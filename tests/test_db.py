@@ -35,10 +35,9 @@ def conn(tmp_path):
 
 def _write_snapshot_csv(path: pathlib.Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["station_code", "name", "address", "suburb", "postcode", "brand", "fuel_code", "price", "date"]
     with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(
-            f, fieldnames=["station_code", "name", "address", "suburb", "postcode", "brand", "price", "date"]
-        )
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -215,7 +214,7 @@ def test_load_snapshot_csv(conn, tmp_path):
     _write_snapshot_csv(snap, [{
         "station_code": 1001, "name": "Shell Springwood",
         "address": "1 Main Street, Springwood", "suburb": "Springwood",
-        "postcode": "2777", "brand": "Shell", "price": "175.9", "date": "2024-03-01",
+        "postcode": "2777", "brand": "Shell", "fuel_code": "E10", "price": "175.9", "date": "2024-03-01",
     }])
     s, p = load_snapshot_csv(conn, snap)
     assert s == 1
@@ -234,11 +233,11 @@ def test_load_snapshot_csv_skips_price_for_duplicate_address_station(conn, tmp_p
     _write_snapshot_csv(snap, [
         {"station_code": 1001, "name": "Shell Springwood",
          "address": "1 Main Street, Springwood", "suburb": "Springwood",
-         "postcode": "2777", "brand": "Shell", "price": "175.9", "date": "2024-03-01"},
+         "postcode": "2777", "brand": "Shell", "fuel_code": "E10", "price": "175.9", "date": "2024-03-01"},
         # Same normalised address, different station_code — second will be dropped
         {"station_code": 1002, "name": "Other Springwood",
          "address": "1 Main Street, Springwood", "suburb": "Springwood",
-         "postcode": "2777", "brand": "Other", "price": "176.0", "date": "2024-03-01"},
+         "postcode": "2777", "brand": "Other", "fuel_code": "E10", "price": "176.0", "date": "2024-03-01"},
     ])
     s, p = load_snapshot_csv(conn, snap)  # must not raise
     assert p == 1  # only the first station's price inserted
@@ -249,10 +248,59 @@ def test_load_snapshot_csv_skips_bad_price(conn, tmp_path):
     _write_snapshot_csv(snap, [{
         "station_code": 1001, "name": "Shell Springwood",
         "address": "1 Main Street, Springwood", "suburb": "Springwood",
-        "postcode": "2777", "brand": "Shell", "price": "NOT_A_PRICE", "date": "2024-03-01",
+        "postcode": "2777", "brand": "Shell", "fuel_code": "E10", "price": "NOT_A_PRICE", "date": "2024-03-01",
     }])
     _, p = load_snapshot_csv(conn, snap)
     assert p == 0
+
+
+def test_load_snapshot_csv_reads_fuel_code_column(conn, tmp_path):
+    snap = tmp_path / "snap.csv"
+    _write_snapshot_csv(snap, [{
+        "station_code": 1001, "name": "Shell Springwood",
+        "address": "1 Main Street, Springwood", "suburb": "Springwood",
+        "postcode": "2777", "brand": "Shell", "fuel_code": "U91", "price": "180.0", "date": "2024-03-01",
+    }])
+    _, p = load_snapshot_csv(conn, snap)
+    assert p == 1
+    # Price must be stored under U91, not the E10 fallback.
+    from fuel_signal.db import station_price_series
+    u91 = station_price_series(conn, 1001, fuel_code="U91")
+    assert u91 == [("2024-03-01", 180.0)]
+
+
+
+def test_load_snapshot_csv_postcode_filter(conn, tmp_path):
+    snap = tmp_path / "snap.csv"
+    _write_snapshot_csv(snap, [
+        {"station_code": 1001, "name": "Shell Springwood", "address": "1 Main St, Springwood",
+         "suburb": "Springwood", "postcode": "2777", "brand": "Shell",
+         "fuel_code": "E10", "price": "175.9", "date": "2024-03-01"},
+        {"station_code": 3001, "name": "Ampol Broken Hill", "address": "1 Argent St, Broken Hill",
+         "suburb": "Broken Hill", "postcode": "2880", "brand": "Ampol",
+         "fuel_code": "E10", "price": "190.0", "date": "2024-03-01"},
+    ])
+    s, p = load_snapshot_csv(conn, snap, postcodes=frozenset({"2777"}))
+    assert s == 1
+    assert p == 1
+    codes = {r[0] for r in conn.execute("SELECT station_code FROM stations")}
+    assert codes == {1001}
+
+
+def test_load_snapshot_csv_fuel_codes_filter(conn, tmp_path):
+    snap = tmp_path / "snap.csv"
+    _write_snapshot_csv(snap, [
+        {"station_code": 1001, "name": "Shell Springwood", "address": "1 Main St, Springwood",
+         "suburb": "Springwood", "postcode": "2777", "brand": "Shell",
+         "fuel_code": "E10", "price": "175.9", "date": "2024-03-01"},
+        {"station_code": 1001, "name": "Shell Springwood", "address": "1 Main St, Springwood",
+         "suburb": "Springwood", "postcode": "2777", "brand": "Shell",
+         "fuel_code": "U91", "price": "180.0", "date": "2024-03-01"},
+    ])
+    _, p = load_snapshot_csv(conn, snap, fuel_codes={"E10"})
+    assert p == 1
+    price_count = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
+    assert price_count == 1
 
 
 def test_load_all_snapshots(conn, tmp_path):
@@ -261,10 +309,25 @@ def test_load_all_snapshots(conn, tmp_path):
         _write_snapshot_csv(snaps_dir / "2024" / "03" / f"{date}.csv", [{
             "station_code": 1001, "name": "Shell Springwood",
             "address": "1 Main Street, Springwood", "suburb": "Springwood",
-            "postcode": "2777", "brand": "Shell", "price": str(175.9 + i), "date": date,
+            "postcode": "2777", "brand": "Shell", "fuel_code": "E10", "price": str(175.9 + i), "date": date,
         }])
     s, p = load_all_snapshots(conn, snaps_dir)
     assert p == 2
+
+
+def test_load_all_snapshots_with_filters(conn, tmp_path):
+    snaps_dir = tmp_path / "snapshots"
+    # Two rows: one metro E10, one rural U91 — filter should admit only the metro E10.
+    _write_snapshot_csv(snaps_dir / "2024" / "03" / "2024-03-01.csv", [
+        {"station_code": 1001, "name": "Shell Springwood", "address": "1 Main St, Springwood",
+         "suburb": "Springwood", "postcode": "2777", "brand": "Shell",
+         "fuel_code": "E10", "price": "175.9", "date": "2024-03-01"},
+        {"station_code": 3001, "name": "Ampol Broken Hill", "address": "1 Argent St, Broken Hill",
+         "suburb": "Broken Hill", "postcode": "2880", "brand": "Ampol",
+         "fuel_code": "U91", "price": "190.0", "date": "2024-03-01"},
+    ])
+    _, p = load_all_snapshots(conn, snaps_dir, postcodes=frozenset({"2777"}), fuel_codes={"E10"})
+    assert p == 1
 
 
 # ---------------------------------------------------------------------------

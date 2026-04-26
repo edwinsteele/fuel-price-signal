@@ -136,58 +136,52 @@ def test_suburb_postcode_no_match_returns_empty():
 # build_snapshot_rows
 # ---------------------------------------------------------------------------
 
-def test_build_filters_to_e10():
+def test_build_includes_all_fuel_types():
+    # Station 1001 has both E10 and U91 — both rows must appear.
     rows = build_snapshot_rows(_API_RESPONSE, snapshot_date=_SNAPSHOT_DATE)
-    # Station 1001 has both E10 and U91; only one E10 row should appear for it
     rows_for_1001 = [r for r in rows if r["station_code"] == 1001]
-    assert len(rows_for_1001) == 1
-    assert rows_for_1001[0]["price"] == 175.9
+    assert len(rows_for_1001) == 2
+    fuel_codes = {r["fuel_code"] for r in rows_for_1001}
+    assert fuel_codes == {"E10", "U91"}
 
 
-def test_build_excludes_rural():
+def test_build_includes_rural_stations():
+    # Broken Hill (postcode 2880) must be included — no region filter at collection time.
     rows = build_snapshot_rows(_API_RESPONSE, snapshot_date=_SNAPSHOT_DATE)
     codes = {r["station_code"] for r in rows}
-    assert 3001 not in codes  # Broken Hill (2880) — outside 2000–2799
+    assert 3001 in codes
 
 
-def test_build_includes_metro_stations():
+def test_build_includes_all_stations():
     rows = build_snapshot_rows(_API_RESPONSE, snapshot_date=_SNAPSHOT_DATE)
     codes = {r["station_code"] for r in rows}
     assert 1001 in codes
     assert 2001 in codes
+    assert 3001 in codes
 
 
 def test_build_row_fields():
     rows = build_snapshot_rows(_API_RESPONSE, snapshot_date=_SNAPSHOT_DATE)
-    row = next(r for r in rows if r["station_code"] == 1001)
+    row = next(r for r in rows if r["station_code"] == 1001 and r["fuel_code"] == "E10")
     assert row["name"] == "Shell Springwood"
     assert row["brand"] == "Shell"
+    assert row["fuel_code"] == "E10"
     assert row["price"] == 175.9
     assert row["date"] == "2024-04-01"
     assert row["postcode"] == "2777"
     assert row["suburb"] == "Springwood"
 
 
+def test_build_total_row_count():
+    # _API_RESPONSE has 4 price rows; all should be included.
+    rows = build_snapshot_rows(_API_RESPONSE, snapshot_date=_SNAPSHOT_DATE)
+    assert len(rows) == 4
+
+
 def test_build_uses_today_if_no_date():
     rows = build_snapshot_rows(_API_RESPONSE)
     today = datetime.date.today().isoformat()
     assert all(r["date"] == today for r in rows)
-
-
-def test_build_custom_fuel_code():
-    rows = build_snapshot_rows(_API_RESPONSE, fuel_code="U91", snapshot_date=_SNAPSHOT_DATE)
-    assert len(rows) == 1
-    assert rows[0]["station_code"] == 1001
-
-
-def test_build_excludes_non_metro_postcodes():
-    rows = build_snapshot_rows(
-        _API_RESPONSE,
-        snapshot_date=_SNAPSHOT_DATE,
-        postcodes=frozenset({"2777"}),  # only Springwood
-    )
-    codes = {r["station_code"] for r in rows}
-    assert codes == {1001}
 
 
 # ---------------------------------------------------------------------------

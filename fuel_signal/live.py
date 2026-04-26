@@ -14,7 +14,6 @@ from fuel_signal.config import (
     FUELAPI_API_SECRET,
     FUELAPI_PRICES_URL,
     FUELAPI_TOKEN_URL,
-    SYDNEY_METRO_POSTCODES,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +36,7 @@ _STREET_TYPE_RE = re.compile(
     re.IGNORECASE,
 )
 
-SNAPSHOT_COLUMNS = ("station_code", "name", "address", "suburb", "postcode", "brand", "price", "date")
+SNAPSHOT_COLUMNS = ("station_code", "name", "address", "suburb", "postcode", "brand", "fuel_code", "price", "date")
 
 
 # ---------------------------------------------------------------------------
@@ -112,14 +111,14 @@ def _station_suburb_postcode(address: str) -> tuple[str, str]:
 
 def build_snapshot_rows(
     data: dict,
-    fuel_code: str = "E10",
-    postcodes: frozenset[str] = SYDNEY_METRO_POSTCODES,
     snapshot_date: datetime.date | None = None,
 ) -> list[dict]:
-    """Filter API response to fuel_code + metro postcodes; return snapshot rows.
+    """Build snapshot rows for ALL NSW stations and ALL fuel types.
 
     Each row matches the SNAPSHOT_COLUMNS schema:
-        station_code, name, address, suburb, postcode, brand, price, date
+        station_code, name, address, suburb, postcode, brand, fuel_code, price, date
+
+    Region and fuel-type filtering happens at DB load time, not here.
     """
     if snapshot_date is None:
         snapshot_date = datetime.date.today()
@@ -127,32 +126,27 @@ def build_snapshot_rows(
 
     station_map: dict[str, dict] = {s["code"]: s for s in data.get("stations", [])}
 
-    # Pre-build postcode lookup from station metadata to avoid re-parsing per price row.
-    station_postcode: dict[str, str] = {}
-    for code, station in station_map.items():
-        _, pc = _station_suburb_postcode(station.get("address", ""))
-        station_postcode[code] = pc
+    # Pre-parse suburb/postcode per station to avoid re-parsing once per price row.
+    station_meta: dict[str, tuple[str, str]] = {
+        code: _station_suburb_postcode(s.get("address", ""))
+        for code, s in station_map.items()
+    }
 
     rows: list[dict] = []
     for price in data.get("prices", []):
-        if price.get("fueltype") != fuel_code:
-            continue
         code = price.get("stationcode", "")
-        pc = station_postcode.get(code, "")
-        if pc not in postcodes:
-            continue
         station = station_map.get(code)
         if not station:
             continue
-        address = station.get("address", "")
-        suburb, _ = _station_suburb_postcode(address)
+        suburb, postcode = station_meta.get(code, ("", ""))
         rows.append({
             "station_code": int(code),
             "name":         station.get("name", ""),
-            "address":      address,
+            "address":      station.get("address", ""),
             "suburb":       suburb,
-            "postcode":     pc,
+            "postcode":     postcode,
             "brand":        station.get("brand", ""),
+            "fuel_code":    price.get("fueltype", ""),
             "price":        price["price"],
             "date":         date_str,
         })
@@ -194,7 +188,11 @@ def collect_snapshot(
     snapshots_dir: pathlib.Path = pathlib.Path("data/snapshots"),
     snapshot_date: datetime.date | None = None,
 ) -> pathlib.Path:
-    """Fetch current prices, filter to E10/Sydney-metro, write snapshot CSV."""
+    """Fetch all NSW prices (all stations, all fuel types) and write snapshot CSV.
+
+    No region or fuel-type filtering is applied here — that happens at DB load time
+    so the region definition can be changed without waiting for new snapshots.
+    """
     if not api_key or not api_secret:
         raise RuntimeError("FUELAPI_API_KEY and FUELAPI_API_SECRET must be set")
 
@@ -213,7 +211,7 @@ def collect_snapshot(
     )
 
     rows = build_snapshot_rows(data, snapshot_date=snapshot_date)
-    logger.info("Filtered to %d E10 Sydney-metro rows", len(rows))
+    logger.info("Built %d snapshot rows (all stations, all fuel types)", len(rows))
 
     return save_snapshot(rows, snapshot_date, snapshots_dir)
 

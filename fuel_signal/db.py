@@ -254,10 +254,18 @@ def insert_prices(conn: sqlite3.Connection, rows: list[dict], source: str = "h")
 # Load from snapshot CSVs
 # ---------------------------------------------------------------------------
 
-def load_snapshot_csv(conn: sqlite3.Connection, csv_path: pathlib.Path) -> tuple[int, int]:
+def load_snapshot_csv(
+    conn: sqlite3.Connection,
+    csv_path: pathlib.Path,
+    postcodes: frozenset[str] | None = None,
+    fuel_codes: set[str] | None = None,
+) -> tuple[int, int]:
     """Load a snapshot CSV into stations + prices tables.
 
-    Snapshot CSV schema: station_code, name, address, suburb, postcode, brand, price, date
+    Snapshot CSV schema: station_code, name, address, suburb, postcode, brand, fuel_code, price, date
+
+    postcodes:  if set, only load stations whose postcode is in this set.
+    fuel_codes: if set, only load prices for fuel types in this set.
     Returns (stations_processed, prices_inserted).
     """
     stations: list[dict] = []
@@ -269,26 +277,41 @@ def load_snapshot_csv(conn: sqlite3.Connection, csv_path: pathlib.Path) -> tuple
                 code = int(row["station_code"])
             except (ValueError, KeyError):
                 continue
+            postcode = row.get("postcode", "")
+            if postcodes is not None and postcode not in postcodes:
+                continue
             stations.append({
                 "station_code": code,
                 "name":         row.get("name", ""),
                 "address":      row.get("address", ""),
                 "suburb":       row.get("suburb", ""),
-                "postcode":     row.get("postcode", ""),
+                "postcode":     postcode,
                 "brand":        row.get("brand"),
                 "latitude":     None,
                 "longitude":    None,
             })
+            fuel_code = row.get("fuel_code", "")
+            if not fuel_code:
+                continue
+            if fuel_codes is not None and fuel_code not in fuel_codes:
+                continue
             try:
                 price_cents = float(row["price"])
             except (ValueError, KeyError):
                 continue
             prices.append({
                 "station_code": code,
-                "fuel_code":    "E10",
+                "fuel_code":    fuel_code,
                 "price_date":   row["date"],
                 "price_cents":  price_cents,
             })
+
+    # Only upsert stations that have at least one price row after filtering.
+    # This naturally excludes EV chargers and other non-fuel venues that share
+    # addresses with petrol stations (they have no E10 prices and would otherwise
+    # cause duplicate normalised-address collisions).
+    stations_with_prices = {p["station_code"] for p in prices}
+    stations = [s for s in stations if s["station_code"] in stations_with_prices]
 
     n_stations = upsert_stations(conn, stations)
 
@@ -324,11 +347,19 @@ def load_snapshot_csv(conn: sqlite3.Connection, csv_path: pathlib.Path) -> tuple
     return n_stations, after - before
 
 
-def load_all_snapshots(conn: sqlite3.Connection, snapshots_dir: pathlib.Path) -> tuple[int, int]:
-    """Load every snapshot CSV found under snapshots_dir. Returns (stations, prices)."""
+def load_all_snapshots(
+    conn: sqlite3.Connection,
+    snapshots_dir: pathlib.Path,
+    postcodes: frozenset[str] | None = None,
+    fuel_codes: set[str] | None = None,
+) -> tuple[int, int]:
+    """Load every snapshot CSV found under snapshots_dir. Returns (stations, prices).
+
+    postcodes and fuel_codes are passed through to load_snapshot_csv for load-time filtering.
+    """
     total_stations = total_prices = 0
     for path in sorted(snapshots_dir.rglob("*.csv")):
-        s, p = load_snapshot_csv(conn, path)
+        s, p = load_snapshot_csv(conn, path, postcodes=postcodes, fuel_codes=fuel_codes)
         logger.info("Snapshot %s: %d stations, %d new prices", path.name, s, p)
         total_stations += s
         total_prices += p
@@ -619,6 +650,9 @@ def db_summary(conn: sqlite3.Connection) -> dict:
 
 if __name__ == "__main__":
     import sys
+
+    from fuel_signal.config import SYDNEY_METRO_POSTCODES
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     db_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DB_PATH
@@ -628,7 +662,11 @@ if __name__ == "__main__":
 
     snapshots_dir = pathlib.Path("data/snapshots")
     if snapshots_dir.exists():
-        s, p = load_all_snapshots(conn, snapshots_dir)
+        s, p = load_all_snapshots(
+            conn, snapshots_dir,
+            postcodes=SYDNEY_METRO_POSTCODES,
+            fuel_codes={"E10"},
+        )
         logger.info("Snapshots: %d stations, %d new prices", s, p)
     else:
         logger.warning("No data/snapshots directory — run live.py first to populate stations")
