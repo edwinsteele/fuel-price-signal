@@ -25,6 +25,4 @@ PREFERRED_STATIONS: dict[int, str] = {
 # Station codes known to share a normalised address with another code and always
 # lose the INSERT OR IGNORE race. Suppresses the duplicate-address WARNING for
 # these specific codes; any new collision not listed here will still warn.
-# 906/907: Ampol Foodary Wyong M1 Southbound/Northbound Diesel — same address as
-#          the Petrol variants (901/903) but separate FuelCheck codes.
-KNOWN_DUPLICATE_STATION_CODES: frozenset[int] = frozenset({906, 907})
+KNOWN_DUPLICATE_STATION_CODES: frozenset[int] = frozenset()
