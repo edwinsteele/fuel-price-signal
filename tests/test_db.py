@@ -180,16 +180,20 @@ def test_upsert_stations_ignores_address_conflict(conn):
 def test_insert_prices(conn):
     upsert_stations(conn, [_STATION])
     insert_prices(conn, [{"station_code": 1001, "fuel_code": "E10", "price_date": "2024-01-15", "price_cents": 180.0}])
-    row = conn.execute("SELECT price_cents, source FROM prices WHERE station_code=1001").fetchone()
-    assert row[0] == 180.0
-    assert row[1] == "h"  # default source
+    assert station_price_series(conn, 1001) == [("2024-01-15", 180.0)]
+    source = conn.execute(
+        "SELECT ps.code FROM prices p JOIN price_sources ps ON p.source_id = ps.id WHERE p.station_code=1001"
+    ).fetchone()[0]
+    assert source == "h"  # default source
 
 
 def test_insert_prices_snapshot_source(conn):
     upsert_stations(conn, [_STATION])
     price = {"station_code": 1001, "fuel_code": "E10", "price_date": "2024-01-15", "price_cents": 180.0}
     insert_prices(conn, [price], source="s")
-    source = conn.execute("SELECT source FROM prices").fetchone()[0]
+    source = conn.execute(
+        "SELECT ps.code FROM prices p JOIN price_sources ps ON p.source_id = ps.id"
+    ).fetchone()[0]
     assert source == "s"
 
 
@@ -216,9 +220,11 @@ def test_load_snapshot_csv(conn, tmp_path):
     s, p = load_snapshot_csv(conn, snap)
     assert s == 1
     assert p == 1
-    row = conn.execute("SELECT price_cents, source FROM prices WHERE station_code=1001").fetchone()
-    assert row[0] == 175.9
-    assert row[1] == "s"
+    assert station_price_series(conn, 1001) == [("2024-03-01", 175.9)]
+    source = conn.execute(
+        "SELECT ps.code FROM prices p JOIN price_sources ps ON p.source_id = ps.id WHERE p.station_code=1001"
+    ).fetchone()[0]
+    assert source == "s"
 
 
 def test_load_snapshot_csv_skips_price_for_duplicate_address_station(conn, tmp_path):
@@ -279,7 +285,9 @@ def test_load_cleaned_csv_matches_by_address(conn, tmp_path):
     inserted, skipped = load_cleaned_csv(conn, cleaned)
     assert inserted == 1
     assert skipped == 0
-    source = conn.execute("SELECT source FROM prices").fetchone()[0]
+    source = conn.execute(
+        "SELECT ps.code FROM prices p JOIN price_sources ps ON p.source_id = ps.id"
+    ).fetchone()[0]
     assert source == "h"
 
 
@@ -308,7 +316,7 @@ def test_load_cleaned_csv_truncates_datetime_to_date(conn, tmp_path):
     }])
     load_cleaned_csv(conn, cleaned)
     date = conn.execute("SELECT price_date FROM prices").fetchone()[0]
-    assert date == "2022-08-15"
+    assert date == 20220815  # stored as YYYYMMDD integer
 
 
 def test_load_all_cleaned(conn, tmp_path):

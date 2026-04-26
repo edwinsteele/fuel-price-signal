@@ -5,6 +5,8 @@ import pathlib
 import sqlite3
 from datetime import date, timedelta
 
+from fuel_signal.db import fuel_type_id, station_price_series, upsert_daily_prices
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,37 +74,26 @@ def fill_all(
     if end_date is None:
         end_date = date.today().isoformat()
 
-    conn.execute("DELETE FROM daily_prices WHERE fuel_code = ?", (fuel_code,))
+    fid = fuel_type_id(conn, fuel_code)
+    conn.execute("DELETE FROM daily_prices WHERE fuel_type_id = ?", (fid,))
 
     station_codes: list[int] = [
         r[0]
         for r in conn.execute(
-            "SELECT DISTINCT station_code FROM prices WHERE fuel_code = ? ORDER BY station_code",
-            (fuel_code,),
+            "SELECT DISTINCT station_code FROM prices WHERE fuel_type_id = ? ORDER BY station_code",
+            (fid,),
         )
     ]
 
     total = 0
     for station_code in station_codes:
-        raw: list[tuple[str, float]] = [
-            (r[0], r[1])
-            for r in conn.execute(
-                "SELECT price_date, price_cents FROM prices"
-                " WHERE station_code = ? AND fuel_code = ? ORDER BY price_date",
-                (station_code, fuel_code),
-            )
-        ]
+        raw = station_price_series(conn, station_code, fuel_code)
         if not raw:
             continue
 
         gaps = find_daily_gaps(raw, end_date)
-        all_rows = raw + gaps
-
-        conn.executemany(
-            "INSERT INTO daily_prices (station_code, fuel_code, price_date, price_cents)"
-            " VALUES (?, ?, ?, ?)",
-            [(station_code, fuel_code, d, p) for d, p in all_rows],
-        )
+        all_rows = [(station_code, fuel_code, d, p) for d, p in raw + gaps]
+        upsert_daily_prices(conn, all_rows)
         total += len(all_rows)
 
     conn.commit()

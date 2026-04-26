@@ -42,23 +42,11 @@ _PREFERRED_COLOURS = [
 
 
 def _coverage_by_month(conn: sqlite3.Connection) -> list[tuple[str, int]]:
-    rows = conn.execute(
-        """SELECT strftime('%Y-%m', price_date) AS ym, COUNT(DISTINCT station_code)
-           FROM prices WHERE fuel_code='E10'
-           GROUP BY ym ORDER BY ym DESC LIMIT 30"""
-    ).fetchall()
-    return [(r[0], r[1]) for r in rows]
+    return _db.coverage_by_month(conn)
 
 
 def _recent_prices(conn: sqlite3.Connection, days: int = 14) -> list[tuple]:
-    cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
-    return conn.execute(
-        """SELECT p.price_date, s.name, s.suburb, p.price_cents
-           FROM prices p JOIN stations s USING(station_code)
-           WHERE p.fuel_code='E10' AND p.price_date >= ?
-           ORDER BY p.price_date DESC, p.price_cents""",
-        (cutoff,),
-    ).fetchall()
+    return _db.recent_prices(conn, days=days)
 
 
 def _preferred_series(conn: sqlite3.Connection, days: int = 365) -> dict[str, list]:

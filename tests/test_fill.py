@@ -2,7 +2,14 @@
 
 import pytest
 
-from fuel_signal.db import create_schema, insert_prices, open_db, sydney_average_series, upsert_stations
+from fuel_signal.db import (
+    create_schema,
+    get_daily_prices,
+    insert_prices,
+    open_db,
+    sydney_average_series,
+    upsert_stations,
+)
 from fuel_signal.fill import fill_all, find_daily_gaps
 
 # ---------------------------------------------------------------------------
@@ -119,9 +126,7 @@ class TestFillAll:
             _price(1001, "2024-01-04", 155.0),
         ])
         fill_all(conn, end_date="2024-01-04")
-        rows = conn.execute(
-            "SELECT price_date, price_cents FROM daily_prices WHERE station_code=1001 ORDER BY price_date"
-        ).fetchall()
+        rows = get_daily_prices(conn, 1001)
         dates = [r[0] for r in rows]
         assert dates == ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"]
         # Gap days carry forward Jan 1 price

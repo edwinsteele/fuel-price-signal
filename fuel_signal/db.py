@@ -75,6 +75,19 @@ def normalize_address(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 _SCHEMA = """\
+CREATE TABLE IF NOT EXISTS fuel_types (
+    id   INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE
+);
+INSERT OR IGNORE INTO fuel_types (code) VALUES
+    ('E10'),('U91'),('P95'),('P98'),('PDL'),('DL'),('LPG'),('E85'),('CNG'),('B20');
+
+CREATE TABLE IF NOT EXISTS price_sources (
+    id   INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE
+);
+INSERT OR IGNORE INTO price_sources (code) VALUES ('h'),('s');
+
 CREATE TABLE IF NOT EXISTS stations (
     station_code       INTEGER PRIMARY KEY,
     address_normalized TEXT NOT NULL UNIQUE,
@@ -87,28 +100,67 @@ CREATE TABLE IF NOT EXISTS stations (
 );
 
 CREATE TABLE IF NOT EXISTS prices (
-    station_code  INTEGER NOT NULL REFERENCES stations(station_code),
-    fuel_code     TEXT NOT NULL,
-    price_date    DATE NOT NULL,
-    price_cents   REAL NOT NULL,
-    source        TEXT NOT NULL DEFAULT 'h',  -- 's' = snapshot, 'h' = historical CSV
-    PRIMARY KEY (station_code, fuel_code, price_date)
+    station_code    INTEGER NOT NULL REFERENCES stations(station_code),
+    fuel_type_id    INTEGER NOT NULL REFERENCES fuel_types(id),
+    price_date      INTEGER NOT NULL,   -- YYYYMMDD e.g. 20240101
+    price_decicents INTEGER NOT NULL,   -- price_cents * 10, e.g. 1619 = 161.9c
+    source_id       INTEGER NOT NULL REFERENCES price_sources(id),
+    PRIMARY KEY (station_code, fuel_type_id, price_date)
 );
 
-CREATE INDEX IF NOT EXISTS prices_fuel_date   ON prices(fuel_code, price_date);
-CREATE INDEX IF NOT EXISTS prices_station_fuel ON prices(station_code, fuel_code);
+CREATE INDEX IF NOT EXISTS prices_fuel_date    ON prices(fuel_type_id, price_date);
+CREATE INDEX IF NOT EXISTS prices_station_fuel ON prices(station_code, fuel_type_id);
 
 CREATE TABLE IF NOT EXISTS daily_prices (
-    station_code  INTEGER NOT NULL REFERENCES stations(station_code),
-    fuel_code     TEXT NOT NULL,
-    price_date    DATE NOT NULL,
-    price_cents   REAL NOT NULL,
-    PRIMARY KEY (station_code, fuel_code, price_date)
+    station_code    INTEGER NOT NULL REFERENCES stations(station_code),
+    fuel_type_id    INTEGER NOT NULL REFERENCES fuel_types(id),
+    price_date      INTEGER NOT NULL,   -- YYYYMMDD
+    price_decicents INTEGER NOT NULL,
+    PRIMARY KEY (station_code, fuel_type_id, price_date)
 );
 
-CREATE INDEX IF NOT EXISTS daily_prices_fuel_date    ON daily_prices(fuel_code, price_date);
-CREATE INDEX IF NOT EXISTS daily_prices_station_fuel ON daily_prices(station_code, fuel_code);
+CREATE INDEX IF NOT EXISTS daily_prices_fuel_date    ON daily_prices(fuel_type_id, price_date);
+CREATE INDEX IF NOT EXISTS daily_prices_station_fuel ON daily_prices(station_code, fuel_type_id);
 """
+
+
+# ---------------------------------------------------------------------------
+# Storage format helpers
+# ---------------------------------------------------------------------------
+
+def _date_to_int(s: str) -> int:
+    """'2024-01-15' → 20240115"""
+    return int(s[:10].replace("-", ""))
+
+
+def _date_from_int(v: int) -> str:
+    """20240115 → '2024-01-15'"""
+    s = str(v)
+    return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
+
+def _ensure_fuel_types(conn: sqlite3.Connection, codes: set[str]) -> dict[str, int]:
+    """Insert any unknown fuel codes; return {code: id} for all known codes."""
+    conn.executemany(
+        "INSERT OR IGNORE INTO fuel_types (code) VALUES (?)", [(c,) for c in codes]
+    )
+    return {r[0]: r[1] for r in conn.execute("SELECT code, id FROM fuel_types")}
+
+
+def _ensure_source_id(conn: sqlite3.Connection, code: str) -> int:
+    """Insert source code if absent; return its id."""
+    conn.execute("INSERT OR IGNORE INTO price_sources (code) VALUES (?)", (code,))
+    return conn.execute(
+        "SELECT id FROM price_sources WHERE code = ?", (code,)
+    ).fetchone()[0]
+
+
+def fuel_type_id(conn: sqlite3.Connection, code: str) -> int:
+    """Return the fuel_types.id for a fuel code string, raising if not found."""
+    row = conn.execute("SELECT id FROM fuel_types WHERE code = ?", (code,)).fetchone()
+    if row is None:
+        raise ValueError(f"Unknown fuel type: {code!r}")
+    return row[0]
 
 
 def open_db(db_path: pathlib.Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -181,10 +233,19 @@ def insert_prices(conn: sqlite3.Connection, rows: list[dict], source: str = "h")
     Expected keys: station_code, fuel_code, price_date (YYYY-MM-DD), price_cents.
     source: 's' for snapshot, 'h' for historical CSV (default).
     """
+    if not rows:
+        return
+    fuel_map = _ensure_fuel_types(conn, {r["fuel_code"] for r in rows})
+    source_id = _ensure_source_id(conn, source)
     conn.executemany(
-        "INSERT OR IGNORE INTO prices (station_code, fuel_code, price_date, price_cents, source)"
+        "INSERT OR IGNORE INTO prices"
+        " (station_code, fuel_type_id, price_date, price_decicents, source_id)"
         " VALUES (?, ?, ?, ?, ?)",
-        [(r["station_code"], r["fuel_code"], r["price_date"], r["price_cents"], source) for r in rows],
+        [
+            (r["station_code"], fuel_map[r["fuel_code"]],
+             _date_to_int(r["price_date"]), round(r["price_cents"] * 10), source_id)
+            for r in rows
+        ],
     )
     conn.commit()
 
@@ -412,18 +473,15 @@ def daily_average_e10(
     conn: sqlite3.Connection,
     start_date: str | None = None,
 ) -> list[tuple[str, float]]:
-    """Return [(price_date, avg_price_cents)] for E10 across all stations."""
-    query = """
-        SELECT price_date, AVG(price_cents)
-        FROM prices
-        WHERE fuel_code = 'E10'
-    """
-    params: list = []
+    """Return [(price_date, avg_price_cents)] for E10 across all stations (raw prices)."""
+    fid = fuel_type_id(conn, "E10")
+    query = "SELECT price_date, AVG(price_decicents) FROM prices WHERE fuel_type_id = ?"
+    params: list = [fid]
     if start_date:
         query += " AND price_date >= ?"
-        params.append(start_date)
+        params.append(_date_to_int(start_date))
     query += " GROUP BY price_date ORDER BY price_date"
-    return [(r[0], r[1]) for r in conn.execute(query, params)]
+    return [(_date_from_int(r[0]), r[1] / 10) for r in conn.execute(query, params)]
 
 
 def station_price_series(
@@ -433,13 +491,17 @@ def station_price_series(
     start_date: str | None = None,
 ) -> list[tuple[str, float]]:
     """Return [(price_date, price_cents)] for a single station."""
-    query = "SELECT price_date, price_cents FROM prices WHERE station_code=? AND fuel_code=?"
-    params: list = [station_code, fuel_code]
+    fid = fuel_type_id(conn, fuel_code)
+    query = (
+        "SELECT price_date, price_decicents FROM prices"
+        " WHERE station_code = ? AND fuel_type_id = ?"
+    )
+    params: list = [station_code, fid]
     if start_date:
         query += " AND price_date >= ?"
-        params.append(start_date)
+        params.append(_date_to_int(start_date))
     query += " ORDER BY price_date"
-    return [(r[0], r[1]) for r in conn.execute(query, params)]
+    return [(_date_from_int(r[0]), r[1] / 10) for r in conn.execute(query, params)]
 
 
 def sydney_average_series(
@@ -450,28 +512,104 @@ def sydney_average_series(
 
     Requires fill.fill_all() to have been run first.
     """
+    fid = fuel_type_id(conn, fuel_code)
     return [
-        (r[0], r[1])
+        (_date_from_int(r[0]), r[1] / 10)
         for r in conn.execute(
-            "SELECT price_date, AVG(price_cents) FROM daily_prices"
-            " WHERE fuel_code = ? GROUP BY price_date ORDER BY price_date",
-            (fuel_code,),
+            "SELECT price_date, AVG(price_decicents) FROM daily_prices"
+            " WHERE fuel_type_id = ? GROUP BY price_date ORDER BY price_date",
+            (fid,),
         )
     ]
+
+
+def upsert_daily_prices(
+    conn: sqlite3.Connection,
+    rows: list[tuple[int, str, str, float]],
+) -> None:
+    """Insert rows into daily_prices.
+
+    rows: list of (station_code, fuel_code, date_str YYYY-MM-DD, price_cents).
+    """
+    if not rows:
+        return
+    fuel_map = _ensure_fuel_types(conn, {r[1] for r in rows})
+    conn.executemany(
+        "INSERT INTO daily_prices (station_code, fuel_type_id, price_date, price_decicents)"
+        " VALUES (?, ?, ?, ?)",
+        [(r[0], fuel_map[r[1]], _date_to_int(r[2]), round(r[3] * 10)) for r in rows],
+    )
+
+
+def get_daily_prices(
+    conn: sqlite3.Connection,
+    station_code: int,
+    fuel_code: str = "E10",
+) -> list[tuple[str, float]]:
+    """Return [(price_date, price_cents)] from daily_prices for a single station."""
+    fid = fuel_type_id(conn, fuel_code)
+    return [
+        (_date_from_int(r[0]), r[1] / 10)
+        for r in conn.execute(
+            "SELECT price_date, price_decicents FROM daily_prices"
+            " WHERE station_code = ? AND fuel_type_id = ? ORDER BY price_date",
+            (station_code, fid),
+        )
+    ]
+
+
+def coverage_by_month(
+    conn: sqlite3.Connection,
+    fuel_code: str = "E10",
+    months: int = 30,
+) -> list[tuple[str, int]]:
+    """Return [(YYYY-MM, station_count)] for the most recent months."""
+    fid = fuel_type_id(conn, fuel_code)
+    rows = conn.execute(
+        "SELECT PRINTF('%04d-%02d', price_date/10000, (price_date/100)%100) AS ym,"
+        "       COUNT(DISTINCT station_code)"
+        " FROM prices WHERE fuel_type_id = ?"
+        " GROUP BY ym ORDER BY ym DESC LIMIT ?",
+        (fid, months),
+    ).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
+def recent_prices(
+    conn: sqlite3.Connection,
+    fuel_code: str = "E10",
+    days: int = 14,
+) -> list[tuple[str, str, str, float]]:
+    """Return [(date_str, station_name, suburb, price_cents)] for recent prices."""
+    import datetime
+    cutoff = _date_to_int(
+        (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    )
+    fid = fuel_type_id(conn, fuel_code)
+    rows = conn.execute(
+        "SELECT p.price_date, s.name, s.suburb, p.price_decicents"
+        " FROM prices p JOIN stations s USING(station_code)"
+        " WHERE p.fuel_type_id = ? AND p.price_date >= ?"
+        " ORDER BY p.price_date DESC, p.price_decicents",
+        (fid, cutoff),
+    ).fetchall()
+    return [(_date_from_int(r[0]), r[1], r[2], r[3] / 10) for r in rows]
 
 
 def db_summary(conn: sqlite3.Connection) -> dict:
     """Return basic stats for display in the inspection page."""
     station_count = conn.execute("SELECT COUNT(*) FROM stations").fetchone()[0]
     price_count = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
+    fid = fuel_type_id(conn, "E10")
     date_range = conn.execute(
-        "SELECT MIN(price_date), MAX(price_date) FROM prices WHERE fuel_code='E10'"
+        "SELECT MIN(price_date), MAX(price_date) FROM prices WHERE fuel_type_id = ?",
+        (fid,),
     ).fetchone()
     return {
         "station_count": station_count,
         "price_count": price_count,
-        "earliest_date": date_range[0] or "—",
-        "latest_date": date_range[1] or "—",
+        "earliest_date": _date_from_int(date_range[0]) if date_range[0] else "—",
+        "latest_date": _date_from_int(date_range[1]) if date_range[1] else "—",
     }
 
 

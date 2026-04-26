@@ -5,6 +5,8 @@
 data/raw/
 data/cleaned/
 fuel_signal.db
+fuel_signal.db-shm
+fuel_signal.db-wal
 
 # Python
 __pycache__/
@@ -24,6 +26,9 @@ inspect.html
 # Env / secrets
 .env
 *.env
+
+# JetBrains IDEs
+.idea/
 
 # macOS
 .DS_Store
