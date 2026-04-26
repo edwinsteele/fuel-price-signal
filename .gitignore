@@ -1,0 +1,25 @@
+# Claude Code local settings
+.claude/
+
+# Local data — not committed; rebuild with history.py + db.py
+data/raw/
+fuel_signal.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.tox/
+.mypy_cache/
+.pytest_cache/
+
+# Env / secrets
+.env
+*.env
+
+# macOS
+.DS_Store
