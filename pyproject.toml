@@ -1,0 +1,20 @@
+[project]
+name = "fuel-price-signal"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "openpyxl>=3.1.5",
+    "requests>=2.33.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-mock>=3.15.1",
+    "responses>=0.26.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

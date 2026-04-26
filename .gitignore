@@ -3,6 +3,7 @@
 
 # Local data — not committed; rebuild with history.py + db.py
 data/raw/
+data/cleaned/
 fuel_signal.db
 
 # Python
