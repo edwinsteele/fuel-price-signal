@@ -171,7 +171,8 @@ def insert_prices(conn: sqlite3.Connection, rows: list[dict], source: str = "h")
     source: 's' for snapshot, 'h' for historical CSV (default).
     """
     conn.executemany(
-        "INSERT OR IGNORE INTO prices (station_code, fuel_code, price_date, price_cents, source) VALUES (?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO prices (station_code, fuel_code, price_date, price_cents, source)"
+        " VALUES (?, ?, ?, ?, ?)",
         [(r["station_code"], r["fuel_code"], r["price_date"], r["price_cents"], source) for r in rows],
     )
     conn.commit()

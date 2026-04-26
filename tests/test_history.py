@@ -1,8 +1,8 @@
 import io
-import zipfile
+import pathlib
+from datetime import datetime
 
 import openpyxl
-import pytest
 import responses as rsps
 
 from fuel_signal.history import (
@@ -13,7 +13,6 @@ from fuel_signal.history import (
     discover_price_resources,
     download_all,
 )
-from datetime import datetime
 
 DATASET_URL = "https://data.nsw.gov.au/data/dataset/fuel-check"
 DUMP_URL = "https://data.nsw.gov.au/data/datastore/dump/"
@@ -54,8 +53,8 @@ def _make_xlsx(rows: list[list]) -> bytes:
     return buf.getvalue()
 
 
-def _make_raw_csv(rows: list[dict], tmp_path, name="test.csv") -> "pathlib.Path":
-    import pathlib, csv
+def _make_raw_csv(rows: list[dict], tmp_path, name="test.csv") -> pathlib.Path:
+    import csv
     p = tmp_path / name
     with open(p, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
@@ -466,7 +465,7 @@ def test_clean_suburb_missing_returns_none():
 # ---------------------------------------------------------------------------
 
 def _run_transformer(rows, tmp_path, name="raw.csv"):
-    import pathlib, csv as _csv
+    import csv as _csv
     raw = tmp_path / name
     out = tmp_path / "cleaned.csv"
     with open(raw, "w", newline="") as f:

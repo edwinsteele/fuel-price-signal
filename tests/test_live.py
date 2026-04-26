@@ -2,7 +2,6 @@
 
 import csv
 import datetime
-import pathlib
 
 import pytest
 import responses as rsps

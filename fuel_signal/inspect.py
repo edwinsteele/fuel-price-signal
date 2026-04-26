@@ -5,7 +5,6 @@ import json
 import logging
 import pathlib
 import sqlite3
-import subprocess
 import sys
 import webbrowser
 

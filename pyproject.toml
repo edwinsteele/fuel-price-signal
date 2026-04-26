@@ -1,7 +1,7 @@
 [project]
 name = "fuel-price-signal"
 version = "0.1.0"
-description = "Add your description here"
+description = "One-line buy/don't-buy signal for E10 fuel near Springwood NSW"
 requires-python = ">=3.14"
 dependencies = [
     "beautifulsoup4>=4.14.3",
@@ -15,6 +15,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-mock>=3.15.1",
     "responses>=0.26.0",
+    "ruff>=0.9.0",
 ]
 
 [project.scripts]
@@ -28,3 +29,9 @@ include = ["fuel_signal*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]  # pycodestyle E/W, pyflakes, isort

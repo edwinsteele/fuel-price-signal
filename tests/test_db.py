@@ -2,12 +2,10 @@
 
 import csv
 import pathlib
-import sqlite3
 
 import pytest
 
 from fuel_signal.db import (
-    _address_index,
     backfill_station_suburbs,
     create_schema,
     daily_average_e10,
@@ -22,7 +20,6 @@ from fuel_signal.db import (
     station_price_series,
     upsert_stations,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -190,7 +187,8 @@ def test_insert_prices(conn):
 
 def test_insert_prices_snapshot_source(conn):
     upsert_stations(conn, [_STATION])
-    insert_prices(conn, [{"station_code": 1001, "fuel_code": "E10", "price_date": "2024-01-15", "price_cents": 180.0}], source="s")
+    price = {"station_code": 1001, "fuel_code": "E10", "price_date": "2024-01-15", "price_cents": 180.0}
+    insert_prices(conn, [price], source="s")
     source = conn.execute("SELECT source FROM prices").fetchone()[0]
     assert source == "s"
 
