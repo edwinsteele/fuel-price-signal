@@ -18,6 +18,9 @@ venv/
 .mypy_cache/
 .pytest_cache/
 
+# Generated locally by fuel_signal.inspect
+inspect.html
+
 # Env / secrets
 .env
 *.env

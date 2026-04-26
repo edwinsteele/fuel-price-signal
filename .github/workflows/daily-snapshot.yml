@@ -1,0 +1,34 @@
+name: Daily E10 snapshot
+
+on:
+  schedule:
+    # 03:00 UTC = 1pm AEST / 2pm AEDT — stable mid-afternoon prices
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+
+      - name: Collect snapshot
+        env:
+          FUELAPI_API_KEY: ${{ secrets.FUELAPI_API_KEY }}
+          FUELAPI_API_SECRET: ${{ secrets.FUELAPI_API_SECRET }}
+        run: uv run python -m fuel_signal.live
+
+      - name: Commit snapshot
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/snapshots/
+          git diff --cached --quiet || git commit -m "snapshot: $(date -u +%Y-%m-%d)"
+          git push
