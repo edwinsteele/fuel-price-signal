@@ -20,10 +20,22 @@ from fuel_signal.config import (
 logger = logging.getLogger(__name__)
 
 _SUBURB_PC_RE = re.compile(
-    r",\s*(.+?)\s+(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\s+(\d{4})\s*$",
+    r",\s*([^,]+?)\s+(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\s+(\d{4})\s*$",
     re.IGNORECASE,
 )
 _PC_ONLY_RE = re.compile(r"\b(\d{4})\b(?=[^0-9]*$)")
+# Matches the state+postcode suffix so we can strip it and work on what's before.
+_STATE_SUFFIX_RE = re.compile(
+    r"^(.*?)\s+(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\s+(\d{4})\s*$",
+    re.IGNORECASE,
+)
+# Splits an address on street-type words; suburb is the last segment after the split.
+_STREET_TYPE_RE = re.compile(
+    r"\b(?:STREET|ROAD|HIGHWAY|AVENUE|DRIVE|LANE|CRESCENT|BOULEVARD|COURT|"
+    r"TERRACE|PLACE|PARADE|CLOSE|GROVE|CIRCUIT|PARKWAY|FREEWAY|EXPRESSWAY|"
+    r"ST|RD|HWY|AVE|DR|LN|CRES|BLVD|CT|TCE|PL|PDE|CL|GR|CCT|PKWY|FWY|EXWY)\.?\b",
+    re.IGNORECASE,
+)
 
 SNAPSHOT_COLUMNS = ("station_code", "name", "address", "suburb", "postcode", "brand", "price", "date")
 
@@ -73,13 +85,28 @@ def fetch_prices(token: str, api_key: str) -> dict:
 
 def _station_suburb_postcode(address: str) -> tuple[str, str]:
     """Extract (suburb, postcode) from an API address string."""
+    # Primary: comma-separated suburb — "123 Main St, Suburb NSW 2000"
     m = _SUBURB_PC_RE.search(address)
     if m:
-        return m.group(1).strip(), m.group(2)
-    # Address without explicit state abbreviation — just grab last 4-digit number
+        return m.group(1).strip().title(), m.group(2)
+
+    # Fallback: no comma — "123 Main Rd Suburb NSW 2000" or corner addresses.
+    # Strip the state+postcode suffix, then split on street-type words; suburb
+    # is whatever remains after the last street-type word.
+    m = _STATE_SUFFIX_RE.match(address.strip())
+    if m:
+        before_state, postcode = m.group(1), m.group(2)
+        parts = _STREET_TYPE_RE.split(before_state)
+        suburb = parts[-1].strip().strip(",-").strip()
+        if suburb:
+            return suburb.title(), postcode
+        return "", postcode
+
+    # No state abbreviation at all — just grab last 4-digit number
     m = _PC_ONLY_RE.search(address)
     if m:
         return "", m.group(1)
+
     return "", ""
 
 

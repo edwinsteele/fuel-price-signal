@@ -8,6 +8,7 @@ import pytest
 
 from fuel_signal.db import (
     _address_index,
+    backfill_station_suburbs,
     create_schema,
     daily_average_e10,
     db_summary,
@@ -327,6 +328,78 @@ def test_load_all_cleaned(conn, tmp_path):
     inserted, skipped = load_all_cleaned(conn, cleaned_dir)
     assert inserted == 3
     assert skipped == 0
+
+
+# ---------------------------------------------------------------------------
+# backfill_station_suburbs
+# ---------------------------------------------------------------------------
+
+def test_backfill_fills_blank_suburb(conn):
+    station = {**_STATION, "suburb": ""}
+    upsert_stations(conn, [station])
+    n = backfill_station_suburbs(conn, {1001: "Springwood"})
+    assert n == 1
+    row = conn.execute("SELECT suburb FROM stations WHERE station_code = 1001").fetchone()
+    assert row[0] == "Springwood"
+
+
+def test_backfill_does_not_overwrite_existing_suburb(conn):
+    upsert_stations(conn, [_STATION])  # suburb = "Springwood"
+    n = backfill_station_suburbs(conn, {1001: "WrongSuburb"})
+    assert n == 0
+    row = conn.execute("SELECT suburb FROM stations WHERE station_code = 1001").fetchone()
+    assert row[0] == "Springwood"
+
+
+def test_backfill_returns_zero_for_empty_input(conn):
+    assert backfill_station_suburbs(conn, {}) == 0
+
+
+def test_load_cleaned_csv_populates_suburb_backfill(conn, tmp_path):
+    station = {**_STATION, "suburb": ""}
+    upsert_stations(conn, [station])
+    cleaned = tmp_path / "file.csv"
+    _write_cleaned_csv(cleaned, [{
+        "ServiceStationName": "Shell Springwood",
+        "Address": "1 MAIN ST, SPRINGWOOD NSW 2777",
+        "Suburb": "Springwood", "Postcode": "2777", "Brand": "Shell",
+        "FuelCode": "E10", "PriceUpdatedDate": "2022-01-15", "Price": "160.0",
+    }])
+    backfill: dict[int, str] = {}
+    load_cleaned_csv(conn, cleaned, suburb_backfill=backfill)
+    assert backfill == {1001: "Springwood"}
+
+
+def test_load_cleaned_csv_backfill_first_seen_wins(conn, tmp_path):
+    station = {**_STATION, "suburb": ""}
+    upsert_stations(conn, [station])
+    cleaned = tmp_path / "file.csv"
+    _write_cleaned_csv(cleaned, [
+        {"ServiceStationName": "Shell Springwood", "Address": "1 MAIN ST, SPRINGWOOD NSW 2777",
+         "Suburb": "FirstSuburb", "Postcode": "2777", "Brand": "Shell",
+         "FuelCode": "E10", "PriceUpdatedDate": "2022-01-15", "Price": "160.0"},
+        {"ServiceStationName": "Shell Springwood", "Address": "1 MAIN ST, SPRINGWOOD NSW 2777",
+         "Suburb": "SecondSuburb", "Postcode": "2777", "Brand": "Shell",
+         "FuelCode": "E10", "PriceUpdatedDate": "2022-01-16", "Price": "161.0"},
+    ])
+    backfill: dict[int, str] = {}
+    load_cleaned_csv(conn, cleaned, suburb_backfill=backfill)
+    assert backfill[1001] == "FirstSuburb"
+
+
+def test_load_all_cleaned_backfills_blank_suburbs(conn, tmp_path):
+    station = {**_STATION, "suburb": ""}
+    upsert_stations(conn, [station])
+    cleaned_dir = tmp_path / "cleaned"
+    _write_cleaned_csv(cleaned_dir / "file.csv", [{
+        "ServiceStationName": "Shell Springwood",
+        "Address": "1 MAIN ST, SPRINGWOOD NSW 2777",
+        "Suburb": "Springwood", "Postcode": "2777", "Brand": "Shell",
+        "FuelCode": "E10", "PriceUpdatedDate": "2022-01-15", "Price": "160.0",
+    }])
+    load_all_cleaned(conn, cleaned_dir)
+    row = conn.execute("SELECT suburb FROM stations WHERE station_code = 1001").fetchone()
+    assert row[0] == "Springwood"
 
 
 # ---------------------------------------------------------------------------

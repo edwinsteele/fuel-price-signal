@@ -5,6 +5,7 @@ description = "Add your description here"
 requires-python = ">=3.14"
 dependencies = [
     "beautifulsoup4>=4.14.3",
+    "click>=8.3.3",
     "openpyxl>=3.1.5",
     "requests>=2.33.1",
 ]
@@ -15,6 +16,15 @@ dev = [
     "pytest-mock>=3.15.1",
     "responses>=0.26.0",
 ]
+
+[project.scripts]
+fuel-signal = "fuel_signal.cli:cli"
+
+[tool.uv]
+package = true
+
+[tool.setuptools.packages.find]
+include = ["fuel_signal*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

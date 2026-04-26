@@ -74,7 +74,7 @@ def test_suburb_postcode_full_format():
 
 
 def test_suburb_postcode_multiword_suburb():
-    suburb, pc = _station_suburb_postcode("55 Old Bathurst Road, Blaxland East NSW 2774")
+    suburb, pc = _station_suburb_postcode("55 Old Bathurst Road, BLAXLAND EAST NSW 2774")
     assert suburb == "Blaxland East"
     assert pc == "2774"
 
@@ -82,6 +82,49 @@ def test_suburb_postcode_multiword_suburb():
 def test_suburb_postcode_no_state():
     _, pc = _station_suburb_postcode("1 Main Street, Springwood 2777")
     assert pc == "2777"
+
+
+def test_suburb_postcode_multi_comma_address():
+    # "Shop 1, Gilchrist Dr, Campbelltown NSW 2560" — must capture only last segment
+    suburb, pc = _station_suburb_postcode("Shop 1, Gilchrist Dr, Campbelltown NSW 2560")
+    assert suburb == "Campbelltown"
+    assert pc == "2560"
+
+
+def test_suburb_postcode_title_case():
+    # API returns UPPERCASE suburbs — must be normalised to title case
+    suburb, _ = _station_suburb_postcode("1 Main Street, SPRINGWOOD NSW 2777")
+    assert suburb == "Springwood"
+
+
+def test_suburb_postcode_no_comma_simple():
+    # "123 Main Rd Suburb NSW 2000" — space instead of comma before suburb
+    suburb, pc = _station_suburb_postcode("262 - 272 VICTORIA RD Rydalmere NSW 2116")
+    assert suburb == "Rydalmere"
+    assert pc == "2116"
+
+
+def test_suburb_postcode_no_comma_highway():
+    # Highway number + no comma — "33351 NEWELL HWY BOGGABILLA NSW 2409"
+    suburb, pc = _station_suburb_postcode("33351 NEWELL HWY BOGGABILLA NSW 2409")
+    assert suburb == "Boggabilla"
+    assert pc == "2409"
+
+
+def test_suburb_postcode_no_comma_corner():
+    # Corner address with multiple street types — suburb is after the last one
+    suburb, pc = _station_suburb_postcode(
+        "Corner Pacific Hwy and Halls Road Coffs Harbour NSW 2450"
+    )
+    assert suburb == "Coffs Harbour"
+    assert pc == "2450"
+
+
+def test_suburb_postcode_no_comma_multiword_suburb():
+    # "842-844 DAVID ST North Albury NSW 2640"
+    suburb, pc = _station_suburb_postcode("842-844 DAVID ST North Albury NSW 2640")
+    assert suburb == "North Albury"
+    assert pc == "2640"
 
 
 def test_suburb_postcode_no_match_returns_empty():

@@ -67,6 +67,25 @@ uv run python -m fuel_signal.inspect
 
 Shows station count, date range, a Sydney E10 average price chart, data coverage by month, and recent prices.
 
+## Station lookup
+
+Find station codes by suburb or name — useful when adding entries to `PREFERRED_STATIONS` in `config.py`:
+
+```bash
+# Free-text search (matches suburb and name)
+fuel-signal stations blaxland
+fuel-signal stations "emu plains"
+
+# Field-specific filters
+fuel-signal stations --suburb springwood
+fuel-signal stations --name ampol
+
+# List all stations
+fuel-signal stations
+```
+
+Output includes `station_code`, suburb, name, and brand. Use the `station_code` value in `PREFERRED_STATIONS`.
+
 ## Getting the signal
 
 ```bash

@@ -6,6 +6,8 @@ import pathlib
 import re
 import sqlite3
 
+from fuel_signal.config import KNOWN_DUPLICATE_STATION_CODES
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = pathlib.Path("fuel_signal.db")
@@ -142,16 +144,19 @@ def upsert_stations(conn: sqlite3.Connection, stations: list[dict]) -> int:
         rows,
     )
     # Update mutable fields; preserve existing lat/lon when incoming value is NULL
-    # (snapshot CSVs don't carry coordinates).
+    # (snapshot CSVs don't carry coordinates); preserve existing suburb when
+    # incoming value is blank (extraction failure).
     conn.executemany(
         """UPDATE stations
            SET name      = ?,
                brand     = ?,
+               suburb    = COALESCE(NULLIF(?, ''), suburb),
                latitude  = COALESCE(?, latitude),
                longitude = COALESCE(?, longitude)
            WHERE station_code = ?""",
         [
-            (s.get("name", ""), s.get("brand"), s.get("latitude"), s.get("longitude"), s["station_code"])
+            (s.get("name", ""), s.get("brand"), s.get("suburb", ""),
+             s.get("latitude"), s.get("longitude"), s["station_code"])
             for s in stations
         ],
     )
@@ -226,9 +231,18 @@ def load_snapshot_csv(conn: sqlite3.Connection, csv_path: pathlib.Path) -> tuple
                 sorted(batch_codes),
             )
         }
-        dropped = len(batch_codes) - len(known_codes)
-        if dropped:
-            logger.warning("%d station(s) dropped (duplicate normalised address); skipping their prices", dropped)
+        dropped_codes = batch_codes - known_codes
+        if dropped_codes:
+            station_lookup = {s["station_code"]: s["name"] for s in stations}
+            unexpected = dropped_codes - KNOWN_DUPLICATE_STATION_CODES
+            if unexpected:
+                detail = ", ".join(
+                    f"{code} ({station_lookup.get(code, '?')})" for code in sorted(unexpected)
+                )
+                logger.warning(
+                    "%d station(s) dropped (duplicate normalised address); skipping their prices: %s",
+                    len(unexpected), detail,
+                )
         prices = [p for p in prices if p["station_code"] in known_codes]
 
     before = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
@@ -263,12 +277,16 @@ def load_cleaned_csv(
     conn: sqlite3.Connection,
     csv_path: pathlib.Path,
     addr_idx: dict[str, int] | None = None,
+    suburb_backfill: dict[int, str] | None = None,
 ) -> tuple[int, int]:
     """Load a historical cleaned CSV; matches rows to stations by normalised address.
 
     Historical CSV schema (from history.py Transformer):
         ServiceStationName, Address, Suburb, Postcode, Brand, FuelCode,
         PriceUpdatedDate, Price
+
+    If suburb_backfill is provided, it is updated in-place with the first
+    non-blank suburb seen per station code (for use by backfill_station_suburbs).
 
     Returns (inserted, skipped).
     """
@@ -285,6 +303,11 @@ def load_cleaned_csv(
             if station_code is None:
                 skipped += 1
                 continue
+
+            if suburb_backfill is not None and station_code not in suburb_backfill:
+                suburb = row.get("Suburb", "").strip()
+                if suburb:
+                    suburb_backfill[station_code] = suburb
 
             raw_date = row.get("PriceUpdatedDate", "")
             if not raw_date:
@@ -317,6 +340,35 @@ def load_cleaned_csv(
     return after - before, skipped
 
 
+def backfill_station_suburbs(conn: sqlite3.Connection, suburb_backfill: dict[int, str]) -> int:
+    """Update stations that have a blank suburb using data collected from historical CSVs.
+
+    This is the correct place to do suburb backfill (rather than during the history.py
+    clean phase) because station_code — the primary key — only comes from the FuelCheck
+    API live snapshot. The stations table doesn't exist until after a snapshot is loaded,
+    so historical CSVs can't populate it directly. The clean phase produces suburb data
+    but has no station_code to key it on; the backfill bridges that gap after both
+    sources have been loaded.
+
+    Only updates rows where suburb is currently blank; never overwrites an existing value.
+    Returns the number of rows updated.
+    """
+    if not suburb_backfill:
+        return 0
+    blank_before = conn.execute(
+        "SELECT COUNT(*) FROM stations WHERE suburb = ''"
+    ).fetchone()[0]
+    conn.executemany(
+        "UPDATE stations SET suburb = ? WHERE station_code = ? AND suburb = ''",
+        [(suburb, code) for code, suburb in suburb_backfill.items()],
+    )
+    conn.commit()
+    blank_after = conn.execute(
+        "SELECT COUNT(*) FROM stations WHERE suburb = ''"
+    ).fetchone()[0]
+    return blank_before - blank_after
+
+
 def load_all_cleaned(
     conn: sqlite3.Connection,
     cleaned_dir: pathlib.Path,
@@ -324,15 +376,18 @@ def load_all_cleaned(
     """Load all historical cleaned CSVs. Returns (total_inserted, total_skipped)."""
     addr_idx = _address_index(conn)
     logger.info("Address index: %d stations", len(addr_idx))
+    suburb_backfill: dict[int, str] = {}
     total_inserted = total_skipped = 0
     for path in sorted(cleaned_dir.glob("*.csv")):
-        inserted, skipped = load_cleaned_csv(conn, path, addr_idx)
+        inserted, skipped = load_cleaned_csv(conn, path, addr_idx, suburb_backfill)
         logger.debug("%s: %d inserted, %d skipped", path.name, inserted, skipped)
         total_inserted += inserted
         total_skipped += skipped
+    n_backfilled = backfill_station_suburbs(conn, suburb_backfill)
     logger.info(
-        "Historical load complete: %d inserted, %d skipped (no station match)",
-        total_inserted, total_skipped,
+        "Historical load complete: %d inserted, %d skipped (no station match), "
+        "%d station suburb(s) backfilled from historical data",
+        total_inserted, total_skipped, n_backfilled,
     )
     return total_inserted, total_skipped
 

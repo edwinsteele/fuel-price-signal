@@ -26,10 +26,20 @@ table { border-collapse: collapse; width: 100%; font-size: .9rem; }
 th, td { text-align: left; padding: .4rem .7rem; border: 1px solid #ddd; }
 th { background: #f0f0f0; }
 tr:nth-child(even) { background: #fafafa; }
-.chart-wrap { max-height: 340px; margin: 1rem 0; }
+.chart-wrap { height: 460px; margin: 1rem 0; }
 """
 
 _CHART_JS_CDN = "https://cdn.jsdelivr.net/npm/chart.js@4"
+
+_PREFERRED_COLOURS = [
+    "#dc2626",  # red
+    "#16a34a",  # green
+    "#d97706",  # amber
+    "#7c3aed",  # violet
+    "#0891b2",  # cyan
+    "#db2777",  # pink
+    "#ea580c",  # orange
+]
 
 
 def _coverage_by_month(conn: sqlite3.Connection) -> list[tuple[str, int]]:
@@ -82,17 +92,18 @@ def generate_html(conn: sqlite3.Connection) -> str:
         "data": avg_values,
         "borderColor": "#2563eb",
         "backgroundColor": "rgba(37,99,235,0.08)",
+        "borderDash": [6, 4],
         "pointRadius": 0,
         "tension": 0.3,
         "fill": True,
     }]
-    for label, series in preferred.items():
-        # Align to the same x-axis labels
+    for i, (label, series) in enumerate(preferred.items()):
         series_dict = dict(series)
+        colour = _PREFERRED_COLOURS[i % len(_PREFERRED_COLOURS)]
         datasets.append({
             "label": label,
             "data": [series_dict.get(d) for d in avg_labels],
-            "borderColor": "#dc2626",
+            "borderColor": colour,
             "pointRadius": 0,
             "tension": 0.3,
             "spanGaps": True,
@@ -158,10 +169,10 @@ new Chart(document.getElementById('avgChart'), {{
   data: {chart_data},
   options: {{
     responsive: true,
-    maintainAspectRatio: true,
+    maintainAspectRatio: false,
     plugins: {{ legend: {{ position: 'top' }} }},
     scales: {{
-      x: {{ ticks: {{ maxTicksLimit: 12, maxRotation: 0 }} }},
+      x: {{ ticks: {{ maxTicksLimit: 16, maxRotation: 45, minRotation: 45 }} }},
       y: {{ title: {{ display: true, text: 'cents/litre' }} }}
     }}
   }}
