@@ -367,7 +367,8 @@ class Transformer:
 
         current_servo: dict[str, str] = {f: "" for f in _SERVO_ID_FIELDS}
         prev_date: datetime.datetime | None = None
-        seen: dict[str, dict] = {}
+        # key → (latest_datetime, row); keeps the last intraday update per station/fuel/day
+        seen: dict[str, tuple[datetime.datetime, dict]] = {}
         line_number = 0
 
         with open(self.raw_path, newline="", encoding="utf-8-sig") as f:
@@ -418,13 +419,16 @@ class Transformer:
                     current_servo[field] = row[field]
                 prev_date = date
 
-                key = f"{fuelcode}{row['ServiceStationName']}{row['Address']}{brand}{date}"
-                seen[key] = row
+                # Dedup by station+fuel+date (not full timestamp); keep the latest
+                # intraday update so we capture end-of-day price rather than morning reset.
+                key = f"{fuelcode}{row['ServiceStationName']}{row['Address']}{brand}{date.date()}"
+                if key not in seen or date > seen[key][0]:
+                    seen[key] = (date, row)
 
         with open(self.cleaned_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=XLSX_COLUMNS, extrasaction="ignore")
             writer.writeheader()
-            for row in seen.values():
+            for _dt, row in seen.values():
                 writer.writerow(row)
 
         return len(seen)

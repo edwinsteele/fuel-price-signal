@@ -494,6 +494,37 @@ def test_clean_deduplicates_same_key(tmp_path):
     assert len(result) == 1
 
 
+def test_clean_keeps_last_intraday_update(tmp_path):
+    # Station resets price high in the morning, drops in the afternoon.
+    # Only the afternoon (end-of-day) price should be kept.
+    rows = [
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "2024-01-15T09:00:00", "Price": "207.9"},
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "2024-01-15T15:00:00", "Price": "167.9"},
+    ]
+    result = _run_transformer(rows, tmp_path)
+    assert len(result) == 1
+    assert float(result[0]["Price"]) == 167.9
+
+
+def test_clean_keeps_latest_timestamp_regardless_of_csv_order(tmp_path):
+    # Even if the CSV rows are out of chronological order, the latest timestamp wins.
+    rows = [
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "2024-01-15T15:00:00", "Price": "167.9"},  # later, listed first
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "2024-01-15T09:00:00", "Price": "207.9"},  # earlier, listed second
+    ]
+    result = _run_transformer(rows, tmp_path)
+    assert len(result) == 1
+    assert float(result[0]["Price"]) == 167.9
+
+
 def test_clean_carries_forward_station_for_extra_fuel_code_lines(tmp_path):
     rows = [
         {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",

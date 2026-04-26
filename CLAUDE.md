@@ -138,7 +138,8 @@ Known data quality issues (handled by transformer):
 - Missing Brand field (infer from station name)
 - Duplicate rows for same station + same timestamp
 - Extra fuel-code lines (station details not repeated in source — blank name/address rows)
-- `PriceUpdatedDate` is date-only, no time component — one price per station per fuel type per day
+- `PriceUpdatedDate` has a time component in all files from ~2019 onwards (three formats: ISO `YYYY-MM-DDTHH:MM:SS`, space-separated `YYYY-MM-DD HH:MM:SS`, Australian `D/MM/YYYY H:MM:SS AM/PM`). Only the oldest pre-2019 files are truly date-only.
+- Stations commonly update price multiple times per day (intraday resets are normal in the NSW price cycle). The transformer keeps the **latest timestamp per station/fuel/day** (end-of-day price) to avoid morning-reset spikes creating artificial day-to-day gyrations that confuse scipy peak detection.
 
 ## Station strategy
 - User manually maintains preferred station list (known from two weekly routes)
