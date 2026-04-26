@@ -97,6 +97,17 @@ CREATE TABLE IF NOT EXISTS prices (
 
 CREATE INDEX IF NOT EXISTS prices_fuel_date   ON prices(fuel_code, price_date);
 CREATE INDEX IF NOT EXISTS prices_station_fuel ON prices(station_code, fuel_code);
+
+CREATE TABLE IF NOT EXISTS daily_prices (
+    station_code  INTEGER NOT NULL REFERENCES stations(station_code),
+    fuel_code     TEXT NOT NULL,
+    price_date    DATE NOT NULL,
+    price_cents   REAL NOT NULL,
+    PRIMARY KEY (station_code, fuel_code, price_date)
+);
+
+CREATE INDEX IF NOT EXISTS daily_prices_fuel_date    ON daily_prices(fuel_code, price_date);
+CREATE INDEX IF NOT EXISTS daily_prices_station_fuel ON daily_prices(station_code, fuel_code);
 """
 
 
@@ -429,6 +440,24 @@ def station_price_series(
         params.append(start_date)
     query += " ORDER BY price_date"
     return [(r[0], r[1]) for r in conn.execute(query, params)]
+
+
+def sydney_average_series(
+    conn: sqlite3.Connection,
+    fuel_code: str = "E10",
+) -> list[tuple[str, float]]:
+    """Return [(price_date, avg_price_cents)] from daily_prices (gap-filled).
+
+    Requires fill.fill_all() to have been run first.
+    """
+    return [
+        (r[0], r[1])
+        for r in conn.execute(
+            "SELECT price_date, AVG(price_cents) FROM daily_prices"
+            " WHERE fuel_code = ? GROUP BY price_date ORDER BY price_date",
+            (fuel_code,),
+        )
+    ]
 
 
 def db_summary(conn: sqlite3.Connection) -> dict:
