@@ -77,8 +77,8 @@ def generate_html(conn: sqlite3.Connection) -> str:
     datasets = [{
         "label": "Sydney avg E10",
         "data": avg_values,
-        "borderColor": "#2563eb",
-        "backgroundColor": "rgba(37,99,235,0.08)",
+        "borderColor": "#000000",
+        "backgroundColor": "rgba(0,0,0,0.06)",
         "borderDash": [6, 4],
         "pointRadius": 0,
         "tension": 0.3,
