@@ -19,8 +19,51 @@ fuel_signal/
 ├── live.py          # FuelCheck API snapshot → append to DB
 ├── cycle.py         # Cycle detection + current phase calculation
 ├── signal.py        # Combine phase + live price → one-line output
+├── compare.py       # Compare two price series (station vs station, station vs LGA mean, etc.)
 └── backtest.py      # Replay historical prices through signal + purchasing strategy
 ```
+
+## CLI pattern
+
+Each command is its own module with a `@click.command` named `main` and an `if __name__ == "__main__": main()` block. Invoked as:
+
+```
+uv run python -m fuel_signal.signal [--as-of DATE] [--db PATH]
+uv run python -m fuel_signal.compare SERIES_A SERIES_B [--fuel E10] [--within 0.5] [--db PATH]
+uv run python -m fuel_signal.cli stations [QUERY]
+```
+
+**Do not** add new commands to `cli.py` or create new pyproject.toml script entries — each module is its own entry point.
+
+## Key db.py read helpers
+
+For analysis and new commands, these are the two series-fetching functions:
+
+```python
+# Gap-filled daily prices for one station → [(date_str, price_cents)]
+get_daily_prices(conn, station_code: int, fuel_code: str = "E10")
+
+# Gap-filled average across all Sydney metro stations (or filtered by LGA) → [(date_str, avg_price_cents)]
+average_price_series(conn, fuel_code: str = "E10", councils: frozenset[str] | None = None)
+```
+
+`daily_prices` (gap-filled) is the right table for analysis. `prices` is raw observations only.
+
+`SYDNEY_METRO_COUNCILS` in `postcode_council.py` is the frozenset of valid council names for the `councils=` parameter.
+
+## Test patterns
+
+Standard fixture for DB-backed tests:
+```python
+@pytest.fixture
+def conn(tmp_path):
+    c = open_db(tmp_path / "test.db")
+    create_schema(c)
+    yield c
+    c.close()
+```
+
+Insert gap-filled test data with `upsert_daily_prices(conn, [(station_code, fuel_code, date_str, price_cents), ...])`. For standalone command tests, invoke via `CliRunner().invoke(main, [...])` where `main` is imported from the module under test.
 
 ## Project setup
 
