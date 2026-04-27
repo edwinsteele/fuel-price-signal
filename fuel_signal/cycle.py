@@ -280,6 +280,54 @@ class CycleDetector:
             return series.iloc[peak_indices[-1] : -plateau_width]
         return pd.Series(dtype=float)
 
+    def peaks_for_plot(self, as_of_date: str | None = None) -> dict:
+        """Return peak metadata for visualisation in the inspection page.
+
+        Returns:
+            peak_dates:         YYYY-MM-DD list of scipy-confirmed peak dates
+            plateau_peak_date:  YYYY-MM-DD of the synthetic boundary peak, or None
+            last_cycle_start:   left edge of the last-cycle window (date str or None)
+            last_cycle_end:     right edge of the last-cycle window (date str or None)
+        """
+        empty: dict = {
+            "peak_dates": [],
+            "plateau_peak_date": None,
+            "last_cycle_start": None,
+            "last_cycle_end": None,
+        }
+        if self._series.empty:
+            return empty
+        series = self._series.loc[:as_of_date] if as_of_date else self._series
+        if series.empty:
+            return empty
+
+        peaks, _ = self._get_peaks(series)
+        plateau_width = self._plateau_width_at_boundary(series, self._PEAK_PROMINENCE)
+
+        peak_dates = [series.index[int(i)].strftime("%Y-%m-%d") for i in peaks]
+        plateau_peak_date = (
+            series.index[-plateau_width].strftime("%Y-%m-%d") if plateau_width else None
+        )
+
+        last_cycle_start = last_cycle_end = None
+        if len(peaks) >= 2:
+            if plateau_width:
+                last_cycle_start = series.index[int(peaks[-1])].strftime("%Y-%m-%d")
+                last_cycle_end = series.index[-plateau_width].strftime("%Y-%m-%d")
+            else:
+                last_cycle_start = series.index[int(peaks[-2])].strftime("%Y-%m-%d")
+                last_cycle_end = series.index[int(peaks[-1])].strftime("%Y-%m-%d")
+        elif len(peaks) >= 1 and plateau_width:
+            last_cycle_start = series.index[int(peaks[-1])].strftime("%Y-%m-%d")
+            last_cycle_end = series.index[-plateau_width].strftime("%Y-%m-%d")
+
+        return {
+            "peak_dates": peak_dates,
+            "plateau_peak_date": plateau_peak_date,
+            "last_cycle_start": last_cycle_start,
+            "last_cycle_end": last_cycle_end,
+        }
+
     @staticmethod
     def _mean_cycle_length(
         series: pd.Series,
