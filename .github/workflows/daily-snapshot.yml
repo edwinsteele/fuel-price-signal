@@ -2,8 +2,8 @@ name: Daily E10 snapshot
 
 on:
   schedule:
-    # 03:00 UTC = 1pm AEST / 2pm AEDT — stable mid-afternoon prices
-    - cron: "0 3 * * *"
+    # 12:00 UTC = 10pm AEST / 11pm AEDT — end-of-day prices
+    - cron: "0 12 * * *"
   workflow_dispatch:
 
 jobs:
