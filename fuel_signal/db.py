@@ -538,7 +538,7 @@ def station_price_series(
     return [(_date_from_int(r[0]), r[1] / 10) for r in conn.execute(query, params)]
 
 
-def sydney_average_series(
+def average_price_series(
     conn: sqlite3.Connection,
     fuel_code: str = "E10",
     councils: frozenset[str] | None = None,

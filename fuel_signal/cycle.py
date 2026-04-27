@@ -1,0 +1,226 @@
+"""Cycle detection for E10 price series.
+
+Usage:
+    series = db.average_price_series(conn)                  # full history
+    cd = CycleDetector(series)                              # converts once
+    state = cd.detect("2024-06-15")                         # in-memory slice
+    if state:
+        print(f"{state.pct_through_cycle:.0%} through cycle")
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+import scipy.signal
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CycleState:
+    """Snapshot of cycle phase as of a specific date."""
+
+    as_of_date: str          # YYYY-MM-DD; series was truncated here
+    days_since_last_peak: int
+    mean_cycle_length: float  # mean inter-peak distance in days
+    pct_through_cycle: float  # days_since_last_peak / mean_cycle_length; can exceed 1.0
+    last_cycle_min: float     # cents; min price in the last complete cycle
+    last_cycle_max: float     # cents; max price in the last complete cycle
+    last_3_gradients: list[float]  # np.gradient of the (possibly smoothed) series, last 3
+    peak_count: int           # number of peaks detected; low values mean low confidence
+
+
+class CycleDetector:
+    """Detect price cycle phase from a daily price series.
+
+    Parameters
+    ----------
+    series:
+        ``[(date_str, price_cents), ...]`` — any aggregated daily series.
+        Dates must be in YYYY-MM-DD format and chronologically ordered.
+        The caller decides which series to use (Sydney metro average,
+        Blue Mountains council average, etc.).
+    smooth:
+        If True, apply a Savitzky-Golay filter (window=7, polyorder=2) before
+        peak detection.  Reduces noise in sparse series (e.g. BM council average
+        with ~20–30 stations) without introducing the lag of a rolling mean.
+        Leave False for the Sydney metro average, which is already smooth.
+    """
+
+    # scipy.signal.find_peaks parameters — tuned for NSW E10 weekly price cycles
+    _PEAK_DISTANCE = 7       # minimum days between peaks
+    _PEAK_PROMINENCE = 1.0   # minimum cents of prominence
+
+    def __init__(
+        self,
+        series: list[tuple[str, float]],
+        smooth: bool = False,
+    ) -> None:
+        if not series:
+            self._series: pd.Series = pd.Series(dtype=float)
+            return
+        dates, prices = zip(*series)
+        index = pd.to_datetime(list(dates))
+        values = np.array(prices, dtype=float)
+        if smooth and len(values) >= 7:
+            values = scipy.signal.savgol_filter(values, window_length=7, polyorder=2)
+        self._series = pd.Series(values, index=index)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def detect(self, as_of_date: str) -> CycleState | None:
+        """Return cycle state as of *as_of_date*, or None if not enough data.
+
+        The full series is sliced to *as_of_date* (inclusive) before all
+        calculations, so this is safe to call with historical dates for
+        backtesting without re-querying the database.
+
+        Returns None when fewer than 2 peaks are detected (insufficient data
+        for a cycle phase estimate).
+        """
+        # TODO: implement
+        #
+        # Steps:
+        # 1. Slice self._series up to and including as_of_date.
+        #    Use: sliced = self._series.loc[:as_of_date]
+        #    Guard: return None if sliced is empty.
+        #
+        # 2. Detect peaks on the sliced series via self._get_peaks(sliced).
+        #    Return None if fewer than 2 peaks found.
+        #    (plateau_width_at_boundary can provide a synthetic "current peak"
+        #    on the right boundary — include it in the effective peak list
+        #    when it fires.)
+        #
+        # 3. Compute days_since_last_peak:
+        #    last_peak_date = sliced.index[effective_last_peak_idx]
+        #    days_since_last_peak = (pd.Timestamp(as_of_date) - last_peak_date).days
+        #
+        # 4. Compute mean_cycle_length via self._mean_cycle_length(sliced, peaks,
+        #    plateau_width).  See _mean_cycle_length docstring.
+        #
+        # 5. Compute pct_through_cycle = days_since_last_peak / mean_cycle_length.
+        #
+        # 6. Compute last_cycle_min / last_cycle_max via
+        #    self._last_cycle_prices(sliced, peaks, plateau_width).
+        #
+        # 7. Compute last_3_gradients = np.gradient(sliced.values)[-3:].round(2).tolist()
+        #    (use the smoothed series if smooth=True was set — self._series is
+        #    already smoothed, so np.gradient on sliced is correct regardless)
+        #
+        # 8. Return CycleState(...)
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Internal helpers (ported from ff-aws-backend PriceCycleDetector)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_peaks(series: pd.Series) -> tuple[np.ndarray, dict]:
+        """Run scipy peak detection on *series*. Returns (peak_indices, properties)."""
+        # TODO: implement
+        # scipy.signal.find_peaks(
+        #     series.values,
+        #     distance=CycleDetector._PEAK_DISTANCE,
+        #     prominence=CycleDetector._PEAK_PROMINENCE,
+        # )
+        raise NotImplementedError
+
+    @staticmethod
+    def _plateau_width_at_boundary(series: pd.Series, prominence: float) -> int:
+        """Return how many trailing points are part of an unconfirmed peak at the
+        right boundary of *series*.
+
+        scipy cannot detect a peak at the boundary because it has no right-side
+        drop-off to measure prominence against.  This method identifies the case
+        where the series has plateaued (or barely declined) at the end and the
+        upswing before the plateau was large enough to constitute a peak.
+
+        Returns 0 if no boundary peak is detected.
+
+        Ported from ff-aws-backend PriceCycleDetector._plateau_width_at_boundary.
+        Logic summary:
+        - Compute np.gradient(series.values).
+        - Walk backwards through gradients, accumulating the running decline.
+        - Stop when either (a) a positive gradient is encountered (we've entered
+          the ramp-up of a new cycle) or (b) the accumulated decline exceeds
+          -prominence (the drop is large enough that scipy would have seen the
+          peak already).
+        - If the stop was caused by (a) and the gradient just before the
+          positive step is >= 2 * prominence, the plateau points count as a
+          peak boundary.  Return 1 + len(plateau_gradients).
+        - Otherwise return 0.
+
+        The original implementation in ff-aws-backend:
+
+            def _plateau_width_at_boundary(self) -> int:
+                plateau_width_at_boundary = 0
+                if len(self.daily_prices) > 1:
+                    gradients = np.gradient(self.daily_prices)
+                    plateau_gradients, other_gradients = (
+                        self.partition_when_threshold_reached(
+                            list(reversed(gradients)),
+                            -self.PRICE_SERIES_MIN_PROMINENCE,
+                        )
+                    )
+                    if (
+                        other_gradients
+                        and other_gradients[0] >= 2 * self.PRICE_SERIES_MIN_PROMINENCE
+                    ):
+                        plateau_width_at_boundary = 1 + len(plateau_gradients)
+                return plateau_width_at_boundary
+
+            @staticmethod
+            def partition_when_threshold_reached(input_list, threshold):
+                running_total = 0.0
+                for idx, val in enumerate(input_list):
+                    if val > 0:
+                        return input_list[:idx], input_list[idx:]
+                    if running_total + val < threshold:
+                        return input_list[:idx], input_list[idx:]
+                    else:
+                        running_total += val
+                return input_list, []
+        """
+        # TODO: port the above verbatim, adapted to accept a pd.Series
+        raise NotImplementedError
+
+    @staticmethod
+    def _last_cycle_prices(
+        series: pd.Series,
+        peak_indices: np.ndarray,
+        plateau_width: int,
+    ) -> pd.Series:
+        """Return the price sub-series spanning the last complete cycle.
+
+        When plateau_width > 0 the current boundary counts as the latest peak,
+        so the last complete cycle runs from peak[-1] to the start of the plateau.
+        When plateau_width == 0 the last complete cycle runs from peak[-2] to peak[-1].
+
+        Returns an empty Series if fewer than 2 effective peaks exist.
+
+        Ported from ff-aws-backend PriceCycleDetector._get_last_cycle_prices.
+        """
+        # TODO: implement
+        raise NotImplementedError
+
+    @staticmethod
+    def _mean_cycle_length(
+        series: pd.Series,
+        peak_indices: np.ndarray,
+        plateau_width: int,
+    ) -> float:
+        """Return mean inter-peak distance in days.
+
+        When plateau_width > 0, the right-boundary plateau point is appended
+        to the peak timestamps before computing inter-peak differences.
+
+        Ported from ff-aws-backend PriceCycleDetector.get_mean_cycle_time.
+        """
+        # TODO: implement
+        raise NotImplementedError

@@ -3,11 +3,11 @@
 import pytest
 
 from fuel_signal.db import (
+    average_price_series,
     create_schema,
     get_daily_prices,
     insert_prices,
     open_db,
-    sydney_average_series,
     upsert_stations,
 )
 from fuel_signal.fill import fill_all, find_daily_gaps
@@ -179,7 +179,7 @@ class TestFillAll:
 
 
 # ---------------------------------------------------------------------------
-# sydney_average_series
+# average_price_series
 # ---------------------------------------------------------------------------
 
 class TestSydneyAverageSeries:
@@ -190,7 +190,7 @@ class TestSydneyAverageSeries:
             _price(1001, "2024-01-02", 160.0),
         ])
         fill_all(conn, end_date="2024-01-02")
-        series = sydney_average_series(conn)
+        series = average_price_series(conn)
         assert series == [("2024-01-01", 150.0), ("2024-01-02", 160.0)]
 
     def test_two_stations_averaged(self, conn):
@@ -200,7 +200,7 @@ class TestSydneyAverageSeries:
             _price(1002, "2024-01-01", 160.0),
         ])
         fill_all(conn, end_date="2024-01-01")
-        series = sydney_average_series(conn)
+        series = average_price_series(conn)
         assert len(series) == 1
         assert series[0][0] == "2024-01-01"
         assert series[0][1] == pytest.approx(150.0)
@@ -214,9 +214,9 @@ class TestSydneyAverageSeries:
             _price(1002, "2024-01-03", 200.0),
         ])
         fill_all(conn, end_date="2024-01-03")
-        series = dict(sydney_average_series(conn))
+        series = dict(average_price_series(conn))
         # Jan 2: station 1001 filled at 100.0, station 1002 filled at 200.0 → avg 150.0
         assert series["2024-01-02"] == pytest.approx(150.0)
 
     def test_empty_daily_prices_returns_empty(self, conn):
-        assert sydney_average_series(conn) == []
+        assert average_price_series(conn) == []
