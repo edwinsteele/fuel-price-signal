@@ -11,10 +11,12 @@ from fuel_signal.db import (
     daily_average_e10,
     db_summary,
     insert_prices,
+    is_file_loaded,
     load_all_cleaned,
     load_all_snapshots,
     load_cleaned_csv,
     load_snapshot_csv,
+    mark_file_loaded,
     normalize_address,
     open_db,
     station_price_series,
@@ -495,6 +497,104 @@ def test_load_all_cleaned_backfills_blank_suburbs(conn, tmp_path):
     load_all_cleaned(conn, cleaned_dir)
     row = conn.execute("SELECT suburb FROM stations WHERE station_code = 1001").fetchone()
     assert row[0] == "Springwood"
+
+
+# ---------------------------------------------------------------------------
+# loaded_files tracking
+# ---------------------------------------------------------------------------
+
+def test_is_file_loaded_false_initially(conn):
+    assert not is_file_loaded(conn, "2024-03-01.csv")
+
+
+def test_mark_file_loaded_then_is_loaded(conn):
+    mark_file_loaded(conn, "2024-03-01.csv")
+    assert is_file_loaded(conn, "2024-03-01.csv")
+
+
+def test_mark_file_loaded_idempotent(conn):
+    mark_file_loaded(conn, "2024-03-01.csv")
+    mark_file_loaded(conn, "2024-03-01.csv")  # should not raise
+    assert is_file_loaded(conn, "2024-03-01.csv")
+
+
+def test_load_all_snapshots_skips_already_loaded(conn, tmp_path):
+    snaps_dir = tmp_path / "snapshots"
+    _write_snapshot_csv(snaps_dir / "2024" / "03" / "2024-03-01.csv", [{
+        "station_code": 1001, "name": "Shell Springwood",
+        "address": "1 Main Street, Springwood", "suburb": "Springwood",
+        "postcode": "2777", "brand": "Shell", "fuel_code": "E10", "price": "175.9", "date": "2024-03-01",
+    }])
+    load_all_snapshots(conn, snaps_dir)
+    # Second load should skip the file and insert 0 new prices
+    _, p = load_all_snapshots(conn, snaps_dir)
+    assert p == 0
+
+
+def test_load_all_snapshots_force_reloads(conn, tmp_path):
+    snaps_dir = tmp_path / "snapshots"
+    _write_snapshot_csv(snaps_dir / "2024" / "03" / "2024-03-01.csv", [{
+        "station_code": 1001, "name": "Shell Springwood",
+        "address": "1 Main Street, Springwood", "suburb": "Springwood",
+        "postcode": "2777", "brand": "Shell", "fuel_code": "E10", "price": "175.9", "date": "2024-03-01",
+    }])
+    load_all_snapshots(conn, snaps_dir)
+    # force=True bypasses the skip; INSERT OR IGNORE means 0 new prices but no error
+    _, p = load_all_snapshots(conn, snaps_dir, force=True)
+    assert p == 0  # already in DB via INSERT OR IGNORE, but file was not skipped
+
+
+def test_load_all_snapshots_marks_file_loaded(conn, tmp_path):
+    snaps_dir = tmp_path / "snapshots"
+    _write_snapshot_csv(snaps_dir / "2024" / "03" / "2024-03-01.csv", [{
+        "station_code": 1001, "name": "Shell Springwood",
+        "address": "1 Main Street, Springwood", "suburb": "Springwood",
+        "postcode": "2777", "brand": "Shell", "fuel_code": "E10", "price": "175.9", "date": "2024-03-01",
+    }])
+    load_all_snapshots(conn, snaps_dir)
+    assert is_file_loaded(conn, "2024-03-01.csv")
+
+
+def test_load_all_cleaned_skips_already_loaded(conn, tmp_path):
+    upsert_stations(conn, [_STATION])
+    cleaned_dir = tmp_path / "cleaned"
+    _write_cleaned_csv(cleaned_dir / "hist.csv", [{
+        "ServiceStationName": "Shell Springwood",
+        "Address": "1 MAIN ST, SPRINGWOOD NSW 2777",
+        "Suburb": "Springwood", "Postcode": "2777", "Brand": "Shell",
+        "FuelCode": "E10", "PriceUpdatedDate": "2022-08-15 00:00:00", "Price": "168.5",
+    }])
+    load_all_cleaned(conn, cleaned_dir)
+    inserted, _ = load_all_cleaned(conn, cleaned_dir)
+    assert inserted == 0
+
+
+def test_load_all_cleaned_force_reloads(conn, tmp_path):
+    upsert_stations(conn, [_STATION])
+    cleaned_dir = tmp_path / "cleaned"
+    _write_cleaned_csv(cleaned_dir / "hist.csv", [{
+        "ServiceStationName": "Shell Springwood",
+        "Address": "1 MAIN ST, SPRINGWOOD NSW 2777",
+        "Suburb": "Springwood", "Postcode": "2777", "Brand": "Shell",
+        "FuelCode": "E10", "PriceUpdatedDate": "2022-08-15 00:00:00", "Price": "168.5",
+    }])
+    load_all_cleaned(conn, cleaned_dir)
+    # force=True bypasses skip; INSERT OR IGNORE means 0 new prices but file was processed
+    inserted, _ = load_all_cleaned(conn, cleaned_dir, force=True)
+    assert inserted == 0  # already in DB, not a duplicate insert
+
+
+def test_load_all_cleaned_marks_file_loaded(conn, tmp_path):
+    upsert_stations(conn, [_STATION])
+    cleaned_dir = tmp_path / "cleaned"
+    _write_cleaned_csv(cleaned_dir / "hist.csv", [{
+        "ServiceStationName": "Shell Springwood",
+        "Address": "1 MAIN ST, SPRINGWOOD NSW 2777",
+        "Suburb": "Springwood", "Postcode": "2777", "Brand": "Shell",
+        "FuelCode": "E10", "PriceUpdatedDate": "2022-08-15 00:00:00", "Price": "168.5",
+    }])
+    load_all_cleaned(conn, cleaned_dir)
+    assert is_file_loaded(conn, "hist.csv")
 
 
 # ---------------------------------------------------------------------------

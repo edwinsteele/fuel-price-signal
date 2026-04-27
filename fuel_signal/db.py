@@ -123,6 +123,11 @@ CREATE TABLE IF NOT EXISTS daily_prices (
 
 CREATE INDEX IF NOT EXISTS daily_prices_fuel_date    ON daily_prices(fuel_type_id, price_date);
 CREATE INDEX IF NOT EXISTS daily_prices_station_fuel ON daily_prices(station_code, fuel_type_id);
+
+CREATE TABLE IF NOT EXISTS loaded_files (
+    filename  TEXT PRIMARY KEY,
+    loaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+);
 """
 
 
@@ -174,6 +179,21 @@ def open_db(db_path: pathlib.Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 def create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    conn.commit()
+
+
+def is_file_loaded(conn: sqlite3.Connection, filename: str) -> bool:
+    """Return True if filename has been recorded in loaded_files."""
+    return conn.execute(
+        "SELECT 1 FROM loaded_files WHERE filename = ?", (filename,)
+    ).fetchone() is not None
+
+
+def mark_file_loaded(conn: sqlite3.Connection, filename: str) -> None:
+    """Record filename in loaded_files (idempotent)."""
+    conn.execute(
+        "INSERT OR IGNORE INTO loaded_files (filename) VALUES (?)", (filename,)
+    )
     conn.commit()
 
 
@@ -355,14 +375,20 @@ def load_all_snapshots(
     snapshots_dir: pathlib.Path,
     postcodes: frozenset[str] | None = None,
     fuel_codes: set[str] | None = None,
+    force: bool = False,
 ) -> tuple[int, int]:
     """Load every snapshot CSV found under snapshots_dir. Returns (stations, prices).
 
+    Already-loaded files (tracked in loaded_files table) are skipped unless force=True.
     postcodes and fuel_codes are passed through to load_snapshot_csv for load-time filtering.
     """
     total_stations = total_prices = 0
     for path in sorted(snapshots_dir.rglob("*.csv")):
+        if not force and is_file_loaded(conn, path.name):
+            logger.debug("Snapshot %s: already loaded, skipping", path.name)
+            continue
         s, p = load_snapshot_csv(conn, path, postcodes=postcodes, fuel_codes=fuel_codes)
+        mark_file_loaded(conn, path.name)
         logger.info("Snapshot %s: %d stations, %d new prices", path.name, s, p)
         total_stations += s
         total_prices += p
@@ -479,14 +505,22 @@ def backfill_station_suburbs(conn: sqlite3.Connection, suburb_backfill: dict[int
 def load_all_cleaned(
     conn: sqlite3.Connection,
     cleaned_dir: pathlib.Path,
+    force: bool = False,
 ) -> tuple[int, int]:
-    """Load all historical cleaned CSVs. Returns (total_inserted, total_skipped)."""
+    """Load all historical cleaned CSVs. Returns (total_inserted, total_skipped).
+
+    Already-loaded files (tracked in loaded_files table) are skipped unless force=True.
+    """
     addr_idx = _address_index(conn)
     logger.info("Address index: %d stations", len(addr_idx))
     suburb_backfill: dict[int, str] = {}
     total_inserted = total_skipped = 0
     for path in sorted(cleaned_dir.glob("*.csv")):
+        if not force and is_file_loaded(conn, path.name):
+            logger.debug("%s: already loaded, skipping", path.name)
+            continue
         inserted, skipped = load_cleaned_csv(conn, path, addr_idx, suburb_backfill)
+        mark_file_loaded(conn, path.name)
         logger.debug("%s: %d inserted, %d skipped", path.name, inserted, skipped)
         total_inserted += inserted
         total_skipped += skipped
@@ -669,16 +703,24 @@ def db_summary(conn: sqlite3.Connection) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
     from fuel_signal.postcode_council import SYDNEY_METRO_POSTCODES
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description="Rebuild fuel_signal.db from snapshots + historical data")
+    parser.add_argument("db_path", nargs="?", default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--force", action="store_true", help="Re-ingest all files, ignoring loaded_files tracking")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args()
 
-    db_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DB_PATH
-    conn = open_db(db_path)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(message)s",
+    )
+
+    conn = open_db(pathlib.Path(args.db_path))
     create_schema(conn)
-    logger.info("Schema ready at %s", db_path)
+    logger.info("Schema ready at %s", args.db_path)
 
     snapshots_dir = pathlib.Path("data/snapshots")
     if snapshots_dir.exists():
@@ -686,6 +728,7 @@ if __name__ == "__main__":
             conn, snapshots_dir,
             postcodes=SYDNEY_METRO_POSTCODES,
             fuel_codes={"E10"},
+            force=args.force,
         )
         logger.info("Snapshots: %d stations, %d new prices", s, p)
     else:
@@ -693,7 +736,7 @@ if __name__ == "__main__":
 
     cleaned_dir = pathlib.Path("data/cleaned")
     if cleaned_dir.exists():
-        inserted, skipped = load_all_cleaned(conn, cleaned_dir)
+        inserted, skipped = load_all_cleaned(conn, cleaned_dir, force=args.force)
         logger.info("Historical: %d inserted, %d skipped", inserted, skipped)
 
     conn.close()
