@@ -3,8 +3,8 @@
 A Python CLI that outputs a one-line buy/don't-buy signal for E10 fuel at preferred stations near postcode 2777 (Springwood/Blue Mountains corridor).
 
 ```
-BUY  | Day 41/46 of cycle | E10 @ Caltex Springwood: 161.9c | Trough est. ~5 days
-WAIT | Day 12/46 of cycle | E10 @ Caltex Springwood: 179.2c | Trough est. ~34 days
+BUY  | Day 41/46 of cycle | E10 @ Caltex Springwood: 161.9c
+WAIT | Day 12/46 of cycle | E10 @ Caltex Springwood: 179.2c
 ```
 
 ## Setup
@@ -33,11 +33,13 @@ uv run python -m fuel_signal.history
 ```
 
 Takes a few minutes on first run (100+ files). Cleaning handles known data quality issues in the source:
-- YYYY-DD-MM / YYYY-MM-DD date format bug (pre-2019 files)
+- YYYY-DD-MM / YYYY-MM-DD date format bug (pre-2019 files); for files where every date has day ≤ 12 a constant-day-across-varying-months fingerprint is used to detect the true month
 - Postcode typos and ACT stations that slipped into NSW data
 - Extra fuel-code lines where station details are omitted
 - Duplicate rows for the same station + timestamp
 - Missing brand fields (inferred from station name)
+
+> **Note:** if you have existing `data/cleaned/` files built before this fix, delete the cleaned versions of the four affected 2019 files (`6d5fd229`, `efcbe322`, `ba5a2055`, `8a29ce30`) and re-run to recover Feb 1–12, Oct 1–9, and Nov 1–8 2019.
 
 ### 2. Collect a live snapshot (populates station reference data)
 

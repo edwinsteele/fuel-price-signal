@@ -269,13 +269,50 @@ def test_get_month_for_file_with_day_over_12(tmp_path):
 
 
 def test_get_month_for_file_fallback_when_all_days_under_13(tmp_path):
-    # All days <= 12 — falls back to last seen month
+    # All days <= 12, single month — falls back to last seen month
     p = _make_raw_csv([
         {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
          "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
          "PriceUpdatedDate": "2024-09-04", "Price": "180.0"},
     ], tmp_path)
     assert Transformer(p, tmp_path / "out.csv").get_month_for_file() == 9
+
+
+def test_get_month_for_file_constant_day_varying_months(tmp_path):
+    # YYYY-DD-MM files where day <= 12: e.g. Oct 2019 file has 2019-01-10,
+    # 2019-02-10 ... 2019-09-10 (day=10 constant, months vary) → month=10.
+    rows = [
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": f"2019-0{m}-10", "Price": "150.0"}
+        for m in range(1, 10)
+    ]
+    p = _make_raw_csv(rows, tmp_path)
+    assert Transformer(p, tmp_path / "out.csv").get_month_for_file() == 10
+
+
+def test_get_month_for_file_constant_day_nov(tmp_path):
+    # Nov 2019 pattern: 2019-01-11 ... 2019-09-11 → month=11
+    rows = [
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": f"2019-0{m}-11", "Price": "150.0"}
+        for m in range(1, 10)
+    ]
+    p = _make_raw_csv(rows, tmp_path)
+    assert Transformer(p, tmp_path / "out.csv").get_month_for_file() == 11
+
+
+def test_get_month_for_file_constant_day_all_12_months(tmp_path):
+    # Feb 2019 pattern: 2019-01-02 ... 2019-12-02 (all months, day=2) → month=2
+    rows = [
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": f"2019-{m:02d}-02", "Price": "150.0"}
+        for m in range(1, 13)
+    ]
+    p = _make_raw_csv(rows, tmp_path)
+    assert Transformer(p, tmp_path / "out.csv").get_month_for_file() == 2
 
 
 def test_get_month_for_file_with_time_component(tmp_path):

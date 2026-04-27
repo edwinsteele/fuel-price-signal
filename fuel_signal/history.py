@@ -260,8 +260,14 @@ class Transformer:
         Many files use YYYY-DD-MM instead of YYYY-MM-DD until the day
         exceeds 12, at which point the format switches back. We find the
         first row whose day > 12 to read the true month unambiguously.
+
+        For files where every date has day <= 12 (e.g. Oct 1-9 only), a
+        constant day value across varying months is the YYYY-DD-MM fingerprint:
+        the constant is the true month.
         """
         last_date = None
+        days_seen: set[int] = set()
+        months_seen: set[int] = set()
         with open(self.raw_path, newline="", encoding="utf-8-sig") as f:
             for row in csv.DictReader(f):
                 raw = row.get("PriceUpdatedDate", "")
@@ -273,13 +279,25 @@ class Transformer:
                 last_date = d
                 if d.day > 12:
                     return d.month
+                days_seen.add(d.day)
+                months_seen.add(d.month)
 
-        # Sep 2017 file only has 4 days of data — never reaches day 13.
-        if last_date:
-            logger.info("Day > 12 not found in %s; assuming month %s", self.raw_path.name, last_date.month)
-            return last_date.month
-        logger.warning("No parseable dates in %s — skipping", self.raw_path.name)
-        return None
+        if not last_date:
+            logger.warning("No parseable dates in %s — skipping", self.raw_path.name)
+            return None
+
+        # Constant day + varying months = YYYY-DD-MM where the day field is
+        # the true month (e.g. all 2019-XX-10 → October).
+        if len(days_seen) == 1 and len(months_seen) > 1:
+            true_month = days_seen.pop()
+            logger.info(
+                "Constant day=%s across %d months in %s; inferring YYYY-DD-MM, month=%s",
+                true_month, len(months_seen), self.raw_path.name, true_month,
+            )
+            return true_month
+
+        logger.info("Day > 12 not found in %s; assuming month %s", self.raw_path.name, last_date.month)
+        return last_date.month
 
     @staticmethod
     def clean_date(raw: str, line_number: int, prev_date: datetime.datetime | None,
