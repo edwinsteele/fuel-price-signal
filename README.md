@@ -65,7 +65,11 @@ Generates `inspect.html` and opens it in your browser:
 uv run python -m fuel_signal.inspect
 ```
 
-Shows station count, date range, a Sydney E10 average price chart, data coverage by month, and recent prices.
+Shows:
+- **Cycle state** — current % through cycle, days since last peak, mean cycle length, last-cycle min/max, boundary plateau status
+- **Full history chart** — Sydney E10 average (gap-filled) with scipy-detected peaks as red dashed verticals, last-cycle window shaded, data gaps marked grey
+- **6-month zoomed chart** — same peak overlays plus preferred station series
+- Coverage by month and recent prices tables
 
 ## Station lookup
 
