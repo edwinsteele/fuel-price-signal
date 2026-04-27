@@ -48,6 +48,16 @@ fuel_signal.db                        # .gitignored; SQLite, rebuilt from raw + 
 - SQLite is rebuilt by running `history.py` (downloads raw CSVs) then `db.py` (assembles DB)
 - GitHub Actions runs daily, commits one snapshot file per day
 
+### Snapshot retirement
+Snapshots are a bridge until historical CSVs cover the same period — keep the committed count as small as possible.
+
+When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verify snapshot prices ≡ historical prices per station/date; (2) if they agree, delete the retired snapshot CSVs; (3) if they diverge, investigate before retiring — divergence reveals something about the data.
+
+`db.py` loads snapshots before historical CSVs and uses `INSERT OR IGNORE`, so snapshot prices win silently on conflict. When the first overlap occurs, compare per-station prices to decide whether snapshot-wins is the right policy. Also check whether the GH Actions cron time (currently 03:00 UTC = 1pm AEST) aligns with the historical CSV rollup time.
+
+### Aggregation
+`sydney_average_series` / `average_price_series` is a temporary convenience for cycle detection. Future analyses will need flexible groupings — by region, corridor, LGA cluster, etc. Don't treat it as permanent infrastructure; don't patch it when new groupings are needed, design a proper aggregation layer instead.
+
 ### Snapshot CSV schema
 
 ```
@@ -109,6 +119,12 @@ Address normalization needs care — the CSV addresses include state and postcod
 - Preferred station prices used for the actual buy price display
 - Data is cyclic but NOT seasonal — do not apply seasonal decomposition
 - Plateau-at-boundary detection: handle the case where the current price is at a peak but scipy won't detect it yet (implemented in ff-aws-backend `PriceCycleDetector._plateau_width_at_boundary`)
+- Atypical periods (COVID demand collapse, 2026 Middle East war supply shock) distort mean cycle length, peak prominence, and last-cycle min/max. When building the backtest engine or calibrating signal thresholds, consider a mechanism to mark/exclude date ranges — but don't bake it in prematurely; add it when backtest results show anomalies traceable to a known shock.
+
+### Backtest constraints
+- Backtests must be runnable at arbitrary historical dates ("at date D, would strategy X have been cheaper?"), not just today.
+- `daily_prices` is point-in-time safe (forward-fill uses no lookahead), but derived metrics built on top may not be. When adding new metrics, explicitly validate whether they can be recomputed on-the-fly by querying `WHERE price_date <= D`, or whether they need to be pre-computed and stored per day.
+- Backtest performance: load the full series ONCE at startup; `detect(as_of_date)` is an in-memory numpy slice (~0.5 ms × 3650 dates ≈ 2 s total). `CycleDetector` must cache `pd.Series` in `__init__` — if conversion happens inside `detect()`, you pay it 3650× per backtest run.
 
 ## Reuse from old projects
 
@@ -133,7 +149,7 @@ Address normalization needs care — the CSV addresses include state and postcod
 Schema: `ServiceStationName, Address, Suburb, Postcode, Brand, FuelCode, PriceUpdatedDate, Price`
 
 Known data quality issues (handled by transformer):
-- YYYY-DD-MM ↔ YYYY-MM-DD date format bug (detectable when day > 12)
+- YYYY-DD-MM ↔ YYYY-MM-DD date format bug (detectable when day > 12). For files where every date has day ≤ 12, a constant day value across varying months is the YYYY-DD-MM fingerprint — the constant is the true month (e.g. Feb 2019, Oct 2019, Nov 2019 files).
 - Postcode errors (hardcoded correction map)
 - Missing Brand field (infer from station name)
 - Duplicate rows for same station + same timestamp
@@ -141,10 +157,41 @@ Known data quality issues (handled by transformer):
 - `PriceUpdatedDate` has a time component in all files from ~2019 onwards (three formats: ISO `YYYY-MM-DDTHH:MM:SS`, space-separated `YYYY-MM-DD HH:MM:SS`, Australian `D/MM/YYYY H:MM:SS AM/PM`). Only the oldest pre-2019 files are truly date-only.
 - Stations commonly update price multiple times per day (intraday resets are normal in the NSW price cycle). The transformer keeps the **latest timestamp per station/fuel/day** (end-of-day price) to avoid morning-reset spikes creating artificial day-to-day gyrations that confuse scipy peak detection.
 
+Known unrecoverable gaps (source data never published):
+- Aug 9–31 and Sep 5–30, 2017 — those bulk CSV files only captured 8 and 4 days respectively
+- Sep 18–30, Oct 10–31, Nov 9–30, 2019 — source files for Oct/Nov 2019 only captured 9 and 8 days; confirmed via price-level cross-check (not a format bug)
+
 ## Station strategy
 - User manually maintains preferred station list (known from two weekly routes)
 - Match to FuelCheck station IDs by name/address at setup time
 - Preferred stations: Blaxland, East Blaxland, Valley Heights, Faulconbridge, Emu Plains, Glenbrook, Winmalee area
+
+## inspect.py rewrite (Flask)
+
+`inspect.py` is currently a static HTML generator. It will be rewritten as a local Flask dev server — `uv run python -m fuel_signal.inspect` starts the server rather than writing a file.
+
+**Reason:** the desired features require round-trip queries (station search/add, named groups with aggregated series) that are impractical to do client-side with all data pre-loaded.
+
+**Target features:**
+- Add/remove individual stations from the chart by name search
+- Define named groups of stations (e.g. "Shell servos in Sydney", "all stations in region X") with an aggregated price series displayed alongside individual ones
+- Hide/show series (Chart.js legend click already does this — keep it)
+
+**Planned architecture:**
+- Flask app replaces `generate_html()` — same entry point
+- Chart.js stays for rendering; data fed via `fetch()` to Flask endpoints rather than baked-in JSON
+- Endpoints needed roughly: station search, get series for station or group, list current chart contents
+- Keep the summary stats, coverage table, and recent prices sections from the current page
+
+**Current static generator state (as of 2026-04-27):**
+- Single `generate_html()` bakes Sydney avg + preferred station series as JSON into a `<script>` block
+- Two charts: full history (scipy peaks as red dashed verticals, last-cycle shaded, data-gap grey shading) + 6-month zoom with preferred stations
+- Cycle state box at top; coverage table and recent prices table included
+
+**Leading indicators (deferred until after Flask rewrite):**
+- Hypothesis: some LGAs and/or macro signals (TGP, crude) precede BM price rises
+- One preferred Penrith station observed to lead on falls, lag on rises — worth examining
+- Architecture supports this: new series → new `CycleDetector` → new signal class → register in `RecommendationManager`
 
 ## Testing
 Tests are required alongside all implementation. Key areas:
