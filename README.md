@@ -103,13 +103,20 @@ uv run python -m fuel_signal.signal --as-of 2026-02-15
 uv run python -m fuel_signal.signal --db /path/to/fuel_signal.db
 ```
 
-Output is one line per preferred station:
+Output is the combined verdict (one line per preferred station) followed by the four contributing signals and their reasons:
 
 ```
-[as of 2026-02-15]
-WAIT | Day 21/36 of cycle | E10 @ BP Valley Heights: 161.9c | Trough est. ~16 days
-BUY  | Day 41/46 of cycle | E10 @ Shell Blaxland: 161.9c | Trough est. ~5 days
+[as of 2026-01-10]
+BUY  | Day 27/35 of cycle | E10 @ BP Valley Heights: 159.9c
+BUY  | Day 27/35 of cycle | E10 @ Shell Blaxland: 157.5c
+Combined: BUY (mean signal +1.00)
+  AverageCycleTimeSignal: BUY — cycle ending soon (73% through cycle; day 26 / 35.5)
+  AverageGradientAfterPeakSignal: NEUTRAL — price has not flatlined (last 3 gradients: [-0.81, -0.52, -0.5])
+  AverageNearPreviousMinMaxSignal: BUY — price close to low in last cycle (current 159.3c; last cycle min 168.3c, max 200.0c)
+  FavouriteServiceStationPriceGradientSignal: NEUTRAL — no preferred stations raising sharply
 ```
+
+The four signals (`AverageCycleTimeSignal`, `AverageGradientAfterPeakSignal`, `AverageNearPreviousMinMaxSignal`, `FavouriteServiceStationPriceGradientSignal`) each return BUY / WAIT / DONT_BUY / NEUTRAL. Directional values are averaged (NEUTRAL excluded); mean ≥ 0.5 → BUY, ≤ -0.5 → DON'T BUY, else WAIT.
 
 If `--as-of` falls within the forward-fill gap (the period between the end of historical CSVs and the first daily snapshot), a warning is printed to stderr and the signal should not be trusted.
 
