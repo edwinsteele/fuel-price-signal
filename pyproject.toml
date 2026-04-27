@@ -24,11 +24,15 @@ dev = [
 [project.scripts]
 fuel-signal = "fuel_signal.cli:cli"
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fuel_signal"]
+
 [tool.uv]
 package = true
-
-[tool.setuptools.packages.find]
-include = ["fuel_signal*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

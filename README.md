@@ -77,15 +77,15 @@ Find station codes by suburb or name — useful when adding entries to `PREFERRE
 
 ```bash
 # Free-text search (matches suburb and name)
-fuel-signal stations blaxland
-fuel-signal stations "emu plains"
+uv run fuel-signal stations blaxland
+uv run fuel-signal stations "emu plains"
 
 # Field-specific filters
-fuel-signal stations --suburb springwood
-fuel-signal stations --name ampol
+uv run fuel-signal stations --suburb springwood
+uv run fuel-signal stations --name ampol
 
 # List all stations
-fuel-signal stations
+uv run fuel-signal stations
 ```
 
 Output includes `station_code`, suburb, name, and brand. Use the `station_code` value in `PREFERRED_STATIONS`.
@@ -93,8 +93,25 @@ Output includes `station_code`, suburb, name, and brand. Use the `station_code` 
 ## Getting the signal
 
 ```bash
-uv run --env-file .env python -m fuel_signal.signal
+# Signal as of today (latest date in DB)
+uv run python -m fuel_signal.signal
+
+# Signal as of a specific historical date (useful for validation)
+uv run python -m fuel_signal.signal --as-of 2026-02-15
+
+# Custom DB path
+uv run python -m fuel_signal.signal --db /path/to/fuel_signal.db
 ```
+
+Output is one line per preferred station:
+
+```
+[as of 2026-02-15]
+WAIT | Day 21/36 of cycle | E10 @ BP Valley Heights: 161.9c | Trough est. ~16 days
+BUY  | Day 41/46 of cycle | E10 @ Shell Blaxland: 161.9c | Trough est. ~5 days
+```
+
+If `--as-of` falls within the forward-fill gap (the period between the end of historical CSVs and the first daily snapshot), a warning is printed to stderr and the signal should not be trusted.
 
 ## Daily snapshots
 
