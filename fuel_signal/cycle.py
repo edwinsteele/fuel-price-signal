@@ -114,7 +114,51 @@ class CycleDetector:
         #    already smoothed, so np.gradient on sliced is correct regardless)
         #
         # 8. Return CycleState(...)
-        raise NotImplementedError
+        if self._series.empty:
+            return None
+        sliced = self._series.loc[:as_of_date]
+        if sliced.empty:
+            return None
+
+        peaks, _ = self._get_peaks(sliced)
+        plateau_width = self._plateau_width_at_boundary(
+            sliced, self._PEAK_PROMINENCE
+        )
+
+        effective_peak_count = len(peaks) + (1 if plateau_width else 0)
+        if effective_peak_count < 2:
+            return None
+
+        if plateau_width:
+            last_peak_idx = len(sliced) - plateau_width
+        else:
+            last_peak_idx = int(peaks[-1])
+        last_peak_date = sliced.index[last_peak_idx]
+        days_since_last_peak = (pd.Timestamp(as_of_date) - last_peak_date).days
+
+        mean_cycle_length = self._mean_cycle_length(sliced, peaks, plateau_width)
+        if mean_cycle_length <= 0 or np.isnan(mean_cycle_length):
+            return None
+        pct_through_cycle = days_since_last_peak / mean_cycle_length
+
+        last_cycle = self._last_cycle_prices(sliced, peaks, plateau_width)
+        if last_cycle.empty:
+            return None
+        last_cycle_min = float(last_cycle.min())
+        last_cycle_max = float(last_cycle.max())
+
+        last_3_gradients = np.gradient(sliced.values)[-3:].round(2).tolist()
+
+        return CycleState(
+            as_of_date=as_of_date,
+            days_since_last_peak=days_since_last_peak,
+            mean_cycle_length=mean_cycle_length,
+            pct_through_cycle=pct_through_cycle,
+            last_cycle_min=last_cycle_min,
+            last_cycle_max=last_cycle_max,
+            last_3_gradients=last_3_gradients,
+            peak_count=effective_peak_count,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers (ported from ff-aws-backend PriceCycleDetector)
@@ -129,7 +173,11 @@ class CycleDetector:
         #     distance=CycleDetector._PEAK_DISTANCE,
         #     prominence=CycleDetector._PEAK_PROMINENCE,
         # )
-        raise NotImplementedError
+        return scipy.signal.find_peaks(
+            series.values,
+            distance=CycleDetector._PEAK_DISTANCE,
+            prominence=CycleDetector._PEAK_PROMINENCE,
+        )
 
     @staticmethod
     def _plateau_width_at_boundary(series: pd.Series, prominence: float) -> int:
@@ -187,8 +235,26 @@ class CycleDetector:
                         running_total += val
                 return input_list, []
         """
-        # TODO: port the above verbatim, adapted to accept a pd.Series
-        raise NotImplementedError
+        plateau_width = 0
+        if len(series) > 1:
+            gradients = np.gradient(series.values)
+            reversed_grads = list(reversed(gradients))
+            running_total = 0.0
+            plateau_grads: list[float] = reversed_grads
+            other_grads: list[float] = []
+            for idx, val in enumerate(reversed_grads):
+                if val > 0:
+                    plateau_grads = reversed_grads[:idx]
+                    other_grads = reversed_grads[idx:]
+                    break
+                if running_total + val < -prominence:
+                    plateau_grads = reversed_grads[:idx]
+                    other_grads = reversed_grads[idx:]
+                    break
+                running_total += val
+            if other_grads and other_grads[0] >= 2 * prominence:
+                plateau_width = 1 + len(plateau_grads)
+        return plateau_width
 
     @staticmethod
     def _last_cycle_prices(
@@ -206,8 +272,13 @@ class CycleDetector:
 
         Ported from ff-aws-backend PriceCycleDetector._get_last_cycle_prices.
         """
-        # TODO: implement
-        raise NotImplementedError
+        if len(peak_indices) >= 2:
+            if plateau_width:
+                return series.iloc[peak_indices[-1] : -plateau_width]
+            return series.iloc[peak_indices[-2] : peak_indices[-1]]
+        if len(peak_indices) >= 1 and plateau_width:
+            return series.iloc[peak_indices[-1] : -plateau_width]
+        return pd.Series(dtype=float)
 
     @staticmethod
     def _mean_cycle_length(
@@ -222,5 +293,18 @@ class CycleDetector:
 
         Ported from ff-aws-backend PriceCycleDetector.get_mean_cycle_time.
         """
-        # TODO: implement
-        raise NotImplementedError
+        effective_count = len(peak_indices) + (1 if plateau_width else 0)
+        if effective_count < 2:
+            return float("nan")
+        peak_times = series.index[peak_indices].astype("datetime64[ns]")
+        if plateau_width:
+            cycle_times = np.append(
+                peak_times,
+                series.index[[-plateau_width]].astype("datetime64[ns]"),
+            )
+        else:
+            cycle_times = peak_times
+        days_between_peaks = (
+            np.diff(cycle_times).astype("float64") / 1_000_000_000 / 60 / 60 / 24
+        )
+        return float(round(np.average(days_between_peaks), 2))

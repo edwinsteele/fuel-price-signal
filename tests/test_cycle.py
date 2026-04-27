@@ -21,13 +21,8 @@ from __future__ import annotations
 import datetime
 
 import numpy as np
-import pytest
 
 from fuel_signal.cycle import CycleDetector
-
-# All tests in this file are expected to fail until CycleDetector is implemented.
-# Remove this marker once the implementation is complete and all tests pass.
-pytestmark = pytest.mark.xfail(raises=NotImplementedError, strict=True)
 
 # ---------------------------------------------------------------------------
 # Synthetic series helpers
