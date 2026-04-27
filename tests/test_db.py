@@ -172,6 +172,32 @@ def test_upsert_stations_ignores_address_conflict(conn):
     assert count == 1
 
 
+def test_upsert_stations_populates_council_from_postcode(conn):
+    upsert_stations(conn, [_STATION])  # postcode 2777 → Blue Mountains
+    council = conn.execute(
+        "SELECT council FROM stations WHERE station_code=1001"
+    ).fetchone()[0]
+    assert council == "Blue Mountains"
+
+
+def test_upsert_stations_council_none_for_unknown_postcode(conn):
+    unknown_pc = {**_STATION, "station_code": 2002, "postcode": "9999"}
+    upsert_stations(conn, [unknown_pc])
+    council = conn.execute(
+        "SELECT council FROM stations WHERE station_code=2002"
+    ).fetchone()[0]
+    assert council is None
+
+
+def test_upsert_stations_council_set_for_inner_sydney(conn):
+    inner = {**_STATION, "station_code": 2003, "address": "5 Main St, Sydney", "postcode": "2000"}
+    upsert_stations(conn, [inner])
+    council = conn.execute(
+        "SELECT council FROM stations WHERE station_code=2003"
+    ).fetchone()[0]
+    assert council == "Sydney"
+
+
 # ---------------------------------------------------------------------------
 # insert_prices
 # ---------------------------------------------------------------------------

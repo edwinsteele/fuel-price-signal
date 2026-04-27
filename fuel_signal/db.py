@@ -7,6 +7,7 @@ import re
 import sqlite3
 
 from fuel_signal.config import KNOWN_DUPLICATE_STATION_CODES
+from fuel_signal.postcode_council import primary_council
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ CREATE TABLE IF NOT EXISTS stations (
     postcode           TEXT NOT NULL,
     name               TEXT NOT NULL,
     brand              TEXT,
+    council            TEXT,
     latitude           REAL,
     longitude          REAL
 );
@@ -194,6 +196,7 @@ def upsert_stations(conn: sqlite3.Connection, stations: list[dict]) -> int:
             s.get("postcode", ""),
             s.get("name", ""),
             s.get("brand"),
+            primary_council(s.get("postcode", "")),
             s.get("latitude"),
             s.get("longitude"),
         )
@@ -202,8 +205,8 @@ def upsert_stations(conn: sqlite3.Connection, stations: list[dict]) -> int:
     # Insert rows that don't exist yet (IGNORE both PK and address_normalized conflicts).
     conn.executemany(
         """INSERT OR IGNORE INTO stations
-           (station_code, address_normalized, suburb, postcode, name, brand, latitude, longitude)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           (station_code, address_normalized, suburb, postcode, name, brand, council, latitude, longitude)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     # Update mutable fields; preserve existing lat/lon when incoming value is NULL
@@ -538,19 +541,36 @@ def station_price_series(
 def sydney_average_series(
     conn: sqlite3.Connection,
     fuel_code: str = "E10",
+    councils: frozenset[str] | None = None,
 ) -> list[tuple[str, float]]:
     """Return [(price_date, avg_price_cents)] from daily_prices (gap-filled).
+
+    councils: if provided, average only stations whose council is in this set.
+              Defaults to all stations in daily_prices (which are already
+              metro-filtered at DB load time).
 
     Requires fill.fill_all() to have been run first.
     """
     fid = fuel_type_id(conn, fuel_code)
+    if councils is not None:
+        placeholders = ",".join("?" * len(councils))
+        query = (
+            "SELECT dp.price_date, AVG(dp.price_decicents)"
+            " FROM daily_prices dp"
+            " JOIN stations s USING(station_code)"
+            f" WHERE dp.fuel_type_id = ? AND s.council IN ({placeholders})"
+            " GROUP BY dp.price_date ORDER BY dp.price_date"
+        )
+        params: list = [fid, *sorted(councils)]
+    else:
+        query = (
+            "SELECT price_date, AVG(price_decicents) FROM daily_prices"
+            " WHERE fuel_type_id = ? GROUP BY price_date ORDER BY price_date"
+        )
+        params = [fid]
     return [
         (_date_from_int(r[0]), r[1] / 10)
-        for r in conn.execute(
-            "SELECT price_date, AVG(price_decicents) FROM daily_prices"
-            " WHERE fuel_type_id = ? GROUP BY price_date ORDER BY price_date",
-            (fid,),
-        )
+        for r in conn.execute(query, params)
     ]
 
 
@@ -651,7 +671,7 @@ def db_summary(conn: sqlite3.Connection) -> dict:
 if __name__ == "__main__":
     import sys
 
-    from fuel_signal.config import SYDNEY_METRO_POSTCODES
+    from fuel_signal.postcode_council import SYDNEY_METRO_POSTCODES
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
