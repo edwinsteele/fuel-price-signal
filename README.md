@@ -61,17 +61,31 @@ Loads all snapshot CSVs (from `data/snapshots/`) then all historical cleaned CSV
 
 ## Inspecting the data
 
-Generates `inspect.html` and opens it in your browser:
+Starts a local Flask workbench and opens it in your browser:
 
 ```bash
 uv run python -m fuel_signal.inspect
+# Custom host/port, no auto-open:
+uv run python -m fuel_signal.inspect --port 5001 --no-browser
 ```
 
-Shows:
-- **Cycle state** — current % through cycle, days since last peak, mean cycle length, last-cycle min/max, boundary plateau status
-- **Full history chart** — Sydney E10 average (gap-filled) with scipy-detected peaks as red dashed verticals, last-cycle window shaded, data gaps marked grey
-- **6-month zoomed chart** — same peak overlays plus preferred station series
-- Coverage by month and recent prices tables
+The workbench is a single GET-driven page — all state lives in the URL query string, so views are bookmarkable and shareable. E10 only.
+
+**Available series types** (select via the controls form or pass as `?series=` params):
+- `sydney` — Sydney metro E10 mean
+- `lga:Name` — LGA average (e.g. `lga:Penrith`, `lga:Blue Mountains`)
+- `brand:Name` — brand average (e.g. `brand:Ampol`)
+- `station:CODE` — specific station by numeric code
+
+**Chart types:**
+- **Line** — up to 10 series; peak/gap annotations when Sydney avg is selected
+- **Scatter** — station-day points coloured by brand; switch to `metric=gradient` for 7-day slope view
+- **Gradient heatmap** — LGA × week price-slope table (blue=falling, red=rising)
+- **Coverage heatmap** — station × month observation counts
+
+**Cycle state box** is always computed against the Sydney metro average (matches the CLI signal), regardless of what's plotted.
+
+**Group display** toggle (mean / individual stations / both) applies to `lga:` and `brand:` series on line and scatter charts.
 
 ## Station lookup
 
@@ -105,20 +119,26 @@ Compare how often one station or area is cheaper than another:
 # Station vs Sydney metro average
 uv run python -m fuel_signal.compare "BP Springwood" sydney
 
-# Station by code vs LGA average (use code when multiple stations share a name)
-uv run python -m fuel_signal.compare 182 "lga:penrith"
+# Station by code vs LGA average (use station:CODE when multiple stations share a name)
+uv run python -m fuel_signal.compare station:182 "lga:penrith"
 
 # Two stations head-to-head
 uv run python -m fuel_signal.compare "Ampol Springwood" "Shell Blaxland"
+
+# Brand average vs Sydney average
+uv run python -m fuel_signal.compare "brand:Ampol" sydney
 
 # Treat prices within 0.2c as equal (default 0.5c)
 uv run python -m fuel_signal.compare "BP Springwood" sydney --within 0.2
 ```
 
 Each series can be:
-- A station name (partial match; must be unique) or station code
+- A station name (partial match against station name only; must be unique) or `station:CODE`
 - `sydney` — Sydney metro E10 average
 - `lga:<name>` or `council:<name>` — average for a specific LGA
+- `brand:<name>` — average for a specific brand
+
+If a name search matches multiple stations, a list of `station:CODE` alternatives is shown.
 
 ## Getting the signal
 
