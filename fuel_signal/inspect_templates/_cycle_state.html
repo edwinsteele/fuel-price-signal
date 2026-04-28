@@ -1,0 +1,34 @@
+{% if cycle_state %}
+<div class="stats">
+  <div class="stat">
+    <div class="stat-value">{{ "%.0f"|format(cycle_state.pct_through_cycle * 100) }}%</div>
+    <div class="stat-label">through cycle</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ cycle_state.days_since_last_peak }}d</div>
+    <div class="stat-label">since last peak</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ "%.0f"|format(cycle_state.mean_cycle_length) }}d</div>
+    <div class="stat-label">mean cycle length</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ cycle_state.peak_count }}</div>
+    <div class="stat-label">peaks detected</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ "%.1f"|format(cycle_state.last_cycle_min) }}–{{ "%.1f"|format(cycle_state.last_cycle_max) }}c</div>
+    <div class="stat-label">last cycle min–max</div>
+  </div>
+</div>
+<p class="cycle-box">
+  {% if peak_data.plateau_peak_date %}
+    <span style="color:#7c3aed; font-weight:700">▲ boundary plateau detected ({{ peak_data.plateau_peak_date }})</span> &mdash;
+  {% else %}
+    <span style="color:#888">no boundary plateau</span> &mdash;
+  {% endif %}
+  last 3 gradients: {{ cycle_state.last_3_gradients }}
+</p>
+{% else %}
+<p style="color:#888">Cycle state: insufficient data (fewer than 2 peaks detected).</p>
+{% endif %}

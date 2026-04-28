@@ -1,0 +1,40 @@
+{% if heatmap_data and heatmap_data.months %}
+<div class="heatmap-legend">
+  <span>0 days</span>
+  <span class="swatch" style="background:rgb(255,255,255); border:1px solid #ccc"></span>
+  <span class="swatch" style="background:rgb(191,230,191)"></span>
+  <span class="swatch" style="background:rgb(128,204,128)"></span>
+  <span class="swatch" style="background:rgb(0,153,0)"></span>
+  <span>30+ days</span>
+  <span style="margin-left:1rem; color:#888">(white=no data, green=full coverage)</span>
+</div>
+<div class="heatmap-outer">
+  <table class="heatmap-table">
+    <thead>
+      <tr>
+        <th class="hm-row-head">Station</th>
+        {% for m in heatmap_data.months %}
+        <th title="{{ m }}">{{ m[2:] }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for name, row in heatmap_data.rows %}
+      <tr>
+        <td class="hm-row-head">{{ name }}</td>
+        {% for n in row %}
+          {% if n is none %}
+          <td style="background:#f5f5f5" title="no data"></td>
+          {% else %}
+          <td style="background:{{ n | coverage_color }}"
+              title="{{ name }}: {{ n }} observation(s)">{{ n if n > 0 else '' }}</td>
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="banner banner-info">No coverage data available.</div>
+{% endif %}

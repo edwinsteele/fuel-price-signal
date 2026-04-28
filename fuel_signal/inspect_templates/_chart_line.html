@@ -1,0 +1,45 @@
+{% if chart_spec %}
+{% if chart_spec.overflow > 0 %}
+<div class="banner banner-warn">
+  Showing 10 of {{ chart_spec.overflow + 10 }} series — use scatter or heatmap to see the full set.
+</div>
+{% endif %}
+
+<p class="peak-legend">
+  <span style="border-left:3px solid rgba(220,38,38,0.6); padding-left:5px">scipy peak (red dashed)</span>
+  <span style="border-left:4px solid #7c3aed; padding-left:5px">boundary plateau (purple)</span>
+  <span style="background:rgba(220,38,38,0.12); padding:1px 6px; border-radius:3px">last cycle band</span>
+  <span style="background:rgba(150,150,150,0.18); padding:1px 6px; border-radius:3px; border:1px solid rgba(150,150,150,0.4)">data gap (forward-fill)</span>
+</p>
+{% if chart_spec.peak_summary %}
+<p class="peak-legend" style="margin-top:-.5rem">{{ chart_spec.peak_summary | safe }}</p>
+{% endif %}
+
+<div class="chart-wrap">
+  <canvas id="mainChart"></canvas>
+</div>
+<script>
+(function() {
+  const spec = {{ chart_spec | tojson }};
+  new Chart(document.getElementById('mainChart'), {
+    type: 'line',
+    data: {labels: spec.labels, datasets: spec.datasets},
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {position: 'top'},
+        annotation: {annotations: spec.annotations}
+      },
+      scales: {
+        x: {ticks: {maxTicksLimit: 16, maxRotation: 45, minRotation: 45}},
+        y: {title: {display: true, text: 'cents/litre'}}
+      }
+    }
+  });
+})();
+</script>
+{% else %}
+<p style="color:#888">No series data to display for the selected window.</p>
+{% endif %}

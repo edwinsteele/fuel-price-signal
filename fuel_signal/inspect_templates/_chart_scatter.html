@@ -1,0 +1,42 @@
+{% if chart_spec and chart_spec.datasets %}
+<div class="chart-wrap">
+  <canvas id="scatterChart"></canvas>
+</div>
+<script>
+(function() {
+  const spec = {{ chart_spec | tojson }};
+  new Chart(document.getElementById('scatterChart'), {
+    type: 'scatter',
+    data: {datasets: spec.datasets},
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {position: 'top'},
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(1) +
+                     (spec.y_title.includes('gradient') ? 'c/day' : 'c') +
+                     ' (' + ctx.raw.x + ')';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'category',
+          ticks: {maxTicksLimit: 14, maxRotation: 45, minRotation: 45}
+        },
+        y: {title: {display: true, text: spec.y_title}}
+      }
+    }
+  });
+})();
+</script>
+{% else %}
+<div class="banner banner-info">
+  Scatter view requires at least one station series. Add stations using the controls above.
+</div>
+{% endif %}

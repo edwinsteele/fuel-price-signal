@@ -1,0 +1,41 @@
+{% if heatmap_data and heatmap_data.weeks %}
+<div class="heatmap-legend">
+  <span>–3c/day</span>
+  <span class="swatch" style="background:rgb(0,0,255)"></span>
+  <span class="swatch" style="background:rgb(128,128,255)"></span>
+  <span class="swatch" style="background:rgb(255,255,255); border:1px solid #ccc"></span>
+  <span class="swatch" style="background:rgb(255,128,128)"></span>
+  <span class="swatch" style="background:rgb(255,0,0)"></span>
+  <span>+3c/day</span>
+  <span style="margin-left:1rem; color:#888">(clipped at ±3c/day — blue=falling, red=rising)</span>
+</div>
+<div class="heatmap-outer">
+  <table class="heatmap-table">
+    <thead>
+      <tr>
+        <th class="hm-row-head">LGA</th>
+        {% for w in heatmap_data.weeks %}
+        <th title="{{ w }}">{{ w[2:7] }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for council, row in heatmap_data.rows %}
+      <tr>
+        <td class="hm-row-head">{{ council }}</td>
+        {% for slope in row %}
+          {% if slope is none %}
+          <td style="background:#f0f0f0" title="no data"></td>
+          {% else %}
+          <td style="background:{{ slope | gradient_color }}"
+              title="{{ council }} {{ loop.index0 | week_label(heatmap_data.weeks) }}: {{ '%.2f'|format(slope) }}c/day"></td>
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="banner banner-info">No gradient data available. Ensure daily_prices has been populated.</div>
+{% endif %}

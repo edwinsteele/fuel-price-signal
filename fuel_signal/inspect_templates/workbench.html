@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Fuel Price Signal — Workbench</h1>
+<p class="meta">E10 only &mdash; as of {{ now }}</p>
+
+<!-- Summary stats -->
+<h2>Summary</h2>
+<div class="stats">
+  <div class="stat">
+    <div class="stat-value">{{ "{:,}".format(summary.station_count) }}</div>
+    <div class="stat-label">Stations</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ "{:,}".format(summary.price_count) }}</div>
+    <div class="stat-label">Price records</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ summary.earliest_date }}</div>
+    <div class="stat-label">Earliest E10</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ summary.latest_date }}</div>
+    <div class="stat-label">Latest E10</div>
+  </div>
+</div>
+
+<!-- Controls form -->
+<div class="controls">
+  <h3>Controls</h3>
+  <form method="get" action="/" id="workbench-form">
+
+    <div class="controls-row">
+
+      <!-- Series selector -->
+      <div class="control-group" style="flex:1; min-width:280px">
+        <label>Series</label>
+
+        <details {% if 'sydney' in specs %}open{% endif %}>
+          <summary>Aggregate</summary>
+          <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+            <label>
+              <input type="checkbox" name="series" value="sydney"
+                     {% if 'sydney' in specs %}checked{% endif %}>
+              Sydney E10 mean
+            </label>
+          </div>
+        </details>
+
+        {% if groups.lgas %}
+        <details {% if spec_starts_with(specs, 'lga:') %}open{% endif %}>
+          <summary>By LGA ({{ groups.lgas | length }})</summary>
+          <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+            {% for lga in groups.lgas %}
+            <label>
+              <input type="checkbox" name="series" value="lga:{{ lga }}"
+                     {% if 'lga:' + lga in specs %}checked{% endif %}>
+              {{ lga }}
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+
+        {% if groups.brands %}
+        <details {% if spec_starts_with(specs, 'brand:') %}open{% endif %}>
+          <summary>By Brand ({{ groups.brands | length }})</summary>
+          <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+            {% for brand in groups.brands %}
+            <label>
+              <input type="checkbox" name="series" value="brand:{{ brand }}"
+                     {% if 'brand:' + brand in specs %}checked{% endif %}>
+              {{ brand }}
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+
+        <details open>
+          <summary>Preferred Stations</summary>
+          <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+            {% for code, label in preferred_stations.items() %}
+            <label>
+              <input type="checkbox" name="series" value="station:{{ code }}"
+                     {% if 'station:' ~ code in specs %}checked{% endif %}>
+              {{ label }}
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+
+        <!-- Dynamically added stations (from typeahead) -->
+        <div id="added-stations">
+          {% for spec in extra_station_specs %}
+          <label style="display:flex; align-items:center; gap:.4rem; font-size:.85rem; margin:.2rem 0">
+            <input type="checkbox" name="series" value="{{ spec.spec }}" checked>
+            {{ spec.label }}
+            <button type="button" onclick="this.parentElement.remove()"
+                    style="background:none;border:none;cursor:pointer;color:#888;font-size:1rem">×</button>
+          </label>
+          {% endfor %}
+        </div>
+
+        <!-- Station search typeahead -->
+        <div style="margin-top:.5rem">
+          <label style="font-size:.8rem; color:#666">Add station by name/suburb:</label>
+          <div class="typeahead-wrap" style="margin-top:.2rem">
+            <input type="text" id="station-input" placeholder="e.g. Ampol, Penrith…" autocomplete="off">
+            <div id="station-suggestions"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart options -->
+      <div class="control-group">
+        <label>Chart type</label>
+        <label><input type="radio" name="chart" value="line" {% if chart_type == 'line' %}checked{% endif %}> Line</label>
+        <label><input type="radio" name="chart" value="scatter" {% if chart_type == 'scatter' %}checked{% endif %}> Scatter</label>
+        <label><input type="radio" name="chart" value="heatmap-gradient" {% if chart_type == 'heatmap-gradient' %}checked{% endif %}> Gradient heatmap</label>
+        <label><input type="radio" name="chart" value="heatmap-coverage" {% if chart_type == 'heatmap-coverage' %}checked{% endif %}> Coverage heatmap</label>
+      </div>
+
+      <div class="control-group">
+        <label>Time window</label>
+        <select name="window">
+          {% for val, label in [('6m','Last 6 months'),('1y','Last year'),('2y','Last 2 years'),('4y','Last 4 years'),('all','Full history')] %}
+          <option value="{{ val }}" {% if window == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Group display <span style="font-size:.75rem; color:#888">(LGA/brand only)</span></label>
+        <select name="display">
+          <option value="mean" {% if display == 'mean' %}selected{% endif %}>Mean only</option>
+          <option value="members" {% if display == 'members' %}selected{% endif %}>Individual stations</option>
+          <option value="both" {% if display == 'both' %}selected{% endif %}>Both</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Scatter metric <span style="font-size:.75rem; color:#888">(scatter only)</span></label>
+        <select name="metric">
+          <option value="price" {% if metric == 'price' %}selected{% endif %}>Price (c/L)</option>
+          <option value="gradient" {% if metric == 'gradient' %}selected{% endif %}>Gradient (c/day)</option>
+        </select>
+      </div>
+
+      <div class="control-group" style="justify-content:flex-end; padding-top:1.3rem">
+        <button type="submit" class="btn">Update</button>
+      </div>
+
+    </div><!-- .controls-row -->
+  </form>
+</div><!-- .controls -->
+
+<!-- Errors -->
+{% for err in errors %}
+<div class="banner banner-error">{{ err }}</div>
+{% endfor %}
+
+<!-- Cycle state — always against Sydney average, regardless of what's plotted -->
+<h2>Cycle State — as of {{ today or '—' }}</h2>
+{% include "_cycle_state.html" %}
+
+<!-- Chart -->
+<h2>
+  {% if chart_type == 'line' %}Price Series
+  {% elif chart_type == 'scatter' %}Scatter — {{ 'Price' if metric == 'price' else 'Gradient' }} by Brand
+  {% elif chart_type == 'heatmap-gradient' %}Gradient Heatmap — Price slope by LGA × week
+  {% elif chart_type == 'heatmap-coverage' %}Coverage Heatmap — Observations by station × month
+  {% endif %}
+  <span style="font-size:.8rem; font-weight:400; color:#888">window: {{ window }}</span>
+</h2>
+
+{% if chart_type == 'line' %}
+  {% include "_chart_line.html" %}
+{% elif chart_type == 'scatter' %}
+  {% include "_chart_scatter.html" %}
+{% elif chart_type == 'heatmap-gradient' %}
+  {% include "_heatmap_gradient.html" %}
+{% elif chart_type == 'heatmap-coverage' %}
+  {% include "_heatmap_coverage.html" %}
+{% endif %}
+
+<script>
+// Station typeahead
+(function() {
+  const input = document.getElementById('station-input');
+  const dropdown = document.getElementById('station-suggestions');
+  const container = document.getElementById('added-stations');
+
+  // Track already-selected specs to avoid duplicates
+  function selectedSpecs() {
+    return new Set(
+      Array.from(document.querySelectorAll('input[name="series"]'))
+           .map(el => el.value)
+    );
+  }
+
+  let debounce = null;
+  input.addEventListener('input', () => {
+    clearTimeout(debounce);
+    const q = input.value.trim();
+    if (q.length < 2) { dropdown.innerHTML = ''; return; }
+    debounce = setTimeout(async () => {
+      const resp = await fetch('/api/stations/search?q=' + encodeURIComponent(q));
+      const data = await resp.json();
+      dropdown.innerHTML = data.map(s =>
+        `<div class="suggestion"
+              data-spec="station:${s.code}"
+              data-label="${s.name} (${s.suburb})">
+           <strong>${s.name}</strong> &mdash; ${s.suburb}
+           <span style="color:#888;font-size:.8em">${s.brand || ''}</span>
+         </div>`
+      ).join('') || '<div class="suggestion" style="color:#888">No results</div>';
+    }, 220);
+  });
+
+  dropdown.addEventListener('click', e => {
+    const target = e.target.closest('[data-spec]');
+    if (!target) return;
+    const spec = target.dataset.spec;
+    const label = target.dataset.label;
+    if (selectedSpecs().has(spec)) {
+      input.value = '';
+      dropdown.innerHTML = '';
+      return;
+    }
+    const div = document.createElement('label');
+    div.style.cssText = 'display:flex;align-items:center;gap:.4rem;font-size:.85rem;margin:.2rem 0';
+    div.innerHTML = `
+      <input type="checkbox" name="series" value="${spec}" checked>
+      ${label}
+      <button type="button" onclick="this.parentElement.remove()"
+              style="background:none;border:none;cursor:pointer;color:#888;font-size:1rem">×</button>`;
+    container.appendChild(div);
+    input.value = '';
+    dropdown.innerHTML = '';
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.typeahead-wrap')) dropdown.innerHTML = '';
+  });
+})();
+</script>
+
+{% endblock %}
