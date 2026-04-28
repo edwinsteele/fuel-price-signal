@@ -5,79 +5,7 @@ import pathlib
 import click
 
 from fuel_signal import db as _db
-from fuel_signal.postcode_council import SYDNEY_METRO_COUNCILS
-
-
-def _resolve_series(
-    conn,
-    spec: str,
-    fuel_code: str,
-) -> tuple[str, list[tuple[str, float]]]:
-    """Return (label, [(date, price_cents)]) for a series specifier.
-
-    Accepted forms:
-      "sydney"           → Sydney metro average (all stations in daily_prices)
-      "lga:<name>"       → LGA/council average; partial case-insensitive match
-      "council:<name>"   → same as lga:
-      anything else      → station name/suburb search (must match exactly one station)
-    """
-    spec_stripped = spec.strip()
-    spec_lower = spec_stripped.lower()
-
-    if spec_lower == "sydney":
-        series = _db.average_price_series(conn, fuel_code=fuel_code)
-        return (f"Sydney {fuel_code} mean", series)
-
-    for prefix in ("lga:", "council:"):
-        if spec_lower.startswith(prefix):
-            query = spec_lower[len(prefix):].strip()
-            matches = [c for c in SYDNEY_METRO_COUNCILS if query in c.lower()]
-            if not matches:
-                known = ", ".join(sorted(SYDNEY_METRO_COUNCILS))
-                raise click.ClickException(
-                    f"No LGA matching {query!r}. Known LGAs: {known}"
-                )
-            if len(matches) > 1:
-                raise click.ClickException(
-                    f"Ambiguous LGA {query!r}, matches: {', '.join(sorted(matches))}. Be more specific."
-                )
-            council = matches[0]
-            series = _db.average_price_series(
-                conn, fuel_code=fuel_code, councils=frozenset({council})
-            )
-            return (f"{council} LGA {fuel_code} mean", series)
-
-    if spec_stripped.isdigit():
-        rows = conn.execute(
-            "SELECT station_code, name, suburb FROM stations WHERE station_code = ?",
-            (int(spec_stripped),),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT station_code, name, suburb FROM stations"
-            " WHERE name LIKE ?"
-            " ORDER BY suburb, name",
-            (f"%{spec_stripped}%",),
-        ).fetchall()
-
-    if not rows:
-        raise click.ClickException(
-            f"No station found matching {spec!r}. "
-            f"Use 'uv run python -m fuel_signal.cli stations {spec!r}' to search."
-        )
-    if len(rows) > 1:
-        lines = "\n".join(
-            f"  {code:<8}  {suburb or '':<22}  {sname}"
-            for code, sname, suburb in rows
-        )
-        raise click.ClickException(
-            f"Multiple stations match {spec!r} — use the station code to disambiguate:\n{lines}"
-        )
-
-    code, sname, suburb = rows[0]
-    label = f"{sname} ({suburb})" if suburb else sname
-    series = _db.get_daily_prices(conn, station_code=code, fuel_code=fuel_code)
-    return (label, series)
+from fuel_signal.series import SeriesError, resolve
 
 
 @click.command("compare")
@@ -107,14 +35,15 @@ def main(
     """Compare how often one price series is cheaper than another.
 
     SERIES_A and SERIES_B can each be:\n
-      - A station name or suburb (partial match; must be unique)\n
+      - A station name (partial match; must be unique) or station:CODE\n
       - 'sydney' for the Sydney metro average\n
       - 'lga:<name>' or 'council:<name>' for an LGA average\n
+      - 'brand:<name>' for a brand average\n
 
     Examples:\n
-        uv run python -m fuel_signal.compare "BP Valley Heights" sydney\n
-        uv run python -m fuel_signal.compare "Valley Heights" "lga:penrith"\n
-        uv run python -m fuel_signal.compare "Ampol Springwood" "Caltex Springwood"
+        uv run python -m fuel_signal.compare "BP Springwood" sydney\n
+        uv run python -m fuel_signal.compare station:182 "lga:penrith"\n
+        uv run python -m fuel_signal.compare "Ampol Springwood" "Shell Blaxland"
     """
     path = pathlib.Path(db_path)
     if not path.exists():
@@ -124,18 +53,24 @@ def main(
 
     conn = _db.open_db(path)
     try:
-        label_a, a_series = _resolve_series(conn, series_a, fuel)
-        label_b, b_series = _resolve_series(conn, series_b, fuel)
+        try:
+            ra = resolve(conn, series_a, fuel)
+        except SeriesError as e:
+            raise click.ClickException(str(e))
+        try:
+            rb = resolve(conn, series_b, fuel)
+        except SeriesError as e:
+            raise click.ClickException(str(e))
     finally:
         conn.close()
 
-    if not a_series:
+    if not ra.points:
         raise click.ClickException(f"No data for {series_a!r}.")
-    if not b_series:
+    if not rb.points:
         raise click.ClickException(f"No data for {series_b!r}.")
 
-    a_map = dict(a_series)
-    b_map = dict(b_series)
+    a_map = dict(ra.points)
+    b_map = dict(rb.points)
     common = sorted(set(a_map) & set(b_map))
 
     if not common:
@@ -163,30 +98,30 @@ def main(
     mean_b = sum(b_map[d] for d in common) / n
     overall_diff = mean_a - mean_b  # negative = A cheaper overall
 
-    w = max(len(label_a), len(label_b))
+    w = max(len(ra.label), len(rb.label))
 
     def _pct(k: int) -> str:
         return f"{100 * k / n:.1f}%"
 
-    click.echo(f"\nComparing {fuel}: {label_a} vs {label_b}")
+    click.echo(f"\nComparing {fuel}: {ra.label} vs {rb.label}")
     click.echo(f"Period: {common[0]} to {common[-1]} ({n:,} overlapping days)\n")
 
     a_avg_str = f"  avg {sum(a_cheaper_savings)/a_count:.1f}c cheaper" if a_count else ""
     b_avg_str = f"  avg {sum(b_cheaper_savings)/b_count:.1f}c cheaper" if b_count else ""
     eq_label = f"Equal (within {within:g}c)"
 
-    click.echo(f"  {label_a + ' cheaper':<{w+8}}  {a_count:>6,} days  ({_pct(a_count):>6}){a_avg_str}")
-    click.echo(f"  {label_b + ' cheaper':<{w+8}}  {b_count:>6,} days  ({_pct(b_count):>6}){b_avg_str}")
+    click.echo(f"  {ra.label + ' cheaper':<{w+8}}  {a_count:>6,} days  ({_pct(a_count):>6}){a_avg_str}")
+    click.echo(f"  {rb.label + ' cheaper':<{w+8}}  {b_count:>6,} days  ({_pct(b_count):>6}){b_avg_str}")
     click.echo(f"  {eq_label:<{w+8}}  {equal_count:>6,} days  ({_pct(equal_count):>6})")
 
-    click.echo(f"\nMean {fuel}  {label_a}: {mean_a:.1f}c   {label_b}: {mean_b:.1f}c")
+    click.echo(f"\nMean {fuel}  {ra.label}: {mean_a:.1f}c   {rb.label}: {mean_b:.1f}c")
 
     if abs(overall_diff) <= within:
         click.echo("Overall: negligible mean difference")
     elif overall_diff < 0:
-        click.echo(f"Overall: {-overall_diff:.1f}c cheaper at {label_a} on average")
+        click.echo(f"Overall: {-overall_diff:.1f}c cheaper at {ra.label} on average")
     else:
-        click.echo(f"Overall: {overall_diff:.1f}c cheaper at {label_b} on average")
+        click.echo(f"Overall: {overall_diff:.1f}c cheaper at {rb.label} on average")
 
 
 if __name__ == "__main__":
