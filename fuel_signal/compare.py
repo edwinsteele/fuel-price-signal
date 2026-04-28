@@ -47,12 +47,18 @@ def _resolve_series(
             )
             return (f"{council} LGA {fuel_code} mean", series)
 
-    rows = conn.execute(
-        "SELECT station_code, name, suburb FROM stations"
-        " WHERE name LIKE ? OR suburb LIKE ?"
-        " ORDER BY suburb, name",
-        (f"%{spec_stripped}%", f"%{spec_stripped}%"),
-    ).fetchall()
+    if spec_stripped.isdigit():
+        rows = conn.execute(
+            "SELECT station_code, name, suburb FROM stations WHERE station_code = ?",
+            (int(spec_stripped),),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT station_code, name, suburb FROM stations"
+            " WHERE name LIKE ?"
+            " ORDER BY suburb, name",
+            (f"%{spec_stripped}%",),
+        ).fetchall()
 
     if not rows:
         raise click.ClickException(
@@ -65,7 +71,7 @@ def _resolve_series(
             for code, sname, suburb in rows
         )
         raise click.ClickException(
-            f"Multiple stations match {spec!r} — be more specific:\n{lines}"
+            f"Multiple stations match {spec!r} — use the station code to disambiguate:\n{lines}"
         )
 
     code, sname, suburb = rows[0]

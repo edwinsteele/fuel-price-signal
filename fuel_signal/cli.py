@@ -45,8 +45,12 @@ def stations(query: str | None, suburb: str | None, name: str | None, db_path: s
     params: list[str] = []
 
     if query:
-        conditions.append("(suburb LIKE ? OR name LIKE ?)")
-        params += [f"%{query}%", f"%{query}%"]
+        if query.isdigit():
+            conditions.append("station_code = ?")
+            params.append(query)
+        else:
+            conditions.append("(suburb LIKE ? OR name LIKE ?)")
+            params += [f"%{query}%", f"%{query}%"]
     if suburb:
         conditions.append("suburb LIKE ?")
         params.append(f"%{suburb}%")
@@ -70,3 +74,7 @@ def stations(query: str | None, suburb: str | None, name: str | None, db_path: s
     for code, sname, ssuburb, postcode, brand in rows:
         click.echo(f"{code:<8}  {(ssuburb or ''):<22}  {sname:<40}  {brand or ''}")
     click.echo(f"\n{len(rows)} station(s) found.")
+
+
+if __name__ == "__main__":
+    cli()

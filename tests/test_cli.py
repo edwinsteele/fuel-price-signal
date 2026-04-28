@@ -89,6 +89,33 @@ class TestResolveSeriesErrors:
         assert "Ampol Springwood" in result.output
         assert "Shell Blaxland" in result.output
 
+    def test_suburb_name_does_not_cause_false_ambiguity(self, db_with_two_stations):
+        # "Springwood" is a suburb shared by multiple stations; name-only matching
+        # should find only "Ampol Springwood" (name contains "Springwood"), not
+        # every station whose suburb happens to be Springwood.
+        runner = CliRunner()
+        result = runner.invoke(
+            compare_cmd, ["Ampol Springwood", "sydney", "--db", str(db_with_two_stations)]
+        )
+        assert result.exit_code == 0
+        assert "Ampol Springwood" in result.output
+
+    def test_station_id_resolves_directly(self, db_with_two_stations):
+        runner = CliRunner()
+        result = runner.invoke(
+            compare_cmd, ["101", "sydney", "--db", str(db_with_two_stations)]
+        )
+        assert result.exit_code == 0
+        assert "Ampol Springwood" in result.output
+
+    def test_unknown_station_id_errors(self, db_with_two_stations):
+        runner = CliRunner()
+        result = runner.invoke(
+            compare_cmd, ["9999", "sydney", "--db", str(db_with_two_stations)]
+        )
+        assert result.exit_code != 0
+        assert "No station found" in result.output
+
     def test_ambiguous_lga_lists_matches(self, db_with_two_stations):
         runner = CliRunner()
         result = runner.invoke(

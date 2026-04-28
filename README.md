@@ -82,6 +82,9 @@ Find station codes by suburb or name — useful when adding entries to `PREFERRE
 uv run fuel-signal stations blaxland
 uv run fuel-signal stations "emu plains"
 
+# Look up by station code (to find the name for a known ID)
+uv run fuel-signal stations 414
+
 # Field-specific filters
 uv run fuel-signal stations --suburb springwood
 uv run fuel-signal stations --name ampol
@@ -91,6 +94,31 @@ uv run fuel-signal stations
 ```
 
 Output includes `station_code`, suburb, name, and brand. Use the `station_code` value in `PREFERRED_STATIONS`.
+
+> **Note:** some stations share a name (e.g. two "7-Eleven Emu Plains" in different suburbs). In that case use the station code to refer to a specific one.
+
+## Comparing price series
+
+Compare how often one station or area is cheaper than another:
+
+```bash
+# Station vs Sydney metro average
+uv run python -m fuel_signal.compare "BP Springwood" sydney
+
+# Station by code vs LGA average (use code when multiple stations share a name)
+uv run python -m fuel_signal.compare 182 "lga:penrith"
+
+# Two stations head-to-head
+uv run python -m fuel_signal.compare "Ampol Springwood" "Shell Blaxland"
+
+# Treat prices within 0.2c as equal (default 0.5c)
+uv run python -m fuel_signal.compare "BP Springwood" sydney --within 0.2
+```
+
+Each series can be:
+- A station name (partial match; must be unique) or station code
+- `sydney` — Sydney metro E10 average
+- `lga:<name>` or `council:<name>` — average for a specific LGA
 
 ## Getting the signal
 
