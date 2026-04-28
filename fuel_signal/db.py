@@ -700,6 +700,161 @@ def db_summary(conn: sqlite3.Connection) -> dict:
     }
 
 
+def average_price_series_by_brand(
+    conn: sqlite3.Connection,
+    fuel_code: str = "E10",
+    brands: frozenset[str] | None = None,
+) -> list[tuple[str, float]]:
+    """Return [(price_date, avg_price_cents)] from daily_prices grouped by brand.
+
+    brands: if provided, average only stations whose brand is in this set.
+    Same gap-fill semantics as average_price_series (uses daily_prices).
+    """
+    fid = fuel_type_id(conn, fuel_code)
+    if brands is not None:
+        placeholders = ",".join("?" * len(brands))
+        query = (
+            "SELECT dp.price_date, AVG(dp.price_decicents)"
+            " FROM daily_prices dp"
+            " JOIN stations s USING(station_code)"
+            f" WHERE dp.fuel_type_id = ? AND s.brand IN ({placeholders})"
+            " GROUP BY dp.price_date ORDER BY dp.price_date"
+        )
+        params: list = [fid, *sorted(brands)]
+    else:
+        query = (
+            "SELECT price_date, AVG(price_decicents) FROM daily_prices"
+            " WHERE fuel_type_id = ? GROUP BY price_date ORDER BY price_date"
+        )
+        params = [fid]
+    return [(_date_from_int(r[0]), r[1] / 10) for r in conn.execute(query, params)]
+
+
+def distinct_brands(
+    conn: sqlite3.Connection,
+    fuel_code: str = "E10",
+    min_stations: int = 3,
+) -> list[str]:
+    """Return brands represented by at least min_stations stations in daily_prices.
+
+    min_stations cuts off the long tail of one-off brand labels.
+    Brands are counted by distinct station_code, not price rows.
+    """
+    fid = fuel_type_id(conn, fuel_code)
+    rows = conn.execute(
+        "SELECT s.brand, COUNT(DISTINCT s.station_code) AS cnt"
+        " FROM daily_prices dp JOIN stations s USING(station_code)"
+        " WHERE dp.fuel_type_id = ? AND s.brand IS NOT NULL AND s.brand != ''"
+        " GROUP BY s.brand HAVING cnt >= ?"
+        " ORDER BY s.brand",
+        (fid, min_stations),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def station_search(
+    conn: sqlite3.Connection,
+    q: str,
+    limit: int = 20,
+) -> list[tuple[int, str, str, str]]:
+    """Search stations by name or suburb.
+
+    Returns [(station_code, name, suburb, brand)] ordered by name.
+    Used by the /api/stations/search typeahead endpoint.
+    """
+    pattern = f"%{q}%"
+    rows = conn.execute(
+        "SELECT station_code, name, suburb, brand FROM stations"
+        " WHERE name LIKE ? OR suburb LIKE ?"
+        " ORDER BY name LIMIT ?",
+        (pattern, pattern, limit),
+    ).fetchall()
+    return [(r[0], r[1], r[2] or "", r[3] or "") for r in rows]
+
+
+def coverage_matrix(
+    conn: sqlite3.Connection,
+    fuel_code: str = "E10",
+    months: int = 24,
+) -> list[tuple[int, str, str, int]]:
+    """Return [(station_code, name, ym, n_observations)] for coverage heatmap.
+
+    ym is a 'YYYY-MM' string. Covers the most recent *months* months.
+    """
+    import datetime as _dt
+    today = _dt.date.today()
+    cutoff_month = today.replace(day=1)
+    for _ in range(months):
+        cutoff_month = (cutoff_month - _dt.timedelta(days=1)).replace(day=1)
+    cutoff_ym = cutoff_month.strftime("%Y-%m")
+
+    fid = fuel_type_id(conn, fuel_code)
+    sql = (
+        "SELECT p.station_code, s.name,"
+        "       PRINTF('%04d-%02d', p.price_date/10000, (p.price_date/100)%100) AS ym,"
+        "       COUNT(*) AS n"
+        " FROM prices p JOIN stations s USING(station_code)"
+        " WHERE p.fuel_type_id = ? AND"
+        "       PRINTF('%04d-%02d', p.price_date/10000, (p.price_date/100)%100) >= ?"
+        " GROUP BY p.station_code, ym ORDER BY ym, s.name"
+    )
+    rows = conn.execute(
+        sql,
+        (fid, cutoff_ym),
+    ).fetchall()
+    return [(r[0], r[1], r[2], r[3]) for r in rows]
+
+
+def gradient_by_lga(
+    conn: sqlite3.Connection,
+    fuel_code: str = "E10",
+    window_days: int = 7,
+) -> list[tuple[str, str, float]]:
+    """Return [(council, week_start, mean_slope_cents_per_day)] for gradient heatmap.
+
+    week_start is the YYYY-MM-DD of the first day of each window_days bucket.
+    Slope is the mean of numpy.gradient over that bucket (positive = rising price).
+    """
+    import datetime as _dt
+
+    import numpy as np
+
+    fid = fuel_type_id(conn, fuel_code)
+    councils = [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT s.council FROM daily_prices dp JOIN stations s USING(station_code)"
+            " WHERE dp.fuel_type_id = ? AND s.council IS NOT NULL ORDER BY s.council",
+            (fid,),
+        ).fetchall()
+    ]
+
+    results: list[tuple[str, str, float]] = []
+    for council in councils:
+        rows = conn.execute(
+            "SELECT dp.price_date, AVG(dp.price_decicents)"
+            " FROM daily_prices dp JOIN stations s USING(station_code)"
+            " WHERE dp.fuel_type_id = ? AND s.council = ?"
+            " GROUP BY dp.price_date ORDER BY dp.price_date",
+            (fid, council),
+        ).fetchall()
+        if len(rows) < window_days:
+            continue
+        dates = [_date_from_int(r[0]) for r in rows]
+        prices = np.array([r[1] / 10 for r in rows])
+        gradients = np.gradient(prices)
+
+        # Bucket by calendar week (ISO Monday)
+        buckets: dict[str, list[float]] = {}
+        for date_str, grad in zip(dates, gradients):
+            d = _dt.date.fromisoformat(date_str)
+            week_start = (d - _dt.timedelta(days=d.weekday())).isoformat()
+            buckets.setdefault(week_start, []).append(float(grad))
+        for week_start, grads in sorted(buckets.items()):
+            results.append((council, week_start, float(np.mean(grads))))
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Entry point: rebuild DB from snapshots + historical data
 # ---------------------------------------------------------------------------

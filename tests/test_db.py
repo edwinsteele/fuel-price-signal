@@ -6,10 +6,14 @@ import pathlib
 import pytest
 
 from fuel_signal.db import (
+    average_price_series_by_brand,
     backfill_station_suburbs,
+    coverage_matrix,
     create_schema,
     daily_average_e10,
     db_summary,
+    distinct_brands,
+    gradient_by_lga,
     insert_prices,
     is_file_loaded,
     load_all_cleaned,
@@ -20,6 +24,8 @@ from fuel_signal.db import (
     normalize_address,
     open_db,
     station_price_series,
+    station_search,
+    upsert_daily_prices,
     upsert_stations,
 )
 
@@ -643,3 +649,160 @@ def test_db_summary_empty(conn):
     s = db_summary(conn)
     assert s["station_count"] == 0
     assert s["earliest_date"] == "—"
+
+
+# ---------------------------------------------------------------------------
+# New helpers: average_price_series_by_brand, distinct_brands, station_search,
+#              coverage_matrix, gradient_by_lga
+# ---------------------------------------------------------------------------
+
+
+def _seed_brands(conn):
+    """Insert 3 Ampol + 3 Shell stations with daily prices for brand helper tests."""
+    stations = []
+    for i in range(3):
+        stations.append({
+            "station_code": 2000 + i,
+            "name": f"Ampol Station{i}",
+            "address": f"{i+1} Ampol St, Suburb{i}",
+            "suburb": f"Suburb{i}",
+            "postcode": "2000",
+            "brand": "Ampol",
+        })
+        stations.append({
+            "station_code": 3000 + i,
+            "name": f"Shell Station{i}",
+            "address": f"{i+1} Shell Rd, Suburb{i}",
+            "suburb": f"Suburb{i}",
+            "postcode": "2000",
+            "brand": "Shell",
+        })
+    upsert_stations(conn, stations)
+    rows = []
+    for code in range(2000, 2003):
+        rows.append((code, "E10", "2024-01-10", 170.0))
+        rows.append((code, "E10", "2024-01-11", 172.0))
+    for code in range(3000, 3003):
+        rows.append((code, "E10", "2024-01-10", 180.0))
+        rows.append((code, "E10", "2024-01-11", 182.0))
+    upsert_daily_prices(conn, rows)
+    conn.commit()
+
+
+def test_average_price_series_by_brand_single_brand(conn):
+    _seed_brands(conn)
+    result = average_price_series_by_brand(conn, "E10", brands=frozenset({"Ampol"}))
+    assert len(result) == 2
+    assert result[0] == ("2024-01-10", pytest.approx(170.0))
+    assert result[1] == ("2024-01-11", pytest.approx(172.0))
+
+
+def test_average_price_series_by_brand_other_brand(conn):
+    _seed_brands(conn)
+    result = average_price_series_by_brand(conn, "E10", brands=frozenset({"Shell"}))
+    assert result[0][1] == pytest.approx(180.0)
+
+
+def test_average_price_series_by_brand_none_returns_all(conn):
+    _seed_brands(conn)
+    result = average_price_series_by_brand(conn, "E10", brands=None)
+    # All 6 stations averaged → (170+180)/2 = 175
+    assert result[0][1] == pytest.approx(175.0)
+
+
+def test_average_price_series_by_brand_empty_db(conn):
+    result = average_price_series_by_brand(conn, "E10")
+    assert result == []
+
+
+def test_distinct_brands_returns_brands_above_threshold(conn):
+    _seed_brands(conn)
+    brands = distinct_brands(conn, "E10", min_stations=3)
+    assert "Ampol" in brands
+    assert "Shell" in brands
+
+
+def test_distinct_brands_filters_below_threshold(conn):
+    _seed_brands(conn)
+    # Only 3 Ampol, 3 Shell — requesting min_stations=4 returns neither
+    brands = distinct_brands(conn, "E10", min_stations=4)
+    assert brands == []
+
+
+def test_distinct_brands_empty_db(conn):
+    assert distinct_brands(conn, "E10") == []
+
+
+def test_station_search_by_name(conn):
+    upsert_stations(conn, [_STATION])
+    results = station_search(conn, "Springwood")
+    assert len(results) == 1
+    code, name, suburb, brand = results[0]
+    assert code == 1001
+    assert "Springwood" in name
+
+
+def test_station_search_by_suburb(conn):
+    upsert_stations(conn, [_STATION])
+    results = station_search(conn, "Springwood")
+    assert len(results) == 1
+
+
+def test_station_search_no_results(conn):
+    upsert_stations(conn, [_STATION])
+    assert station_search(conn, "NoSuchPlace") == []
+
+
+def test_station_search_respects_limit(conn):
+    # Insert 5 stations all matching "test"
+    stations = [
+        {**_STATION, "station_code": 4000 + i, "name": f"Test Station {i}",
+         "address": f"{i} Test St, Sub{i}", "suburb": f"Sub{i}"}
+        for i in range(5)
+    ]
+    upsert_stations(conn, stations)
+    results = station_search(conn, "Test", limit=3)
+    assert len(results) == 3
+
+
+def test_coverage_matrix_returns_station_month_counts(conn):
+    import datetime
+    today = datetime.date.today()
+    d1 = today.replace(day=1).isoformat()
+    d2 = (today.replace(day=1) + datetime.timedelta(days=1)).isoformat()
+    ym = today.strftime("%Y-%m")
+    upsert_stations(conn, [_STATION])
+    insert_prices(conn, [
+        {"station_code": 1001, "fuel_code": "E10", "price_date": d1, "price_cents": 175.0},
+        {"station_code": 1001, "fuel_code": "E10", "price_date": d2, "price_cents": 178.0},
+    ])
+    rows = coverage_matrix(conn, "E10", months=24)
+    assert any(r[0] == 1001 and r[2] == ym and r[3] == 2 for r in rows)
+
+
+def test_coverage_matrix_empty_db(conn):
+    assert coverage_matrix(conn) == []
+
+
+def test_gradient_by_lga_returns_weekly_slopes(conn):
+    import datetime
+    # Insert a BM station with 14 days of rising prices
+    upsert_stations(conn, [_STATION])  # postcode 2777 → Blue Mountains
+    base = datetime.date(2024, 1, 1)
+    rows = [
+        (1001, "E10", (base + datetime.timedelta(days=i)).isoformat(), 160.0 + i)
+        for i in range(14)
+    ]
+    upsert_daily_prices(conn, rows)
+    conn.commit()
+    results = gradient_by_lga(conn, "E10", window_days=7)
+    # Should have at least one weekly entry for Blue Mountains
+    councils = {r[0] for r in results}
+    assert "Blue Mountains" in councils
+    # All slopes should be positive (rising prices)
+    bm = [r for r in results if r[0] == "Blue Mountains"]
+    assert all(r[2] > 0 for r in bm)
+
+
+def test_gradient_by_lga_empty_db(conn):
+    assert gradient_by_lga(conn) == []
