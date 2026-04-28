@@ -8,6 +8,7 @@ import pathlib
 import urllib.parse
 import zipfile
 
+import click
 import openpyxl
 import requests
 from bs4 import BeautifulSoup
@@ -475,11 +476,19 @@ def clean_all_resources(raw_dir: pathlib.Path, cleaned_dir: pathlib.Path) -> lis
 # Entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+@click.command("history")
+@click.option("--raw-dir", default="data/raw", show_default=True, help="Directory for downloaded raw CSVs.")
+@click.option("--cleaned-dir", default="data/cleaned", show_default=True, help="Directory for cleaned output CSVs.")
+def main(raw_dir: str, cleaned_dir: str) -> None:
+    """Download and clean bulk historical price CSVs from data.nsw.gov.au."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    raw_dir = pathlib.Path("data/raw")
-    cleaned_dir = pathlib.Path("data/cleaned")
-    paths = download_all(raw_dir)
-    print(f"Downloaded {len(paths)} files to {raw_dir}")
-    clean_all_resources(raw_dir, cleaned_dir)
-    print(f"Cleaned files written to {cleaned_dir}")
+    raw = pathlib.Path(raw_dir)
+    cleaned = pathlib.Path(cleaned_dir)
+    paths = download_all(raw)
+    click.echo(f"Downloaded {len(paths)} files to {raw}")
+    clean_all_resources(raw, cleaned)
+    click.echo(f"Cleaned files written to {cleaned}")
+
+
+if __name__ == "__main__":
+    main()

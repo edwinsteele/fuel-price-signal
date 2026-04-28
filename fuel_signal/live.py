@@ -7,6 +7,7 @@ import pathlib
 import re
 import uuid
 
+import click
 import requests
 
 from fuel_signal.config import (
@@ -220,7 +221,13 @@ def collect_snapshot(
 # Entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+@click.command("live")
+def main() -> None:
+    """Collect a live E10 snapshot from the FuelCheck API and save it as CSV."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     path = collect_snapshot()
-    print(f"Snapshot written to {path}")
+    click.echo(f"Snapshot written to {path}")
+
+
+if __name__ == "__main__":
+    main()

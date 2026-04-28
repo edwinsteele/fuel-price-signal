@@ -30,10 +30,10 @@ Each command is its own module with a `@click.command` named `main` and an `if _
 ```
 uv run python -m fuel_signal.signal [--as-of DATE] [--db PATH]
 uv run python -m fuel_signal.compare SERIES_A SERIES_B [--fuel E10] [--within 0.5] [--db PATH]
-uv run python -m fuel_signal.cli stations [QUERY]
+uv run python -m fuel_signal.stations [QUERY]
 ```
 
-**Do not** add new commands to `cli.py` or create new pyproject.toml script entries — each module is its own entry point.
+**Do not** add new commands to a shared CLI group or create new `[project.scripts]` entries — each module is its own entry point invoked via `python -m`.
 
 ## Key db.py read helpers
 

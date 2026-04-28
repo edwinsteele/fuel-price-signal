@@ -5,7 +5,16 @@ import pathlib
 import sqlite3
 from datetime import date, timedelta
 
-from fuel_signal.db import fuel_type_id, station_price_series, upsert_daily_prices
+import click
+
+from fuel_signal.db import (
+    DEFAULT_DB_PATH,
+    create_schema,
+    fuel_type_id,
+    open_db,
+    station_price_series,
+    upsert_daily_prices,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +113,22 @@ def fill_all(
     return total
 
 
-if __name__ == "__main__":
-    import sys
-
-    from fuel_signal.db import DEFAULT_DB_PATH, create_schema, open_db
-
+@click.command("fill")
+@click.option(
+    "--db",
+    "db_path",
+    default=str(DEFAULT_DB_PATH),
+    show_default=True,
+    help="Path to SQLite database.",
+)
+def main(db_path: str) -> None:
+    """Forward-fill daily price gaps and rebuild the daily_prices table."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-    db_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DB_PATH
-    conn = open_db(db_path)
+    conn = open_db(pathlib.Path(db_path))
     create_schema(conn)
     fill_all(conn)
     conn.close()
+
+
+if __name__ == "__main__":
+    main()

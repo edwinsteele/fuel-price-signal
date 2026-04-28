@@ -6,8 +6,10 @@ import pathlib
 import re
 import sqlite3
 
+import click
+
 from fuel_signal.config import KNOWN_DUPLICATE_STATION_CODES
-from fuel_signal.postcode_council import primary_council
+from fuel_signal.postcode_council import SYDNEY_METRO_POSTCODES, primary_council
 
 logger = logging.getLogger(__name__)
 
@@ -702,25 +704,26 @@ def db_summary(conn: sqlite3.Connection) -> dict:
 # Entry point: rebuild DB from snapshots + historical data
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import argparse
-
-    from fuel_signal.postcode_council import SYDNEY_METRO_POSTCODES
-
-    parser = argparse.ArgumentParser(description="Rebuild fuel_signal.db from snapshots + historical data")
-    parser.add_argument("db_path", nargs="?", default=str(DEFAULT_DB_PATH))
-    parser.add_argument("--force", action="store_true", help="Re-ingest all files, ignoring loaded_files tracking")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-
+@click.command("db")
+@click.option(
+    "--db",
+    "db_path",
+    default=str(DEFAULT_DB_PATH),
+    show_default=True,
+    help="Path to SQLite database.",
+)
+@click.option("--force", is_flag=True, help="Re-ingest all files, ignoring loaded_files tracking.")
+@click.option("-v", "--verbose", is_flag=True, help="Enable debug logging.")
+def main(db_path: str, force: bool, verbose: bool) -> None:
+    """Rebuild the SQLite database from snapshots + historical data."""
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s %(message)s",
     )
 
-    conn = open_db(pathlib.Path(args.db_path))
+    conn = open_db(pathlib.Path(db_path))
     create_schema(conn)
-    logger.info("Schema ready at %s", args.db_path)
+    logger.info("Schema ready at %s", db_path)
 
     snapshots_dir = pathlib.Path("data/snapshots")
     if snapshots_dir.exists():
@@ -728,7 +731,7 @@ if __name__ == "__main__":
             conn, snapshots_dir,
             postcodes=SYDNEY_METRO_POSTCODES,
             fuel_codes={"E10"},
-            force=args.force,
+            force=force,
         )
         logger.info("Snapshots: %d stations, %d new prices", s, p)
     else:
@@ -736,7 +739,11 @@ if __name__ == "__main__":
 
     cleaned_dir = pathlib.Path("data/cleaned")
     if cleaned_dir.exists():
-        inserted, skipped = load_all_cleaned(conn, cleaned_dir, force=args.force)
+        inserted, skipped = load_all_cleaned(conn, cleaned_dir, force=force)
         logger.info("Historical: %d inserted, %d skipped", inserted, skipped)
 
     conn.close()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,4 @@
-"""Command-line interface for fuel-price-signal."""
+"""Search stations by suburb, name, or station code."""
 
 import pathlib
 
@@ -7,12 +7,7 @@ import click
 from fuel_signal import db as _db
 
 
-@click.group()
-def cli() -> None:
-    """Fuel price signal tools."""
-
-
-@cli.command()
+@click.command("stations")
 @click.argument("query", required=False)
 @click.option("--suburb", "-s", help="Filter by suburb (partial match).")
 @click.option("--name", "-n", help="Filter by station name (partial match).")
@@ -23,16 +18,16 @@ def cli() -> None:
     show_default=True,
     help="Path to SQLite DB.",
 )
-def stations(query: str | None, suburb: str | None, name: str | None, db_path: str) -> None:
+def main(query: str | None, suburb: str | None, name: str | None, db_path: str) -> None:
     """Search stations by suburb or name.
 
     QUERY searches both suburb and name simultaneously.
     Use --suburb or --name for field-specific filtering.
 
     Examples:\n
-        fuel-signal stations blaxland\n
-        fuel-signal stations --suburb "emu plains"\n
-        fuel-signal stations --name ampol
+        uv run python -m fuel_signal.stations blaxland\n
+        uv run python -m fuel_signal.stations --suburb "emu plains"\n
+        uv run python -m fuel_signal.stations --name ampol
     """
     path = pathlib.Path(db_path)
     if not path.exists():
@@ -77,4 +72,4 @@ def stations(query: str | None, suburb: str | None, name: str | None, db_path: s
 
 
 if __name__ == "__main__":
-    cli()
+    main()

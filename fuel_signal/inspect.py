@@ -5,8 +5,9 @@ import json
 import logging
 import pathlib
 import sqlite3
-import sys
 import webbrowser
+
+import click
 
 from fuel_signal import db as _db
 from fuel_signal.config import PREFERRED_STATIONS
@@ -468,33 +469,44 @@ def generate_html(conn: sqlite3.Connection) -> str:
 """
 
 
-def main(
-    db_path: pathlib.Path = _db.DEFAULT_DB_PATH,
-    out_path: pathlib.Path = pathlib.Path("inspect.html"),
-    open_browser: bool = True,
-) -> pathlib.Path:
-    if not db_path.exists():
-        print(
-            f"Database not found at {db_path}.\n"
-            "Run 'uv run python -m fuel_signal.live' first to populate stations,\n"
-            "then 'uv run python -m fuel_signal.db' to load historical data.",
-            file=sys.stderr,
+@click.command("inspect")
+@click.option(
+    "--db",
+    "db_path",
+    default=str(_db.DEFAULT_DB_PATH),
+    show_default=True,
+    help="Path to SQLite database.",
+)
+@click.option(
+    "--out",
+    "out_path",
+    default="inspect.html",
+    show_default=True,
+    help="Output HTML file path.",
+)
+@click.option("--no-open-browser", "open_browser", is_flag=True, default=True, flag_value=False,
+              help="Do not open the file in a browser after writing.")
+def main(db_path: str, out_path: str, open_browser: bool) -> None:
+    """Generate an HTML inspection page from the local SQLite database."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    path = pathlib.Path(db_path)
+    if not path.exists():
+        raise click.ClickException(
+            f"Database not found: {db_path}. "
+            "Run 'uv run python -m fuel_signal.live' then 'uv run python -m fuel_signal.db' first."
         )
-        sys.exit(1)
 
-    conn = _db.open_db(db_path)
+    conn = _db.open_db(path)
     html = generate_html(conn)
     conn.close()
 
-    out_path.write_text(html, encoding="utf-8")
-    print(f"Inspection page written to {out_path}")
+    out = pathlib.Path(out_path)
+    out.write_text(html, encoding="utf-8")
+    click.echo(f"Inspection page written to {out}")
 
     if open_browser:
-        webbrowser.open(out_path.resolve().as_uri())
-
-    return out_path
+        webbrowser.open(out.resolve().as_uri())
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     main()

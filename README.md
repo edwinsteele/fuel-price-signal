@@ -79,18 +79,18 @@ Find station codes by suburb or name — useful when adding entries to `PREFERRE
 
 ```bash
 # Free-text search (matches suburb and name)
-uv run fuel-signal stations blaxland
-uv run fuel-signal stations "emu plains"
+uv run python -m fuel_signal.stations blaxland
+uv run python -m fuel_signal.stations "emu plains"
 
 # Look up by station code (to find the name for a known ID)
-uv run fuel-signal stations 414
+uv run python -m fuel_signal.stations 414
 
 # Field-specific filters
-uv run fuel-signal stations --suburb springwood
-uv run fuel-signal stations --name ampol
+uv run python -m fuel_signal.stations --suburb springwood
+uv run python -m fuel_signal.stations --name ampol
 
 # List all stations
-uv run fuel-signal stations
+uv run python -m fuel_signal.stations
 ```
 
 Output includes `station_code`, suburb, name, and brand. Use the `station_code` value in `PREFERRED_STATIONS`.
