@@ -49,14 +49,20 @@
         {% if groups.lgas %}
         <details {% if spec_starts_with(specs, 'lga:') %}open{% endif %}>
           <summary>By LGA ({{ groups.lgas | length }})</summary>
-          <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
-            {% for lga in groups.lgas %}
-            <label>
-              <input type="checkbox" name="series" value="lga:{{ lga }}"
-                     {% if 'lga:' + lga in specs %}checked{% endif %}>
-              {{ lga }}
-            </label>
-            {% endfor %}
+          <div class="series-group">
+            <div class="group-toggles">
+              <a href="#" data-toggle="all">all</a> ·
+              <a href="#" data-toggle="none">none</a>
+            </div>
+            <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+              {% for lga in groups.lgas %}
+              <label>
+                <input type="checkbox" name="series" value="lga:{{ lga }}"
+                       {% if 'lga:' + lga in specs %}checked{% endif %}>
+                {{ lga }}
+              </label>
+              {% endfor %}
+            </div>
           </div>
         </details>
         {% endif %}
@@ -64,41 +70,61 @@
         {% if groups.brands %}
         <details {% if spec_starts_with(specs, 'brand:') %}open{% endif %}>
           <summary>By Brand ({{ groups.brands | length }})</summary>
-          <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
-            {% for brand in groups.brands %}
-            <label>
-              <input type="checkbox" name="series" value="brand:{{ brand }}"
-                     {% if 'brand:' + brand in specs %}checked{% endif %}>
-              {{ brand }}
-            </label>
-            {% endfor %}
+          <div class="series-group">
+            <div class="group-toggles">
+              <a href="#" data-toggle="all">all</a> ·
+              <a href="#" data-toggle="none">none</a>
+            </div>
+            <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+              {% for brand in groups.brands %}
+              <label>
+                <input type="checkbox" name="series" value="brand:{{ brand }}"
+                       {% if 'brand:' + brand in specs %}checked{% endif %}>
+                {{ brand }}
+              </label>
+              {% endfor %}
+            </div>
           </div>
         </details>
         {% endif %}
 
         <details open>
           <summary>Preferred Stations</summary>
-          <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
-            {% for code, label in preferred_stations.items() %}
-            <label>
-              <input type="checkbox" name="series" value="station:{{ code }}"
-                     {% if 'station:' ~ code in specs %}checked{% endif %}>
-              {{ label }}
-            </label>
-            {% endfor %}
+          <div class="series-group">
+            <div class="group-toggles">
+              <a href="#" data-toggle="all">all</a> ·
+              <a href="#" data-toggle="none">none</a>
+            </div>
+            <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+              {% for code, label in preferred_stations.items() %}
+              <label>
+                <input type="checkbox" name="series" value="station:{{ code }}"
+                       {% if 'station:' ~ code in specs %}checked{% endif %}>
+                {{ label }}
+              </label>
+              {% endfor %}
+            </div>
           </div>
         </details>
 
         <!-- Dynamically added stations (from typeahead) -->
-        <div id="added-stations">
-          {% for spec in extra_station_specs %}
-          <label style="display:flex; align-items:center; gap:.4rem; font-size:.85rem; margin:.2rem 0">
-            <input type="checkbox" name="series" value="{{ spec.spec }}" checked>
-            {{ spec.label }}
-            <button type="button" onclick="this.parentElement.remove()"
-                    style="background:none;border:none;cursor:pointer;color:#888;font-size:1rem">×</button>
-          </label>
-          {% endfor %}
+        <div class="series-group">
+          {% if extra_station_specs %}
+          <div class="group-toggles">
+            <a href="#" data-toggle="all">all</a> ·
+            <a href="#" data-toggle="none">none</a>
+          </div>
+          {% endif %}
+          <div id="added-stations">
+            {% for spec in extra_station_specs %}
+            <label style="display:flex; align-items:center; gap:.4rem; font-size:.85rem; margin:.2rem 0">
+              <input type="checkbox" name="series" value="{{ spec.spec }}" checked>
+              {{ spec.label }}
+              <button type="button" onclick="this.parentElement.remove()"
+                      style="background:none;border:none;cursor:pointer;color:#888;font-size:1rem">×</button>
+            </label>
+            {% endfor %}
+          </div>
         </div>
 
         <!-- Station search typeahead -->
@@ -183,6 +209,22 @@
   {% include "_heatmap_coverage.html" %}
 {% endif %}
 
+<script>
+// Group all/none toggles
+(function() {
+  document.querySelectorAll('.group-toggles').forEach(bar => {
+    bar.addEventListener('click', e => {
+      const link = e.target.closest('[data-toggle]');
+      if (!link) return;
+      e.preventDefault();
+      const checked = link.dataset.toggle === 'all';
+      const group = bar.closest('.series-group');
+      group.querySelectorAll('input[type="checkbox"][name="series"]')
+           .forEach(cb => { cb.checked = checked; });
+    });
+  });
+})();
+</script>
 <script>
 // Station typeahead
 (function() {

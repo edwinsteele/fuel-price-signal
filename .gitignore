@@ -23,6 +23,9 @@ venv/
 # Generated locally by fuel_signal.inspect
 inspect.html
 
+# Scratch planning docs — kept in the tree for stable paths, not committed
+PLAN_*.md
+
 # Env / secrets
 .env
 *.env

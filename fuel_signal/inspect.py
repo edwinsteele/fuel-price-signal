@@ -27,17 +27,19 @@ logger = logging.getLogger(__name__)
 
 _LINE_CAP = 10  # max series on line chart before overflow banner
 
+_SYDNEY_COLOUR = "#9ca3af"  # mid-grey: visible on both light and dark backgrounds
+
 _COLOURS = [
-    "#000000",  # black (reserved for Sydney avg)
-    "#dc2626",  # red
-    "#16a34a",  # green
-    "#d97706",  # amber
-    "#7c3aed",  # violet
-    "#0891b2",  # cyan
-    "#db2777",  # pink
-    "#ea580c",  # orange
-    "#6366f1",  # indigo
-    "#0d9488",  # teal
+    "#f87171",  # red-400
+    "#4ade80",  # green-400
+    "#fbbf24",  # amber-400
+    "#a78bfa",  # violet-400
+    "#22d3ee",  # cyan-400
+    "#f472b6",  # pink-400
+    "#fb923c",  # orange-400
+    "#818cf8",  # indigo-400
+    "#2dd4bf",  # teal-400
+    "#facc15",  # yellow-400
 ]
 
 _BRAND_COLOURS: dict[str, str] = {
@@ -197,7 +199,23 @@ def _build_line_spec(
     has_sydney: bool,
 ) -> dict:
     cap = _LINE_CAP
-    ordered = sorted(resolved, key=lambda r: (0 if r.kind == "sydney" else 1, r.label))
+
+    def _sort_key(r: _series.ResolvedSeries) -> tuple[int, str]:
+        # Aggregate (sydney) → LGA → Brand → Favourites → other individual stations
+        if r.kind == "sydney":
+            group = 0
+        elif r.kind == "lga":
+            group = 1
+        elif r.kind == "brand":
+            group = 2
+        elif r.kind == "station" and r.spec.startswith("station:") \
+                and int(r.spec.split(":", 1)[1]) in PREFERRED_STATIONS:
+            group = 3
+        else:
+            group = 4
+        return (group, r.label)
+
+    ordered = sorted(resolved, key=_sort_key)
     overflow = max(0, len(ordered) - cap)
     displayed = ordered[:cap]
 
@@ -206,11 +224,11 @@ def _build_line_spec(
         return {}
 
     datasets = []
-    colour_idx = 0
+    colour_idx = -1
     for r in displayed:
         d_map = dict(r.points)
         if r.kind == "sydney":
-            colour = "#000000"
+            colour = _SYDNEY_COLOUR
         else:
             colour_idx += 1
             colour = _COLOURS[colour_idx % len(_COLOURS)]
@@ -219,14 +237,23 @@ def _build_line_spec(
             "label": r.label,
             "data": [d_map.get(d) for d in all_dates],
             "borderColor": colour,
+            "borderWidth": 1.5,
             "pointRadius": 0,
             "tension": 0.3,
             "spanGaps": True,
         }
+        # Dash patterns chosen to differ from cycle/event vertical annotations:
+        #   scipy peak  = red [5,3] thin vertical
+        #   plateau     = purple solid thick vertical
         if r.kind == "sydney":
-            ds["borderDash"] = [6, 4]
+            ds["borderDash"] = [12, 3, 2, 3]  # dash-dot
             ds["fill"] = True
-            ds["backgroundColor"] = "rgba(0,0,0,0.06)"
+            ds["backgroundColor"] = "rgba(150,150,150,0.10)"
+        elif r.kind == "lga":
+            ds["borderDash"] = [10, 4]  # long dash
+        elif r.kind == "brand":
+            ds["borderDash"] = [1, 3]   # tight dots
+        # individual stations (favourite or not) stay solid
         datasets.append(ds)
 
     annotations = _build_annotations(peak_data, all_dates, boundaries) if has_sydney else {}
@@ -394,34 +421,8 @@ def _create_app(
             specs = ["sydney"] + [f"station:{code}" for code in PREFERRED_STATIONS]
 
         cutoff = _cutoff_date(window)
+        is_heatmap = chart_type.startswith("heatmap-")
 
-        # Resolve series, expanding group display if requested
-        resolved: list[_series.ResolvedSeries] = []
-        errors: list[str] = []
-        for spec in specs:
-            sl = spec.lower()
-            is_group = sl.startswith("lga:") or sl.startswith("council:") or sl.startswith("brand:")
-            if is_group and display in ("members", "both") and chart_type in ("line", "scatter"):
-                if display == "both":
-                    try:
-                        r = _series.resolve(conn, spec)
-                        r.points = _slice_points(r.points, cutoff)
-                        resolved.append(r)
-                    except _series.SeriesError:
-                        pass
-                members = _series.resolve_members(conn, spec)
-                for m in members:
-                    m.points = _slice_points(m.points, cutoff)
-                resolved.extend(members)
-            else:
-                try:
-                    r = _series.resolve(conn, spec)
-                    r.points = _slice_points(r.points, cutoff)
-                    resolved.append(r)
-                except _series.SeriesError as e:
-                    errors.append(str(e))
-
-        # Which station specs came from typeahead (not in preferred_stations)?
         groups = _series.enumerate_groups(conn)
         preferred_spec_set = {f"station:{code}" for code in PREFERRED_STATIONS} | {"sydney"}
         known_specs = (
@@ -429,10 +430,46 @@ def _create_app(
             | {f"lga:{c}" for c in groups["lgas"]}
             | {f"brand:{b}" for b in groups["brands"]}
         )
-        extra_station_specs = [
-            r for r in resolved
-            if r.spec not in known_specs and r.kind == "station"
-        ]
+
+        # Resolve series, expanding group display if requested. Heatmap views
+        # don't use resolved.points — skip the resolver to avoid forcing
+        # full-history aggregations for every selected brand/LGA on first load.
+        resolved: list[_series.ResolvedSeries] = []
+        errors: list[str] = []
+        if is_heatmap:
+            extra_station_specs = [
+                _series.ResolvedSeries(spec=s, label=s, points=[], kind="station")
+                for s in specs
+                if s.startswith("station:") and s not in known_specs
+            ]
+        else:
+            for spec in specs:
+                sl = spec.lower()
+                is_group = sl.startswith("lga:") or sl.startswith("council:") or sl.startswith("brand:")
+                if is_group and display in ("members", "both") and chart_type in ("line", "scatter"):
+                    if display == "both":
+                        try:
+                            r = _series.resolve(conn, spec)
+                            r.points = _slice_points(r.points, cutoff)
+                            resolved.append(r)
+                        except _series.SeriesError:
+                            pass
+                    members = _series.resolve_members(conn, spec)
+                    for m in members:
+                        m.points = _slice_points(m.points, cutoff)
+                    resolved.extend(members)
+                else:
+                    try:
+                        r = _series.resolve(conn, spec)
+                        r.points = _slice_points(r.points, cutoff)
+                        resolved.append(r)
+                    except _series.SeriesError as e:
+                        errors.append(str(e))
+
+            extra_station_specs = [
+                r for r in resolved
+                if r.spec not in known_specs and r.kind == "station"
+            ]
 
         # Build chart spec
         chart_spec = None
