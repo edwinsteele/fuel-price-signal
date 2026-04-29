@@ -355,7 +355,15 @@ def _build_coverage_heatmap(
 # Flask app factory
 # ---------------------------------------------------------------------------
 
-def _create_app(conn: sqlite3.Connection, cd: CycleDetector) -> Flask:
+def _create_app(
+    conn: sqlite3.Connection,
+    cd: CycleDetector,
+    today: str | None,
+    cycle_state,
+    peak_data: dict,
+    summary: dict,
+    boundaries: dict,
+) -> Flask:
     app = Flask(__name__, template_folder="inspect_templates")
 
     app.jinja_env.filters["gradient_color"] = _gradient_color
@@ -414,20 +422,17 @@ def _create_app(conn: sqlite3.Connection, cd: CycleDetector) -> Flask:
                     errors.append(str(e))
 
         # Which station specs came from typeahead (not in preferred_stations)?
+        groups = _series.enumerate_groups(conn)
         preferred_spec_set = {f"station:{code}" for code in PREFERRED_STATIONS} | {"sydney"}
-        known_specs = preferred_spec_set | {f"lga:{c}" for c in _series.enumerate_groups(conn)["lgas"]} | \
-                      {f"brand:{b}" for b in _series.enumerate_groups(conn)["brands"]}
+        known_specs = (
+            preferred_spec_set
+            | {f"lga:{c}" for c in groups["lgas"]}
+            | {f"brand:{b}" for b in groups["brands"]}
+        )
         extra_station_specs = [
             r for r in resolved
             if r.spec not in known_specs and r.kind == "station"
         ]
-
-        summary = _db.db_summary(conn)
-        full_series = _db.average_price_series(conn)
-        today = full_series[-1][0] if full_series else None
-        cycle_state = cd.detect(today) if today else None
-        peak_data = cd.peaks_for_plot()
-        boundaries = _data_boundaries(conn)
 
         # Build chart spec
         chart_spec = None
@@ -442,8 +447,6 @@ def _create_app(conn: sqlite3.Connection, cd: CycleDetector) -> Flask:
             heatmap_data = _build_gradient_heatmap(conn, cutoff) or None
         elif chart_type == "heatmap-coverage":
             heatmap_data = _build_coverage_heatmap(conn, cutoff) or None
-
-        groups = _series.enumerate_groups(conn)
 
         return render_template(
             "workbench.html",
@@ -530,7 +533,13 @@ def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool) -> N
     logger.info("Loading CycleDetector over %d daily points…", len(full_series))
     cd = CycleDetector(full_series)
 
-    app = _create_app(conn, cd)
+    today = cd._series.index[-1].strftime("%Y-%m-%d") if not cd._series.empty else None
+    cycle_state = cd.detect(today) if today else None
+    peak_data = cd.peaks_for_plot()
+    summary = _db.db_summary(conn)
+    boundaries = _data_boundaries(conn)
+
+    app = _create_app(conn, cd, today, cycle_state, peak_data, summary, boundaries)
 
     url = f"http://{host}:{port}/"
     if not no_browser:

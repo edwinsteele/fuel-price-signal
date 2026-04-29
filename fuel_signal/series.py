@@ -30,18 +30,40 @@ class ResolvedSeries:
     kind: str                          # "station" | "lga" | "brand" | "sydney"
 
 
+# Full series cache: (id(conn), canonical_spec, fuel) → [(date, price), ...]
+# Keyed by conn identity so each DB connection (server run or test) has its own
+# namespace.  No eviction; cache lives for the process lifetime.
+_SERIES_CACHE: dict[tuple[int, str, str], list[tuple[str, float]]] = {}
+
+# Groups cache: id(conn) → {"lgas": [...], "brands": [...]}
+_GROUPS_CACHE: dict[int, dict] = {}
+
+
+def _cached_series(
+    conn: sqlite3.Connection,
+    canonical_spec: str,
+    fuel: str,
+    fetch,
+) -> list[tuple[str, float]]:
+    """Return series from cache, calling *fetch()* on miss."""
+    key = (id(conn), canonical_spec, fuel)
+    if key not in _SERIES_CACHE:
+        _SERIES_CACHE[key] = fetch()
+    return _SERIES_CACHE[key]
+
+
 def resolve(conn: sqlite3.Connection, spec: str, fuel: str = "E10") -> ResolvedSeries:
     """Return a ResolvedSeries for *spec*, raising SeriesError if unresolvable."""
     s = spec.strip()
     sl = s.lower()
 
     if sl == "sydney":
-        return ResolvedSeries(
-            spec="sydney",
-            label=f"Sydney {fuel} mean",
-            points=_db.average_price_series(conn, fuel_code=fuel),
-            kind="sydney",
+        points = _cached_series(
+            conn, "sydney", fuel,
+            lambda: _db.average_price_series(conn, fuel_code=fuel),
         )
+        return ResolvedSeries(spec="sydney", label=f"Sydney {fuel} mean",
+                              points=points, kind="sydney")
 
     for prefix in ("lga:", "council:"):
         if sl.startswith(prefix):
@@ -101,12 +123,19 @@ def resolve_members(
 
 def enumerate_groups(conn: sqlite3.Connection) -> dict:
     """Return {lgas: [...], brands: [...]} for the controls-form picker."""
-    lgas = [
-        c for c in sorted(SYDNEY_METRO_COUNCILS)
-        if conn.execute("SELECT 1 FROM stations WHERE council = ? LIMIT 1", (c,)).fetchone()
-    ]
+    key = id(conn)
+    if key in _GROUPS_CACHE:
+        return _GROUPS_CACHE[key]
+    present = {
+        row[0]
+        for row in conn.execute(
+            "SELECT council FROM stations WHERE council IS NOT NULL GROUP BY council"
+        ).fetchall()
+    }
+    lgas = sorted(c for c in SYDNEY_METRO_COUNCILS if c in present)
     brands = sorted(_db.distinct_brands(conn, fuel_code="E10"))
-    return {"lgas": lgas, "brands": brands}
+    _GROUPS_CACHE[key] = {"lgas": lgas, "brands": brands}
+    return _GROUPS_CACHE[key]
 
 
 # ---------------------------------------------------------------------------
@@ -123,22 +152,24 @@ def _resolve_lga(conn: sqlite3.Connection, query: str, fuel: str) -> ResolvedSer
             f"Ambiguous LGA {query!r}, matches: {', '.join(sorted(matches))}. Be more specific."
         )
     council = matches[0]
-    return ResolvedSeries(
-        spec=f"lga:{council}",
-        label=f"{council} LGA {fuel} mean",
-        points=_db.average_price_series(conn, fuel_code=fuel, councils=frozenset({council})),
-        kind="lga",
+    canonical = f"lga:{council}"
+    points = _cached_series(
+        conn, canonical, fuel,
+        lambda: _db.average_price_series(conn, fuel_code=fuel, councils=frozenset({council})),
     )
+    return ResolvedSeries(spec=canonical, label=f"{council} LGA {fuel} mean",
+                          points=points, kind="lga")
 
 
 def _resolve_brand(conn: sqlite3.Connection, brand_query: str, fuel: str) -> ResolvedSeries:
     brand = _lookup_brand(conn, brand_query, fuel)
-    return ResolvedSeries(
-        spec=f"brand:{brand}",
-        label=f"{brand} {fuel} mean",
-        points=_db.average_price_series_by_brand(conn, fuel_code=fuel, brands=frozenset({brand})),
-        kind="brand",
+    canonical = f"brand:{brand}"
+    points = _cached_series(
+        conn, canonical, fuel,
+        lambda: _db.average_price_series_by_brand(conn, fuel_code=fuel, brands=frozenset({brand})),
     )
+    return ResolvedSeries(spec=canonical, label=f"{brand} {fuel} mean",
+                          points=points, kind="brand")
 
 
 def _lookup_brand(conn: sqlite3.Connection, brand_query: str, fuel: str) -> str:
@@ -185,12 +216,12 @@ def _resolve_station(conn: sqlite3.Connection, spec: str, fuel: str) -> Resolved
 
     code, sname, suburb = rows[0]
     label = f"{sname} ({suburb})" if suburb else sname
-    return ResolvedSeries(
-        spec=f"station:{code}",
-        label=label,
-        points=_db.get_daily_prices(conn, station_code=code, fuel_code=fuel),
-        kind="station",
+    canonical = f"station:{code}"
+    points = _cached_series(
+        conn, canonical, fuel,
+        lambda: _db.get_daily_prices(conn, station_code=code, fuel_code=fuel),
     )
+    return ResolvedSeries(spec=canonical, label=label, points=points, kind="station")
 
 
 def _rows_to_series(
@@ -200,10 +231,12 @@ def _rows_to_series(
 ) -> list[ResolvedSeries]:
     results = []
     for code, name, suburb in stations:
-        points = _db.get_daily_prices(conn, station_code=code, fuel_code=fuel)
+        canonical = f"station:{code}"
+        points = _cached_series(
+            conn, canonical, fuel,
+            lambda c=code: _db.get_daily_prices(conn, station_code=c, fuel_code=fuel),
+        )
         if points:
             label = f"{name} ({suburb})" if suburb else name
-            results.append(
-                ResolvedSeries(spec=f"station:{code}", label=label, points=points, kind="station")
-            )
+            results.append(ResolvedSeries(spec=canonical, label=label, points=points, kind="station"))
     return results

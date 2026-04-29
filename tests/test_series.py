@@ -1,7 +1,11 @@
 """Tests for fuel_signal.series — resolve(), resolve_members(), enumerate_groups()."""
 
+from unittest.mock import patch
+
 import pytest
 
+from fuel_signal import db as _db
+from fuel_signal import series as _series_mod
 from fuel_signal.db import (
     create_schema,
     open_db,
@@ -291,3 +295,38 @@ def test_enumerate_groups_brands_threshold(conn):
     conn.commit()
     groups = enumerate_groups(conn)
     assert "Ampol" not in groups["brands"]
+
+
+# ---------------------------------------------------------------------------
+# Series cache
+# ---------------------------------------------------------------------------
+
+def test_resolve_uses_cache_on_second_call(conn):
+    """Second resolve() for the same spec must not re-query the DB."""
+    _seed_stations(conn)
+    _seed_daily(conn, {100: 170.0, 200: 172.0})
+
+    # Ensure a clean cache slot for this conn so the test is self-contained.
+    _series_mod._SERIES_CACHE.pop((id(conn), "sydney", "E10"), None)
+
+    with patch.object(_db, "average_price_series", wraps=_db.average_price_series) as spy:
+        r1 = resolve(conn, "sydney")
+        r2 = resolve(conn, "sydney")
+
+    assert r1.points == r2.points
+    assert spy.call_count == 1, "DB should be queried once; second call must use cache"
+
+
+def test_resolve_station_uses_cache_on_second_call(conn):
+    """Second resolve() for the same station:code must not re-query the DB."""
+    _seed_stations(conn)
+    _seed_daily(conn, {100: 170.0})
+
+    _series_mod._SERIES_CACHE.pop((id(conn), "station:100", "E10"), None)
+
+    with patch.object(_db, "get_daily_prices", wraps=_db.get_daily_prices) as spy:
+        r1 = resolve(conn, "station:100")
+        r2 = resolve(conn, "station:100")
+
+    assert r1.points == r2.points
+    assert spy.call_count == 1, "DB should be queried once; second call must use cache"
