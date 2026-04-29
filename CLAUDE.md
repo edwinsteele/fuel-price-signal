@@ -96,7 +96,7 @@ Snapshots are a bridge until historical CSVs cover the same period — keep the 
 
 When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verify snapshot prices ≡ historical prices per station/date; (2) if they agree, delete the retired snapshot CSVs; (3) if they diverge, investigate before retiring — divergence reveals something about the data.
 
-`db.py` loads snapshots before historical CSVs and uses `INSERT OR IGNORE`, so snapshot prices win silently on conflict. When the first overlap occurs, compare per-station prices to decide whether snapshot-wins is the right policy. Also check whether the GH Actions cron time (currently 12:00 UTC = 10pm AEST) aligns with the historical CSV rollup time.
+`db.py` loads snapshots before historical CSVs and uses `INSERT OR IGNORE`, so snapshot prices win silently on conflict. When the first overlap occurs, compare per-station prices to decide whether snapshot-wins is the right policy. Also check whether the GH Actions cron time (currently 10:00 UTC = 8pm AEST / 9pm AEDT) aligns with the historical CSV rollup time.
 
 ### Aggregation
 `sydney_average_series` / `average_price_series` is a temporary convenience for cycle detection. Future analyses will need flexible groupings — by region, corridor, LGA cluster, etc. Don't treat it as permanent infrastructure; don't patch it when new groupings are needed, design a proper aggregation layer instead.
