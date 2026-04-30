@@ -280,7 +280,7 @@ You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `pol
 2. Implement the minimal change — do not scope-creep.
 3. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
 4. Open as draft PR titled `fix: <issue title> (closes #N)` with labels `claude-authored` + the issue's original label.
-5. Once CI is green and the plan comment has been up for at least 4 hours with no `nack` reply: mark the PR ready-for-review. For `chore` PRs, also add `auto-merge-ok`.
+5. Once CI is green and the plan comment has been up for at least 24 hours with no `nack` reply: mark the PR ready-for-review. For `chore` PRs, also add `auto-merge-ok`.
 
 **Escape hatch — polish → design upgrade:**
 If while implementing a `polish` issue you discover it actually requires design work:
