@@ -1,0 +1,54 @@
+name: Auto-merge chore PRs
+
+# Fires when auto-merge-ok is applied, and again when any CI workflow finishes
+# on a PR that already has the label (catches the race where CI finishes after labelling).
+on:
+  pull_request:
+    types: [labeled]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge eligible PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Find all open PRs that carry all three required labels.
+          prs=$(gh pr list \
+            --label "claude-authored" \
+            --label "chore" \
+            --label "auto-merge-ok" \
+            --state open \
+            --json number \
+            --jq '.[].number')
+
+          if [ -z "$prs" ]; then
+            echo "No eligible PRs found."
+            exit 0
+          fi
+
+          for pr in $prs; do
+            echo "=== Checking PR #$pr ==="
+
+            # Count checks that are not yet successful or skipped.
+            failing=$(gh pr checks "$pr" 2>/dev/null \
+              | awk '$2 ~ /fail|error|pending|in_progress|queued/ {count++} END {print count+0}')
+
+            if [ "$failing" -gt 0 ]; then
+              echo "PR #$pr: $failing check(s) not yet green — skipping."
+              continue
+            fi
+
+            echo "PR #$pr: all checks green, merging."
+            gh pr merge "$pr" --squash --delete-branch \
+              --subject "$(gh pr view "$pr" --json title --jq .title)" \
+              --body "Auto-merged: chore PR, all CI checks green."
+          done

@@ -1,0 +1,95 @@
+name: Signal regression check
+
+on:
+  pull_request:
+
+jobs:
+  signal-diff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Get ISO week (cache key component)
+        id: week
+        run: echo "week=$(date +%Y-%W)" >> "$GITHUB_OUTPUT"
+
+      # Restore a weekly-keyed DB so we don't re-download bulk CSVs every run.
+      # Cache miss triggers a full rebuild (~5 min); cache hit is instant.
+      - name: Restore DB cache
+        id: cache-db
+        uses: actions/cache@v4
+        with:
+          path: fuel_signal.db
+          key: fuel-db-${{ runner.os }}-${{ hashFiles('data/snapshots/**') }}-${{ steps.week.outputs.week }}
+
+      - name: Build DB (cache miss)
+        if: steps.cache-db.outputs.cache-hit != 'true'
+        run: |
+          uv run python -m fuel_signal.history
+          uv run python -m fuel_signal.db
+
+      - name: Run signal on PR branch
+        run: |
+          uv run python -m fuel_signal.signal --as-of 2025-06-01 > /tmp/signal-pr.txt 2>/dev/null \
+            || echo "(signal unavailable — insufficient DB data)" > /tmp/signal-pr.txt
+          uv run python -m fuel_signal.signal --as-of 2025-12-01 >> /tmp/signal-pr.txt 2>/dev/null \
+            || true
+          uv run python -m fuel_signal.signal >> /tmp/signal-pr.txt 2>/dev/null \
+            || true
+
+      - name: Checkout base branch code (keep DB)
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git checkout origin/${{ github.base_ref }} -- fuel_signal/ pyproject.toml uv.lock
+
+      - name: Run signal on base branch code
+        run: |
+          uv run python -m fuel_signal.signal --as-of 2025-06-01 > /tmp/signal-base.txt 2>/dev/null \
+            || echo "(signal unavailable — insufficient DB data)" > /tmp/signal-base.txt
+          uv run python -m fuel_signal.signal --as-of 2025-12-01 >> /tmp/signal-base.txt 2>/dev/null \
+            || true
+          uv run python -m fuel_signal.signal >> /tmp/signal-base.txt 2>/dev/null \
+            || true
+
+      - name: Compute diff
+        id: diff
+        run: |
+          diff /tmp/signal-base.txt /tmp/signal-pr.txt > /tmp/diff.txt || true
+          {
+            echo "changed=$(test -s /tmp/diff.txt && echo 'true' || echo 'false')"
+            printf 'diff<<__EOF__\n'
+            cat /tmp/diff.txt
+            printf '__EOF__\n'
+            printf 'pr_out<<__EOF__\n'
+            cat /tmp/signal-pr.txt
+            printf '__EOF__\n'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post regression comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const changed = '${{ steps.diff.outputs.changed }}' === 'true';
+            const diff    = `${{ steps.diff.outputs.diff }}`.trim();
+            const prOut   = `${{ steps.diff.outputs.pr_out }}`.trim();
+
+            const body = changed
+              ? `## ⚠️ Signal output changed by this PR\n\n\`\`\`diff\n${diff}\n\`\`\``
+              : `## ✅ Signal output unchanged\n\n\`\`\`\n${prOut}\n\`\`\``;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

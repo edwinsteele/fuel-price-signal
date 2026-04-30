@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: automation.md
+    url: https://github.com/edwinsteele/fuel-price-signal/blob/main/docs/automation.md
+    about: How the chore/polish/design workflow and worker routine operate

@@ -1,0 +1,40 @@
+name: Claude PR review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. Focus on:
+            - Correctness: does the change do what the linked issue asks?
+            - Scope discipline: does it touch only what's needed (no scope creep)?
+            - Test coverage: is there a test for any new behaviour?
+            - Signal/cycle logic: if fuel_signal/cycle.py, signal.py, or backtest.py are touched,
+              flag any change to thresholds, smoothing parameters, or peak-detection logic — these
+              require design review even if the PR is labelled chore or polish.
+            - Security: no secrets, no shell injection, no unsafe SQL.
+
+            Use `gh pr comment` for top-level feedback.
+            Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) to
+            highlight specific code issues inline.
+            Only post GitHub comments — do not produce review text as assistant messages.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"

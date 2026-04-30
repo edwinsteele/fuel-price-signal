@@ -248,3 +248,81 @@ Tests are required alongside all implementation. Key areas:
 ## Model/effort guidance
 - Sonnet for implementation (downloader, transformer, DB layer, tests)
 - Opus for analytically hard design: cycle detection math, backtest engine architecture, leading indicator analysis
+
+## Automation workflow
+
+### Label taxonomy
+
+| Label | Meaning | Who acts |
+|-------|---------|----------|
+| `chore` | Formatting, dead code, doc fixes, dependency bumps, trivial cleanup | Worker picks up; auto-merges on green CI |
+| `polish` | Small contained features, test additions, minor refactors | Worker picks up; owner review required before merge |
+| `design` | Cycle detection, signal logic, ML work, architecture decisions | **Worker never picks these** — owner works manually |
+| `claude-authored` | PR was opened by the worker routine | Applied automatically by the worker |
+| `auto-merge-ok` | Safe to auto-merge once CI passes | Applied by worker to `chore` PRs after CI is green |
+
+**Classification examples:**
+- `chore`: add a missing type hint, bump a dev dependency, fix a typo in a docstring, delete unused import
+- `polish`: add a missing test for an existing function, extract a helper that duplicates two callers, add a `--verbose` flag to an existing CLI command
+- `design`: change cycle detection algorithm, add a new signal class, modify the DB schema, anything that touches `cycle.py`, `signal.py`, or ML work
+
+### If you are the scheduled worker routine
+
+You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `polish` issues and open draft PRs.
+
+**Pickup rules:**
+1. Check for open PRs with the `claude-authored` label. If any exist, **exit immediately** — one batch at a time.
+2. Query `gh issue list --label "chore,polish" --state open --no-assignee --json number,title,labels,createdAt` ordered by label (`chore` before `polish`), then by age (oldest first). Take up to 3.
+3. For each issue, create a branch `worker/issue-<N>-<slug>` and open a draft PR.
+
+**For each PR:**
+1. Post a plan comment (3–5 bullets: what will change, what won't, what test gets added) as your first action.
+2. Implement the minimal change — do not scope-creep.
+3. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
+4. Open as draft PR titled `fix: <issue title> (closes #N)` with labels `claude-authored` + the issue's original label.
+5. Once CI is green and the plan comment has been up for at least 4 hours with no `nack` reply: mark the PR ready-for-review. For `chore` PRs, also add `auto-merge-ok`.
+
+**Escape hatch — polish → design upgrade:**
+If while implementing a `polish` issue you discover it actually requires design work:
+1. Relabel the issue to `design` using `gh issue edit N --add-label design --remove-label polish`.
+2. Post a comment explaining why you stopped and what the design question is.
+3. Do not write any code. Move on to the next issue in the batch.
+
+**Nack detection:**
+Before marking a PR ready-for-review, check whether any reply to your plan comment contains `nack` (case-insensitive). If so, close the PR and add a comment linking back to the issue.
+
+**Branch naming:** `worker/issue-<N>-<short-slug>` (e.g. `worker/issue-7-add-type-hints`)
+
+**PR title format:** `fix: <issue title> (closes #N)` for chore; `feat: <issue title> (closes #N)` for polish.
+
+### If you are an interactive session
+
+- **Do not pick up `chore` or `polish` issues yourself.** Those belong to the worker routine. If you notice something that belongs in one of those categories, file a `gh issue create` instead.
+- **`design` issues are fair game** for interactive work — work them with the owner as you would any other task.
+- Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
+
+### spawn_task → gh issue create redirect
+
+When `mcp__ccd_session__spawn_task` would normally be the right call (you noticed an out-of-scope issue while working), **do not spawn a session**. Instead:
+
+```bash
+gh issue create \
+  --title "Short imperative title" \
+  --label "chore"  # or polish or design \
+  --body "$(cat <<'EOF'
+## What
+<what needs doing>
+
+## Why I noticed this
+<file paths + context — e.g. "saw this while implementing X in fuel_signal/cycle.py">
+
+## Files likely affected
+- fuel_signal/foo.py
+
+## Acceptance criteria
+- [ ] ...
+EOF
+)"
+```
+
+Use `chore` for cleanup, `polish` for small features/tests, `design` for anything architectural. Include file paths and enough context for the worker (or future-you) to act cold.
