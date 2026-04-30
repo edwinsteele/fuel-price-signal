@@ -6,11 +6,10 @@ This document describes how `chore` and `polish` issues flow from filing to merg
 
 | Label | Who files | Who works it | Merge path |
 |-------|-----------|--------------|------------|
-| `chore` | Owner or worker (via spawn_task redirect) | Worker routine | Auto-merge once CI green + `auto-merge-ok` applied |
+| `chore` | Owner or worker (via spawn_task redirect) | Worker routine | Owner review required |
 | `polish` | Owner or worker | Worker routine | Owner review required |
 | `design` | Owner | Owner (interactive) | Normal PR review |
 | `claude-authored` | Applied by worker automatically | — | Identifies worker-opened PRs |
-| `auto-merge-ok` | Applied by worker after CI passes | — | Triggers auto-merge workflow |
 
 ## State machine
 
@@ -26,24 +25,14 @@ Worker picks up (next hourly run, no open claude-authored PRs)
         └─ Opens draft PR (claude-authored + chore|polish)
                 │
                 ▼
-        CI runs (lint, test, signal-regression, claude-review)
+        CI runs (lint, test, signal-regression)
                 │
           ┌─────┴──────┐
         fail           pass
           │               │
-        Worker           Wait 4 hours (nack window)
-        fixes &          │
-        pushes    ┌──────┴────────┐
-                nack received    no nack
-                  │               │
-                Worker          Mark ready-for-review
-                closes PR       │
-                + comment    ┌──┴──────────────────┐
-                           chore                  polish
-                             │                     │
-                       Add auto-merge-ok      Owner reviews
-                             │                     │
-                       Auto-merged           Owner merges or closes
+        Worker         Mark ready-for-review
+        fixes &            │
+        pushes         Owner reviews and merges
 ```
 
 For `polish` issues that turn out to need design work:
@@ -61,26 +50,6 @@ Worker discovers design work needed
 The worker keeps at most **one batch of 3 draft PRs** open at a time. Before picking up issues, it checks `gh pr list --label claude-authored --state open`. If any open PR exists, it exits without doing anything.
 
 This means: review your open PRs before filing more issues if you want the queue to move.
-
-## Nack window
-
-After CI passes, the worker waits **4 hours** before marking a PR ready-for-review. During this window you can:
-- Reply `nack` to the plan comment → worker closes the PR and adds a comment linking back to the issue (which stays open).
-- Close the PR yourself → worker will not reopen it.
-- Merge the PR yourself → closes the issue automatically via the `Closes #N` in the PR body.
-
-If you are AFK for more than 4 hours and come back to a ready-for-review `polish` PR, that's expected — review it normally.
-
-## Auto-merge (chore only)
-
-The auto-merge workflow fires when a PR has all three:
-1. `claude-authored` label
-2. `chore` label
-3. `auto-merge-ok` label
-
-…and all CI checks pass. It squash-merges the PR and deletes the branch.
-
-To disable auto-merge for a specific PR: remove the `auto-merge-ok` label.
 
 ## Pausing the worker
 
@@ -106,5 +75,5 @@ If a worker PR is causing problems and you need to stop everything immediately:
 The workflow was set up in this order (so future readers understand the dependency):
 
 1. **Labels + CLAUDE.md + issue templates + PR template + this doc** — landed first, so the worker has conventions to follow from its first run.
-2. **CI enrichment** (claude-code-review action, signal-regression check, auto-merge workflow) — landed second, so CI is informative before the worker starts opening PRs.
+2. **CI enrichment** (signal-regression check) — landed second, so CI is informative before the worker starts opening PRs.
 3. **Worker routine** — activated last, once the full infrastructure was in place.
