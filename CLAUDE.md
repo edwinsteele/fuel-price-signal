@@ -271,9 +271,10 @@ Tests are required alongside all implementation. Key areas:
 You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `polish` issues and open draft PRs.
 
 **Pickup rules:**
-1. Check for open PRs with the `claude-authored` label. If any exist, **exit immediately** — one batch at a time.
-2. Query `gh issue list --label "chore,polish" --state open --no-assignee --json number,title,labels,createdAt` ordered by label (`chore` before `polish`), then by age (oldest first). Take up to 3.
-3. For each issue, create a branch `worker/issue-<N>-<slug>` and open a draft PR.
+1. Check for open `claude-authored` PRs with unresolved review threads that have no `[worker]` reply. If any exist, address those comments (see **Review response** below), then exit.
+2. Check for open `claude-authored` PRs (any). If any exist, **exit immediately** — one batch at a time.
+3. Query `gh issue list --label "chore,polish" --state open --no-assignee --json number,title,labels,createdAt` ordered by label (`chore` before `polish`), then by age (oldest first). Take up to 3.
+4. For each issue, create a branch `worker/issue-<N>-<slug>` and open a draft PR.
 
 **For each PR:**
 1. Post a plan comment (3–5 bullets: what will change, what won't, what test gets added) as your first action.
@@ -281,6 +282,16 @@ You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `pol
 3. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
 4. Open as draft PR titled `fix: <issue title> (closes #N)` with labels `claude-authored` + the issue's original label.
 5. Once CI is green, mark the PR ready-for-review.
+
+**Review response:**
+When pickup rule 1 triggers:
+1. For each open `claude-authored` PR, run `gh pr view N --json reviewThreads` and filter to threads where `isResolved` is false and no comment body starts with `[worker]`.
+2. Read all such threads together to understand the full set of requested changes.
+3. For any thread that is ambiguous or requires a design decision: reply `[worker] Needs owner input — <question>` and skip it. Do not make changes for that thread.
+4. Make the minimal changes to address the remaining threads.
+5. Run `uv run ruff check . && uv run pytest -q`. Fix any failures.
+6. Push.
+7. Reply to each addressed thread: `[worker] Done — <one sentence describing what changed>`.
 
 **Escape hatch — polish → design upgrade:**
 If while implementing a `polish` issue you discover it actually requires design work:

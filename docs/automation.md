@@ -32,7 +32,18 @@ Worker picks up (next hourly run, no open claude-authored PRs)
           │               │
         Worker         Mark ready-for-review
         fixes &            │
-        pushes         Owner reviews and merges
+        pushes         Owner reviews
+                           │
+                 ┌─────────┴──────────┐
+           Comments left         No comments
+                 │                    │
+         Worker addresses        Owner merges
+         on next hourly run
+                 │
+         [worker] Done / Needs owner input
+         reply per thread + push
+                 │
+         Owner resolves threads + merges
 ```
 
 For `polish` issues that turn out to need design work:
@@ -44,6 +55,16 @@ Worker discovers design work needed
         ├─ Posts comment: why it needs design + what the question is
         └─ Stops (no code written), moves to next issue in batch
 ```
+
+## Review response
+
+On each hourly run the worker checks open `claude-authored` PRs for unresolved review threads before looking for new issues. A thread needs a response if it is unresolved and has no comment starting with `[worker]`.
+
+The worker reads all actionable threads together, makes the changes in one pass, pushes, then replies to each thread:
+- `[worker] Done — <one sentence>` for addressed threads
+- `[worker] Needs owner input — <question>` for anything ambiguous or requiring a design decision
+
+You resolve the threads and merge when satisfied. The `[worker]` prefix is how the worker avoids re-processing threads it has already replied to.
 
 ## WIP cap
 
