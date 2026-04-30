@@ -2,9 +2,11 @@ name: Signal regression check
 
 on:
   pull_request:
+    types: [labeled, opened, synchronize, reopened]
 
 jobs:
   signal-diff:
+    if: contains(github.event.pull_request.labels.*.name, 'design')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,24 +21,43 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Get ISO week (cache key component)
-        id: week
-        run: echo "week=$(date +%Y-%W)" >> "$GITHUB_OUTPUT"
+      - name: Get month (cache key component)
+        id: month
+        run: echo "month=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
 
-      # Restore a weekly-keyed DB so we don't re-download bulk CSVs every run.
-      # Cache miss triggers a full rebuild (~5 min); cache hit is instant.
+      - name: Restore raw CSV cache
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: fuel-raw-${{ runner.os }}-${{ steps.month.outputs.month }}
+          restore-keys: |
+            fuel-raw-${{ runner.os }}-
+
+      - name: Restore cleaned CSV cache
+        uses: actions/cache@v4
+        with:
+          path: data/cleaned
+          key: fuel-cleaned-${{ runner.os }}-${{ steps.month.outputs.month }}
+          restore-keys: |
+            fuel-cleaned-${{ runner.os }}-
+
       - name: Restore DB cache
-        id: cache-db
         uses: actions/cache@v4
         with:
           path: fuel_signal.db
-          key: fuel-db-${{ runner.os }}-${{ hashFiles('data/snapshots/**') }}-${{ steps.week.outputs.week }}
+          key: fuel-db-${{ runner.os }}-${{ steps.month.outputs.month }}
+          restore-keys: |
+            fuel-db-${{ runner.os }}-
 
-      - name: Build DB (cache miss)
-        if: steps.cache-db.outputs.cache-hit != 'true'
+      - name: Download and clean (if needed)
         run: |
-          uv run python -m fuel_signal.history
-          uv run python -m fuel_signal.db
+          if [ ! -d data/cleaned ] || [ -z "$(ls -A data/cleaned 2>/dev/null)" ]; then
+            uv run python -m fuel_signal.history
+          fi
+
+      - name: Build DB (if needed)
+        run: |
+          [ -f fuel_signal.db ] || uv run python -m fuel_signal.db
 
       - name: Run signal on PR branch
         run: |
