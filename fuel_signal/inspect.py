@@ -328,22 +328,26 @@ def _build_scatter_spec(
 def _build_gradient_heatmap(
     conn: sqlite3.Connection,
     cutoff: str | None,
-    window_days: int = 7,
+    window_days: int = 1,
+    councils: list[str] | None = None,
 ) -> dict:
     raw = _db.gradient_by_lga(conn, window_days=window_days)
     if cutoff:
-        raw = [(c, w, s) for c, w, s in raw if w >= cutoff]
+        raw = [(c, d, s) for c, d, s in raw if d >= cutoff]
+    if councils:
+        council_set = set(councils)
+        raw = [(c, d, s) for c, d, s in raw if c in council_set]
     if not raw:
         return {}
 
-    all_weeks = sorted({w for _, w, _ in raw})
-    councils = sorted({c for c, _, _ in raw})
+    all_dates = sorted({d for _, d, _ in raw})
+    council_list = sorted({c for c, _, _ in raw})
     pivot: dict[str, dict[str, float]] = {}
-    for council, week, slope in raw:
-        pivot.setdefault(council, {})[week] = slope
+    for council, date, slope in raw:
+        pivot.setdefault(council, {})[date] = slope
 
-    rows = [(c, [pivot[c].get(w) for w in all_weeks]) for c in councils]
-    return {"weeks": all_weeks, "rows": rows}
+    rows = [(c, [pivot[c].get(d) for d in all_dates]) for c in council_list]
+    return {"dates": all_dates, "rows": rows}
 
 
 def _build_coverage_heatmap(
@@ -481,7 +485,10 @@ def _create_app(
         elif chart_type == "scatter":
             chart_spec = _build_scatter_spec(conn, resolved, metric) or None
         elif chart_type == "heatmap-gradient":
-            heatmap_data = _build_gradient_heatmap(conn, cutoff) or None
+            selected_councils = [s[4:] for s in specs if s.startswith("lga:")]
+            heatmap_data = _build_gradient_heatmap(
+                conn, cutoff, councils=selected_councils or None
+            ) or None
         elif chart_type == "heatmap-coverage":
             heatmap_data = _build_coverage_heatmap(conn, cutoff) or None
 

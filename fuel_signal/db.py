@@ -808,12 +808,13 @@ def coverage_matrix(
 def gradient_by_lga(
     conn: sqlite3.Connection,
     fuel_code: str = "E10",
-    window_days: int = 7,
+    window_days: int = 1,
 ) -> list[tuple[str, str, float]]:
-    """Return [(council, week_start, mean_slope_cents_per_day)] for gradient heatmap.
+    """Return [(council, date, slope_cents_per_day)] for gradient heatmap.
 
-    week_start is the YYYY-MM-DD of the first day of each window_days bucket.
-    Slope is the mean of numpy.gradient over that bucket (positive = rising price).
+    When window_days=1 (default) each row is one calendar day and slope is
+    the numpy.gradient at that day.  When window_days>1 rows are bucketed into
+    ISO-week windows and slope is the mean gradient across the bucket.
     """
     import datetime as _dt
 
@@ -843,14 +844,18 @@ def gradient_by_lga(
         prices = np.array([r[1] / 10 for r in rows])
         gradients = np.gradient(prices)
 
-        # Bucket by calendar week (ISO Monday)
-        buckets: dict[str, list[float]] = {}
-        for date_str, grad in zip(dates, gradients):
-            d = _dt.date.fromisoformat(date_str)
-            week_start = (d - _dt.timedelta(days=d.weekday())).isoformat()
-            buckets.setdefault(week_start, []).append(float(grad))
-        for week_start, grads in sorted(buckets.items()):
-            results.append((council, week_start, float(np.mean(grads))))
+        if window_days == 1:
+            for date_str, grad in zip(dates, gradients):
+                results.append((council, date_str, float(grad)))
+        else:
+            # Bucket by calendar week (ISO Monday)
+            buckets: dict[str, list[float]] = {}
+            for date_str, grad in zip(dates, gradients):
+                d = _dt.date.fromisoformat(date_str)
+                week_start = (d - _dt.timedelta(days=d.weekday())).isoformat()
+                buckets.setdefault(week_start, []).append(float(grad))
+            for week_start, grads in sorted(buckets.items()):
+                results.append((council, week_start, float(np.mean(grads))))
 
     return results
 
