@@ -32,14 +32,7 @@ Downloads all bulk price history from data.nsw.gov.au (~2016–present) into `da
 uv run python -m fuel_signal.history
 ```
 
-Takes a few minutes on first run (100+ files). Cleaning handles known data quality issues in the source:
-- YYYY-DD-MM / YYYY-MM-DD date format bug (pre-2019 files); for files where every date has day ≤ 12 a constant-day-across-varying-months fingerprint is used to detect the true month
-- Postcode typos and ACT stations that slipped into NSW data
-- Extra fuel-code lines where station details are omitted
-- Duplicate rows for the same station + timestamp
-- Missing brand fields (inferred from station name)
-
-> **Note:** if you have existing `data/cleaned/` files built before this fix, delete the cleaned versions of the four affected 2019 files (`6d5fd229`, `efcbe322`, `ba5a2055`, `8a29ce30`) and re-run to recover Feb 1–12, Oct 1–9, and Nov 1–8 2019.
+Takes a few minutes on first run (100+ files).
 
 ### 2. Collect a live snapshot (populates station reference data)
 
@@ -57,7 +50,15 @@ This writes one snapshot CSV to `data/snapshots/YYYY/MM/YYYY-MM-DD.csv` and is a
 uv run python -m fuel_signal.db
 ```
 
-Loads all snapshot CSVs (from `data/snapshots/`) then all historical cleaned CSVs (from `data/cleaned/`), matching historical rows to stations by normalised address. Skipped rows mean the station predates the FuelCheck API reference data — expected and harmless.
+Loads all snapshot CSVs (from `data/snapshots/`) then all historical cleaned CSVs (from `data/cleaned/`).
+
+### 4. Forward-fill daily price gaps
+
+```bash
+uv run python -m fuel_signal.fill
+```
+
+Rebuilds the `daily_prices` table by forward-filling gaps between observations. Required after `db` — analysis commands read from `daily_prices`, not from the raw observations.
 
 ## Inspecting the data
 
@@ -153,7 +154,7 @@ uv run python -m fuel_signal.signal --as-of 2026-02-15
 uv run python -m fuel_signal.signal --db /path/to/fuel_signal.db
 ```
 
-Output is the combined verdict (one line per preferred station) followed by the four contributing signals and their reasons:
+Output is the combined verdict (one line per preferred station) followed by the contributing signals:
 
 ```
 [as of 2026-01-10]
@@ -161,14 +162,10 @@ BUY  | Day 27/35 of cycle | E10 @ BP Valley Heights: 159.9c
 BUY  | Day 27/35 of cycle | E10 @ Shell Blaxland: 157.5c
 Combined: BUY (mean signal +1.00)
   AverageCycleTimeSignal: BUY — cycle ending soon (73% through cycle; day 26 / 35.5)
-  AverageGradientAfterPeakSignal: NEUTRAL — price has not flatlined (last 3 gradients: [-0.81, -0.52, -0.5])
-  AverageNearPreviousMinMaxSignal: BUY — price close to low in last cycle (current 159.3c; last cycle min 168.3c, max 200.0c)
+  AverageGradientAfterPeakSignal: NEUTRAL — price has not flatlined
+  AverageNearPreviousMinMaxSignal: BUY — price close to low in last cycle
   FavouriteServiceStationPriceGradientSignal: NEUTRAL — no preferred stations raising sharply
 ```
-
-The four signals (`AverageCycleTimeSignal`, `AverageGradientAfterPeakSignal`, `AverageNearPreviousMinMaxSignal`, `FavouriteServiceStationPriceGradientSignal`) each return BUY / WAIT / DONT_BUY / NEUTRAL. Directional values are averaged (NEUTRAL excluded); mean ≥ 0.5 → BUY, ≤ -0.5 → DON'T BUY, else WAIT.
-
-If `--as-of` falls within the forward-fill gap (the period between the end of historical CSVs and the first daily snapshot), a warning is printed to stderr and the signal should not be trusted.
 
 ## Daily snapshots
 
