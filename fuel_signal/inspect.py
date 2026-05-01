@@ -482,13 +482,7 @@ def _create_app(
         elif chart_type == "scatter":
             chart_spec = _build_scatter_spec(conn, resolved, metric) or None
         elif chart_type == "heatmap-gradient":
-            selected_councils = [s[4:] for s in specs if s.startswith("lga:")]
-            if selected_councils:
-                heatmap_data = _build_gradient_heatmap(
-                    conn, cutoff, councils=selected_councils
-                ) or None
-            else:
-                heatmap_data = None
+            heatmap_data = _build_gradient_heatmap(conn, cutoff) or None
         elif chart_type == "heatmap-coverage":
             heatmap_data = _build_coverage_heatmap(conn, cutoff) or None
 

@@ -8,8 +8,12 @@
   <span class="swatch" style="background:rgb(255,0,0)"></span>
   <span>+3c/day</span>
   <span style="margin-left:1rem; color:#888">(clipped at ±3c/day — blue=falling, red=rising)</span>
+  <span style="margin-left:auto">
+    <button class="hm-scroll-btn" onclick="document.querySelector('.heatmap-outer').scrollBy({left:-300,behavior:'smooth'})">&#9664;</button>
+    <button class="hm-scroll-btn" onclick="document.querySelector('.heatmap-outer').scrollBy({left:300,behavior:'smooth'})">&#9654;</button>
+  </span>
 </div>
-<div class="heatmap-outer">
+<div class="heatmap-outer" id="heatmap-outer">
   <table class="heatmap-table">
     <thead>
       <tr>

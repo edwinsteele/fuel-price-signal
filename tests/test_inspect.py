@@ -92,17 +92,15 @@ def test_gradient_heatmap_respects_cutoff(conn):
     assert all(d >= cutoff for d in result["dates"])
 
 
-def test_gradient_heatmap_empty_when_no_councils_selected(conn):
-    # When only preferred stations are selected (no lga: specs), the
-    # index() route must not fall back to showing all LGAs.
-    # Simulate the route logic: selected_councils=[] → heatmap_data=None
+def test_gradient_heatmap_shows_all_councils_when_no_lga_selected(conn):
+    # When no lga: specs are in the URL (e.g. only brand/favourite/sydney),
+    # the route calls _build_gradient_heatmap with councils=None so all LGAs
+    # are shown — the heatmap is always visible on the gradient view.
     upsert_stations(conn, [_STATION_BM, _STATION_SYD])
     _insert_prices(conn, 1001)
     _insert_prices(conn, 2001)
-    # Route logic: if not selected_councils → heatmap_data = None (no call)
-    selected_councils: list[str] = []
-    heatmap_data = (
-        _build_gradient_heatmap(conn, cutoff=None, councils=selected_councils)
-        if selected_councils else None
-    )
-    assert heatmap_data is None
+    heatmap_data = _build_gradient_heatmap(conn, cutoff=None, councils=None)
+    assert heatmap_data
+    council_names = {c for c, _ in heatmap_data["rows"]}
+    assert "Blue Mountains" in council_names
+    assert "Parramatta" in council_names
