@@ -4,6 +4,7 @@ import datetime
 
 import pytest
 
+from fuel_signal import series as _series
 from fuel_signal.db import (
     create_schema,
     open_db,
@@ -50,34 +51,43 @@ def _insert_prices(conn, station_code, n_days=10, base_price=160.0):
     conn.commit()
 
 
-def test_gradient_heatmap_shows_all_councils_when_none_selected(conn):
+def _resolve_specs(conn, specs):
+    return [_series.resolve(conn, s) for s in specs]
+
+
+def test_gradient_heatmap_filters_to_selected_lga(conn):
     upsert_stations(conn, [_STATION_BM, _STATION_SYD])
     _insert_prices(conn, 1001)
     _insert_prices(conn, 2001)
-    result = _build_gradient_heatmap(conn, cutoff=None, councils=None)
+    resolved = _resolve_specs(conn, ["lga:Blue Mountains"])
+    result = _build_gradient_heatmap(resolved, cutoff=None)
     assert result
-    council_names = {c for c, _ in result["rows"]}
-    assert "Blue Mountains" in council_names
-    assert "Parramatta" in council_names
+    labels = {label for label, _ in result["rows"]}
+    assert any("Blue Mountains" in lab for lab in labels)
+    assert not any("Parramatta" in lab for lab in labels)
 
 
-def test_gradient_heatmap_filters_to_selected_councils(conn):
+def test_gradient_heatmap_includes_brand_and_station_rows(conn):
     upsert_stations(conn, [_STATION_BM, _STATION_SYD])
     _insert_prices(conn, 1001)
     _insert_prices(conn, 2001)
-    result = _build_gradient_heatmap(conn, cutoff=None, councils=["Blue Mountains"])
+    resolved = _resolve_specs(
+        conn, ["sydney", "brand:Shell", "station:1001"]
+    )
+    result = _build_gradient_heatmap(resolved, cutoff=None)
     assert result
-    council_names = {c for c, _ in result["rows"]}
-    assert "Blue Mountains" in council_names
-    assert "Parramatta" not in council_names
+    labels = {label for label, _ in result["rows"]}
+    assert any("Sydney" in lab for lab in labels)
+    assert any("Shell" in lab for lab in labels)
+    assert any("Springwood" in lab for lab in labels)
 
 
 def test_gradient_heatmap_returns_daily_dates(conn):
     upsert_stations(conn, [_STATION_BM])
     _insert_prices(conn, 1001, n_days=10)
-    result = _build_gradient_heatmap(conn, cutoff=None)
+    resolved = _resolve_specs(conn, ["station:1001"])
+    result = _build_gradient_heatmap(resolved, cutoff=None)
     assert result
-    # Daily mode: 10 dates, each formatted YYYY-MM-DD
     assert len(result["dates"]) == 10
     assert all(len(d) == 10 for d in result["dates"])
 
@@ -85,22 +95,13 @@ def test_gradient_heatmap_returns_daily_dates(conn):
 def test_gradient_heatmap_respects_cutoff(conn):
     upsert_stations(conn, [_STATION_BM])
     _insert_prices(conn, 1001, n_days=10)
-    # Cutoff after day 5 keeps only the last 5 dates
+    resolved = _resolve_specs(conn, ["station:1001"])
     cutoff = (datetime.date(2024, 1, 1) + datetime.timedelta(days=5)).isoformat()
-    result = _build_gradient_heatmap(conn, cutoff=cutoff)
+    result = _build_gradient_heatmap(resolved, cutoff=cutoff)
     assert result
     assert all(d >= cutoff for d in result["dates"])
 
 
-def test_gradient_heatmap_shows_all_councils_when_no_lga_selected(conn):
-    # When no lga: specs are in the URL (e.g. only brand/favourite/sydney),
-    # the route calls _build_gradient_heatmap with councils=None so all LGAs
-    # are shown — the heatmap is always visible on the gradient view.
-    upsert_stations(conn, [_STATION_BM, _STATION_SYD])
-    _insert_prices(conn, 1001)
-    _insert_prices(conn, 2001)
-    heatmap_data = _build_gradient_heatmap(conn, cutoff=None, councils=None)
-    assert heatmap_data
-    council_names = {c for c, _ in heatmap_data["rows"]}
-    assert "Blue Mountains" in council_names
-    assert "Parramatta" in council_names
+def test_gradient_heatmap_empty_when_no_resolved_series(conn):
+    result = _build_gradient_heatmap([], cutoff=None)
+    assert result == {}

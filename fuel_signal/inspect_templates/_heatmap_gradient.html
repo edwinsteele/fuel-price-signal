@@ -17,22 +17,22 @@
   <table class="heatmap-table">
     <thead>
       <tr>
-        <th class="hm-row-head">LGA</th>
+        <th class="hm-row-head">Series</th>
         {% for d in heatmap_data.dates %}
         <th title="{{ d }}">{% if d[8:10] == '01' %}{{ d[:7] }}{% endif %}</th>
         {% endfor %}
       </tr>
     </thead>
     <tbody>
-      {% for council, row in heatmap_data.rows %}
+      {% for label, row in heatmap_data.rows %}
       <tr>
-        <td class="hm-row-head">{{ council }}</td>
+        <td class="hm-row-head">{{ label }}</td>
         {% for slope in row %}
           {% if slope is none %}
           <td style="background:#f0f0f0" title="no data"></td>
           {% else %}
           <td style="background:{{ slope | gradient_color }}"
-              title="{{ council }} {{ heatmap_data.dates[loop.index0] }}: {{ '%.2f'|format(slope) }}c/day"></td>
+              title="{{ label }} {{ heatmap_data.dates[loop.index0] }}: {{ '%.2f'|format(slope) }}c/day"></td>
           {% endif %}
         {% endfor %}
       </tr>
