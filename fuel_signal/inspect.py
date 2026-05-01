@@ -331,12 +331,9 @@ def _build_gradient_heatmap(
     window_days: int = 1,
     councils: list[str] | None = None,
 ) -> dict:
-    raw = _db.gradient_by_lga(conn, window_days=window_days)
+    raw = _db.gradient_by_lga(conn, window_days=window_days, councils=councils)
     if cutoff:
         raw = [(c, d, s) for c, d, s in raw if d >= cutoff]
-    if councils:
-        council_set = set(councils)
-        raw = [(c, d, s) for c, d, s in raw if c in council_set]
     if not raw:
         return {}
 
@@ -486,9 +483,12 @@ def _create_app(
             chart_spec = _build_scatter_spec(conn, resolved, metric) or None
         elif chart_type == "heatmap-gradient":
             selected_councils = [s[4:] for s in specs if s.startswith("lga:")]
-            heatmap_data = _build_gradient_heatmap(
-                conn, cutoff, councils=selected_councils or None
-            ) or None
+            if selected_councils:
+                heatmap_data = _build_gradient_heatmap(
+                    conn, cutoff, councils=selected_councils
+                ) or None
+            else:
+                heatmap_data = None
         elif chart_type == "heatmap-coverage":
             heatmap_data = _build_coverage_heatmap(conn, cutoff) or None
 

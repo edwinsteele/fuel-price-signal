@@ -828,3 +828,26 @@ def test_gradient_by_lga_returns_daily_slopes(conn):
 
 def test_gradient_by_lga_empty_db(conn):
     assert gradient_by_lga(conn) == []
+
+
+def test_gradient_by_lga_councils_filter(conn):
+    import datetime
+    # Two stations in different LGAs
+    bm_station = _STATION  # postcode 2777 → Blue Mountains
+    syd_station = {**_STATION, "station_code": 2001, "address": "5 Church Street, Parramatta",
+                   "suburb": "Parramatta", "postcode": "2150", "name": "Ampol Parramatta"}
+    upsert_stations(conn, [bm_station, syd_station])
+    base = datetime.date(2024, 1, 1)
+    upsert_daily_prices(conn, [
+        (1001, "E10", (base + datetime.timedelta(days=i)).isoformat(), 160.0 + i)
+        for i in range(7)
+    ])
+    upsert_daily_prices(conn, [
+        (2001, "E10", (base + datetime.timedelta(days=i)).isoformat(), 165.0 + i)
+        for i in range(7)
+    ])
+    conn.commit()
+    results = gradient_by_lga(conn, "E10", councils=["Blue Mountains"])
+    councils_seen = {r[0] for r in results}
+    assert "Blue Mountains" in councils_seen
+    assert len(councils_seen) == 1, "councils filter must exclude other LGAs"

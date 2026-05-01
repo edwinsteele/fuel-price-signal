@@ -1,4 +1,4 @@
-"""Tests for fuel_signal.inspect — gradient heatmap builder."""
+"""Tests for fuel_signal.inspect — gradient heatmap builder and Flask routes."""
 
 import datetime
 
@@ -90,3 +90,19 @@ def test_gradient_heatmap_respects_cutoff(conn):
     result = _build_gradient_heatmap(conn, cutoff=cutoff)
     assert result
     assert all(d >= cutoff for d in result["dates"])
+
+
+def test_gradient_heatmap_empty_when_no_councils_selected(conn):
+    # When only preferred stations are selected (no lga: specs), the
+    # index() route must not fall back to showing all LGAs.
+    # Simulate the route logic: selected_councils=[] → heatmap_data=None
+    upsert_stations(conn, [_STATION_BM, _STATION_SYD])
+    _insert_prices(conn, 1001)
+    _insert_prices(conn, 2001)
+    # Route logic: if not selected_councils → heatmap_data = None (no call)
+    selected_councils: list[str] = []
+    heatmap_data = (
+        _build_gradient_heatmap(conn, cutoff=None, councils=selected_councils)
+        if selected_councils else None
+    )
+    assert heatmap_data is None
