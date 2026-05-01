@@ -395,6 +395,22 @@ class Transformer:
             for row in reader:
                 line_number += 1
 
+                # CKAN datastore dump injects a numeric _id column at row 32001+
+                # without updating the header, shifting all subsequent fields right.
+                # ServiceStationName is never a plain integer in real data.
+                if row.get("ServiceStationName", "").isdigit():
+                    extras = row.get(None) or []
+                    row = {
+                        "ServiceStationName": row["Address"],
+                        "Address": row["Suburb"],
+                        "Suburb": row["Postcode"],
+                        "Postcode": row["Brand"],
+                        "Brand": row["FuelCode"],
+                        "FuelCode": row["PriceUpdatedDate"],
+                        "PriceUpdatedDate": row["Price"],
+                        "Price": extras[0] if extras else "",
+                    }
+
                 # Skip trailing blank/separator lines
                 if not row.get("FuelCode") and not row.get("Price") and not row.get("PriceUpdatedDate"):
                     continue

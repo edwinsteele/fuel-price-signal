@@ -518,6 +518,35 @@ def _run_transformer(rows, tmp_path, name="raw.csv"):
         return list(_csv.DictReader(f))
 
 
+def _run_transformer_with_ckan_shift(normal_rows, shifted_rows, tmp_path):
+    """Write a CSV mimicking the CKAN _id column injection bug and run the transformer.
+
+    First len(normal_rows) data rows have the standard 8-column format.
+    Then shifted_rows are written with a numeric _id prepended (9 columns after
+    an 8-column header), exactly as the CKAN dump endpoint produces.
+    """
+    import csv as _csv
+    raw = tmp_path / "raw_shifted.csv"
+    out = tmp_path / "cleaned_shifted.csv"
+    _FIELDS = ["ServiceStationName", "Address", "Suburb", "Postcode",
+               "Brand", "FuelCode", "PriceUpdatedDate", "Price"]
+    with open(raw, "w", newline="") as f:
+        writer = _csv.DictWriter(f, fieldnames=_FIELDS)
+        writer.writeheader()
+        for row in normal_rows:
+            writer.writerow(row)
+        # Shifted rows: prepend a numeric _id so each row has 9 values against
+        # the 8-column header, replicating what the CKAN dump endpoint produces.
+        w = _csv.writer(f)
+        for i, row in enumerate(shifted_rows, start=len(normal_rows) + 1):
+            w.writerow([str(i), row["ServiceStationName"], row["Address"],
+                        row["Suburb"], row["Postcode"], row["Brand"],
+                        row["FuelCode"], row["PriceUpdatedDate"], row["Price"]])
+    Transformer(raw, out).clean()
+    with open(out, newline="") as f:
+        return list(_csv.DictReader(f))
+
+
 def test_clean_deduplicates_same_key(tmp_path):
     rows = [
         {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
@@ -600,6 +629,28 @@ def test_clean_fixes_date_swap_bug(tmp_path):
     result = _run_transformer(rows, tmp_path)
     dates = {r["PriceUpdatedDate"] for r in result}
     assert any("01-05" in d or "01-20" in d for d in dates)
+
+
+def test_clean_recovers_ckan_shifted_rows(tmp_path):
+    # The CKAN datastore dump injects a numeric _id column at row 32001+
+    # without updating the header. Rows before the shift and after must both
+    # appear in the cleaned output with correct field values.
+    normal = [
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "15/06/2025 9:00", "Price": "180.0"},
+    ]
+    shifted = [
+        {"ServiceStationName": "BP", "Address": "2 High St", "Suburb": "Penrith",
+         "Postcode": "2750", "Brand": "BP", "FuelCode": "E10",
+         "PriceUpdatedDate": "20/06/2025 10:00", "Price": "175.0"},
+    ]
+    result = _run_transformer_with_ckan_shift(normal, shifted, tmp_path)
+    assert len(result) == 2
+    stations = {r["ServiceStationName"] for r in result}
+    assert stations == {"Shell", "BP"}
+    prices = {r["ServiceStationName"]: float(r["Price"]) for r in result}
+    assert prices["BP"] == 175.0
 
 
 def test_clean_all_resources(tmp_path):
