@@ -326,24 +326,39 @@ def _build_scatter_spec(
 
 
 def _build_gradient_heatmap(
-    conn: sqlite3.Connection,
+    resolved: list[_series.ResolvedSeries],
     cutoff: str | None,
-    window_days: int = 7,
 ) -> dict:
-    raw = _db.gradient_by_lga(conn, window_days=window_days)
-    if cutoff:
-        raw = [(c, w, s) for c, w, s in raw if w >= cutoff]
-    if not raw:
+    """Build a gradient-by-series-by-day heatmap from resolved series.
+
+    Rows are ordered: sydney → lga → brand → station; within each kind,
+    alphabetical by label.  Each row is numpy.gradient over the post-cutoff
+    points, aligned to the union of dates across all rows.
+    """
+    if not resolved:
         return {}
 
-    all_weeks = sorted({w for _, w, _ in raw})
-    councils = sorted({c for c, _, _ in raw})
-    pivot: dict[str, dict[str, float]] = {}
-    for council, week, slope in raw:
-        pivot.setdefault(council, {})[week] = slope
+    def _key(r: _series.ResolvedSeries) -> tuple[int, str]:
+        order = {"sydney": 0, "lga": 1, "brand": 2, "station": 3}
+        return (order.get(r.kind, 4), r.label)
 
-    rows = [(c, [pivot[c].get(w) for w in all_weeks]) for c in councils]
-    return {"weeks": all_weeks, "rows": rows}
+    rows_with_grads: list[tuple[str, dict[str, float]]] = []
+    for r in sorted(resolved, key=_key):
+        pts = [(d, p) for d, p in r.points if cutoff is None or d >= cutoff]
+        if len(pts) < 2:
+            continue
+        prices = np.array([p for _, p in pts])
+        grads = np.gradient(prices)
+        rows_with_grads.append(
+            (r.label, {pts[i][0]: float(grads[i]) for i in range(len(pts))})
+        )
+
+    if not rows_with_grads:
+        return {}
+
+    all_dates = sorted({d for _, m in rows_with_grads for d in m})
+    rows = [(label, [m.get(d) for d in all_dates]) for label, m in rows_with_grads]
+    return {"dates": all_dates, "rows": rows}
 
 
 def _build_coverage_heatmap(
@@ -421,7 +436,6 @@ def _create_app(
             specs = ["sydney"] + [f"station:{code}" for code in PREFERRED_STATIONS]
 
         cutoff = _cutoff_date(window)
-        is_heatmap = chart_type.startswith("heatmap-")
 
         groups = _series.enumerate_groups(conn)
         preferred_spec_set = {f"station:{code}" for code in PREFERRED_STATIONS} | {"sydney"}
@@ -431,22 +445,19 @@ def _create_app(
             | {f"brand:{b}" for b in groups["brands"]}
         )
 
-        # Resolve series, expanding group display if requested. Heatmap views
-        # don't use resolved.points — skip the resolver to avoid forcing
-        # full-history aggregations for every selected brand/LGA on first load.
+        # Resolve series for everything except the coverage heatmap (which is
+        # built from a per-station observation count and doesn't need price
+        # series).  Display modes (mean/members/both) apply to line, scatter,
+        # and gradient heatmap so each view reflects what the user selected.
         resolved: list[_series.ResolvedSeries] = []
         errors: list[str] = []
-        if is_heatmap:
-            extra_station_specs = [
-                _series.ResolvedSeries(spec=s, label=s, points=[], kind="station")
-                for s in specs
-                if s.startswith("station:") and s not in known_specs
-            ]
-        else:
+        needs_resolve = chart_type != "heatmap-coverage"
+        if needs_resolve:
+            display_expand_kinds = ("line", "scatter", "heatmap-gradient")
             for spec in specs:
                 sl = spec.lower()
                 is_group = sl.startswith("lga:") or sl.startswith("council:") or sl.startswith("brand:")
-                if is_group and display in ("members", "both") and chart_type in ("line", "scatter"):
+                if is_group and display in ("members", "both") and chart_type in display_expand_kinds:
                     if display == "both":
                         try:
                             r = _series.resolve(conn, spec)
@@ -470,6 +481,12 @@ def _create_app(
                 r for r in resolved
                 if r.spec not in known_specs and r.kind == "station"
             ]
+        else:
+            extra_station_specs = [
+                _series.ResolvedSeries(spec=s, label=s, points=[], kind="station")
+                for s in specs
+                if s.startswith("station:") and s not in known_specs
+            ]
 
         # Build chart spec
         chart_spec = None
@@ -481,7 +498,7 @@ def _create_app(
         elif chart_type == "scatter":
             chart_spec = _build_scatter_spec(conn, resolved, metric) or None
         elif chart_type == "heatmap-gradient":
-            heatmap_data = _build_gradient_heatmap(conn, cutoff) or None
+            heatmap_data = _build_gradient_heatmap(resolved, cutoff) or None
         elif chart_type == "heatmap-coverage":
             heatmap_data = _build_coverage_heatmap(conn, cutoff) or None
 

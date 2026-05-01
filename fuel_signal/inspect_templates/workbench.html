@@ -193,7 +193,7 @@
 <h2>
   {% if chart_type == 'line' %}Price Series
   {% elif chart_type == 'scatter' %}Scatter — {{ 'Price' if metric == 'price' else 'Gradient' }} by Brand
-  {% elif chart_type == 'heatmap-gradient' %}Gradient Heatmap — Price slope by LGA × week
+  {% elif chart_type == 'heatmap-gradient' %}Gradient Heatmap — Price slope by series × day
   {% elif chart_type == 'heatmap-coverage' %}Coverage Heatmap — Observations by station × month
   {% endif %}
   <span style="font-size:.8rem; font-weight:400; color:#888">window: {{ window }}</span>

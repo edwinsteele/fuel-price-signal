@@ -808,49 +808,61 @@ def coverage_matrix(
 def gradient_by_lga(
     conn: sqlite3.Connection,
     fuel_code: str = "E10",
-    window_days: int = 7,
+    window_days: int = 1,
+    councils: list[str] | None = None,
 ) -> list[tuple[str, str, float]]:
-    """Return [(council, week_start, mean_slope_cents_per_day)] for gradient heatmap.
+    """Return [(council, date, slope_cents_per_day)] for gradient heatmap.
 
-    week_start is the YYYY-MM-DD of the first day of each window_days bucket.
-    Slope is the mean of numpy.gradient over that bucket (positive = rising price).
+    When window_days=1 (default) each row is one calendar day and slope is
+    the numpy.gradient at that day.  When window_days>1 rows are bucketed into
+    ISO-week windows and slope is the mean gradient across the bucket.
+
+    Pass councils to restrict results to a subset of LGAs (SQL-level filter).
     """
     import datetime as _dt
+    from itertools import groupby
 
     import numpy as np
 
     fid = fuel_type_id(conn, fuel_code)
-    councils = [
-        r[0] for r in conn.execute(
-            "SELECT DISTINCT s.council FROM daily_prices dp JOIN stations s USING(station_code)"
-            " WHERE dp.fuel_type_id = ? AND s.council IS NOT NULL ORDER BY s.council",
-            (fid,),
-        ).fetchall()
-    ]
+    cond = "dp.fuel_type_id = ? AND s.council IS NOT NULL"
+    params: list = [fid]
+    if councils:
+        placeholders = ",".join("?" * len(councils))
+        cond += f" AND s.council IN ({placeholders})"
+        params.extend(councils)
+
+    all_rows = conn.execute(
+        f"SELECT s.council, dp.price_date, AVG(dp.price_decicents)"  # noqa: S608
+        f" FROM daily_prices dp JOIN stations s USING(station_code)"
+        f" WHERE {cond}"
+        f" GROUP BY s.council, dp.price_date ORDER BY s.council, dp.price_date",
+        params,
+    ).fetchall()
+    if not all_rows:
+        return []
 
     results: list[tuple[str, str, float]] = []
-    for council in councils:
-        rows = conn.execute(
-            "SELECT dp.price_date, AVG(dp.price_decicents)"
-            " FROM daily_prices dp JOIN stations s USING(station_code)"
-            " WHERE dp.fuel_type_id = ? AND s.council = ?"
-            " GROUP BY dp.price_date ORDER BY dp.price_date",
-            (fid, council),
-        ).fetchall()
-        if len(rows) < window_days:
+    for council, council_rows_iter in groupby(all_rows, key=lambda r: r[0]):
+        council_rows = list(council_rows_iter)
+        if len(council_rows) < max(window_days, 1):
             continue
-        dates = [_date_from_int(r[0]) for r in rows]
-        prices = np.array([r[1] / 10 for r in rows])
+        dates = [_date_from_int(r[1]) for r in council_rows]
+        prices = np.array([r[2] / 10 for r in council_rows])
         gradients = np.gradient(prices)
 
-        # Bucket by calendar week (ISO Monday)
-        buckets: dict[str, list[float]] = {}
-        for date_str, grad in zip(dates, gradients):
-            d = _dt.date.fromisoformat(date_str)
-            week_start = (d - _dt.timedelta(days=d.weekday())).isoformat()
-            buckets.setdefault(week_start, []).append(float(grad))
-        for week_start, grads in sorted(buckets.items()):
-            results.append((council, week_start, float(np.mean(grads))))
+        if window_days == 1:
+            for date_str, grad in zip(dates, gradients):
+                results.append((council, date_str, float(grad)))
+        else:
+            # Bucket by calendar week (ISO Monday)
+            buckets: dict[str, list[float]] = {}
+            for date_str, grad in zip(dates, gradients):
+                d = _dt.date.fromisoformat(date_str)
+                week_start = (d - _dt.timedelta(days=d.weekday())).isoformat()
+                buckets.setdefault(week_start, []).append(float(grad))
+            for week_start, grads in sorted(buckets.items()):
+                results.append((council, week_start, float(np.mean(grads))))
 
     return results
 
