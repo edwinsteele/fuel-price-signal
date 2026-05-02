@@ -7,11 +7,12 @@ import pytest
 from fuel_signal import series as _series
 from fuel_signal.db import (
     create_schema,
+    insert_prices,
     open_db,
     upsert_daily_prices,
     upsert_stations,
 )
-from fuel_signal.inspect import _build_gradient_heatmap
+from fuel_signal.inspect import _build_coverage_heatmap, _build_gradient_heatmap
 
 
 @pytest.fixture
@@ -104,4 +105,54 @@ def test_gradient_heatmap_respects_cutoff(conn):
 
 def test_gradient_heatmap_empty_when_no_resolved_series(conn):
     result = _build_gradient_heatmap([], cutoff=None)
+    assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Coverage heatmap tests
+# ---------------------------------------------------------------------------
+
+def _insert_raw_prices(conn, station_code, n_days=5, base_price=160.0):
+    # Use recent dates so coverage_matrix's 24-month window includes them.
+    base = datetime.date.today() - datetime.timedelta(days=30)
+    rows = [
+        {
+            "station_code": station_code,
+            "fuel_code": "E10",
+            "price_date": (base + datetime.timedelta(days=i)).isoformat(),
+            "price_cents": base_price + i,
+        }
+        for i in range(n_days)
+    ]
+    insert_prices(conn, rows)
+    conn.commit()
+
+
+def test_coverage_heatmap_filters_to_station_codes(conn):
+    upsert_stations(conn, [_STATION_BM, _STATION_SYD])
+    _insert_raw_prices(conn, 1001)
+    _insert_raw_prices(conn, 2001)
+    result = _build_coverage_heatmap(conn, cutoff=None, station_codes={1001})
+    assert result
+    row_names = {name for name, _ in result["rows"]}
+    assert "Shell Springwood" in row_names
+    assert "Ampol Parramatta" not in row_names
+
+
+def test_coverage_heatmap_no_filter_shows_all_stations(conn):
+    upsert_stations(conn, [_STATION_BM, _STATION_SYD])
+    _insert_raw_prices(conn, 1001)
+    _insert_raw_prices(conn, 2001)
+    result = _build_coverage_heatmap(conn, cutoff=None, station_codes=None)
+    assert result
+    row_names = {name for name, _ in result["rows"]}
+    assert "Shell Springwood" in row_names
+    assert "Ampol Parramatta" in row_names
+
+
+def test_coverage_heatmap_empty_station_codes_returns_empty(conn):
+    upsert_stations(conn, [_STATION_BM, _STATION_SYD])
+    _insert_raw_prices(conn, 1001)
+    _insert_raw_prices(conn, 2001)
+    result = _build_coverage_heatmap(conn, cutoff=None, station_codes=set())
     assert result == {}

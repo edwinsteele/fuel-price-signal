@@ -364,6 +364,7 @@ def _build_gradient_heatmap(
 def _build_coverage_heatmap(
     conn: sqlite3.Connection,
     cutoff: str | None,
+    station_codes: set[int] | None = None,
 ) -> dict:
     cutoff_ym = cutoff[:7] if cutoff else None
     months_param = 24
@@ -375,6 +376,8 @@ def _build_coverage_heatmap(
         months_param = (ty - cy) * 12 + (tm - cm) + 1
 
     raw = _db.coverage_matrix(conn, months=months_param)
+    if station_codes is not None:
+        raw = [(code, name, ym, n) for code, name, ym, n in raw if code in station_codes]
     if cutoff_ym:
         raw = [(code, name, ym, n) for code, name, ym, n in raw if ym >= cutoff_ym]
     if not raw:
@@ -445,48 +448,39 @@ def _create_app(
             | {f"brand:{b}" for b in groups["brands"]}
         )
 
-        # Resolve series for everything except the coverage heatmap (which is
-        # built from a per-station observation count and doesn't need price
-        # series).  Display modes (mean/members/both) apply to line, scatter,
-        # and gradient heatmap so each view reflects what the user selected.
+        # Resolve series for all chart types. Display modes (mean/members/both)
+        # apply to line, scatter, and gradient heatmap.  Coverage heatmap also
+        # resolves so it can filter rows to the selected series.
         resolved: list[_series.ResolvedSeries] = []
         errors: list[str] = []
-        needs_resolve = chart_type != "heatmap-coverage"
-        if needs_resolve:
-            display_expand_kinds = ("line", "scatter", "heatmap-gradient")
-            for spec in specs:
-                sl = spec.lower()
-                is_group = sl.startswith("lga:") or sl.startswith("council:") or sl.startswith("brand:")
-                if is_group and display in ("members", "both") and chart_type in display_expand_kinds:
-                    if display == "both":
-                        try:
-                            r = _series.resolve(conn, spec)
-                            r.points = _slice_points(r.points, cutoff)
-                            resolved.append(r)
-                        except _series.SeriesError:
-                            pass
-                    members = _series.resolve_members(conn, spec)
-                    for m in members:
-                        m.points = _slice_points(m.points, cutoff)
-                    resolved.extend(members)
-                else:
+        display_expand_kinds = ("line", "scatter", "heatmap-gradient")
+        for spec in specs:
+            sl = spec.lower()
+            is_group = sl.startswith("lga:") or sl.startswith("council:") or sl.startswith("brand:")
+            if is_group and display in ("members", "both") and chart_type in display_expand_kinds:
+                if display == "both":
                     try:
                         r = _series.resolve(conn, spec)
                         r.points = _slice_points(r.points, cutoff)
                         resolved.append(r)
-                    except _series.SeriesError as e:
-                        errors.append(str(e))
+                    except _series.SeriesError:
+                        pass
+                members = _series.resolve_members(conn, spec)
+                for m in members:
+                    m.points = _slice_points(m.points, cutoff)
+                resolved.extend(members)
+            else:
+                try:
+                    r = _series.resolve(conn, spec)
+                    r.points = _slice_points(r.points, cutoff)
+                    resolved.append(r)
+                except _series.SeriesError as e:
+                    errors.append(str(e))
 
-            extra_station_specs = [
-                r for r in resolved
-                if r.spec not in known_specs and r.kind == "station"
-            ]
-        else:
-            extra_station_specs = [
-                _series.ResolvedSeries(spec=s, label=s, points=[], kind="station")
-                for s in specs
-                if s.startswith("station:") and s not in known_specs
-            ]
+        extra_station_specs = [
+            r for r in resolved
+            if r.spec not in known_specs and r.kind == "station"
+        ]
 
         # Build chart spec
         chart_spec = None
@@ -500,7 +494,18 @@ def _create_app(
         elif chart_type == "heatmap-gradient":
             heatmap_data = _build_gradient_heatmap(resolved, cutoff) or None
         elif chart_type == "heatmap-coverage":
-            heatmap_data = _build_coverage_heatmap(conn, cutoff) or None
+            # Filter to selected stations; expand group specs to their members.
+            # No filter (None) when sydney is selected — show all metro stations.
+            coverage_codes: set[int] | None = None
+            if not any(r.kind == "sydney" for r in resolved):
+                coverage_codes = set()
+                for r in resolved:
+                    if r.kind == "station":
+                        coverage_codes.add(int(r.spec.split(":")[1]))
+                    elif r.kind in ("lga", "brand"):
+                        for m in _series.resolve_members(conn, r.spec):
+                            coverage_codes.add(int(m.spec.split(":")[1]))
+            heatmap_data = _build_coverage_heatmap(conn, cutoff, coverage_codes) or None
 
         return render_template(
             "workbench.html",
