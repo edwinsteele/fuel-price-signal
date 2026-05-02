@@ -9,6 +9,7 @@ from fuel_signal.history import (
     ResourceFetcher,
     Transformer,
     _format_cell,
+    _parse_date,
     clean_all_resources,
     discover_price_resources,
     download_all,
@@ -255,6 +256,17 @@ def test_download_all_returns_one_path_per_resource(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# _parse_date
+# ---------------------------------------------------------------------------
+
+def test_parse_date_dmy_hhmm_no_leading_zeros():
+    # "1/10/2025 0:00" — D/M/YYYY H:MM with no leading zeros, as seen in
+    # Jun/Oct 2025 bulk CSVs. strptime %d/%m/%Y %H:%M is lenient on padding.
+    d = _parse_date("1/10/2025 0:00")
+    assert d == datetime(2025, 10, 1, 0, 0)
+
+
+# ---------------------------------------------------------------------------
 # Transformer.get_month_for_file
 # ---------------------------------------------------------------------------
 
@@ -324,6 +336,21 @@ def test_get_month_for_file_with_time_component(tmp_path):
     assert Transformer(p, tmp_path / "out.csv").get_month_for_file() == 3
 
 
+def test_get_month_for_file_dmy_hhmm_format(tmp_path):
+    # D/MM/YYYY H:MM (no leading zeros) as used in Jun/Oct 2025 bulk CSVs.
+    # All days ≤ 12, so the early-exit (day > 12) never fires; must fall
+    # through to last_date.month which is the correctly-parsed month=10.
+    p = _make_raw_csv([
+        {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "1/10/2025 0:00", "Price": "163.9"},
+        {"ServiceStationName": "BP", "Address": "2 High St", "Suburb": "Penrith",
+         "Postcode": "2750", "Brand": "BP", "FuelCode": "E10",
+         "PriceUpdatedDate": "2/10/2025 0:00", "Price": "164.5"},
+    ], tmp_path)
+    assert Transformer(p, tmp_path / "out.csv").get_month_for_file() == 10
+
+
 def test_get_month_for_file_returns_none_for_no_dates(tmp_path):
     p = _make_raw_csv([
         {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
@@ -386,6 +413,12 @@ def test_clean_date_space_separated_datetime():
 def test_clean_date_dmy_hhmm_no_seconds():
     d = _clean_date("1/06/2025 0:08", month=6)
     assert d == datetime(2025, 6, 1, 0, 8)
+
+
+def test_clean_date_dmy_hhmm_october_no_swap():
+    # October file: month_in_file=10, date parses to month=10 day=1 — no swap.
+    d = _clean_date("1/10/2025 0:00", month=10)
+    assert d == datetime(2025, 10, 1, 0, 0)
 
 
 def test_clean_date_fixes_swapped_month_day():
