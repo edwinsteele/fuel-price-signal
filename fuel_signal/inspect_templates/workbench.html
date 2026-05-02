@@ -141,7 +141,6 @@
       <div class="control-group">
         <label>Chart type</label>
         <label><input type="radio" name="chart" value="line" {% if chart_type == 'line' %}checked{% endif %}> Line</label>
-        <label><input type="radio" name="chart" value="scatter" {% if chart_type == 'scatter' %}checked{% endif %}> Scatter</label>
         <label><input type="radio" name="chart" value="heatmap-gradient" {% if chart_type == 'heatmap-gradient' %}checked{% endif %}> Gradient heatmap</label>
         <label><input type="radio" name="chart" value="heatmap-coverage" {% if chart_type == 'heatmap-coverage' %}checked{% endif %}> Coverage heatmap</label>
       </div>
@@ -164,15 +163,7 @@
         </select>
       </div>
 
-      <div class="control-group">
-        <label>Scatter metric <span style="font-size:.75rem; color:#888">(scatter only)</span></label>
-        <select name="metric">
-          <option value="price" {% if metric == 'price' %}selected{% endif %}>Price (c/L)</option>
-          <option value="gradient" {% if metric == 'gradient' %}selected{% endif %}>Gradient (c/day)</option>
-        </select>
-      </div>
-
-      <div class="control-group" style="justify-content:flex-end; padding-top:1.3rem">
+<div class="control-group" style="justify-content:flex-end; padding-top:1.3rem">
         <button type="submit" class="btn">Update</button>
       </div>
 
@@ -192,7 +183,6 @@
 <!-- Chart -->
 <h2>
   {% if chart_type == 'line' %}Price Series
-  {% elif chart_type == 'scatter' %}Scatter — {{ 'Price' if metric == 'price' else 'Gradient' }} by Brand
   {% elif chart_type == 'heatmap-gradient' %}Gradient Heatmap — Price slope by series × day
   {% elif chart_type == 'heatmap-coverage' %}Coverage Heatmap — Observations by station × month
   {% endif %}
@@ -201,8 +191,6 @@
 
 {% if chart_type == 'line' %}
   {% include "_chart_line.html" %}
-{% elif chart_type == 'scatter' %}
-  {% include "_chart_scatter.html" %}
 {% elif chart_type == 'heatmap-gradient' %}
   {% include "_heatmap_gradient.html" %}
 {% elif chart_type == 'heatmap-coverage' %}
