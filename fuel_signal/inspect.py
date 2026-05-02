@@ -83,10 +83,13 @@ def _cutoff_date(window: str) -> str | None:
 def _slice_points(
     points: list[tuple[str, float]],
     cutoff: str | None,
+    end: str | None = None,
 ) -> list[tuple[str, float]]:
-    if cutoff is None:
-        return points
-    return [(d, p) for d, p in points if d >= cutoff]
+    if cutoff is not None:
+        points = [(d, p) for d, p in points if d >= cutoff]
+    if end is not None:
+        points = [(d, p) for d, p in points if d <= end]
+    return points
 
 
 # Reused from old inspect.py — unchanged logic
@@ -306,21 +309,24 @@ def _build_coverage_heatmap(
     conn: sqlite3.Connection,
     cutoff: str | None,
     station_codes: set[int] | None = None,
+    end_date: str | None = None,
 ) -> dict:
-    cutoff_ym = cutoff[:7] if cutoff else None
     months_param = 24
-    if cutoff_ym:
-        # derive months count from cutoff
+    if cutoff and not end_date:
+        # Derive months_param from cutoff to today so the DB query fetches enough.
+        cutoff_ym = cutoff[:7]
         today = datetime.date.today()
         cy, cm = int(cutoff_ym[:4]), int(cutoff_ym[5:7])
-        ty, tm = today.year, today.month
-        months_param = (ty - cy) * 12 + (tm - cm) + 1
+        months_param = (today.year - cy) * 12 + (today.month - cm) + 1
+    elif cutoff and end_date:
+        cutoff_ym = cutoff[:7]
+        ref = datetime.date.fromisoformat(end_date)
+        cy, cm = int(cutoff_ym[:4]), int(cutoff_ym[5:7])
+        months_param = (ref.year - cy) * 12 + (ref.month - cm) + 1
 
-    raw = _db.coverage_matrix(conn, months=months_param)
+    raw = _db.coverage_matrix(conn, months=months_param, start_date=cutoff, end_date=end_date)
     if station_codes is not None:
         raw = [(code, name, ym, n) for code, name, ym, n in raw if code in station_codes]
-    if cutoff_ym:
-        raw = [(code, name, ym, n) for code, name, ym, n in raw if ym >= cutoff_ym]
     if not raw:
         return {}
 
@@ -373,12 +379,52 @@ def _create_app(
         chart_type = request.args.get("chart", "line")
         window = request.args.get("window", "6m")
         display = request.args.get("display", "mean")
+        # Custom date range overrides the window preset when either is provided.
+        range_start = request.args.get("start", "").strip()
+        range_end = request.args.get("end", "").strip()
+
+        date_errors: list[str] = []
+        for param_name, param_val in [("start", range_start), ("end", range_end)]:
+            if param_val:
+                try:
+                    datetime.date.fromisoformat(param_val)
+                except ValueError:
+                    date_errors.append(
+                        f"Invalid {param_name} date '{param_val}' — use YYYY-MM-DD"
+                    )
+        if date_errors:
+            return render_template(
+                "workbench.html",
+                now=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                summary=summary,
+                cycle_state=cycle_state,
+                peak_data=peak_data,
+                today=today,
+                specs=specs,
+                resolved=[],
+                extra_station_specs=[],
+                chart_type=chart_type,
+                chart_spec=None,
+                heatmap_data=None,
+                window=window,
+                range_start=range_start,
+                range_end=range_end,
+                display=display,
+                groups=_series.enumerate_groups(conn),
+                preferred_stations=PREFERRED_STATIONS,
+                errors=date_errors,
+            ), 400
 
         # Default landing: Sydney avg + preferred stations
         if not specs:
             specs = ["sydney"] + [f"station:{code}" for code in PREFERRED_STATIONS]
 
-        cutoff = _cutoff_date(window)
+        if range_start or range_end:
+            cutoff = range_start or None
+            end_date = range_end or None
+        else:
+            cutoff = _cutoff_date(window)
+            end_date = None
 
         groups = _series.enumerate_groups(conn)
         preferred_spec_set = {f"station:{code}" for code in PREFERRED_STATIONS} | {"sydney"}
@@ -401,18 +447,18 @@ def _create_app(
                 if display == "both":
                     try:
                         r = _series.resolve(conn, spec)
-                        r.points = _slice_points(r.points, cutoff)
+                        r.points = _slice_points(r.points, cutoff, end_date)
                         resolved.append(r)
                     except _series.SeriesError:
                         pass
                 members = _series.resolve_members(conn, spec)
                 for m in members:
-                    m.points = _slice_points(m.points, cutoff)
+                    m.points = _slice_points(m.points, cutoff, end_date)
                 resolved.extend(members)
             else:
                 try:
                     r = _series.resolve(conn, spec)
-                    r.points = _slice_points(r.points, cutoff)
+                    r.points = _slice_points(r.points, cutoff, end_date)
                     resolved.append(r)
                 except _series.SeriesError as e:
                     errors.append(str(e))
@@ -443,7 +489,7 @@ def _create_app(
                     elif r.kind in ("lga", "brand"):
                         for m in _series.resolve_members(conn, r.spec):
                             coverage_codes.add(int(m.spec.split(":")[1]))
-            heatmap_data = _build_coverage_heatmap(conn, cutoff, coverage_codes) or None
+            heatmap_data = _build_coverage_heatmap(conn, cutoff, coverage_codes, end_date) or None
 
         return render_template(
             "workbench.html",
@@ -459,6 +505,8 @@ def _create_app(
             chart_spec=chart_spec,
             heatmap_data=heatmap_data,
             window=window,
+            range_start=range_start,
+            range_end=range_end,
             display=display,
             groups=groups,
             preferred_stations=PREFERRED_STATIONS,
