@@ -9,3 +9,4 @@ def _clear_series_caches():
     yield
     _series._SERIES_CACHE.clear()
     _series._GROUPS_CACHE.clear()
+    _series._BRAND_MAP_CACHE.clear()

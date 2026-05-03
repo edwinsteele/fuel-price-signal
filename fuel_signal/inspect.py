@@ -301,7 +301,16 @@ def _build_gradient_heatmap(
         return {}
 
     all_dates = sorted({d for _, m in rows_with_grads for d in m})
-    rows = [(label, [m.get(d) for d in all_dates]) for label, m in rows_with_grads]
+    rows = [
+        (
+            label,
+            [
+                (d, m.get(d), _gradient_color(m[d]) if d in m else None)
+                for d in all_dates
+            ],
+        )
+        for label, m in rows_with_grads
+    ]
     return {"dates": all_dates, "rows": rows}
 
 

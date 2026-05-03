@@ -27,12 +27,12 @@
       {% for label, row in heatmap_data.rows %}
       <tr>
         <td class="hm-row-head">{{ label }}</td>
-        {% for slope in row %}
+        {% for date, slope, color in row %}
           {% if slope is none %}
           <td style="background:#f0f0f0" title="no data"></td>
           {% else %}
-          <td style="background:{{ slope | gradient_color }}"
-              title="{{ label }} {{ heatmap_data.dates[loop.index0] }}: {{ '%.2f'|format(slope) }}c/day"></td>
+          <td style="background:{{ color }}"
+              title="{{ label }} {{ date }}: {{ '%.2f'|format(slope) }}c/day"></td>
           {% endif %}
         {% endfor %}
       </tr>
