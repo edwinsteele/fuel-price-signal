@@ -40,6 +40,8 @@ def compute_label(
 
     date_d: YYYY-MM-DD
     """
+    if horizon_days < 1:
+        raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
     fid = _db.fuel_type_id(conn, "E10")
     d_int = _to_date_int(date_d)
 
@@ -81,6 +83,13 @@ def assemble_training_rows(
     No feature columns — those are added in a later phase.
     station_codes=None processes all stations with E10 prices in daily_prices.
     """
+    if horizon_days < 1:
+        raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
+
+    cols = ["station_code", "price_date", "today_price_cents", "future_min_cents", "label"]
+    if station_codes is not None and len(station_codes) == 0:
+        return pd.DataFrame(columns=cols)
+
     fid = _db.fuel_type_id(conn, "E10")
 
     if station_codes is not None:
@@ -115,7 +124,6 @@ def assemble_training_rows(
                 "label": label,
             })
 
-    cols = ["station_code", "price_date", "today_price_cents", "future_min_cents", "label"]
     if not records:
         return pd.DataFrame(columns=cols)
     return pd.DataFrame(records, columns=cols)
@@ -128,7 +136,7 @@ def assemble_training_rows(
     show_default=True,
     help="Output CSV path.",
 )
-@click.option("--horizon", default=7, show_default=True, help="Forward horizon in days.")
+@click.option("--horizon", type=click.IntRange(min=1), default=7, show_default=True, help="Forward horizon in days.")
 @click.option(
     "--threshold",
     default=3.0,

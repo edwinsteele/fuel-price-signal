@@ -3,9 +3,10 @@
 import datetime
 
 import pytest
+from click.testing import CliRunner
 
 from fuel_signal.db import create_schema, open_db, upsert_daily_prices, upsert_stations
-from fuel_signal.labels import assemble_training_rows, compute_label
+from fuel_signal.labels import assemble_training_rows, compute_label, main
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -132,3 +133,45 @@ def test_assemble_empty_station(conn):
     df = assemble_training_rows(conn, horizon_days=7, threshold_cents=3.0, station_codes=[1001])
     assert df.empty
     assert list(df.columns) == ["station_code", "price_date", "today_price_cents", "future_min_cents", "label"]
+
+
+def test_assemble_empty_station_codes_list(conn):
+    """station_codes=[] returns empty DataFrame without hitting the DB."""
+    df = assemble_training_rows(conn, horizon_days=7, threshold_cents=3.0, station_codes=[])
+    assert df.empty
+    assert list(df.columns) == ["station_code", "price_date", "today_price_cents", "future_min_cents", "label"]
+
+
+def test_compute_label_invalid_horizon(conn):
+    """horizon_days < 1 raises ValueError."""
+    _station(conn, 1001)
+    with pytest.raises(ValueError, match="horizon_days"):
+        compute_label(conn, 1001, _d(-15), horizon_days=0)
+
+
+def test_assemble_invalid_horizon(conn):
+    """horizon_days < 1 raises ValueError."""
+    with pytest.raises(ValueError, match="horizon_days"):
+        assemble_training_rows(conn, horizon_days=0)
+
+
+def test_cli_main_smoke(conn, tmp_path):
+    """CLI happy path: writes a CSV and exits 0."""
+    _station(conn, 1001)
+    _prices(conn, 1001, [(-15 + i, 200.0 - i) for i in range(10)])
+    db_path = tmp_path / "test.db"
+    # Persist the in-memory DB to a file the CLI can open
+    import sqlite3 as _sqlite3
+    file_conn = _sqlite3.connect(db_path)
+    conn.backup(file_conn)
+    file_conn.close()
+
+    out_path = tmp_path / "labels.csv"
+    result = CliRunner().invoke(main, [
+        "--db", str(db_path),
+        "--output", str(out_path),
+        "--horizon", "7",
+        "--threshold", "3.0",
+    ])
+    assert result.exit_code == 0, result.output
+    assert out_path.exists()
