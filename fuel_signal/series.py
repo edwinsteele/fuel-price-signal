@@ -125,18 +125,33 @@ def resolve_members(
 
 
 def enumerate_groups(conn: sqlite3.Connection) -> dict:
-    """Return {lgas: [...], brands: [...]} for the controls-form picker."""
+    """Return {lgas: [(name, count), ...], brands: [(name, count), ...]} for the controls-form picker.
+
+    Counts reflect distinct stations per LGA/brand in the DB.
+    """
     key = id(conn)
     if key in _GROUPS_CACHE:
         return _GROUPS_CACHE[key]
-    present = {
-        row[0]
+    council_counts = {
+        row[0]: row[1]
         for row in conn.execute(
-            "SELECT council FROM stations WHERE council IS NOT NULL GROUP BY council"
+            "SELECT council, COUNT(*) FROM stations"
+            " WHERE council IS NOT NULL GROUP BY council"
         ).fetchall()
     }
-    lgas = sorted(c for c in SYDNEY_METRO_COUNCILS if c in present)
-    brands = sorted(_db.distinct_brands(conn, fuel_code="E10"))
+    lgas = [(c, council_counts[c]) for c in sorted(SYDNEY_METRO_COUNCILS) if c in council_counts]
+
+    fid = _db.fuel_type_id(conn, "E10")
+    brand_rows = conn.execute(
+        "SELECT s.brand, COUNT(DISTINCT s.station_code) AS cnt"
+        " FROM daily_prices dp JOIN stations s USING(station_code)"
+        " WHERE dp.fuel_type_id = ? AND s.brand IS NOT NULL AND s.brand != ''"
+        " GROUP BY s.brand HAVING cnt >= 3"
+        " ORDER BY s.brand",
+        (fid,),
+    ).fetchall()
+    brands = [(brand, cnt) for brand, cnt in brand_rows]
+
     _GROUPS_CACHE[key] = {"lgas": lgas, "brands": brands}
     return _GROUPS_CACHE[key]
 

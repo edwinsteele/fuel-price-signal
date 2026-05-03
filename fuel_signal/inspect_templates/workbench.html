@@ -55,11 +55,11 @@
               <a href="#" data-toggle="none">none</a>
             </div>
             <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
-              {% for lga in groups.lgas %}
+              {% for lga, count in groups.lgas %}
               <label>
                 <input type="checkbox" name="series" value="lga:{{ lga }}"
                        {% if 'lga:' + lga in specs %}checked{% endif %}>
-                {{ lga }}
+                {{ lga }} ({{ count }})
               </label>
               {% endfor %}
             </div>
@@ -76,11 +76,11 @@
               <a href="#" data-toggle="none">none</a>
             </div>
             <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
-              {% for brand in groups.brands %}
+              {% for brand, count in groups.brands %}
               <label>
                 <input type="checkbox" name="series" value="brand:{{ brand }}"
                        {% if 'brand:' + brand in specs %}checked{% endif %}>
-                {{ brand }}
+                {{ brand }} ({{ count }})
               </label>
               {% endfor %}
             </div>

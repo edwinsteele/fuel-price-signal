@@ -439,8 +439,8 @@ def _create_app(
         preferred_spec_set = {f"station:{code}" for code in PREFERRED_STATIONS} | {"sydney"}
         known_specs = (
             preferred_spec_set
-            | {f"lga:{c}" for c in groups["lgas"]}
-            | {f"brand:{b}" for b in groups["brands"]}
+            | {f"lga:{c}" for c, _ in groups["lgas"]}
+            | {f"brand:{b}" for b, _ in groups["brands"]}
         )
 
         # Resolve series for all chart types. Display modes (mean/members/both)
