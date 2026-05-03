@@ -273,13 +273,23 @@ def test_resolve_members_only_returns_stations_with_data(conn):
 def test_enumerate_groups_returns_lgas_with_stations(conn):
     upsert_stations(conn, _PENRITH_STATIONS)
     groups = enumerate_groups(conn)
-    assert "Penrith" in groups["lgas"]
+    lga_names = [name for name, _ in groups["lgas"]]
+    assert "Penrith" in lga_names
 
 
 def test_enumerate_groups_lgas_excludes_empty(conn):
     groups = enumerate_groups(conn)
     # No stations → no LGAs
     assert groups["lgas"] == []
+
+
+def test_enumerate_groups_lga_counts(conn):
+    upsert_stations(conn, _PENRITH_STATIONS)
+    # Clear cache so this conn sees a fresh result.
+    _series_mod._GROUPS_CACHE.pop(id(conn), None)
+    groups = enumerate_groups(conn)
+    penrith_count = next(cnt for name, cnt in groups["lgas"] if name == "Penrith")
+    assert penrith_count == len(_PENRITH_STATIONS)
 
 
 def test_enumerate_groups_brands_threshold(conn):
@@ -294,7 +304,24 @@ def test_enumerate_groups_brands_threshold(conn):
     upsert_daily_prices(conn, rows)
     conn.commit()
     groups = enumerate_groups(conn)
-    assert "Ampol" not in groups["brands"]
+    brand_names = [name for name, _ in groups["brands"]]
+    assert "Ampol" not in brand_names
+
+
+def test_enumerate_groups_brand_counts(conn):
+    stations = [
+        {**_ST_AMPOL, "station_code": 800 + i, "address": f"{i} Ampol Ct, Sub{i}",
+         "suburb": f"Sub{i}", "postcode": "2000"}
+        for i in range(4)
+    ]
+    upsert_stations(conn, stations)
+    rows = [(s["station_code"], "E10", "2024-03-01", 170.0) for s in stations]
+    upsert_daily_prices(conn, rows)
+    conn.commit()
+    _series_mod._GROUPS_CACHE.pop(id(conn), None)
+    groups = enumerate_groups(conn)
+    ampol_count = next(cnt for name, cnt in groups["brands"] if name == "Ampol")
+    assert ampol_count == 4
 
 
 # ---------------------------------------------------------------------------
