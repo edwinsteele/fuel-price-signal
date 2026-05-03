@@ -7,12 +7,18 @@ import pytest
 from fuel_signal import series as _series
 from fuel_signal.db import (
     create_schema,
+    db_summary,
     insert_prices,
     open_db,
     upsert_daily_prices,
     upsert_stations,
 )
-from fuel_signal.inspect import _build_coverage_heatmap, _build_gradient_heatmap
+from fuel_signal.inspect import (
+    _build_coverage_heatmap,
+    _build_gradient_heatmap,
+    _create_app,
+    _slice_points,
+)
 
 
 @pytest.fixture
@@ -156,3 +162,88 @@ def test_coverage_heatmap_empty_station_codes_returns_empty(conn):
     _insert_raw_prices(conn, 2001)
     result = _build_coverage_heatmap(conn, cutoff=None, station_codes=set())
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# _slice_points date-range tests
+# ---------------------------------------------------------------------------
+
+_POINTS = [
+    ("2024-01-01", 150.0),
+    ("2024-02-01", 155.0),
+    ("2024-03-01", 160.0),
+    ("2024-04-01", 165.0),
+]
+
+
+def test_slice_points_lower_bound_only():
+    result = _slice_points(_POINTS, cutoff="2024-02-01")
+    assert [d for d, _ in result] == ["2024-02-01", "2024-03-01", "2024-04-01"]
+
+
+def test_slice_points_upper_bound_only():
+    result = _slice_points(_POINTS, cutoff=None, end="2024-03-01")
+    assert [d for d, _ in result] == ["2024-01-01", "2024-02-01", "2024-03-01"]
+
+
+def test_slice_points_both_bounds():
+    result = _slice_points(_POINTS, cutoff="2024-02-01", end="2024-03-01")
+    assert [d for d, _ in result] == ["2024-02-01", "2024-03-01"]
+
+
+def test_slice_points_no_bounds_returns_all():
+    result = _slice_points(_POINTS, cutoff=None)
+    assert result == _POINTS
+
+
+def test_slice_points_empty_window_returns_empty():
+    result = _slice_points(_POINTS, cutoff="2024-05-01", end="2024-06-01")
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Route-level tests: start/end query params
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def flask_client(conn):
+    """Minimal Flask test client with one station and a few price rows."""
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=14)
+    app = _create_app(
+        conn,
+        cd=None,
+        today="2024-01-14",
+        cycle_state=None,
+        peak_data={},
+        summary=db_summary(conn),
+        boundaries={},
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        yield client
+
+
+def test_route_start_end_override_persists_in_response(flask_client):
+    """start= and end= params should appear in the rendered form inputs."""
+    resp = flask_client.get(
+        "/?start=2024-01-03&end=2024-01-07&series=station:1001&chart=heatmap-coverage"
+    )
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    assert 'value="2024-01-03"' in html
+    assert 'value="2024-01-07"' in html
+
+
+def test_route_invalid_start_returns_400(flask_client):
+    """Invalid start date should return a 400 with an error in the page."""
+    resp = flask_client.get("/?start=not-a-date&series=station:1001")
+    assert resp.status_code == 400
+    assert b"Invalid start date" in resp.data
+
+
+def test_route_invalid_end_returns_400(flask_client):
+    """Invalid end date should return a 400 with an error in the page."""
+    resp = flask_client.get("/?end=2024-13-01&series=station:1001")
+    assert resp.status_code == 400
+    assert b"Invalid end date" in resp.data

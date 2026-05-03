@@ -147,11 +147,19 @@
 
       <div class="control-group">
         <label>Time window</label>
-        <select name="window">
+        <select name="window" id="window-preset">
           {% for val, label in [('6m','Last 6 months'),('1y','Last year'),('2y','Last 2 years'),('4y','Last 4 years'),('all','Full history')] %}
           <option value="{{ val }}" {% if window == val %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
+        <div style="margin-top:.5rem; font-size:.8rem; color:#666">Custom range (overrides preset):</div>
+        <div style="display:flex; gap:.3rem; align-items:center; margin-top:.2rem; flex-wrap:wrap">
+          <input type="date" name="start" id="range-start"
+                 value="{{ range_start }}" style="font-size:.85rem; flex:1; min-width:0">
+          <span style="color:#888; flex-shrink:0">to</span>
+          <input type="date" name="end" id="range-end"
+                 value="{{ range_end }}" style="font-size:.85rem; flex:1; min-width:0">
+        </div>
       </div>
 
       <div class="control-group">
@@ -186,7 +194,13 @@
   {% elif chart_type == 'heatmap-gradient' %}Gradient Heatmap — Price slope by series × day
   {% elif chart_type == 'heatmap-coverage' %}Coverage Heatmap — Observations by station × month
   {% endif %}
-  <span style="font-size:.8rem; font-weight:400; color:#888">window: {{ window }}</span>
+  <span style="font-size:.8rem; font-weight:400; color:#888">
+    {%- if range_start or range_end -%}
+      {{ range_start or '—' }} to {{ range_end or 'now' }}
+    {%- else -%}
+      window: {{ window }}
+    {%- endif -%}
+  </span>
 </h2>
 
 {% if chart_type == 'line' %}
@@ -197,6 +211,18 @@
   {% include "_heatmap_coverage.html" %}
 {% endif %}
 
+<script>
+// Selecting a window preset clears the custom date range so both don't coexist.
+(function() {
+  const preset = document.getElementById('window-preset');
+  if (preset) {
+    preset.addEventListener('change', () => {
+      document.getElementById('range-start').value = '';
+      document.getElementById('range-end').value = '';
+    });
+  }
+})();
+</script>
 <script>
 // Group all/none toggles
 (function() {

@@ -776,32 +776,48 @@ def coverage_matrix(
     conn: sqlite3.Connection,
     fuel_code: str = "E10",
     months: int = 24,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> list[tuple[int, str, str, int]]:
     """Return [(station_code, name, ym, n_observations)] for coverage heatmap.
 
-    ym is a 'YYYY-MM' string. Covers the most recent *months* months.
+    ym is a 'YYYY-MM' string.  When start_date/end_date (YYYY-MM-DD) are
+    given they filter at the price_date level before monthly aggregation,
+    giving exact-date semantics.  Otherwise covers the most recent *months*.
     """
     import datetime as _dt
-    today = _dt.date.today()
-    cutoff_month = today.replace(day=1)
-    for _ in range(months):
-        cutoff_month = (cutoff_month - _dt.timedelta(days=1)).replace(day=1)
-    cutoff_ym = cutoff_month.strftime("%Y-%m")
-
     fid = fuel_type_id(conn, fuel_code)
+
+    params: list = [fid]
+    where_clauses = ["p.fuel_type_id = ?"]
+
+    if start_date:
+        where_clauses.append("p.price_date >= ?")
+        params.append(_date_to_int(start_date))
+    else:
+        today = _dt.date.today()
+        cutoff_month = today.replace(day=1)
+        for _ in range(months):
+            cutoff_month = (cutoff_month - _dt.timedelta(days=1)).replace(day=1)
+        cutoff_ym = cutoff_month.strftime("%Y-%m")
+        where_clauses.append(
+            "PRINTF('%04d-%02d', p.price_date/10000, (p.price_date/100)%100) >= ?"
+        )
+        params.append(cutoff_ym)
+
+    if end_date:
+        where_clauses.append("p.price_date <= ?")
+        params.append(_date_to_int(end_date))
+
     sql = (
         "SELECT p.station_code, s.name,"
         "       PRINTF('%04d-%02d', p.price_date/10000, (p.price_date/100)%100) AS ym,"
         "       COUNT(*) AS n"
         " FROM prices p JOIN stations s USING(station_code)"
-        " WHERE p.fuel_type_id = ? AND"
-        "       PRINTF('%04d-%02d', p.price_date/10000, (p.price_date/100)%100) >= ?"
+        f" WHERE {' AND '.join(where_clauses)}"
         " GROUP BY p.station_code, ym ORDER BY ym, s.name"
     )
-    rows = conn.execute(
-        sql,
-        (fid, cutoff_ym),
-    ).fetchall()
+    rows = conn.execute(sql, params).fetchall()
     return [(r[0], r[1], r[2], r[3]) for r in rows]
 
 
