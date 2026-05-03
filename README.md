@@ -171,6 +171,23 @@ Combined: BUY (mean signal +1.00)
 
 GitHub Actions commits one snapshot CSV per day to `data/snapshots/`. To enable it, add `FUELAPI_API_KEY` and `FUELAPI_API_SECRET` as repository secrets under **Settings → Secrets and variables → Actions**.
 
+## Generating ML training labels
+
+Assemble a training table with one row per (station, date) that has a computable label:
+
+```bash
+# Default: 7-day horizon, 3c threshold, output to data/labels.csv
+uv run python -m fuel_signal.labels
+
+# Custom horizon and threshold
+uv run python -m fuel_signal.labels --horizon 14 --threshold 5.0
+
+# Custom output path
+uv run python -m fuel_signal.labels --output /tmp/labels.csv
+```
+
+Each row contains `station_code`, `price_date`, `today_price_cents`, `future_min_cents`, and `label` (1 if the minimum price over the next `--horizon` days falls more than `--threshold` cents below today's price, else 0). Rows near the end of the data where a full horizon isn't available are excluded.
+
 ## Running tests
 
 ```bash

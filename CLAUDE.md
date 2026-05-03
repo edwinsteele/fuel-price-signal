@@ -20,6 +20,7 @@ fuel_signal/
 ├── cycle.py         # Cycle detection + current phase calculation
 ├── signal.py        # Combine phase + live price → one-line output
 ├── compare.py       # Compare two price series (station vs station, station vs LGA mean, etc.)
+├── labels.py        # ML label generation + training-row assembly
 └── backtest.py      # Replay historical prices through signal + purchasing strategy
 ```
 
@@ -31,6 +32,7 @@ Each command is its own module with a `@click.command` named `main` and an `if _
 uv run python -m fuel_signal.signal [--as-of DATE] [--db PATH]
 uv run python -m fuel_signal.compare SERIES_A SERIES_B [--fuel E10] [--within 0.5] [--db PATH]
 uv run python -m fuel_signal.stations [QUERY]
+uv run python -m fuel_signal.labels [--output PATH] [--horizon DAYS] [--threshold CENTS] [--db PATH]
 ```
 
 **Do not** add new commands to a shared CLI group or create new `[project.scripts]` entries — each module is its own entry point invoked via `python -m`.
