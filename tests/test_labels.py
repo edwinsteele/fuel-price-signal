@@ -159,16 +159,10 @@ def test_cli_main_smoke(conn, tmp_path):
     """CLI happy path: writes a CSV and exits 0."""
     _station(conn, 1001)
     _prices(conn, 1001, [(-15 + i, 200.0 - i) for i in range(10)])
-    db_path = tmp_path / "test.db"
-    # Persist the in-memory DB to a file the CLI can open
-    import sqlite3 as _sqlite3
-    file_conn = _sqlite3.connect(db_path)
-    conn.backup(file_conn)
-    file_conn.close()
-
+    # conn fixture is already backed by tmp_path / "test.db"
     out_path = tmp_path / "labels.csv"
     result = CliRunner().invoke(main, [
-        "--db", str(db_path),
+        "--db", str(tmp_path / "test.db"),
         "--output", str(out_path),
         "--horizon", "7",
         "--threshold", "3.0",
