@@ -1,6 +1,7 @@
 """Tests for fuel_signal.inspect — gradient heatmap builder and Flask routes."""
 
 import datetime
+import re
 
 import pytest
 
@@ -289,7 +290,7 @@ def test_route_fresh_load_annotations_checkbox_checked(flask_client):
     html = resp.data.decode()
     assert 'name="annotations"' in html
     # Checkbox must carry the checked attribute on fresh load.
-    assert 'name="annotations" value="1"\n                 checked' in html
+    assert re.search(r'<input[^>]*name="annotations"[^>]*\bchecked\b', html)
 
 
 def test_route_form_submit_without_annotations_param_unchecked(flask_client):
@@ -298,4 +299,4 @@ def test_route_form_submit_without_annotations_param_unchecked(flask_client):
     assert resp.status_code == 200
     html = resp.data.decode()
     assert 'name="annotations"' in html
-    assert 'name="annotations" value="1"\n                 checked' not in html
+    assert not re.search(r'<input[^>]*name="annotations"[^>]*\bchecked\b', html)
