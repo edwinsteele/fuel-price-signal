@@ -42,20 +42,6 @@ _COLOURS = [
     "#facc15",  # yellow-400
 ]
 
-_BRAND_COLOURS: dict[str, str] = {
-    "Ampol": "#dc2626",
-    "Caltex": "#dc2626",
-    "Shell": "#f59e0b",
-    "BP": "#16a34a",
-    "United": "#7c3aed",
-    "Puma": "#0891b2",
-    "Coles Express": "#db2777",
-    "Viva Energy": "#db2777",
-    "Mobil": "#ea580c",
-    "7-Eleven": "#6366f1",
-    "Metro": "#0d9488",
-}
-
 
 # ---------------------------------------------------------------------------
 # Colour helpers (also registered as Jinja2 filters)
@@ -280,51 +266,6 @@ def _build_line_spec(
     }
 
 
-def _build_scatter_spec(
-    conn: sqlite3.Connection,
-    resolved: list[_series.ResolvedSeries],
-    metric: str,
-) -> dict:
-    station_series = [r for r in resolved if r.kind == "station"]
-    if not station_series:
-        return {}
-
-    code_to_brand: dict[int, str] = {}
-    for r in station_series:
-        code = int(r.spec.split(":")[1])
-        row = conn.execute(
-            "SELECT brand FROM stations WHERE station_code = ?", (code,)
-        ).fetchone()
-        code_to_brand[code] = (row[0] if row and row[0] else "Other")
-
-    by_brand: dict[str, list[dict]] = {}
-    for r in station_series:
-        code = int(r.spec.split(":")[1])
-        brand = code_to_brand[code]
-        pts = r.points
-        if metric == "gradient" and len(pts) >= 2:
-            prices = np.array([p for _, p in pts])
-            grads = np.gradient(prices)
-            data = [{"x": pts[i][0], "y": round(float(grads[i]), 3)} for i in range(len(pts))]
-        else:
-            data = [{"x": d, "y": round(p, 1)} for d, p in pts]
-        by_brand.setdefault(brand, []).extend(data)
-
-    datasets = []
-    for brand, data_points in sorted(by_brand.items()):
-        colour = _BRAND_COLOURS.get(brand, "#9ca3af")
-        datasets.append({
-            "label": brand,
-            "data": data_points,
-            "backgroundColor": colour + "88",
-            "borderColor": colour,
-            "pointRadius": 3,
-        })
-
-    y_title = "gradient (cents/day)" if metric == "gradient" else "cents/litre"
-    return {"datasets": datasets, "y_title": y_title}
-
-
 def _build_gradient_heatmap(
     resolved: list[_series.ResolvedSeries],
     cutoff: str | None,
@@ -432,7 +373,6 @@ def _create_app(
         chart_type = request.args.get("chart", "line")
         window = request.args.get("window", "6m")
         display = request.args.get("display", "mean")
-        metric = request.args.get("metric", "price")
 
         # Default landing: Sydney avg + preferred stations
         if not specs:
@@ -449,11 +389,11 @@ def _create_app(
         )
 
         # Resolve series for all chart types. Display modes (mean/members/both)
-        # apply to line, scatter, and gradient heatmap.  Coverage heatmap also
+        # apply to line and gradient heatmap.  Coverage heatmap also
         # resolves so it can filter rows to the selected series.
         resolved: list[_series.ResolvedSeries] = []
         errors: list[str] = []
-        display_expand_kinds = ("line", "scatter", "heatmap-gradient")
+        display_expand_kinds = ("line", "heatmap-gradient")
         for spec in specs:
             sl = spec.lower()
             is_group = sl.startswith("lga:") or sl.startswith("council:") or sl.startswith("brand:")
@@ -489,8 +429,6 @@ def _create_app(
 
         if chart_type == "line":
             chart_spec = _build_line_spec(resolved, peak_data, boundaries, has_sydney) or None
-        elif chart_type == "scatter":
-            chart_spec = _build_scatter_spec(conn, resolved, metric) or None
         elif chart_type == "heatmap-gradient":
             heatmap_data = _build_gradient_heatmap(resolved, cutoff) or None
         elif chart_type == "heatmap-coverage":
@@ -522,7 +460,6 @@ def _create_app(
             heatmap_data=heatmap_data,
             window=window,
             display=display,
-            metric=metric,
             groups=groups,
             preferred_stations=PREFERRED_STATIONS,
             errors=errors,
