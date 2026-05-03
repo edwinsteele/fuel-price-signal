@@ -38,6 +38,9 @@ _SERIES_CACHE: dict[tuple[int, str, str], list[tuple[str, float]]] = {}
 # Groups cache: id(conn) → {"lgas": [...], "brands": [...]}
 _GROUPS_CACHE: dict[int, dict] = {}
 
+# Brand map cache: (id(conn), fuel) → {brand_lower: brand_canonical}
+_BRAND_MAP_CACHE: dict[tuple[int, str], dict[str, str]] = {}
+
 
 def _cached_series(
     conn: sqlite3.Connection,
@@ -174,12 +177,15 @@ def _resolve_brand(conn: sqlite3.Connection, brand_query: str, fuel: str) -> Res
 
 def _lookup_brand(conn: sqlite3.Connection, brand_query: str, fuel: str) -> str:
     """Return the exact brand name matching *brand_query* (case-insensitive)."""
-    brands = _db.distinct_brands(conn, fuel_code=fuel, min_stations=1)
-    brand_map = {b.lower(): b for b in brands}
+    cache_key = (id(conn), fuel)
+    if cache_key not in _BRAND_MAP_CACHE:
+        brands = _db.distinct_brands(conn, fuel_code=fuel, min_stations=1)
+        _BRAND_MAP_CACHE[cache_key] = {b.lower(): b for b in brands}
+    brand_map = _BRAND_MAP_CACHE[cache_key]
     key = brand_query.lower()
     if key not in brand_map:
         raise SeriesError(
-            f"No brand matching {brand_query!r}. Known brands: {', '.join(sorted(brands))}"
+            f"No brand matching {brand_query!r}. Known brands: {', '.join(sorted(brand_map.values()))}"
         )
     return brand_map[key]
 
