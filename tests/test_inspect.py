@@ -16,6 +16,7 @@ from fuel_signal.db import (
 from fuel_signal.inspect import (
     _build_coverage_heatmap,
     _build_gradient_heatmap,
+    _build_line_spec,
     _create_app,
     _slice_points,
 )
@@ -202,6 +203,38 @@ def test_slice_points_empty_window_returns_empty():
 
 
 # ---------------------------------------------------------------------------
+# _build_line_spec: show_annotations flag
+# ---------------------------------------------------------------------------
+
+_PEAK_DATA_EMPTY = {
+    "peak_dates": [],
+    "plateau_peak_date": None,
+    "last_cycle_start": None,
+    "last_cycle_end": None,
+}
+
+
+def test_build_line_spec_annotations_on_flag_true(conn):
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=10)
+    resolved = _resolve_specs(conn, ["station:1001"])
+    peak_date = resolved[0].points[3][0]  # a date within the series
+    peak_data = {**_PEAK_DATA_EMPTY, "peak_dates": [peak_date]}
+    result = _build_line_spec(resolved, peak_data, {}, show_annotations=True)
+    assert "pk0" in result["annotations"]
+
+
+def test_build_line_spec_annotations_off_flag_false(conn):
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=10)
+    resolved = _resolve_specs(conn, ["station:1001"])
+    peak_date = resolved[0].points[3][0]
+    peak_data = {**_PEAK_DATA_EMPTY, "peak_dates": [peak_date]}
+    result = _build_line_spec(resolved, peak_data, {}, show_annotations=False)
+    assert result["annotations"] == {}
+
+
+# ---------------------------------------------------------------------------
 # Route-level tests: start/end query params
 # ---------------------------------------------------------------------------
 
@@ -247,3 +280,22 @@ def test_route_invalid_end_returns_400(flask_client):
     resp = flask_client.get("/?end=2024-13-01&series=station:1001")
     assert resp.status_code == 400
     assert b"Invalid end date" in resp.data
+
+
+def test_route_fresh_load_annotations_checkbox_checked(flask_client):
+    """Fresh load (no query params) should render the annotations checkbox checked."""
+    resp = flask_client.get("/")
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    assert 'name="annotations"' in html
+    # Checkbox must carry the checked attribute on fresh load.
+    assert 'name="annotations" value="1"\n                 checked' in html
+
+
+def test_route_form_submit_without_annotations_param_unchecked(flask_client):
+    """Submitting the form without the annotations param should leave the checkbox unchecked."""
+    resp = flask_client.get("/?series=station:1001&chart=line")
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    assert 'name="annotations"' in html
+    assert 'name="annotations" value="1"\n                 checked' not in html

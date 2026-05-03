@@ -143,6 +143,11 @@
         <label><input type="radio" name="chart" value="line" {% if chart_type == 'line' %}checked{% endif %}> Line</label>
         <label><input type="radio" name="chart" value="heatmap-gradient" {% if chart_type == 'heatmap-gradient' %}checked{% endif %}> Gradient heatmap</label>
         <label><input type="radio" name="chart" value="heatmap-coverage" {% if chart_type == 'heatmap-coverage' %}checked{% endif %}> Coverage heatmap</label>
+        <label style="margin-top:.5rem; font-size:.85rem; color:#666">
+          <input type="checkbox" name="annotations" value="1"
+                 {% if show_annotations %}checked{% endif %}>
+          Show cycle annotations
+        </label>
       </div>
 
       <div class="control-group">
