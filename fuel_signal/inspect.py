@@ -247,14 +247,18 @@ def _build_line_spec(
 
     annotations = _build_annotations(peak_data, all_dates, boundaries) if show_annotations else {}
 
-    n_peaks = len(peak_data["peak_dates"])
+    plateau_peak_date = peak_data.get("plateau_peak_date")
+    last_cycle_start = peak_data.get("last_cycle_start")
+    last_cycle_end = peak_data.get("last_cycle_end")
+
+    n_peaks = len(peak_data.get("peak_dates", []))
     plateau_note = (
-        f" + boundary plateau on {peak_data['plateau_peak_date']}"
-        if peak_data["plateau_peak_date"] else ""
+        f" + boundary plateau on {plateau_peak_date}"
+        if plateau_peak_date else ""
     )
     last_cycle_note = (
-        f"Last cycle: {peak_data['last_cycle_start']} → {peak_data['last_cycle_end']}"
-        if peak_data["last_cycle_start"] else ""
+        f"Last cycle: {last_cycle_start} → {last_cycle_end}"
+        if last_cycle_start else ""
     )
     peak_summary = f"{n_peaks} scipy peaks{plateau_note}"
     if last_cycle_note:
