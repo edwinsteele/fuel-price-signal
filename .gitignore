@@ -4,6 +4,7 @@
 # Local data — not committed; rebuild with history.py + db.py
 data/raw/
 data/cleaned/
+data/labels.csv
 fuel_signal.db
 fuel_signal.db-shm
 fuel_signal.db-wal
