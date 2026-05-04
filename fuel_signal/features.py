@@ -71,6 +71,8 @@ def _sydney_avg_on_date(
     date_d: str,
     fuel_type_id: int,
 ) -> float | None:
+    # Averages over all stations in daily_prices — intentionally unfiltered because
+    # the DB contains only Sydney metro stations by design (filtered at load time).
     row = conn.execute(
         "SELECT AVG(price_decicents) FROM daily_prices"
         " WHERE fuel_type_id = ? AND price_date = ?",

@@ -269,3 +269,31 @@ def test_assembler_empty_station_list(conn):
     df = assemble_feature_rows(conn, station_codes=[])
     assert len(df) == 0
     assert set(FEATURE_COLUMNS).issubset(set(df.columns))
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def test_cli_writes_csv(conn, tmp_path):
+    """CLI happy path: exits 0 and writes a CSV with expected columns."""
+    from click.testing import CliRunner
+
+    from fuel_signal.features import main
+
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+
+    out_csv = tmp_path / "features.csv"
+    result = CliRunner().invoke(main, [
+        "--db", str(tmp_path / "test.db"),
+        "--output", str(out_csv),
+    ])
+    assert result.exit_code == 0, result.output
+    assert out_csv.exists()
+
+    import pandas as pd
+    df = pd.read_csv(out_csv)
+    assert len(df) > 0
+    for col in FEATURE_COLUMNS:
+        assert col in df.columns
