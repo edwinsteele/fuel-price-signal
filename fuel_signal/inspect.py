@@ -146,7 +146,7 @@ def _build_annotations(peak_data: dict, labels: list[str],
                           "font": {"size": 9}},
             }
 
-    for i, date in enumerate(peak_data["peak_dates"]):
+    for i, date in enumerate(peak_data.get("peak_dates", [])):
         if date not in label_set:
             continue
         out[f"pk{i}"] = {
@@ -185,7 +185,7 @@ def _build_line_spec(
     resolved: list[_series.ResolvedSeries],
     peak_data: dict,
     boundaries: dict,
-    has_sydney: bool,
+    show_annotations: bool,
 ) -> dict:
     cap = _LINE_CAP
 
@@ -245,16 +245,20 @@ def _build_line_spec(
         # individual stations (favourite or not) stay solid
         datasets.append(ds)
 
-    annotations = _build_annotations(peak_data, all_dates, boundaries) if has_sydney else {}
+    annotations = _build_annotations(peak_data, all_dates, boundaries) if show_annotations else {}
 
-    n_peaks = len(peak_data["peak_dates"])
+    plateau_peak_date = peak_data.get("plateau_peak_date")
+    last_cycle_start = peak_data.get("last_cycle_start")
+    last_cycle_end = peak_data.get("last_cycle_end")
+
+    n_peaks = len(peak_data.get("peak_dates", []))
     plateau_note = (
-        f" + boundary plateau on {peak_data['plateau_peak_date']}"
-        if peak_data["plateau_peak_date"] else ""
+        f" + boundary plateau on {plateau_peak_date}"
+        if plateau_peak_date else ""
     )
     last_cycle_note = (
-        f"Last cycle: {peak_data['last_cycle_start']} → {peak_data['last_cycle_end']}"
-        if peak_data["last_cycle_start"] else ""
+        f"Last cycle: {last_cycle_start} → {last_cycle_end}"
+        if last_cycle_start else ""
     )
     peak_summary = f"{n_peaks} scipy peaks{plateau_note}"
     if last_cycle_note:
@@ -391,6 +395,9 @@ def _create_app(
         # Custom date range overrides the window preset when either is provided.
         range_start = request.args.get("start", "").strip()
         range_end = request.args.get("end", "").strip()
+        # Annotations default on; unchecking the checkbox omits the param entirely.
+        form_submitted = bool(request.args)
+        show_annotations = (not form_submitted) or (request.args.get("annotations") == "1")
 
         date_errors: list[str] = []
         for param_name, param_val in [("start", range_start), ("end", range_end)]:
@@ -419,6 +426,7 @@ def _create_app(
                 range_start=range_start,
                 range_end=range_end,
                 display=display,
+                show_annotations=show_annotations,
                 groups=_series.enumerate_groups(conn),
                 preferred_stations=PREFERRED_STATIONS,
                 errors=date_errors,
@@ -480,10 +488,9 @@ def _create_app(
         # Build chart spec
         chart_spec = None
         heatmap_data = None
-        has_sydney = any(r.kind == "sydney" for r in resolved)
 
         if chart_type == "line":
-            chart_spec = _build_line_spec(resolved, peak_data, boundaries, has_sydney) or None
+            chart_spec = _build_line_spec(resolved, peak_data, boundaries, show_annotations) or None
         elif chart_type == "heatmap-gradient":
             heatmap_data = _build_gradient_heatmap(resolved, cutoff) or None
         elif chart_type == "heatmap-coverage":
@@ -517,6 +524,7 @@ def _create_app(
             range_start=range_start,
             range_end=range_end,
             display=display,
+            show_annotations=show_annotations,
             groups=groups,
             preferred_stations=PREFERRED_STATIONS,
             errors=errors,
