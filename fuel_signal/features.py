@@ -147,7 +147,7 @@ def assemble_feature_rows(
     CycleDetector is built once from the full average series — detect() slices
     per row, so PIT-safety is preserved.
     """
-    label_df = assemble_training_rows(conn, horizon_days, threshold_cents, station_codes)
+    label_df = assemble_training_rows(conn, horizon_days, threshold_cents, station_codes=station_codes)
     all_cols = list(label_df.columns) + FEATURE_COLUMNS
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
