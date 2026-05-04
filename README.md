@@ -188,6 +188,23 @@ uv run python -m fuel_signal.labels --output /tmp/labels.csv
 
 Each row contains `station_code`, `price_date`, `today_price_cents`, `future_min_cents`, and `label` (1 if the minimum price over the next `--horizon` days falls more than `--threshold` cents below today's price, else 0). Rows near the end of the data where a full horizon isn't available are excluded.
 
+## Assembling ML feature rows
+
+Join cycle features onto the labels table to produce a model-ready training set:
+
+```bash
+# Default: 7-day horizon, 3c threshold, output to data/features.csv
+uv run python -m fuel_signal.features
+
+# Custom horizon and threshold
+uv run python -m fuel_signal.features --horizon 14 --threshold 5.0
+
+# Custom output path
+uv run python -m fuel_signal.features --output /tmp/features.csv
+```
+
+Output includes all label columns (`station_code`, `price_date`, `today_price_cents`, `future_min_cents`, `label`) plus cycle features (`cycle_pct_through`, `cycle_days_since_peak`, `cycle_mean_length`, `cycle_last_min_cents`, `cycle_last_max_cents`, `cycle_peak_count`) and station-vs-aggregate features (`station_price_cents`, `station_minus_last_min_cents`, `station_minus_last_max_cents`, `station_minus_sydney_avg_cents`). Rows with insufficient history for cycle detection are excluded.
+
 ## Running tests
 
 ```bash
