@@ -568,7 +568,7 @@ _PC_MAP: dict[str, str] = {
     "2784": "Blue Mountains",
     "2785": "Lithgow",
     "2786": "Lithgow",
-    "2787": "Wollondilly",
+    "2787": "Oberon",
     "2790": "Lithgow",
     "2791": "Blayney",
     "2792": "Cowra",
