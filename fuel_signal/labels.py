@@ -121,6 +121,8 @@ def compute_label(
     """
     if horizon_days < 1:
         raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
+    if threshold_cents < 0:
+        raise ValueError(f"threshold_cents must be >= 0, got {threshold_cents}")
     if lookback_days < 1:
         raise ValueError(f"lookback_days must be >= 1, got {lookback_days}")
     if not 0.0 <= percentile_pct <= 100.0:
@@ -180,6 +182,8 @@ def assemble_training_rows(
     """
     if horizon_days < 1:
         raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
+    if threshold_cents < 0:
+        raise ValueError(f"threshold_cents must be >= 0, got {threshold_cents}")
     if lookback_days < 1:
         raise ValueError(f"lookback_days must be >= 1, got {lookback_days}")
     if not 0.0 <= percentile_pct <= 100.0:
@@ -252,7 +256,10 @@ def assemble_training_rows(
     help="Output CSV path.",
 )
 @click.option("--horizon", type=click.IntRange(min=1), default=7, show_default=True, help="Forward horizon in days.")
-@click.option("--threshold", default=3.0, show_default=True, help="Minimum price drop (cents) to signal a better deal.")
+@click.option(
+    "--threshold", type=click.FloatRange(min=0.0), default=3.0, show_default=True,
+    help="Minimum price drop (cents) to signal a better deal.",
+)
 @click.option(
     "--lookback", type=click.IntRange(min=1), default=90, show_default=True,
     help="Past days for price percentile (~2 cycles).",

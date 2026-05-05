@@ -183,7 +183,10 @@ def assemble_feature_rows(
     help="Output CSV path.",
 )
 @click.option("--horizon", type=click.IntRange(min=1), default=7, show_default=True, help="Forward horizon in days.")
-@click.option("--threshold", default=3.0, show_default=True, help="Minimum price drop (cents) to label as 1.")
+@click.option(
+    "--threshold", type=click.FloatRange(min=0.0), default=3.0, show_default=True,
+    help="Minimum price drop (cents) to label as 1.",
+)
 @click.option(
     "--lookback", type=click.IntRange(min=1), default=90, show_default=True,
     help="Past days for price percentile (~2 cycles).",
