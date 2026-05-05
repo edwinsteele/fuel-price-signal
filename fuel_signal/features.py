@@ -138,6 +138,8 @@ def assemble_feature_rows(
     conn: sqlite3.Connection,
     horizon_days: int = 7,
     threshold_cents: float = 3.0,
+    lookback_days: int = 90,
+    percentile_pct: float = 33.0,
     station_codes: list[int] | None = None,
 ) -> pd.DataFrame:
     """Build labels (via labels.assemble_training_rows) and join feature columns.
@@ -147,7 +149,14 @@ def assemble_feature_rows(
     CycleDetector is built once from the full average series — detect() slices
     per row, so PIT-safety is preserved.
     """
-    label_df = assemble_training_rows(conn, horizon_days, threshold_cents, station_codes)
+    label_df = assemble_training_rows(
+        conn,
+        horizon_days=horizon_days,
+        threshold_cents=threshold_cents,
+        lookback_days=lookback_days,
+        percentile_pct=percentile_pct,
+        station_codes=station_codes,
+    )
     all_cols = list(label_df.columns) + FEATURE_COLUMNS
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
@@ -175,10 +184,16 @@ def assemble_feature_rows(
 )
 @click.option("--horizon", type=click.IntRange(min=1), default=7, show_default=True, help="Forward horizon in days.")
 @click.option(
-    "--threshold",
-    default=3.0,
-    show_default=True,
+    "--threshold", type=click.FloatRange(min=0.0), default=3.0, show_default=True,
     help="Minimum price drop (cents) to label as 1.",
+)
+@click.option(
+    "--lookback", type=click.IntRange(min=1), default=90, show_default=True,
+    help="Past days for price percentile (~2 cycles).",
+)
+@click.option(
+    "--percentile", type=click.FloatRange(min=0.0, max=100.0), default=33.0, show_default=True,
+    help="Percentile gate for 'price is cheap' condition.",
 )
 @click.option(
     "--db",
@@ -187,7 +202,7 @@ def assemble_feature_rows(
     show_default=True,
     help="Path to SQLite DB.",
 )
-def main(output: str, horizon: int, threshold: float, db_path: str) -> None:
+def main(output: str, horizon: int, threshold: float, lookback: int, percentile: float, db_path: str) -> None:
     """Assemble ML training rows with cycle features joined to labels."""
     path = pathlib.Path(db_path)
     if not path.exists():
@@ -196,7 +211,13 @@ def main(output: str, horizon: int, threshold: float, db_path: str) -> None:
         )
 
     conn = _db.open_db(path)
-    df = assemble_feature_rows(conn, horizon_days=horizon, threshold_cents=threshold)
+    df = assemble_feature_rows(
+        conn,
+        horizon_days=horizon,
+        threshold_cents=threshold,
+        lookback_days=lookback,
+        percentile_pct=percentile,
+    )
     conn.close()
 
     out_path = pathlib.Path(output)
