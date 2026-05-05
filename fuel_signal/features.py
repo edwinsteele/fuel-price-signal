@@ -168,6 +168,9 @@ def assemble_feature_rows(
     Stations with fewer than min_rows_per_station label rows are also removed
     (too-new stations haven't survived a full price cycle).
     """
+    if min_rows_per_station < 0:
+        raise ValueError("min_rows_per_station must be >= 0")
+
     label_df = assemble_training_rows(
         conn,
         horizon_days=horizon_days,

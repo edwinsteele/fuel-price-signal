@@ -294,6 +294,14 @@ def test_assembler_excludes_stations_below_min_rows(conn):
     assert set(df["station_code"].unique()) == {STATION_B}
 
 
+def test_assembler_rejects_negative_min_rows(conn):
+    """assemble_feature_rows raises ValueError for negative min_rows_per_station."""
+    import pytest
+
+    with pytest.raises(ValueError, match="min_rows_per_station must be >= 0"):
+        assemble_feature_rows(conn, min_rows_per_station=-1)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
