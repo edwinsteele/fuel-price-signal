@@ -186,7 +186,32 @@ uv run python -m fuel_signal.labels --horizon 14 --threshold 5.0
 uv run python -m fuel_signal.labels --output /tmp/labels.csv
 ```
 
-Each row contains `station_code`, `price_date`, `today_price_cents`, `future_min_cents`, and `label` (1 if the minimum price over the next `--horizon` days falls more than `--threshold` cents below today's price, else 0). Rows near the end of the data where a full horizon isn't available are excluded.
+Each row contains `station_code`, `price_date`, `today_price_cents`, `future_min_cents`, and `label`. `label=1` (BUY) when **both** conditions hold: no cheaper price arrives within `--horizon` days (by more than `--threshold` cents), **and** today's price is at or below the `--percentile`th percentile of the past `--lookback` days. Rows without sufficient forward or lookback history are excluded.
+
+### Diagnosing label distributions
+
+```bash
+# Produce two diagnostic plots in data/
+uv run python -m fuel_signal.label_viz
+
+# Custom input / output location
+uv run python -m fuel_signal.label_viz --input /tmp/labels.csv --output /tmp/plots/
+```
+
+Writes `positive_rate_by_date.png` (fraction of stations labeled BUY per day — should oscillate with the ~45d price cycle) and `positive_rate_by_station.png` (histogram of per-station BUY rates — healthy distribution clusters near the marginal rate with no stations stuck at 0% or 100%).
+
+### Inspecting individual label decisions
+
+```bash
+# Show per-day label decomposition for one station (21 days from --date)
+uv run python -m fuel_signal.label_inspect --station 585 --date 2024-01-15
+
+# Adjust window length or label parameters
+uv run python -m fuel_signal.label_inspect --station 414 --date 2023-06-01 --days 30
+uv run python -m fuel_signal.label_inspect --station 585 --date 2024-08-01 --horizon 14 --threshold 5.0
+```
+
+Prints a table showing `today_price`, `future_min`, the rolling `P33` threshold, and the two condition flags (`Cheap?`, `NoDrop?`) alongside the final label for each day. Useful for understanding why a specific date was or wasn't labeled BUY.
 
 ## Assembling ML feature rows
 
