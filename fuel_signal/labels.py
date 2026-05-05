@@ -121,6 +121,10 @@ def compute_label(
     """
     if horizon_days < 1:
         raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
+    if lookback_days < 1:
+        raise ValueError(f"lookback_days must be >= 1, got {lookback_days}")
+    if not 0.0 <= percentile_pct <= 100.0:
+        raise ValueError(f"percentile_pct must be between 0 and 100, got {percentile_pct}")
     fid = _db.fuel_type_id(conn, "E10")
     d_int = _to_date_int(date_d)
     d = datetime.date.fromisoformat(date_d)
@@ -176,6 +180,10 @@ def assemble_training_rows(
     """
     if horizon_days < 1:
         raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
+    if lookback_days < 1:
+        raise ValueError(f"lookback_days must be >= 1, got {lookback_days}")
+    if not 0.0 <= percentile_pct <= 100.0:
+        raise ValueError(f"percentile_pct must be between 0 and 100, got {percentile_pct}")
 
     cols = ["station_code", "price_date", "today_price_cents", "future_min_cents", "label"]
     if station_codes is not None and len(station_codes) == 0:
@@ -200,10 +208,21 @@ def assemble_training_rows(
 
     records: list[dict] = []
     for station_code, station_iter in groupby(raw_rows, key=lambda r: r[0]):
-        series = [(r[1], r[2] / 10) for r in station_iter]  # [(date_int, price_cents)]
+        series = [
+            (datetime.date.fromisoformat(_from_date_int(r[1])), r[2] / 10)
+            for r in station_iter
+        ]  # [(price_date, price_cents)]
         n = len(series)
         for i in range(lookback_days, n - horizon_days):
-            date_int, today_price = series[i]
+            date_d, today_price = series[i]
+            # Skip rows where the actual calendar span doesn't equal the requested window.
+            # daily_prices is forward-filled but may still have gaps at the start of a
+            # station's history; row-index arithmetic would silently straddle such a gap,
+            # producing a different result from compute_label() for the same (station, date).
+            if (date_d - series[i - lookback_days][0]).days != lookback_days:
+                continue
+            if (series[i + horizon_days][0] - date_d).days != horizon_days:
+                continue
             forward_prices = [p for _, p in series[i + 1 : i + 1 + horizon_days]]
             future_min = min(forward_prices)
             past_prices = [p for _, p in series[i - lookback_days : i]]
@@ -214,7 +233,7 @@ def assemble_training_rows(
             label = 1 if (no_better_deal and price_is_cheap) else 0
             records.append({
                 "station_code": station_code,
-                "price_date": _from_date_int(date_int),
+                "price_date": date_d.isoformat(),
                 "today_price_cents": today_price,
                 "future_min_cents": future_min,
                 "label": label,
@@ -234,8 +253,14 @@ def assemble_training_rows(
 )
 @click.option("--horizon", type=click.IntRange(min=1), default=7, show_default=True, help="Forward horizon in days.")
 @click.option("--threshold", default=3.0, show_default=True, help="Minimum price drop (cents) to signal a better deal.")
-@click.option("--lookback", default=90, show_default=True, help="Past days for price percentile (~2 cycles).")
-@click.option("--percentile", default=33.0, show_default=True, help="Percentile gate for 'price is cheap' condition.")
+@click.option(
+    "--lookback", type=click.IntRange(min=1), default=90, show_default=True,
+    help="Past days for price percentile (~2 cycles).",
+)
+@click.option(
+    "--percentile", type=click.FloatRange(min=0.0, max=100.0), default=33.0, show_default=True,
+    help="Percentile gate for 'price is cheap' condition.",
+)
 @click.option(
     "--db",
     "db_path",
