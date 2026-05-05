@@ -244,7 +244,9 @@ def test_assembler_drops_none_rows(conn):
     short = _sawtooth_series(0.7, start=_START)
     _add_prices(conn, STATION_B, short)
 
-    df = assemble_feature_rows(conn, station_codes=[STATION_A, STATION_B])
+    # min_rows_per_station=0 bypasses the row-count filter; this test targets
+    # the None-row dropping path only.
+    df = assemble_feature_rows(conn, station_codes=[STATION_A, STATION_B], min_rows_per_station=0)
     # All rows in output must be for STATION_A only
     assert len(df) > 0
     assert set(df["station_code"].unique()) == {STATION_A}
@@ -255,7 +257,7 @@ def test_assembler_columns(conn):
     _add_station(conn, STATION_A)
     _add_prices(conn, STATION_A, _3_CYCLES)
 
-    df = assemble_feature_rows(conn, station_codes=[STATION_A])
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
     assert len(df) > 0
     for col in FEATURE_COLUMNS:
         assert col in df.columns, f"Missing feature column: {col}"
@@ -269,6 +271,27 @@ def test_assembler_empty_station_list(conn):
     df = assemble_feature_rows(conn, station_codes=[])
     assert len(df) == 0
     assert set(FEATURE_COLUMNS).issubset(set(df.columns))
+
+
+def test_assembler_excludes_stations_below_min_rows(conn):
+    """Stations with fewer label rows than min_rows_per_station are excluded.
+
+    STATION_A gets 3 cycles (138 days) → ~40 label rows with default params.
+    STATION_B gets 5 cycles (230 days) → ~133 label rows.
+    Setting min_rows_per_station=100 should admit only STATION_B.
+    """
+    _add_station(conn, STATION_A)
+    _add_station(conn, STATION_B)
+    _add_prices(conn, STATION_A, _3_CYCLES)   # ~40 label rows → below threshold
+    _add_prices(conn, STATION_B, _5_CYCLES)   # ~133 label rows → above threshold
+
+    df = assemble_feature_rows(
+        conn,
+        station_codes=[STATION_A, STATION_B],
+        min_rows_per_station=100,
+    )
+    assert len(df) > 0
+    assert set(df["station_code"].unique()) == {STATION_B}
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +311,7 @@ def test_cli_writes_csv(conn, tmp_path):
     result = CliRunner().invoke(main, [
         "--db", str(tmp_path / "test.db"),
         "--output", str(out_csv),
+        "--min-rows", "0",
     ])
     assert result.exit_code == 0, result.output
     assert out_csv.exists()

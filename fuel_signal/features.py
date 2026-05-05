@@ -33,6 +33,20 @@ from fuel_signal import db as _db
 from fuel_signal.cycle import CycleDetector
 from fuel_signal.labels import assemble_training_rows
 
+# Minimum label rows a station must have to be included in the training dataset.
+# Roughly one year of daily observations. Stations below this threshold are
+# too new to have survived a full price cycle and produce uninformative label patterns.
+MIN_TRAINING_ROWS_PER_STATION: int = 365
+
+# Stations excluded from training due to confirmed data-gap distortion.
+# Issue #29: both stations went offline during high-price years, so their
+# rolling P33 was computed against a cheap-only price history. This causes
+# both label conditions to fire almost constantly (positive rate 0.72–0.84),
+# producing misleading training signal that the min-rows filter alone won't catch.
+#   20528 — Speedway William Street, Granville: median 116.9c, positive rate 0.84
+#   20133 — Metro Condell Park West: median 143.7c, positive rate 0.72
+EXCLUDED_STATION_CODES: frozenset[int] = frozenset({20133, 20528})
+
 # Canonical ordered list of feature column names.
 FEATURE_COLUMNS: list[str] = [
     "cycle_pct_through",
@@ -141,6 +155,7 @@ def assemble_feature_rows(
     lookback_days: int = 90,
     percentile_pct: float = 33.0,
     station_codes: list[int] | None = None,
+    min_rows_per_station: int = MIN_TRAINING_ROWS_PER_STATION,
 ) -> pd.DataFrame:
     """Build labels (via labels.assemble_training_rows) and join feature columns.
 
@@ -148,6 +163,10 @@ def assemble_feature_rows(
     Rows where compute_features returns None are dropped.
     CycleDetector is built once from the full average series — detect() slices
     per row, so PIT-safety is preserved.
+
+    Stations in EXCLUDED_STATION_CODES are always removed (data-gap distortion).
+    Stations with fewer than min_rows_per_station label rows are also removed
+    (too-new stations haven't survived a full price cycle).
     """
     label_df = assemble_training_rows(
         conn,
@@ -158,6 +177,17 @@ def assemble_feature_rows(
         station_codes=station_codes,
     )
     all_cols = list(label_df.columns) + FEATURE_COLUMNS
+    if label_df.empty:
+        return pd.DataFrame(columns=all_cols)
+
+    if EXCLUDED_STATION_CODES:
+        label_df = label_df[~label_df["station_code"].isin(EXCLUDED_STATION_CODES)]
+
+    if min_rows_per_station > 0:
+        counts = label_df.groupby("station_code")["label"].count()
+        eligible = counts[counts >= min_rows_per_station].index
+        label_df = label_df[label_df["station_code"].isin(eligible)]
+
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
 
@@ -196,13 +226,21 @@ def assemble_feature_rows(
     help="Percentile gate for 'price is cheap' condition.",
 )
 @click.option(
+    "--min-rows", "min_rows", type=click.IntRange(min=0), default=MIN_TRAINING_ROWS_PER_STATION,
+    show_default=True,
+    help="Minimum label rows per station to include in training set (0 = no filter).",
+)
+@click.option(
     "--db",
     "db_path",
     default=str(_db.DEFAULT_DB_PATH),
     show_default=True,
     help="Path to SQLite DB.",
 )
-def main(output: str, horizon: int, threshold: float, lookback: int, percentile: float, db_path: str) -> None:
+def main(  # noqa: PLR0913
+    output: str, horizon: int, threshold: float, lookback: int,
+    percentile: float, min_rows: int, db_path: str,
+) -> None:
     """Assemble ML training rows with cycle features joined to labels."""
     path = pathlib.Path(db_path)
     if not path.exists():
@@ -217,6 +255,7 @@ def main(output: str, horizon: int, threshold: float, lookback: int, percentile:
         threshold_cents=threshold,
         lookback_days=lookback,
         percentile_pct=percentile,
+        min_rows_per_station=min_rows,
     )
     conn.close()
 
