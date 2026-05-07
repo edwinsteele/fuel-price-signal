@@ -230,6 +230,33 @@ uv run python -m fuel_signal.features --output /tmp/features.csv
 
 Output includes all label columns (`station_code`, `price_date`, `today_price_cents`, `future_min_cents`, `label`) plus cycle features (`cycle_pct_through`, `cycle_days_since_peak`, `cycle_mean_length`, `cycle_last_min_cents`, `cycle_last_max_cents`, `cycle_peak_count`) and station-vs-aggregate features (`station_price_cents`, `station_minus_last_min_cents`, `station_minus_last_max_cents`, `station_minus_sydney_avg_cents`). Rows with insufficient history for cycle detection are excluded.
 
+## Evaluation harness
+
+`fuel_signal/evaluate.py` defines the canonical train/val/test split for the ML model and provides scoring utilities. The split is fixed — never adjust it after results are in.
+
+| Split    | Start      | End        |
+|----------|------------|------------|
+| Train    | 2016-08-01 | 2025-03-17 |
+| Val      | 2025-03-25 | 2025-06-23 |
+| Test     | 2025-07-01 | 2025-12-31 |
+
+7-day buffers between splits prevent label leakage (labels look 7 days forward). Val is sized for hyperparameter tuning; test is touched only for final evaluation.
+
+Experiment results are appended to `experiments/results.csv` via `log_experiment()`. The baseline row (constant predictor at the train marginal rate ≈ 0.26) is the floor every model must beat:
+
+```python
+from fuel_signal.evaluate import split, baseline_prior, log_loss, brier, log_experiment
+import numpy as np
+
+train, val, test = split(df)  # df has price_date and label columns
+p = baseline_prior(train)
+pred = np.full(len(test), p)
+print(log_loss(test["label"].values, pred))   # ≈ 0.573
+print(brier(test["label"].values, pred))      # ≈ 0.192
+
+log_experiment("my_model", features=["cycle_pct_through"], holdout_logloss=0.52, brier=0.18)
+```
+
 ## Running tests
 
 ```bash
