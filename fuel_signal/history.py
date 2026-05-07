@@ -419,6 +419,9 @@ class Transformer:
                 # Extra fuel-code lines omit station details — carry forward
                 if not row.get("ServiceStationName"):
                     row.update(current_servo)
+                elif row.get("ServiceStationName") != current_servo["ServiceStationName"]:
+                    # New station — don't let prev_date bleed across station boundaries
+                    prev_date = None
 
                 date = self.clean_date(row.get("PriceUpdatedDate", ""), line_number, prev_date, month_in_file)
                 if date is None:
