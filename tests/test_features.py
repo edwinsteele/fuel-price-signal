@@ -17,7 +17,12 @@ import datetime
 import pytest
 
 from fuel_signal.db import create_schema, open_db, upsert_daily_prices, upsert_stations
-from fuel_signal.features import FEATURE_COLUMNS, assemble_feature_rows, compute_features
+from fuel_signal.features import (
+    FEATURE_COLUMNS,
+    MIN_TRAINING_ROWS_PER_STATION,
+    assemble_feature_rows,
+    compute_features,
+)
 
 # ---------------------------------------------------------------------------
 # Synthetic series helpers
@@ -55,6 +60,7 @@ STATION_B = 1002
 _START = "2020-01-01"
 _3_CYCLES = _sawtooth_series(3.0, start=_START)  # 138 days
 _5_CYCLES = _sawtooth_series(5.0, start=_START)  # 230 days
+_16_CYCLES = _sawtooth_series(16.0, start=_START)  # 736 days, > 365 label rows
 
 
 def _date_at_day(day: int, start: str = _START) -> str:
@@ -292,6 +298,27 @@ def test_assembler_excludes_stations_below_min_rows(conn):
     )
     assert len(df) > 0
     assert set(df["station_code"].unique()) == {STATION_B}
+
+
+def test_assembler_default_min_rows_enforces_365(conn):
+    """Default min_rows_per_station applies MIN_TRAINING_ROWS_PER_STATION (365).
+
+    STATION_A gets 3 cycles (138 days) → label-row count well below 365.
+    STATION_B gets 16 cycles (736 days) → label-row count well above 365.
+    Calling without min_rows_per_station must rely on the default and admit
+    only STATION_B, pinning the constant + default-path behaviour.
+    """
+    assert MIN_TRAINING_ROWS_PER_STATION == 365
+
+    _add_station(conn, STATION_A)
+    _add_station(conn, STATION_B)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    _add_prices(conn, STATION_B, _16_CYCLES)
+
+    df = assemble_feature_rows(conn, station_codes=[STATION_A, STATION_B])
+    assert len(df) > 0
+    assert set(df["station_code"].unique()) == {STATION_B}
+    assert (df["station_code"] == STATION_B).sum() >= MIN_TRAINING_ROWS_PER_STATION
 
 
 def test_assembler_rejects_negative_min_rows(conn):
