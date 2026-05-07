@@ -9,6 +9,7 @@ from fuel_signal.evaluate import (
     TEST_END,
     TEST_START,
     TRAIN_END,
+    TRAIN_START,
     VAL_END,
     VAL_START,
     baseline_prior,
@@ -53,6 +54,22 @@ def test_split_assigns_boundary_dates():
     assert set(train["price_date"]) == {"2020-06-15", TRAIN_END}
     assert set(val["price_date"]) == {VAL_START, VAL_END}
     assert set(test["price_date"]) == {TEST_START, TEST_END}
+
+
+def test_split_excludes_pre_train_start():
+    """Rows before TRAIN_START are excluded from train (canonical window is enforced)."""
+    df = _make_df([
+        ("2015-01-01", 0),  # before TRAIN_START — must be excluded
+        ("2016-07-31", 0),  # day before TRAIN_START — must be excluded
+        (TRAIN_START, 0),   # first day of train — must be included
+        ("2020-06-15", 0),  # interior train
+    ])
+    train, _val, _test = split(df)
+    all_train_dates = set(train["price_date"])
+    assert "2015-01-01" not in all_train_dates
+    assert "2016-07-31" not in all_train_dates
+    assert TRAIN_START in all_train_dates
+    assert "2020-06-15" in all_train_dates
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +137,13 @@ def test_split_no_date_in_multiple_splits():
 # ---------------------------------------------------------------------------
 # Scoring — log_loss and brier
 # ---------------------------------------------------------------------------
+
+def test_baseline_prior_empty_raises():
+    """baseline_prior() raises ValueError on an empty training DataFrame."""
+    empty = pd.DataFrame(columns=["label", "price_date"])
+    with pytest.raises(ValueError, match="baseline_prior"):
+        baseline_prior(empty)
+
 
 def test_log_loss_perfect_predictor():
     y = np.array([1.0, 0.0, 1.0])

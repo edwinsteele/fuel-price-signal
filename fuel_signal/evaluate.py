@@ -75,7 +75,7 @@ def split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     exclusive. Rows after TEST_END are also excluded.
     """
     dates = pd.to_datetime(df["price_date"])
-    train = df[dates <= TRAIN_END].copy()
+    train = df[(dates >= TRAIN_START) & (dates <= TRAIN_END)].copy()
     val = df[(dates >= VAL_START) & (dates <= VAL_END)].copy()
     test = df[(dates >= TEST_START) & (dates <= TEST_END)].copy()
     return train, val, test
@@ -108,6 +108,8 @@ def baseline_prior(df_train: pd.DataFrame) -> float:
     A constant predictor at this value is the 'do nothing' baseline: among all
     constant predictors, it minimises log loss. All models must beat this floor.
     """
+    if df_train.empty:
+        raise ValueError("baseline_prior() requires at least one training row.")
     return float(df_train["label"].mean())
 
 
