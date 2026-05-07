@@ -92,6 +92,10 @@ def log_loss(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.clip(np.asarray(y_pred, dtype=float), 1e-15, 1 - 1e-15)
+    if y_true.shape != y_pred.shape:
+        raise ValueError(f"log_loss(): shape mismatch — y_true {y_true.shape} vs y_pred {y_pred.shape}")
+    if y_true.size == 0:
+        raise ValueError("log_loss() requires non-empty inputs.")
     return float(-np.mean(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred)))
 
 
@@ -99,6 +103,10 @@ def brier(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Brier score — mean squared error of probability predictions (lower is better)."""
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
+    if y_true.shape != y_pred.shape:
+        raise ValueError(f"brier(): shape mismatch — y_true {y_true.shape} vs y_pred {y_pred.shape}")
+    if y_true.size == 0:
+        raise ValueError("brier() requires non-empty inputs.")
     return float(np.mean((y_pred - y_true) ** 2))
 
 

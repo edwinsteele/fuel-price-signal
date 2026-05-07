@@ -157,6 +157,16 @@ def test_log_loss_worst_predictor():
     assert log_loss(y, np.array([0.0, 1.0])) > 30
 
 
+def test_log_loss_shape_mismatch_raises():
+    with pytest.raises(ValueError, match="shape mismatch"):
+        log_loss(np.array([1.0, 0.0, 1.0]), np.array([0.5, 0.5]))
+
+
+def test_log_loss_empty_raises():
+    with pytest.raises(ValueError, match="non-empty"):
+        log_loss(np.array([]), np.array([]))
+
+
 def test_brier_perfect():
     y = np.array([1.0, 0.0, 1.0])
     assert brier(y, np.array([1.0, 0.0, 1.0])) == pytest.approx(0.0)
@@ -165,6 +175,16 @@ def test_brier_perfect():
 def test_brier_worst():
     y = np.array([1.0, 0.0])
     assert brier(y, np.array([0.0, 1.0])) == pytest.approx(1.0)
+
+
+def test_brier_shape_mismatch_raises():
+    with pytest.raises(ValueError, match="shape mismatch"):
+        brier(np.array([1.0, 0.0, 1.0]), np.array([0.5, 0.5]))
+
+
+def test_brier_empty_raises():
+    with pytest.raises(ValueError, match="non-empty"):
+        brier(np.array([]), np.array([]))
 
 
 # ---------------------------------------------------------------------------
