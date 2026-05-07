@@ -214,11 +214,11 @@ def test_log_experiment_creates_file_with_header(tmp_path, monkeypatch):
     results_path = tmp_path / "results.csv"
     monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
 
-    log_experiment("baseline", [], holdout_logloss=0.573, brier=0.192)
+    log_experiment("baseline", [], holdout_logloss=0.573, holdout_brier=0.192)
 
     assert results_path.exists()
     lines = results_path.read_text().splitlines()
-    assert lines[0].startswith("timestamp,git_sha,name")
+    assert lines[0].startswith("timestamp,git_sha,name,features,train_start,train_end")
     assert len(lines) == 2  # header + one data row
 
 
@@ -227,8 +227,8 @@ def test_log_experiment_appends_row(tmp_path, monkeypatch):
     results_path = tmp_path / "results.csv"
     monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
 
-    log_experiment("run_1", ["feat_a"], holdout_logloss=0.55, brier=0.18)
-    log_experiment("run_2", ["feat_a", "feat_b"], holdout_logloss=0.50, brier=0.17)
+    log_experiment("run_1", ["feat_a"], holdout_logloss=0.55, holdout_brier=0.18)
+    log_experiment("run_2", ["feat_a", "feat_b"], holdout_logloss=0.50, holdout_brier=0.17)
 
     lines = results_path.read_text().splitlines()
     assert len(lines) == 3  # header + 2 data rows
@@ -241,7 +241,7 @@ def test_log_experiment_features_pipe_separated(tmp_path, monkeypatch):
     results_path = tmp_path / "results.csv"
     monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
 
-    log_experiment("m", ["cycle_pct_through", "station_price_cents"], holdout_logloss=0.5, brier=0.2)
+    log_experiment("m", ["cycle_pct_through", "station_price_cents"], holdout_logloss=0.5, holdout_brier=0.2)
 
     content = results_path.read_text()
     assert "cycle_pct_through|station_price_cents" in content

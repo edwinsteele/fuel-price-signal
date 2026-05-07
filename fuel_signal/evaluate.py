@@ -58,7 +58,7 @@ TEST_END = "2025-12-31"
 _RESULTS_CSV = pathlib.Path(__file__).parent.parent / "experiments" / "results.csv"
 _CSV_HEADER = [
     "timestamp", "git_sha", "name", "features",
-    "train_end", "val_start", "val_end", "test_start", "test_end",
+    "train_start", "train_end", "val_start", "val_end", "test_start", "test_end",
     "holdout_logloss", "holdout_brier", "notes",
 ]
 
@@ -132,13 +132,12 @@ def log_experiment(
     name: str,
     features: list[str],
     holdout_logloss: float,
-    brier: float,
+    holdout_brier: float,
     notes: str = "",
 ) -> None:
     """Append one row to experiments/results.csv with a UTC timestamp and git sha.
 
-    Creates the file with a header row if it does not exist yet. The `brier`
-    parameter is the holdout Brier score (not the module-level brier() function).
+    Creates the file with a header row if it does not exist yet.
     """
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
@@ -151,12 +150,13 @@ def log_experiment(
             _git_sha(),
             name,
             "|".join(features),
+            TRAIN_START,
             TRAIN_END,
             VAL_START,
             VAL_END,
             TEST_START,
             TEST_END,
             f"{holdout_logloss:.6f}",
-            f"{brier:.6f}",
+            f"{holdout_brier:.6f}",
             notes,
         ])
