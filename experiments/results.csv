@@ -1,2 +1,2 @@
 timestamp,git_sha,name,features,train_start,train_end,val_start,val_end,test_start,test_end,holdout_logloss,holdout_brier,notes
-2026-05-07T00:00:00+00:00,ca33c6b,marginal_rate_baseline,,2016-08-01,2025-03-17,2025-03-25,2025-06-23,2025-07-01,2025-12-31,0.573057,0.192400,constant predictor p=0.26 (train marginal rate); approximate — class balance from issue #26
+2026-05-07T08:14:29.308188+00:00,5d3e99f,marginal_rate_baseline,,2016-08-01,2025-03-17,2025-03-25,2025-06-23,2025-07-01,2025-12-31,0.582126,0.196563,constant predictor p=0.2602; computed from real DB 2026-05-07
