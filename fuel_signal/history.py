@@ -314,8 +314,9 @@ class Transformer:
             logger.debug("Line %s: unparseable date %r", line_number, raw)
             return None
 
-        # Fix YYYY-DD-MM bug: when month field != file month, day and month
-        # are swapped. Sanity-check that day == file month before swapping.
+        # Fix YYYY-DD-MM bug: Python parses YYYY-DD-MM as month=day, day=month.
+        # When d.month == month_in_file, the raw day happens to equal the true
+        # month — swapping would produce the same date, so skipping is correct.
         if d.month != month_in_file:
             if d.day != month_in_file:
                 logger.debug("Line %s: date %s inconsistent with file month %s", line_number, d, month_in_file)
