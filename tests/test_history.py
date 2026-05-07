@@ -686,6 +686,44 @@ def test_clean_recovers_ckan_shifted_rows(tmp_path):
     assert prices["BP"] == 175.0
 
 
+def test_clean_does_not_inherit_prev_date_across_station_boundary(tmp_path):
+    # Station B's first row has a blank date. It must NOT inherit Station A's date.
+    rows = [
+        {"ServiceStationName": "Station A", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "2024-01-15", "Price": "180.0"},
+        # Station B — blank date on first row; should be dropped, not inherit A's date
+        {"ServiceStationName": "Station B", "Address": "2 High St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "BP", "FuelCode": "E10",
+         "PriceUpdatedDate": "", "Price": "175.0"},
+        # Station B — second row with a valid date
+        {"ServiceStationName": "Station B", "Address": "2 High St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "BP", "FuelCode": "E10",
+         "PriceUpdatedDate": "2024-01-16", "Price": "176.0"},
+    ]
+    result = _run_transformer(rows, tmp_path)
+    # Only Station A row 1 and Station B row 3 should appear; blank-date row is dropped.
+    assert len(result) == 2
+    station_b_rows = [r for r in result if r["ServiceStationName"] == "Station B"]
+    assert len(station_b_rows) == 1
+    assert "01-16" in station_b_rows[0]["PriceUpdatedDate"]
+
+
+def test_clean_blank_date_at_start_of_first_station_is_dropped(tmp_path):
+    # Even the very first station in a file should have blank-date rows dropped.
+    rows = [
+        {"ServiceStationName": "Station A", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "", "Price": "180.0"},
+        {"ServiceStationName": "Station A", "Address": "1 Main St", "Suburb": "Sydney",
+         "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+         "PriceUpdatedDate": "2024-01-15", "Price": "181.0"},
+    ]
+    result = _run_transformer(rows, tmp_path)
+    assert len(result) == 1
+    assert float(result[0]["Price"]) == 181.0
+
+
 def test_clean_all_resources(tmp_path):
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
