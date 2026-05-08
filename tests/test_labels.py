@@ -263,25 +263,40 @@ def test_assemble_matches_compute_label_per_row(conn):
 
     # 40 contiguous days, then a 3-day gap, then 30 more contiguous days. Prices
     # oscillate so the percentile gate and future_min both vary across rows.
+    # Quantise to 0.1c — daily_prices stores price_decicents as INTEGER, so any
+    # finer precision would silently round on insert and drift the round-trip.
     rng = np.random.default_rng(seed=42)
-    pre_gap = [(-80 + i, 160.0 + 30.0 * rng.random()) for i in range(40)]
-    post_gap = [(-37 + i, 160.0 + 30.0 * rng.random()) for i in range(30)]
+    pre_gap = [(-80 + i, round(160.0 + 30.0 * rng.random(), 1)) for i in range(40)]
+    post_gap = [(-37 + i, round(160.0 + 30.0 * rng.random(), 1)) for i in range(30)]
     _prices(conn, 1001, pre_gap + post_gap)
+    price_by_offset = dict(pre_gap + post_gap)
+    offset_by_date = {_d(offset): offset for offset in price_by_offset}
 
     df = assemble_training_rows(
         conn, horizon_days=3, threshold_cents=2.0,
         lookback_days=LOOKBACK, station_codes=[1001],
     )
 
-    # Every row in df must match compute_label for the same date.
+    # Every row in df must match compute_label for the same date,
+    # and emitted today_price / future_min must reflect the underlying series.
     for _, row in df.iterrows():
+        date_iso = row["price_date"]
+        offset = offset_by_date[date_iso]
         expected = compute_label(
-            conn, 1001, row["price_date"], horizon_days=3, threshold_cents=2.0,
+            conn, 1001, date_iso, horizon_days=3, threshold_cents=2.0,
             lookback_days=LOOKBACK, percentile_pct=33.0,
         )
-        assert expected is not None, f"compute_label returned None for emitted row {row['price_date']}"
+        assert expected is not None, f"compute_label returned None for emitted row {date_iso}"
         assert row["label"] == expected, (
-            f"label mismatch on {row['price_date']}: assembler={row['label']} vs compute_label={expected}"
+            f"label mismatch on {date_iso}: assembler={row['label']} vs compute_label={expected}"
+        )
+        assert row["today_price_cents"] == pytest.approx(price_by_offset[offset]), (
+            f"today_price_cents mismatch on {date_iso}"
+        )
+        expected_future_min = min(price_by_offset[offset + delta] for delta in range(1, 4))
+        assert row["future_min_cents"] == pytest.approx(expected_future_min), (
+            f"future_min_cents mismatch on {date_iso}: "
+            f"assembler={row['future_min_cents']} vs expected={expected_future_min}"
         )
 
     # Conversely, every date for which compute_label returns non-None must appear in df.
