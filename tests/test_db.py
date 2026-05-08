@@ -784,6 +784,27 @@ def test_coverage_matrix_empty_db(conn):
     assert coverage_matrix(conn) == []
 
 
+def test_coverage_matrix_months_window_is_exact(conn):
+    import datetime
+    today = datetime.date.today()
+
+    def first_of_month_ago(d: datetime.date, n: int) -> datetime.date:
+        for _ in range(n):
+            d = (d.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+        return d
+
+    upsert_stations(conn, [_STATION])
+    # Insert one price in each of the 4 most recent months (0..3 months ago)
+    dates = [first_of_month_ago(today.replace(day=1), n).isoformat() for n in range(4)]
+    insert_prices(conn, [
+        {"station_code": 1001, "fuel_code": "E10", "price_date": d, "price_cents": 175.0}
+        for d in dates
+    ])
+    rows = coverage_matrix(conn, "E10", months=3)
+    ym_values = {r[2] for r in rows}
+    assert len(ym_values) == 3, f"Expected 3 months, got {sorted(ym_values)}"
+
+
 def test_gradient_by_lga_returns_weekly_slopes(conn):
     import datetime
     # Insert a BM station with 14 days of rising prices
