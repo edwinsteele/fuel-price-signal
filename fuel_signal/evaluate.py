@@ -136,6 +136,60 @@ def _git_sha() -> str:
         return "unknown"
 
 
+def reliability_table(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    n_bins: int = 10,
+) -> pd.DataFrame:
+    """10-bin quantile reliability table for any binary classifier.
+
+    Returns a DataFrame with columns: bin_mean_pred, actual_rate, count, gap.
+    gap = actual_rate − bin_mean_pred; positive means under-confident, negative
+    means over-confident.  max |gap| > 0.05 is the flag threshold used in
+    calibrate.py.
+
+    Quantile binning is used (equal row counts per bin) rather than equal-width
+    so that sparse probability regions at the extremes aren't misleading.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.clip(np.asarray(y_pred, dtype=float), 0.0, 1.0)
+    if y_true.shape != y_pred.shape:
+        raise ValueError(
+            f"reliability_table(): shape mismatch — y_true {y_true.shape} vs y_pred {y_pred.shape}"
+        )
+    if y_true.size == 0:
+        raise ValueError("reliability_table() requires non-empty inputs.")
+
+    quantiles = np.linspace(0.0, 1.0, n_bins + 1)
+    edges = np.unique(np.quantile(y_pred, quantiles))
+    if edges.size < 2:
+        bin_mean_pred = np.array([float(y_pred.mean())])
+        actual_rate = np.array([float(y_true.mean())])
+        counts = np.array([int(y_true.size)])
+    else:
+        bin_idx = np.clip(np.digitize(y_pred, edges[1:-1], right=False), 0, len(edges) - 2)
+        bin_mean_pred, actual_rate, counts = [], [], []
+        for b in range(len(edges) - 1):
+            mask = bin_idx == b
+            n = int(mask.sum())
+            if n == 0:
+                continue
+            bin_mean_pred.append(float(y_pred[mask].mean()))
+            actual_rate.append(float(y_true[mask].mean()))
+            counts.append(n)
+        bin_mean_pred = np.array(bin_mean_pred)
+        actual_rate = np.array(actual_rate)
+        counts = np.array(counts)
+
+    gap = actual_rate - bin_mean_pred
+    return pd.DataFrame({
+        "bin_mean_pred": bin_mean_pred,
+        "actual_rate": actual_rate,
+        "count": counts,
+        "gap": gap,
+    })
+
+
 def log_experiment(
     name: str,
     features: list[str],
