@@ -159,6 +159,8 @@ def reliability_table(
         )
     if y_true.size == 0:
         raise ValueError("reliability_table() requires non-empty inputs.")
+    if not isinstance(n_bins, int) or n_bins < 1:
+        raise ValueError(f"reliability_table(): n_bins must be a positive integer, got {n_bins!r}.")
 
     quantiles = np.linspace(0.0, 1.0, n_bins + 1)
     edges = np.unique(np.quantile(y_pred, quantiles))

@@ -114,6 +114,12 @@ class TestReliabilityTable:
         assert len(tbl) == 1
         assert tbl["bin_mean_pred"].iloc[0] == pytest.approx(0.5)
 
+    def test_invalid_n_bins_raises(self):
+        y = np.array([0, 1])
+        p = np.array([0.3, 0.7])
+        with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+            _ev.reliability_table(y, p, n_bins=0)
+
 
 # ---------------------------------------------------------------------------
 # class_balance
@@ -187,32 +193,42 @@ class TestPickBest:
             "y_val": y,
         }
 
+    _FLAGGED = 0.10   # > _MISCAL_THRESHOLD (0.05) → proceed to calibration check
+    _OK = 0.02        # ≤ _MISCAL_THRESHOLD → short-circuit to raw immediately
+
+    def test_returns_raw_when_well_calibrated_regardless_of_logloss(self):
+        # gate: max_gap ≤ threshold → raw, even if calibration would improve logloss
+        compare = self._make_compare(raw_ll=0.50, sig_ll=0.45, sig_br=0.19, iso_ll=0.44, iso_br=0.19)
+        name, model = pick_best(compare, self._OK)
+        assert name == "raw"
+        assert model is None
+
     def test_returns_raw_when_calibration_does_not_improve(self):
         compare = self._make_compare(raw_ll=0.50, sig_ll=0.55, sig_br=0.20, iso_ll=0.52, iso_br=0.20)
-        name, model = pick_best(compare)
+        name, model = pick_best(compare, self._FLAGGED)
         assert name == "raw"
         assert model is None
 
     def test_picks_sigmoid_when_it_wins(self):
         compare = self._make_compare(raw_ll=0.50, sig_ll=0.45, sig_br=0.19, iso_ll=0.55, iso_br=0.20)
-        name, model = pick_best(compare)
+        name, model = pick_best(compare, self._FLAGGED)
         assert name == "sigmoid"
         assert model is not None
 
     def test_picks_isotonic_when_it_wins(self):
         compare = self._make_compare(raw_ll=0.50, sig_ll=0.55, sig_br=0.20, iso_ll=0.45, iso_br=0.19)
-        name, model = pick_best(compare)
+        name, model = pick_best(compare, self._FLAGGED)
         assert name == "isotonic"
 
     def test_brier_regression_blocks_win(self):
         # sigmoid has lower logloss but blows up Brier beyond the limit
         compare = self._make_compare(raw_ll=0.50, raw_br=0.20, sig_ll=0.45, sig_br=0.21, iso_ll=0.55, iso_br=0.20)
-        name, _ = pick_best(compare)
+        name, _ = pick_best(compare, self._FLAGGED)
         assert name == "raw"
 
     def test_picks_lower_logloss_when_both_candidates(self):
         compare = self._make_compare(raw_ll=0.50, sig_ll=0.44, sig_br=0.19, iso_ll=0.46, iso_br=0.19)
-        name, _ = pick_best(compare)
+        name, _ = pick_best(compare, self._FLAGGED)
         assert name == "sigmoid"
 
 
@@ -251,12 +267,13 @@ class TestCalibrateCLI:
         model_out = tmp_path / "models" / "logreg_calibrated.joblib"
 
         runner = CliRunner()
-        runner.invoke(main, [
+        result = runner.invoke(main, [
             "--features-csv", str(features_path),
             "--model-in", str(model_path),
             "--model-out", str(model_out),
             "--skip-results-csv",
         ])
+        assert result.exit_code == 0, result.output
 
         saved = joblib.load(model_out)
         assert "pipeline" in saved

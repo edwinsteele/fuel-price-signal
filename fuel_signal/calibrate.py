@@ -34,6 +34,7 @@ the calibration data is a held-out slice that the base model never saw.
 from __future__ import annotations
 
 import pathlib
+from typing import Any
 
 import click
 import joblib
@@ -67,7 +68,7 @@ class _CalibratedPipeline:
     regardless of whether calibration was applied.
     """
 
-    def __init__(self, base_pipeline, calibrator, method: str) -> None:
+    def __init__(self, base_pipeline: Any, calibrator: Any, method: str) -> None:
         self.base_pipeline = base_pipeline
         self.calibrator = calibrator
         self.method = method
@@ -135,10 +136,27 @@ def compare_calibrations(
     df_fit = train_sorted.iloc[:-n_calib]
     df_calib = train_sorted.iloc[-n_calib:]
 
+    if df_fit.empty:
+        raise ValueError(
+            "compare_calibrations(): fit slice is empty after temporal split — "
+            "train split is too small for calibration."
+        )
+
     X_fit = df_fit[feature_columns].to_numpy(dtype=float)
     y_fit = df_fit["label"].to_numpy(dtype=int)
     X_calib = df_calib[feature_columns].to_numpy(dtype=float)
     y_calib = df_calib["label"].to_numpy(dtype=int)
+
+    if len(np.unique(y_fit)) < 2:
+        raise ValueError(
+            "compare_calibrations(): fit slice has only one class — "
+            "cannot fit the base logistic regression."
+        )
+    if len(np.unique(y_calib)) < 2:
+        raise ValueError(
+            "compare_calibrations(): calibration slice has only one class — "
+            "cannot fit sigmoid or isotonic calibrators."
+        )
 
     base = build_pipeline()
     base.fit(X_fit, y_fit)
@@ -182,16 +200,19 @@ def compare_calibrations(
     }
 
 
-def pick_best(compare: dict) -> tuple[str, object]:
+def pick_best(compare: dict, max_gap: float) -> tuple[str, object]:
     """Pick the best model variant; return (name, model_or_None).
 
     'model_or_None' is None for 'raw' (caller should load the raw pipeline).
     Decision rule:
-      1. If raw is well-calibrated (max |gap| ≤ threshold) → use raw.
+      1. If raw is well-calibrated (max |gap| ≤ _MISCAL_THRESHOLD) → use raw.
       2. Otherwise pick the calibration method that has lower val logloss
-         provided it does not regress Brier by more than the limit.
+         provided it does not regress Brier by more than _BRIER_REGRESSION_LIMIT.
       3. If neither calibration method beats raw, fall back to raw.
     """
+    if max_gap <= _MISCAL_THRESHOLD:
+        return "raw", None
+
     raw_ll = compare["raw"]["val_logloss"]
     raw_br = compare["raw"]["val_brier"]
 
@@ -351,7 +372,7 @@ def main(features_csv: str, model_in: str, model_out: str, skip_results_csv: boo
 
     # --- calibration comparison (always run so we can report numbers) ---
     compare = compare_calibrations(df, model_path, feature_columns)
-    best_name, best_model = pick_best(compare)
+    best_name, best_model = pick_best(compare, max_gap)
     click.echo(_fmt_comparison(compare, best_name))
     click.echo()
 
