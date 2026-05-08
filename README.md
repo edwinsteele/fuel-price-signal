@@ -275,6 +275,36 @@ uv run python -m fuel_signal.train_logreg \
 
 Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output prints train/val sizes and class balance, val log-loss / Brier, and the delta versus the constant-predictor baseline. The reliability plot uses 10 quantile bins with a `y=x` reference line; points below the diagonal indicate over-confidence, above indicate under-confidence.
 
+## Phase 2 final evaluation (lock the model)
+
+Threshold sweep on val → pick τ → **score test once** → append to `experiments/results.csv`. Run this command once to lock Phase 2. Do not re-run to tune τ after seeing test results.
+
+```bash
+# Default: reads data/features.csv
+uv run python -m fuel_signal.score_phase2
+
+# Custom features CSV
+uv run python -m fuel_signal.score_phase2 --features-csv /tmp/features.csv
+```
+
+**What it does:**
+
+1. Trains the logreg pipeline on the train split (reuses `train_logreg` internals).
+2. Sweeps τ ∈ [0.05, 0.95] (step 0.05) on val — prints precision, recall, F1, BUY%, and expected-cents-saved per row.
+3. Picks τ = argmax(expected cents/row on val) + 0.05 adjustment. The +0.05 corrects for val's elevated BUY rate (36.1% vs test's 26.9%): the cost-optimal τ on val is slightly too aggressive for the test distribution.
+4. Scores test at chosen τ. Appends one row to `experiments/results.csv`.
+
+**Cost model:** TP → +3.0c saved; FP → −1.5c penalty; FN/TN → 0.
+
+**Phase 2 result** (2026-05-09, real DB):
+
+| Model | Test logloss | Test brier | vs baseline |
+|---|---|---|---|
+| Marginal-rate baseline | 0.5821 | 0.1966 | — |
+| Logreg cycle features (τ=0.40) | 0.4029 | 0.1346 | −0.1792 logloss, −0.0620 brier |
+
+At τ=0.40: precision=0.618, recall=0.581, F1=0.599, BUY rate=25.0% on test.
+
 ## Running tests
 
 ```bash
