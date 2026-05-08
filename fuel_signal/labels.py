@@ -210,42 +210,76 @@ def assemble_training_rows(
             (fid,),
         ).fetchall()
 
-    records: list[dict] = []
+    frames: list[pd.DataFrame] = []
     for station_code, station_iter in groupby(raw_rows, key=lambda r: r[0]):
-        series = [
-            (datetime.date.fromisoformat(_from_date_int(r[1])), r[2] / 10)
-            for r in station_iter
-        ]  # [(price_date, price_cents)]
-        n = len(series)
-        for i in range(lookback_days, n - horizon_days):
-            date_d, today_price = series[i]
-            # Skip rows where the actual calendar span doesn't equal the requested window.
-            # daily_prices is forward-filled but may still have gaps at the start of a
-            # station's history; row-index arithmetic would silently straddle such a gap,
-            # producing a different result from compute_label() for the same (station, date).
-            if (date_d - series[i - lookback_days][0]).days != lookback_days:
-                continue
-            if (series[i + horizon_days][0] - date_d).days != horizon_days:
-                continue
-            forward_prices = [p for _, p in series[i + 1 : i + 1 + horizon_days]]
-            future_min = min(forward_prices)
-            past_prices = [p for _, p in series[i - lookback_days : i]]
-            price_threshold = float(np.percentile(past_prices, percentile_pct))
+        rows = list(station_iter)
+        n = len(rows)
+        if n < lookback_days + horizon_days + 1:
+            continue
 
-            no_better_deal = future_min >= today_price - threshold_cents
-            price_is_cheap = today_price <= price_threshold
-            label = 1 if (no_better_deal and price_is_cheap) else 0
-            records.append({
-                "station_code": station_code,
-                "price_date": date_d.isoformat(),
-                "today_price_cents": today_price,
-                "future_min_cents": future_min,
-                "label": label,
-            })
+        dates = [datetime.date.fromisoformat(_from_date_int(r[1])) for r in rows]
+        prices = np.fromiter((r[2] / 10 for r in rows), dtype=float, count=n)
+        ordinals = np.fromiter((d.toordinal() for d in dates), dtype=np.int64, count=n)
 
-    if not records:
+        s = pd.Series(prices)
+        # Past percentile: shift(1) so today's price is excluded from its own lookback,
+        # then rolling(lookback).quantile is the percentile of prices[i-lookback:i].
+        # pd.quantile defaults to linear interpolation, matching np.percentile.
+        past_threshold = (
+            s.shift(1)
+            .rolling(lookback_days, min_periods=lookback_days)
+            .quantile(percentile_pct / 100.0)
+            .to_numpy()
+        )
+        # Future min over prices[i+1 : i+1+horizon_days]: rolling(horizon).min() at
+        # index j covers prices[j-horizon+1 : j+1], so shift up by -horizon_days
+        # to land that window on row i.
+        future_min = (
+            s.rolling(horizon_days, min_periods=horizon_days)
+            .min()
+            .shift(-horizon_days)
+            .to_numpy()
+        )
+
+        # Calendar-gap mask: (date[i] - date[i-lookback]) and (date[i+horizon] - date[i])
+        # must equal the requested windows in calendar days. daily_prices is forward-filled
+        # but may still have gaps at the start of a station's history; index arithmetic
+        # alone would silently straddle them, diverging from compute_label() output.
+        idx = np.arange(n)
+        lookback_span_ok = np.zeros(n, dtype=bool)
+        lookback_span_ok[lookback_days:] = (
+            ordinals[lookback_days:] - ordinals[:-lookback_days] == lookback_days
+        )
+        horizon_span_ok = np.zeros(n, dtype=bool)
+        horizon_span_ok[:-horizon_days] = (
+            ordinals[horizon_days:] - ordinals[:-horizon_days] == horizon_days
+        )
+        valid = (
+            (idx >= lookback_days)
+            & (idx < n - horizon_days)
+            & lookback_span_ok
+            & horizon_span_ok
+        )
+
+        if not valid.any():
+            continue
+
+        no_better_deal = future_min >= prices - threshold_cents
+        price_is_cheap = prices <= past_threshold
+        labels = (no_better_deal & price_is_cheap).astype(np.int64)
+
+        sel = np.flatnonzero(valid)
+        frames.append(pd.DataFrame({
+            "station_code": np.full(sel.size, station_code, dtype=np.int64),
+            "price_date": [dates[i].isoformat() for i in sel],
+            "today_price_cents": prices[sel],
+            "future_min_cents": future_min[sel],
+            "label": labels[sel],
+        }))
+
+    if not frames:
         return pd.DataFrame(columns=cols)
-    return pd.DataFrame(records, columns=cols)
+    return pd.concat(frames, ignore_index=True)[cols]
 
 
 @click.command("labels")

@@ -11,6 +11,7 @@ Cheap/expensive is controlled by setting past prices high (200c) or low (160c):
 
 import datetime
 
+import numpy as np
 import pytest
 from click.testing import CliRunner
 
@@ -248,6 +249,67 @@ def test_assemble_invalid_horizon(conn):
     """horizon_days < 1 raises ValueError."""
     with pytest.raises(ValueError, match="horizon_days"):
         assemble_training_rows(conn, horizon_days=0)
+
+
+def test_assemble_matches_compute_label_per_row(conn):
+    """Vectorised assemble_training_rows must agree row-for-row with compute_label.
+
+    Builds a long, varied price series with a mid-history calendar gap, then
+    asserts that for every (station, date) compute_label produces, the assembler
+    emits the same label, today_price, and future_min — and that gap-straddling
+    rows are absent from both.
+    """
+    _station(conn, 1001)
+
+    # 40 contiguous days, then a 3-day gap, then 30 more contiguous days. Prices
+    # oscillate so the percentile gate and future_min both vary across rows.
+    # Quantise to 0.1c — daily_prices stores price_decicents as INTEGER, so any
+    # finer precision would silently round on insert and drift the round-trip.
+    rng = np.random.default_rng(seed=42)
+    pre_gap = [(-80 + i, round(160.0 + 30.0 * rng.random(), 1)) for i in range(40)]
+    post_gap = [(-37 + i, round(160.0 + 30.0 * rng.random(), 1)) for i in range(30)]
+    _prices(conn, 1001, pre_gap + post_gap)
+    price_by_offset = dict(pre_gap + post_gap)
+    offset_by_date = {_d(offset): offset for offset in price_by_offset}
+
+    df = assemble_training_rows(
+        conn, horizon_days=3, threshold_cents=2.0,
+        lookback_days=LOOKBACK, station_codes=[1001],
+    )
+
+    # Every row in df must match compute_label for the same date,
+    # and emitted today_price / future_min must reflect the underlying series.
+    for _, row in df.iterrows():
+        date_iso = row["price_date"]
+        offset = offset_by_date[date_iso]
+        expected = compute_label(
+            conn, 1001, date_iso, horizon_days=3, threshold_cents=2.0,
+            lookback_days=LOOKBACK, percentile_pct=33.0,
+        )
+        assert expected is not None, f"compute_label returned None for emitted row {date_iso}"
+        assert row["label"] == expected, (
+            f"label mismatch on {date_iso}: assembler={row['label']} vs compute_label={expected}"
+        )
+        assert row["today_price_cents"] == pytest.approx(price_by_offset[offset]), (
+            f"today_price_cents mismatch on {date_iso}"
+        )
+        expected_future_min = min(price_by_offset[offset + delta] for delta in range(1, 4))
+        assert row["future_min_cents"] == pytest.approx(expected_future_min), (
+            f"future_min_cents mismatch on {date_iso}: "
+            f"assembler={row['future_min_cents']} vs expected={expected_future_min}"
+        )
+
+    # Conversely, every date for which compute_label returns non-None must appear in df.
+    all_dates = [d for d, _ in pre_gap + post_gap]
+    expected_dates = set()
+    for offset in all_dates:
+        date_iso = _d(offset)
+        if compute_label(
+            conn, 1001, date_iso, horizon_days=3, threshold_cents=2.0,
+            lookback_days=LOOKBACK, percentile_pct=33.0,
+        ) is not None:
+            expected_dates.add(date_iso)
+    assert set(df["price_date"]) == expected_dates
 
 
 def test_cli_main_smoke(conn, tmp_path):
