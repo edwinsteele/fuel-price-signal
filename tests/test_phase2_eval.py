@@ -195,6 +195,11 @@ def test_pick_tau_on_random_sweep():
     assert _TAU_STEP <= tau <= 1.0 - _TAU_STEP + 1e-9
 
 
+def test_pick_tau_empty_raises():
+    with pytest.raises(ValueError, match="at least one sweep row"):
+        pick_tau([])
+
+
 # ---------------------------------------------------------------------------
 # score_test
 # ---------------------------------------------------------------------------

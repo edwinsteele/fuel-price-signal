@@ -41,6 +41,7 @@ import pathlib
 import click
 import numpy as np
 import pandas as pd
+from sklearn.pipeline import Pipeline
 
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import FEATURE_COLUMNS
@@ -143,6 +144,8 @@ def pick_tau(
     the cost-optimal τ on val would be too aggressive on test without this bump.
     Result is clamped to [_TAU_STEP, 1.0 - _TAU_STEP].
     """
+    if not sweep_rows:
+        raise ValueError("pick_tau() requires at least one sweep row.")
     best = max(sweep_rows, key=lambda r: r["expected_cents_per_row"])
     adjusted = round(best["tau"] + tau_adjustment, 4)
     lo, hi = _TAU_STEP, 1.0 - _TAU_STEP
@@ -150,7 +153,7 @@ def pick_tau(
 
 
 def score_test(
-    pipeline,
+    pipeline: Pipeline,
     df: pd.DataFrame,
     tau: float,
     feature_columns: list[str] | None = None,
