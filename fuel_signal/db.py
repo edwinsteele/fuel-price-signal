@@ -797,7 +797,7 @@ def coverage_matrix(
     else:
         today = _dt.date.today()
         cutoff_month = today.replace(day=1)
-        for _ in range(months):
+        for _ in range(months - 1):
             cutoff_month = (cutoff_month - _dt.timedelta(days=1)).replace(day=1)
         cutoff_ym = cutoff_month.strftime("%Y-%m")
         where_clauses.append(
