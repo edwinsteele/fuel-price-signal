@@ -11,6 +11,7 @@ from fuel_signal.history import (
     _format_cell,
     _parse_date,
     clean_all_resources,
+    clean_resource,
     discover_price_resources,
     download_all,
 )
@@ -738,3 +739,63 @@ def test_clean_all_resources(tmp_path):
     paths = clean_all_resources(raw_dir, cleaned_dir)
     assert len(paths) == 2
     assert all(p.exists() for p in paths)
+
+
+def test_clean_resource_skips_when_cleaned_is_newer(tmp_path):
+    import os
+    import time
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    cleaned_dir = tmp_path / "cleaned"
+    row = {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+           "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+           "PriceUpdatedDate": "2024-01-15", "Price": "180.0"}
+    raw_path = _make_raw_csv([row], raw_dir)
+    # First clean to create the cleaned file.
+    clean_resource(raw_path, cleaned_dir)
+    cleaned_path = cleaned_dir / raw_path.name
+    first_mtime = cleaned_path.stat().st_mtime
+    # Touch raw to ensure its mtime is not newer than cleaned.
+    time.sleep(0.01)
+    os.utime(raw_path, (raw_path.stat().st_atime, first_mtime - 1))
+    # Second call should skip (cleaned is newer).
+    clean_resource(raw_path, cleaned_dir)
+    assert cleaned_path.stat().st_mtime == first_mtime
+
+
+def test_clean_resource_recleans_when_raw_is_newer(tmp_path):
+    import os
+    import time
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    cleaned_dir = tmp_path / "cleaned"
+    row = {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+           "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+           "PriceUpdatedDate": "2024-01-15", "Price": "180.0"}
+    raw_path = _make_raw_csv([row], raw_dir)
+    clean_resource(raw_path, cleaned_dir)
+    cleaned_path = cleaned_dir / raw_path.name
+    first_mtime = cleaned_path.stat().st_mtime
+    # Make raw file newer than cleaned file.
+    time.sleep(0.01)
+    os.utime(raw_path, None)
+    assert raw_path.stat().st_mtime > first_mtime
+    # Should re-clean because raw is newer.
+    clean_resource(raw_path, cleaned_dir)
+    assert cleaned_path.stat().st_mtime > first_mtime
+
+
+def test_clean_resource_force_recleans_when_cleaned_is_newer(tmp_path):
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    cleaned_dir = tmp_path / "cleaned"
+    row = {"ServiceStationName": "Shell", "Address": "1 Main St", "Suburb": "Sydney",
+           "Postcode": "2000", "Brand": "Shell", "FuelCode": "E10",
+           "PriceUpdatedDate": "2024-01-15", "Price": "180.0"}
+    raw_path = _make_raw_csv([row], raw_dir)
+    clean_resource(raw_path, cleaned_dir)
+    cleaned_path = cleaned_dir / raw_path.name
+    first_mtime = cleaned_path.stat().st_mtime
+    # force=True should re-clean even though cleaned file is up-to-date.
+    clean_resource(raw_path, cleaned_dir, force=True)
+    assert cleaned_path.stat().st_mtime >= first_mtime

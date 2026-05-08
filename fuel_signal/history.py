@@ -473,22 +473,40 @@ class Transformer:
         return len(seen)
 
 
-def clean_resource(raw_path: pathlib.Path, cleaned_dir: pathlib.Path) -> pathlib.Path:
+def clean_resource(
+    raw_path: pathlib.Path,
+    cleaned_dir: pathlib.Path,
+    *,
+    force: bool = False,
+) -> pathlib.Path:
+    """Clean raw_path into cleaned_dir.
+
+    Skips re-cleaning if the cleaned file exists and is newer than the raw
+    file.  Pass force=True to bypass the cache entirely — use this after
+    changing transformer logic so stale cleaned files are not silently reused.
+    """
     cleaned_dir.mkdir(parents=True, exist_ok=True)
     cleaned_path = cleaned_dir / raw_path.name
-    if cleaned_path.exists():
-        logger.info("%s already cleaned, skipping", raw_path.name)
-        return cleaned_path
+    if not force and cleaned_path.exists():
+        if cleaned_path.stat().st_mtime >= raw_path.stat().st_mtime:
+            logger.info("%s already cleaned, skipping", raw_path.name)
+            return cleaned_path
+        logger.info("%s raw file newer than cleaned, re-cleaning", raw_path.name)
     rows = Transformer(raw_path, cleaned_path).clean()
     logger.info("Cleaned %s → %d rows", raw_path.name, rows)
     return cleaned_path
 
 
-def clean_all_resources(raw_dir: pathlib.Path, cleaned_dir: pathlib.Path) -> list[pathlib.Path]:
+def clean_all_resources(
+    raw_dir: pathlib.Path,
+    cleaned_dir: pathlib.Path,
+    *,
+    force: bool = False,
+) -> list[pathlib.Path]:
     """Clean all raw CSVs in raw_dir into cleaned_dir."""
     paths = []
     for raw_path in sorted(raw_dir.glob("*.csv")):
-        paths.append(clean_resource(raw_path, cleaned_dir))
+        paths.append(clean_resource(raw_path, cleaned_dir, force=force))
     return paths
 
 
@@ -499,14 +517,16 @@ def clean_all_resources(raw_dir: pathlib.Path, cleaned_dir: pathlib.Path) -> lis
 @click.command("history")
 @click.option("--raw-dir", default="data/raw", show_default=True, help="Directory for downloaded raw CSVs.")
 @click.option("--cleaned-dir", default="data/cleaned", show_default=True, help="Directory for cleaned output CSVs.")
-def main(raw_dir: str, cleaned_dir: str) -> None:
+@click.option("--force", is_flag=True, default=False,
+              help="Re-clean all files even if cached. Use after changing transformer logic.")
+def main(raw_dir: str, cleaned_dir: str, force: bool) -> None:
     """Download and clean bulk historical price CSVs from data.nsw.gov.au."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     raw = pathlib.Path(raw_dir)
     cleaned = pathlib.Path(cleaned_dir)
     paths = download_all(raw)
     click.echo(f"Downloaded {len(paths)} files to {raw}")
-    clean_all_resources(raw, cleaned)
+    clean_all_resources(raw, cleaned, force=force)
     click.echo(f"Cleaned files written to {cleaned}")
 
 
