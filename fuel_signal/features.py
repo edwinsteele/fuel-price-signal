@@ -30,7 +30,7 @@ import click
 import pandas as pd
 
 from fuel_signal import db as _db
-from fuel_signal.cycle import CycleDetector
+from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.labels import assemble_training_rows
 
 # Minimum label rows a station must have to be included in the training dataset.
@@ -97,6 +97,25 @@ def _sydney_avg_on_date(
     return row[0] / 10
 
 
+def _build_feature_dict(
+    state: CycleState,
+    station_price: float,
+    sydney_avg: float,
+) -> dict[str, float]:
+    return {
+        "cycle_pct_through": state.pct_through_cycle,
+        "cycle_days_since_peak": float(state.days_since_last_peak),
+        "cycle_mean_length": state.mean_cycle_length,
+        "cycle_last_min_cents": state.last_cycle_min,
+        "cycle_last_max_cents": state.last_cycle_max,
+        "cycle_peak_count": float(state.peak_count),
+        "station_price_cents": station_price,
+        "station_minus_last_min_cents": station_price - state.last_cycle_min,
+        "station_minus_last_max_cents": station_price - state.last_cycle_max,
+        "station_minus_sydney_avg_cents": station_price - sydney_avg,
+    }
+
+
 def compute_features(
     conn: sqlite3.Connection,
     station_code: int,
@@ -111,6 +130,8 @@ def compute_features(
 
     For batched callers: pre-build one CycleDetector and pass it in.
     Building per-row costs 3650x on a full backtest (CLAUDE.md perf note).
+    For very large batches use assemble_feature_rows, which caches all three
+    inputs across stations sharing a date.
 
     Returns None when:
     - Station has no price on date_d in daily_prices
@@ -134,18 +155,7 @@ def compute_features(
     if sydney_avg is None:
         return None
 
-    return {
-        "cycle_pct_through": state.pct_through_cycle,
-        "cycle_days_since_peak": float(state.days_since_last_peak),
-        "cycle_mean_length": state.mean_cycle_length,
-        "cycle_last_min_cents": state.last_cycle_min,
-        "cycle_last_max_cents": state.last_cycle_max,
-        "cycle_peak_count": float(state.peak_count),
-        "station_price_cents": station_price,
-        "station_minus_last_min_cents": station_price - state.last_cycle_min,
-        "station_minus_last_max_cents": station_price - state.last_cycle_max,
-        "station_minus_sydney_avg_cents": station_price - sydney_avg,
-    }
+    return _build_feature_dict(state, station_price, sydney_avg)
 
 
 def assemble_feature_rows(
@@ -194,14 +204,49 @@ def assemble_feature_rows(
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
 
-    cd = CycleDetector(_db.average_price_series(conn))
+    fid = _db.fuel_type_id(conn, "E10")
 
+    # Cache 1: Sydney avg by date. average_price_series IS the GROUP BY query
+    # the per-row path runs, so reusing its result is bit-for-bit identical.
+    sydney_series = _db.average_price_series(conn)
+    sydney_avg_by_date: dict[str, float] = dict(sydney_series)
+
+    cd = CycleDetector(sydney_series)
+
+    # Cache 2: cycle state by date. detect() is pure in (cd._series, date),
+    # and cd._series is set in __init__ and never mutated, so a single call per
+    # unique date is correct.
+    cycle_state_by_date: dict[str, CycleState | None] = {
+        d: cd.detect(d) for d in label_df["price_date"].unique()
+    }
+
+    # Cache 3: station price by (station_code, date_iso). One bulk SELECT
+    # replaces ~2M point-lookups. price_date is INTEGER YYYYMMDD in the DB but
+    # ISO string in label_df; convert once at load time so the lookup key
+    # matches.
+    station_price_by_key: dict[tuple[int, str], float] = {
+        (sc, _db._date_from_int(date_int)): decicents / 10
+        for sc, date_int, decicents in conn.execute(
+            "SELECT station_code, price_date, price_decicents FROM daily_prices"
+            " WHERE fuel_type_id = ?",
+            (fid,),
+        )
+    }
+
+    # Every (station_code, price_date) in label_df came from daily_prices, and
+    # every label date is in cd._series for the same reason — so cache misses
+    # on station_price / sydney_avg are upstream bugs, not data conditions.
+    # Letting dict[key] raise KeyError surfaces them rather than silently
+    # dropping rows the per-row path would have kept.
     records = []
     for row_dict in label_df.to_dict("records"):
-        features = compute_features(conn, row_dict["station_code"], row_dict["price_date"], cd)
-        if features is None:
+        date_d: str = row_dict["price_date"]
+        state = cycle_state_by_date[date_d]
+        if state is None:
             continue
-        records.append({**row_dict, **features})
+        station_price = station_price_by_key[(row_dict["station_code"], date_d)]
+        sydney_avg = sydney_avg_by_date[date_d]
+        records.append({**row_dict, **_build_feature_dict(state, station_price, sydney_avg)})
 
     if not records:
         return pd.DataFrame(columns=all_cols)
