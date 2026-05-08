@@ -257,6 +257,24 @@ print(brier(test["label"].values, pred))      # ≈ 0.192
 log_experiment("my_model", features=["cycle_pct_through"], holdout_logloss=0.52, brier=0.18)
 ```
 
+## Training the logistic regression baseline
+
+The first real ML model — a vanilla logistic regression on the cycle features. Train on the canonical train split, score on val. Test is reserved for the locked final-model evaluation, so this command does **not** write to `experiments/results.csv`.
+
+```bash
+# Default: reads data/features.csv, writes data/models/logreg.joblib
+# and experiments/reliability_logreg_val.png
+uv run python -m fuel_signal.train_logreg
+
+# Custom paths
+uv run python -m fuel_signal.train_logreg \
+    --features-csv /tmp/features.csv \
+    --model-out /tmp/logreg.joblib \
+    --reliability-out /tmp/reliability.png
+```
+
+Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output prints train/val sizes and class balance, val log-loss / Brier, and the delta versus the constant-predictor baseline. The reliability plot uses 10 quantile bins with a `y=x` reference line; points below the diagonal indicate over-confidence, above indicate under-confidence.
+
 ## Running tests
 
 ```bash
