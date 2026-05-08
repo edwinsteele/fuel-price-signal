@@ -66,6 +66,11 @@ def _date_to_int(s: str) -> int:
     return int(s[:10].replace("-", ""))
 
 
+def _date_from_int(v: int) -> str:
+    s = str(v)
+    return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
+
 def _station_price_on_date(
     conn: sqlite3.Connection,
     station_code: int,
@@ -225,7 +230,7 @@ def assemble_feature_rows(
     # ISO string in label_df; convert once at load time so the lookup key
     # matches.
     station_price_by_key: dict[tuple[int, str], float] = {
-        (sc, _db._date_from_int(date_int)): decicents / 10
+        (sc, _date_from_int(date_int)): decicents / 10
         for sc, date_int, decicents in conn.execute(
             "SELECT station_code, price_date, price_decicents FROM daily_prices"
             " WHERE fuel_type_id = ?",
