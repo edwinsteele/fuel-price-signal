@@ -57,6 +57,9 @@ def compute_tp_benefit(
     Rows where fewer than horizon_days future prices exist in daily_prices are dropped.
     All daily_prices are loaded in one bulk SELECT; no per-row DB queries.
     """
+    if horizon_days < 1:
+        raise ValueError("horizon_days must be >= 1")
+
     tp = features_df[features_df["label"] == 1][
         ["station_code", "price_date", "today_price_cents"]
     ].copy()

@@ -143,6 +143,12 @@ def test_empty_features_df(conn):
     assert tp.empty
 
 
+def test_zero_horizon_raises(conn):
+    df = pd.DataFrame(columns=["station_code", "price_date", "today_price_cents", "label"])
+    with pytest.raises(ValueError, match="horizon_days"):
+        compute_tp_benefit(conn, df, horizon_days=0)
+
+
 # ---------------------------------------------------------------------------
 # format_summary
 # ---------------------------------------------------------------------------
