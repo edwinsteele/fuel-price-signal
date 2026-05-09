@@ -347,7 +347,46 @@ def test_day_and_cycle_format(signal_db):
     as_of = series[3 * _CYCLE_LENGTH + _CYCLE_LENGTH // 2][0]
     output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
     import re
-    assert re.search(r"Day \d+/\d+ of cycle", output)
+    assert re.search(r"Day \d+\+?/\d+ of cycle", output)
+
+
+def test_day_number_exceeds_cycle_len_shows_plus_suffix(tmp_path):
+    import re
+    import datetime as _dt
+    db_path = tmp_path / "long_cycle.db"
+    conn = db.open_db(db_path)
+    db.create_schema(conn)
+    conn.execute(
+        "INSERT INTO stations"
+        " (station_code, address_normalized, suburb, postcode, name, brand)"
+        " VALUES (9001, '1 main street springwood', 'Springwood', '2777',"
+        "         'Shell Springwood', 'Shell')"
+    )
+    conn.commit()
+    # 3 complete sawtooth cycles establish mean cycle length ~46 (peaks at days 3, 49, 95).
+    # Append 50 flat days at trough price — no new peak, so scipy last peak stays at day 95.
+    # At series[-1]: days_since_peak = 92, day_num = 93 > 46 → display must show "Day 46+/46".
+    s1 = _sawtooth_series(n_cycles=3.0, start="2020-01-01")
+    start = _dt.date(2020, 1, 1)
+    tail = [
+        ((start + _dt.timedelta(days=len(s1) + i)).isoformat(), 151.0)
+        for i in range(50)
+    ]
+    series = s1 + tail
+    fid = db.fuel_type_id(conn, "E10")
+    conn.executemany(
+        "INSERT INTO daily_prices (station_code, fuel_type_id, price_date, price_decicents)"
+        " VALUES (9001, ?, ?, ?)",
+        [(fid, db._date_to_int(d), round(p * 10)) for d, p in series],
+    )
+    conn.commit()
+
+    as_of = series[-1][0]
+    output = build_signals(conn, as_of, preferred_stations={9001: "Shell Springwood"})
+    assert re.search(r"Day \d+\+/\d+ of cycle", output), (
+        f"Expected 'Day N+/N of cycle' when cycle exceeds mean, got:\n{output}"
+    )
+    conn.close()
 
 
 # ---------------------------------------------------------------------------
