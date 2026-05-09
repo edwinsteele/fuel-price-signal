@@ -280,7 +280,7 @@ def test_log_experiment_row_has_all_phase2_fields(tmp_path, monkeypatch):
 
     notes = (
         "tau=0.35; criterion=max_expected_cents_val_adj+0.05; "
-        "cost_model=TP+3.0c_FP-1.5c; "
+        "cost_model=TP+3.0c_FP-5.8c_FN-11.14c; "
         "val_logloss=0.4321; test_logloss=0.4567; "
         "val_BUY_rate=0.361; test_BUY_rate=0.269; "
         "val_P=0.500/R=0.600/F1=0.545; "
