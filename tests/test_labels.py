@@ -146,6 +146,31 @@ def test_compute_label_insufficient_lookback(conn):
     assert label is None
 
 
+def test_compute_label_forward_span_ends_early(conn):
+    """Forward data stops one day short of horizon boundary → None (calendar-span guard)."""
+    _station(conn, 1001)
+    past = [(-LOOKBACK - 7 + i, 200.0) for i in range(LOOKBACK)]
+    today = [(-7, 160.0)]
+    fwd = [(-6 + i, 162.0) for i in range(6)]  # 6 rows ending at d+6, not d+7
+    _prices(conn, 1001, past + today + fwd)
+    label = compute_label(conn, 1001, _d(-7), horizon_days=7, threshold_cents=3.0,
+                          lookback_days=LOOKBACK, percentile_pct=33.0)
+    assert label is None
+
+
+def test_compute_label_lookback_starts_late(conn):
+    """Lookback data begins one day after the lookback boundary → None (calendar-span guard)."""
+    _station(conn, 1001)
+    # LOOKBACK-1 rows starting one day after d_start: window is one day short
+    past = [(-LOOKBACK - 7 + 1 + i, 200.0) for i in range(LOOKBACK - 1)]
+    today = [(-7, 160.0)]
+    fwd = [(-6 + i, 162.0) for i in range(7)]
+    _prices(conn, 1001, past + today + fwd)
+    label = compute_label(conn, 1001, _d(-7), horizon_days=7, threshold_cents=3.0,
+                          lookback_days=LOOKBACK, percentile_pct=33.0)
+    assert label is None
+
+
 def test_compute_label_missing_today(conn):
     """No price row for the requested date → None."""
     _station(conn, 1001)
