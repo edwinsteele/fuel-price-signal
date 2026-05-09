@@ -144,11 +144,17 @@ def plot_fp_distribution(
     out_path: pathlib.Path = DEFAULT_PLOT_PATH,
 ) -> None:
     """Save histogram of damage stratified by cluster to out_path."""
+    if fp.empty:
+        return
+
     ca = fp.loc[fp["cluster"] == CLUSTER_A_LABEL, "damage"]
     cb = fp.loc[fp["cluster"] == CLUSTER_B_LABEL, "damage"]
 
     lo = float(fp["damage"].quantile(0.005))
     hi = float(fp["damage"].quantile(0.995))
+    if np.isnan(lo) or np.isnan(hi) or lo >= hi:
+        lo = float(fp["damage"].min()) - 0.5
+        hi = float(fp["damage"].max()) + 0.5
     bins = np.linspace(lo, hi, 60)
 
     fig, ax = plt.subplots(figsize=(12, 5))

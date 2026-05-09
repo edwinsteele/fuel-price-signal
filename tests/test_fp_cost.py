@@ -14,6 +14,7 @@ from fuel_signal.fp_cost import (
     compute_damage,
     format_summary,
     main,
+    plot_fp_distribution,
 )
 
 
@@ -134,6 +135,14 @@ def test_cli_writes_plot(tmp_path: pathlib.Path):
     ])
     assert result.exit_code == 0, result.output
     assert plot_path.exists()
+
+
+def test_plot_constant_damage_no_crash(tmp_path: pathlib.Path):
+    # All rows have identical damage — quantile range collapses to a single value.
+    rows = [{"today_price_cents": 170.0, "future_min_cents": 160.0, "label": 0}] * 20
+    fp = compute_damage(pd.DataFrame(rows))
+    plot_fp_distribution(fp, out_path=tmp_path / "out.png")
+    assert (tmp_path / "out.png").exists()
 
 
 def test_cli_custom_threshold(tmp_path: pathlib.Path):
