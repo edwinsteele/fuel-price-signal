@@ -112,8 +112,23 @@ def _stats(series: pd.Series) -> dict:
     }
 
 
+def _trimmed_mean(series: pd.Series, trim_pct: float = 0.05) -> float:
+    """Mean of values at or below the (1 - trim_pct) quantile.
+
+    Trims only the right tail — same rationale as fn_cost._trimmed_mean:
+    supply shocks create ~1 extreme price-spike event per 20 cycles (~2 years).
+    Those spikes inflate both FN cost and TP benefit; trimming symmetrically
+    keeps the two measures on the same footing.
+    """
+    if series.empty:
+        return float("nan")
+    cap = float(series.quantile(1.0 - trim_pct))
+    return float(series[series <= cap].mean())
+
+
 def format_summary(tp: pd.DataFrame, horizon_days: int = DEFAULT_HORIZON_DAYS) -> str:
     s = _stats(tp["benefit"])
+    tm = _trimmed_mean(tp["benefit"]) if not tp.empty else float("nan")
     w = 13
 
     def _fmt_n(d: dict) -> str:
@@ -123,10 +138,12 @@ def format_summary(tp: pd.DataFrame, horizon_days: int = DEFAULT_HORIZON_DAYS) -
         v = d[key]
         return f"{v:>{w - 1}.2f}c" if not np.isnan(v) else f"{'—':>{w}}"
 
-    if not np.isnan(s["mean"]):
-        mean_val = s["mean"]
-        suggestion = f"  → Suggested TP reward: {mean_val:.2f}c (mean; horizon = {horizon_days}d)"
-        if abs(mean_val - _CURRENT_TP_REWARD) > 0.5:
+    def _fmt_v(v: float) -> str:
+        return f"{v:>{w - 1}.2f}c" if not np.isnan(v) else f"{'—':>{w}}"
+
+    if not np.isnan(tm):
+        suggestion = f"  → Suggested TP reward: {tm:.2f}c (95th-pct trimmed mean; horizon = {horizon_days}d)"
+        if abs(tm - _CURRENT_TP_REWARD) > 0.5:
             suggestion += f"  ** differs from current {_CURRENT_TP_REWARD:.1f}c **"
     else:
         suggestion = "  → No data to suggest TP reward."
@@ -139,6 +156,7 @@ def format_summary(tp: pd.DataFrame, horizon_days: int = DEFAULT_HORIZON_DAYS) -
         "  " + "-" * (22 + w),
         f"  {'rows':<22s}{_fmt_n(s)}",
         f"  {'mean benefit':<22s}{_fmt_c(s, 'mean')}",
+        f"  {'trimmed mean (p95)':<22s}{_fmt_v(tm)}",
         f"  {'median benefit':<22s}{_fmt_c(s, 'median')}",
         f"  {'p25 benefit':<22s}{_fmt_c(s, 'p25')}",
         f"  {'p75 benefit':<22s}{_fmt_c(s, 'p75')}",

@@ -158,7 +158,7 @@ def test_format_summary_smoke(conn):
     tp = compute_tp_benefit(conn, _features_df(["2024-01-01"]))
     out = format_summary(tp)
     assert "Suggested TP reward" in out
-    assert "mean" in out
+    assert "trimmed mean" in out
     assert "10.00c" in out
 
 
