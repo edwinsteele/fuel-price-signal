@@ -182,6 +182,32 @@ def test_cli_missing_db(tmp_path):
     assert "not found" in result.output.lower()
 
 
+def test_cli_empty_result_skips_plot(tmp_path):
+    db_path = tmp_path / "fuel_signal.db"
+    conn = open_db(db_path)
+    create_schema(conn)
+    upsert_stations(conn, [{"station_code": STATION, "address": "999 Test Street, Testville",
+                            "suburb": "Testville", "postcode": "2000", "name": "Test Station",
+                            "brand": "TestBrand"}])
+    _load_prices(conn, "2024-01-01", [160.0] * 3)  # only 3 days — day+7 missing
+    conn.close()
+
+    csv_path = tmp_path / "features.csv"
+    pd.DataFrame([
+        {"station_code": STATION, "price_date": "2024-01-01", "today_price_cents": 160.0, "label": 1},
+    ]).to_csv(csv_path, index=False)
+
+    plot_path = tmp_path / "out.png"
+    result = CliRunner().invoke(main, [
+        "--features-csv", str(csv_path),
+        "--db", str(db_path),
+        "--plot", str(plot_path),
+    ])
+    assert result.exit_code == 0, result.output
+    assert not plot_path.exists()
+    assert "skipped plot" in result.output.lower()
+
+
 def test_cli_writes_plot(tmp_path):
     db_path = tmp_path / "fuel_signal.db"
     conn = open_db(db_path)

@@ -147,10 +147,10 @@ def plot_fn_distribution(
     fn: pd.DataFrame,
     delay_days: int = DEFAULT_DELAY_DAYS,
     out_path: pathlib.Path = DEFAULT_PLOT_PATH,
-) -> None:
-    """Save histogram of FN damage to out_path."""
+) -> pathlib.Path | None:
+    """Save histogram of FN damage to out_path. Returns out_path on success, None if skipped."""
     if fn.empty:
-        return
+        return None
 
     damage = fn["damage"]
     lo = float(damage.quantile(0.005))
@@ -184,6 +184,7 @@ def plot_fn_distribution(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+    return out_path
 
 
 @click.command("fn-cost")
@@ -242,15 +243,20 @@ def main(features_csv: str, db_path: str, plot_path: str, delay_days: int) -> No
         )
 
     conn = _db.open_db(db)
-    fn = compute_fn_damage(conn, df, delay_days)
-    conn.close()
+    try:
+        fn = compute_fn_damage(conn, df, delay_days)
+    finally:
+        conn.close()
 
     click.echo(format_summary(fn, delay_days))
     click.echo()
 
     out = pathlib.Path(plot_path)
-    plot_fn_distribution(fn, delay_days, out)
-    click.echo(f"Wrote plot to {out}")
+    written = plot_fn_distribution(fn, delay_days, out)
+    if written:
+        click.echo(f"Wrote plot to {out}")
+    else:
+        click.echo("Skipped plot — no label=1 rows with a price available at the delay offset.")
 
 
 if __name__ == "__main__":
