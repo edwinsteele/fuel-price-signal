@@ -367,13 +367,14 @@ def build_signals(
 
     day_num = state.days_since_last_peak + 1          # 1-indexed
     cycle_len = round(state.mean_cycle_length)
+    day_str = f"{cycle_len}+" if day_num > cycle_len else str(day_num)
 
     lines = [f"[as of {as_of_date}]"]
     for station_code, label in stations.items():
         price = _station_price_at(conn, station_code, as_of_date)
         price_str = f"{price:.1f}c" if price is not None else "no data"
         lines.append(
-            f"{verdict.label} | Day {day_num}/{cycle_len} of cycle"
+            f"{verdict.label} | Day {day_str}/{cycle_len} of cycle"
             f" | E10 @ {label}: {price_str}"
         )
 
