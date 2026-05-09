@@ -105,8 +105,22 @@ def _stats(series: pd.Series) -> dict:
     }
 
 
+def _trimmed_mean(series: pd.Series, trim_pct: float = 0.05) -> float:
+    """Mean of values at or below the (1 - trim_pct) quantile.
+
+    Trims only the right tail. Rationale: supply shocks occur roughly every
+    2 years (~20 price cycles); trimming the top 5% removes those extremes
+    without discarding normal high-damage cases.
+    """
+    if series.empty:
+        return float("nan")
+    cap = float(series.quantile(1.0 - trim_pct))
+    return float(series[series <= cap].mean())
+
+
 def format_summary(fn: pd.DataFrame, delay_days: int = DEFAULT_DELAY_DAYS) -> str:
     s = _stats(fn["damage"])
+    tm = _trimmed_mean(fn["damage"]) if not fn.empty else float("nan")
     w = 13
 
     def _fmt_n(d: dict) -> str:
@@ -116,14 +130,19 @@ def format_summary(fn: pd.DataFrame, delay_days: int = DEFAULT_DELAY_DAYS) -> st
         v = d[key]
         return f"{v:>{w - 1}.2f}c" if not np.isnan(v) else f"{'—':>{w}}"
 
-    med = s["median"]
-    suggestion = (
-        f"  → Suggested FN penalty: {med:.2f}c (median; delay assumption = {delay_days}d)"
-        if not np.isnan(med)
-        else "  → No data to suggest FN penalty."
-    )
-    if not np.isnan(med) and abs(med - _CURRENT_FN_PENALTY) > 0.5:
-        suggestion += f"  ** differs from current {_CURRENT_FN_PENALTY:.1f}c **"
+    def _fmt_v(v: float) -> str:
+        return f"{v:>{w - 1}.2f}c" if not np.isnan(v) else f"{'—':>{w}}"
+
+    if not np.isnan(tm):
+        suggestion = (
+            f"  → Suggested FN penalty: {tm:.2f}c"
+            f" (95th-pct trimmed mean; delay = {delay_days}d;"
+            f" top 5% trimmed to exclude supply-shock extremes ~1 per 20 cycles)"
+        )
+        if abs(tm - _CURRENT_FN_PENALTY) > 0.5:
+            suggestion += f"  ** differs from current {_CURRENT_FN_PENALTY:.1f}c **"
+    else:
+        suggestion = "  → No data to suggest FN penalty."
 
     rows = [
         f"FN cost analysis — {len(fn):,} label=1 rows with {delay_days}d future price",
@@ -133,6 +152,7 @@ def format_summary(fn: pd.DataFrame, delay_days: int = DEFAULT_DELAY_DAYS) -> st
         "  " + "-" * (22 + w),
         f"  {'rows':<22s}{_fmt_n(s)}",
         f"  {'mean damage':<22s}{_fmt_c(s, 'mean')}",
+        f"  {'trimmed mean (p95)':<22s}{_fmt_v(tm)}",
         f"  {'median damage':<22s}{_fmt_c(s, 'median')}",
         f"  {'p25 damage':<22s}{_fmt_c(s, 'p25')}",
         f"  {'p75 damage':<22s}{_fmt_c(s, 'p75')}",

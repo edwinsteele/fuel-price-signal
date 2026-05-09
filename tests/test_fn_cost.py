@@ -132,6 +132,7 @@ def test_format_summary_smoke(conn):
     fn = compute_fn_damage(conn, _features_df(["2024-01-01"]))
     out = format_summary(fn)
     assert "Suggested FN penalty" in out
+    assert "trimmed mean" in out
     assert "10.00c" in out
 
 
