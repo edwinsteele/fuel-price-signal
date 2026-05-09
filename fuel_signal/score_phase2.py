@@ -93,7 +93,6 @@ def threshold_sweep(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     taus: np.ndarray | None = None,
-    threshold_cents: float = _THRESHOLD_CENTS,
     tp_reward_cents: float = _TP_REWARD_CENTS,
     fp_cost_cents: float = _FP_COST_CENTS,
     fn_cost_cents: float = _FN_COST_CENTS,
@@ -102,6 +101,9 @@ def threshold_sweep(
 
     Each dict contains: tau, buy_rate, precision, recall, f1, expected_cents_per_row,
     tp, fp, fn, tn.
+
+    tp_reward_cents controls TP valuation in expected_cents_per_row. It is distinct from
+    the label-definition threshold (3.0c) used in labels.py — see module docstring.
 
     Monotone invariants (always hold):
     - buy_rate is non-increasing as tau increases
