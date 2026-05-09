@@ -15,12 +15,18 @@ trough days look definitively cheap. See issue #34 for the full diagnosis.
 
 ## Cost model (documented here; used consistently throughout)
 
-  TP (BUY, label=1):  +threshold_cents saved  (e.g. +3.0c)
+  TP (BUY, label=1):  +tp_reward_cents saved  (e.g. +6.37c, 95th-pct trimmed mean from tp_benefit.py)
   FP (BUY, label=0):  −fp_cost_cents penalty  (e.g. −5.80c, population median from fp_cost.py)
   FN (WAIT, label=1):  −fn_cost_cents penalty  (e.g. −11.14c, 95th-pct trimmed mean from fn_cost.py)
   TN (WAIT, label=0):  0
 
-Expected cents per row = (TP × threshold_cents − FP × fp_cost_cents − FN × fn_cost_cents) / n_rows
+Expected cents per row = (TP × tp_reward_cents − FP × fp_cost_cents − FN × fn_cost_cents) / n_rows
+
+Note: tp_reward_cents (6.37c) and threshold_cents (3.0c) are distinct. threshold_cents is
+the label definition (a 3c drop = "cheap enough"); tp_reward_cents is the empirical average
+saving achieved on a correct BUY — derived from mean 7-day forward price minus today on
+label=1 rows (95th-pct trimmed mean from tp_benefit.py; raw mean 8.01c, trimmed to match
+FN methodology by excluding the same supply-shock extremes).
 
 FP penalty (5.80c): population median damage across all label=0 rows — frequency-weighted
 across Cluster A (gate only failed, ~0c real cost) and Cluster B (drop came, ~9c median).
@@ -54,9 +60,10 @@ _TAU_STEP: float = 0.05
 _TAUS: np.ndarray = np.round(np.arange(_TAU_STEP, 1.0, _TAU_STEP), 2)
 
 # Cost model constants — see module docstring.
-_THRESHOLD_CENTS: float = 3.0
-_FP_COST_CENTS: float = 5.80   # population median from fp_cost.py diagnostic
-_FN_COST_CENTS: float = 11.14  # 95th-pct trimmed mean from fn_cost.py diagnostic
+_THRESHOLD_CENTS: float = 3.0   # label definition: 3c drop = "cheap enough"
+_TP_REWARD_CENTS: float = 6.37  # empirical avg saving on correct BUY (95th-pct trimmed mean, tp_benefit.py)
+_FP_COST_CENTS: float = 5.80    # population median from fp_cost.py diagnostic
+_FN_COST_CENTS: float = 11.14   # 95th-pct trimmed mean from fn_cost.py diagnostic
 
 # Known BUY-rate gap between val and test (from issue #34, real DB 2026-05-07).
 # Used only to inform the τ adjustment direction, not to look at test labels.
@@ -87,6 +94,7 @@ def threshold_sweep(
     y_pred: np.ndarray,
     taus: np.ndarray | None = None,
     threshold_cents: float = _THRESHOLD_CENTS,
+    tp_reward_cents: float = _TP_REWARD_CENTS,
     fp_cost_cents: float = _FP_COST_CENTS,
     fn_cost_cents: float = _FN_COST_CENTS,
 ) -> list[dict]:
@@ -120,7 +128,7 @@ def threshold_sweep(
         tn = int(((y_hat == 0) & (y_true == 0)).sum())
         buy_rate = float(y_hat.mean())
         precision, recall, f1 = _precision_recall_f1(y_true, y_hat)
-        expected_cents = (tp * threshold_cents - fp * fp_cost_cents - fn * fn_cost_cents) / n
+        expected_cents = (tp * tp_reward_cents - fp * fp_cost_cents - fn * fn_cost_cents) / n
         rows.append({
             "tau": round(float(tau), 4),
             "buy_rate": round(buy_rate, 4),
@@ -341,7 +349,7 @@ def main(features_csv: str) -> None:
     notes = (
         f"tau={chosen_tau:.2f}; "
         f"criterion=max_expected_cents_val_adj+0.05; "
-        f"cost_model=TP+{_THRESHOLD_CENTS}c_FP-{_FP_COST_CENTS}c_FN-{_FN_COST_CENTS}c; "
+        f"cost_model=TP+{_TP_REWARD_CENTS}c_FP-{_FP_COST_CENTS}c_FN-{_FN_COST_CENTS}c; "
         f"val_logloss={result['val_logloss']:.4f}; "
         f"test_logloss={test_result['test_logloss']:.4f}; "
         f"val_BUY_rate={_VAL_LABEL_RATE:.3f}; "
