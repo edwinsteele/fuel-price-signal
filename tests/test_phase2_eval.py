@@ -162,12 +162,12 @@ def test_threshold_sweep_empty_raises():
 def test_threshold_sweep_expected_cents_includes_fn_cost():
     # y_true=[1,1,0], y_pred=[0.9,0.1,0.8], tau=0.5 → y_hat=[1,0,1]
     # TP=1 (row0), FN=1 (row1), FP=1 (row2)
-    # expected = (1*3.0 - 1*5.8 - 1*11.14) / 3
+    # expected = (1*6.37 - 1*5.8 - 1*11.14) / 3
     rows = threshold_sweep(
         np.array([1.0, 1.0, 0.0]),
         np.array([0.9, 0.1, 0.8]),
         taus=np.array([0.5]),
-        threshold_cents=3.0,
+        tp_reward_cents=6.37,
         fp_cost_cents=5.8,
         fn_cost_cents=11.14,
     )
@@ -175,7 +175,7 @@ def test_threshold_sweep_expected_cents_includes_fn_cost():
     assert row["tp"] == 1
     assert row["fp"] == 1
     assert row["fn"] == 1
-    assert row["expected_cents_per_row"] == pytest.approx((3.0 - 5.8 - 11.14) / 3, abs=1e-6)
+    assert row["expected_cents_per_row"] == pytest.approx((6.37 - 5.8 - 11.14) / 3, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +299,7 @@ def test_log_experiment_row_has_all_phase2_fields(tmp_path, monkeypatch):
 
     notes = (
         "tau=0.35; criterion=max_expected_cents_val_adj+0.05; "
-        "cost_model=TP+3.0c_FP-5.8c_FN-11.14c; "
+        "cost_model=TP+6.37c_FP-5.8c_FN-11.14c; "
         "val_logloss=0.4321; test_logloss=0.4567; "
         "val_BUY_rate=0.361; test_BUY_rate=0.269; "
         "val_P=0.500/R=0.600/F1=0.545; "
