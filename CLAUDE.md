@@ -13,15 +13,29 @@ WAIT | Day 12/46 of cycle | E10 @ Caltex Springwood: 179.2c | Trough est. ~34 da
 
 ```
 fuel_signal/
-├── config.py        # API key, preferred station list, postcode
-├── history.py       # Download + clean bulk CSVs; dynamic resource discovery
-├── db.py            # SQLite schema + read/write helpers
-├── live.py          # FuelCheck API snapshot → append to DB
-├── cycle.py         # Cycle detection + current phase calculation
-├── signal.py        # Combine phase + live price → one-line output
-├── compare.py       # Compare two price series (station vs station, station vs LGA mean, etc.)
-├── labels.py        # ML label generation + training-row assembly
-└── backtest.py      # Replay historical prices through signal + purchasing strategy
+├── config.py          # API key, preferred station list, postcode
+├── history.py         # Download + clean bulk CSVs; dynamic resource discovery
+├── db.py              # SQLite schema + read/write helpers
+├── fill.py            # Forward-fill daily price gaps → daily_prices table
+├── live.py            # FuelCheck API snapshot → append to DB
+├── series.py          # Series resolution (station/lga/brand/sydney) used by compare + inspect
+├── cycle.py           # Cycle detection + current phase calculation
+├── signal.py          # Combine phase + live price → one-line output
+├── compare.py         # Compare two price series (station vs station, station vs LGA mean, etc.)
+├── inspect.py         # Flask workbench: interactive chart + cycle state (dev server)
+├── stations.py        # Station lookup CLI
+├── labels.py          # ML label generation + training-row assembly
+├── label_viz.py       # Diagnostic plots for label distributions
+├── label_inspect.py   # Per-station per-day label decomposition table
+├── features.py        # Join cycle features onto labels → model-ready CSV
+├── evaluate.py        # Canonical train/val/test split + scoring utilities
+├── train_logreg.py    # Train logistic regression baseline (val only)
+├── calibrate.py       # Calibration diagnostics + calibrated model artifact
+├── score_phase2.py    # Threshold sweep on val → score test → append results.csv
+├── tp_benefit.py      # Diagnostic: empirical TP benefit distribution
+├── fp_cost.py         # Diagnostic: empirical FP cost distribution (bimodal)
+├── fn_cost.py         # Diagnostic: empirical FN cost distribution
+└── backtest.py        # Replay historical prices through purchasing strategies
 ```
 
 ## CLI pattern
