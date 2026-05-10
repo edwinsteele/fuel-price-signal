@@ -33,9 +33,11 @@ coverage.xml
 
 # Generated locally by fuel_signal.inspect
 inspect.html
-# Generated locally — charts, labels, other derived artefacts
+# Generated locally — charts, labels, features, models, experiment outputs
 data/**/*.png
-data/labels.csv
+data/*.csv
+data/models/
+experiments/**/*.png
 
 # Scratch planning docs — kept in the tree for stable paths, not committed
 PLAN_*.md
