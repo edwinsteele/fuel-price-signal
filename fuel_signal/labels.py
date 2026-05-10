@@ -114,8 +114,9 @@ def compute_label(
 ) -> int | None:
     """Return 1 (BUY) if price is cheap and no better deal is coming, else 0.
 
-    Returns None when today's price is missing, fewer than horizon_days of
-    forward data exist, or fewer than lookback_days of past data exist.
+    Returns None when today's price is missing, the forward window does not
+    span exactly horizon_days calendar days, or the lookback window does not
+    span exactly lookback_days calendar days.
 
     date_d: YYYY-MM-DD
     """
@@ -142,24 +143,25 @@ def compute_label(
 
     d_end_int = _to_date_int((d + datetime.timedelta(days=horizon_days)).isoformat())
     forward_rows = conn.execute(
-        "SELECT price_decicents FROM daily_prices"
+        "SELECT price_date, price_decicents FROM daily_prices"
         " WHERE station_code = ? AND fuel_type_id = ? AND price_date > ? AND price_date <= ?"
         " ORDER BY price_date",
         (station_code, fid, d_int, d_end_int),
     ).fetchall()
-    if len(forward_rows) < horizon_days:
+    if len(forward_rows) < horizon_days or forward_rows[-1][0] != d_end_int:
         return None
-    future_min = min(r[0] / 10 for r in forward_rows)
+    future_min = min(r[1] / 10 for r in forward_rows)
 
     d_start_int = _to_date_int((d - datetime.timedelta(days=lookback_days)).isoformat())
     past_rows = conn.execute(
-        "SELECT price_decicents FROM daily_prices"
-        " WHERE station_code = ? AND fuel_type_id = ? AND price_date >= ? AND price_date < ?",
+        "SELECT price_date, price_decicents FROM daily_prices"
+        " WHERE station_code = ? AND fuel_type_id = ? AND price_date >= ? AND price_date < ?"
+        " ORDER BY price_date",
         (station_code, fid, d_start_int, d_int),
     ).fetchall()
-    if len(past_rows) < lookback_days:
+    if len(past_rows) < lookback_days or past_rows[0][0] != d_start_int:
         return None
-    price_threshold = float(np.percentile([r[0] / 10 for r in past_rows], percentile_pct))
+    price_threshold = float(np.percentile([r[1] / 10 for r in past_rows], percentile_pct))
 
     no_better_deal = future_min >= today_price - threshold_cents
     price_is_cheap = today_price <= price_threshold
