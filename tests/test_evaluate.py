@@ -265,3 +265,15 @@ def test_log_experiment_features_pipe_separated(tmp_path, monkeypatch):
 
     content = results_path.read_text()
     assert "cycle_pct_through|station_price_cents" in content
+
+
+def test_log_experiment_raises_on_schema_drift(tmp_path, monkeypatch):
+    """log_experiment raises ValueError if existing file has a different header."""
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    # Write a file with an old/mismatched header
+    results_path.write_text("timestamp,git_sha,name,holdout_logloss\n")
+
+    import pytest
+    with pytest.raises(ValueError, match="header does not match current schema"):
+        log_experiment("m", [], holdout_logloss=0.5, holdout_brier=0.2)

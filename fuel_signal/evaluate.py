@@ -211,6 +211,16 @@ def log_experiment(
     """
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
+    if not write_header:
+        with _RESULTS_CSV.open("r", newline="") as fh:
+            existing_header = next(csv.reader(fh), [])
+        if existing_header != _CSV_HEADER:
+            raise ValueError(
+                f"experiments/results.csv header does not match current schema.\n"
+                f"  Expected: {_CSV_HEADER}\n"
+                f"  Found:    {existing_header}\n"
+                "Migrate or archive the existing file before logging new results."
+            )
     with _RESULTS_CSV.open("a", newline="") as fh:
         writer = csv.writer(fh)
         if write_header:

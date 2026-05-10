@@ -90,6 +90,14 @@ def test_evaluation_dates_stops_at_end():
     assert "2024-01-29" not in dates
 
 
+def test_evaluation_dates_raises_on_non_positive_interval():
+    import pytest
+    with pytest.raises(ValueError, match="interval_days must be > 0"):
+        _evaluation_dates("2024-01-01", "2024-01-22", 0)
+    with pytest.raises(ValueError, match="interval_days must be > 0"):
+        _evaluation_dates("2024-01-01", "2024-01-22", -1)
+
+
 # ---------------------------------------------------------------------------
 # AlwaysBuyStrategy on constant prices
 # ---------------------------------------------------------------------------

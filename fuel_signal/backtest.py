@@ -207,6 +207,8 @@ class BacktestResult:
 
 def _evaluation_dates(start_date: str, end_date: str, interval_days: int) -> list[str]:
     """Return ISO date strings at interval_days spacing from start_date to end_date inclusive."""
+    if interval_days <= 0:
+        raise ValueError(f"interval_days must be > 0, got {interval_days}")
     current = datetime.date.fromisoformat(start_date)
     end = datetime.date.fromisoformat(end_date)
     dates: list[str] = []
@@ -388,6 +390,14 @@ def main(  # noqa: PLR0913
     db_path: str,
 ) -> None:
     """Replay purchasing strategies over historical prices and compare spend."""
+    if tank_size <= 0:
+        raise click.UsageError("--tank-size must be > 0.")
+    if daily_use < 0:
+        raise click.UsageError("--daily-use must be >= 0.")
+    if eval_interval <= 0:
+        raise click.UsageError("--eval-interval must be > 0.")
+    if strategy_name == "model" and model_path is None:
+        raise click.UsageError("--model-path is required when --strategy is 'model'.")
     if not station_codes and not preferred:
         raise click.UsageError("Specify --station CODE or --preferred.")
 
