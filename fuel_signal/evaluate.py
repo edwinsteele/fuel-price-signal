@@ -59,7 +59,9 @@ _RESULTS_CSV = pathlib.Path(__file__).parent.parent / "experiments" / "results.c
 _CSV_HEADER = [
     "timestamp", "git_sha", "name", "features",
     "train_start", "train_end", "val_start", "val_end", "test_start", "test_end",
-    "holdout_logloss", "holdout_brier", "notes",
+    "holdout_logloss", "holdout_brier",
+    "realised_spend_cpl", "realised_savings_vs_always_buy_pct",
+    "notes",
 ]
 
 
@@ -198,13 +200,27 @@ def log_experiment(
     holdout_logloss: float,
     holdout_brier: float,
     notes: str = "",
+    realised_spend_cpl: float | None = None,
+    realised_savings_vs_always_buy_pct: float | None = None,
 ) -> None:
     """Append one row to experiments/results.csv with a UTC timestamp and git sha.
 
     Creates the file with a header row if it does not exist yet.
+    realised_spend_cpl and realised_savings_vs_always_buy_pct are populated
+    by the backtest engine (Phase 3); leave None for probabilistic-only runs.
     """
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
+    if not write_header:
+        with _RESULTS_CSV.open("r", newline="") as fh:
+            existing_header = next(csv.reader(fh), [])
+        if existing_header != _CSV_HEADER:
+            raise ValueError(
+                f"experiments/results.csv header does not match current schema.\n"
+                f"  Expected: {_CSV_HEADER}\n"
+                f"  Found:    {existing_header}\n"
+                "Migrate or archive the existing file before logging new results."
+            )
     with _RESULTS_CSV.open("a", newline="") as fh:
         writer = csv.writer(fh)
         if write_header:
@@ -222,5 +238,7 @@ def log_experiment(
             TEST_END,
             f"{holdout_logloss:.6f}",
             f"{holdout_brier:.6f}",
+            f"{realised_spend_cpl:.2f}" if realised_spend_cpl is not None else "",
+            f"{realised_savings_vs_always_buy_pct:.2f}" if realised_savings_vs_always_buy_pct is not None else "",
             notes,
         ])
