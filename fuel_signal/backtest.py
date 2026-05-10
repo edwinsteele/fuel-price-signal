@@ -143,7 +143,18 @@ class ModelStrategy:
     def __post_init__(self) -> None:
         import joblib  # defer import so non-ML callers don't pay the cost
         self.name: str = f"model(τ={self.threshold})"
-        self._pipeline = joblib.load(self.model_path)
+        loaded = joblib.load(self.model_path)
+        if isinstance(loaded, dict) and loaded.get("calibrated"):
+            # Calibrated artifact stores sklearn primitives to avoid __main__ pickle issues.
+            # Reconstruct _CalibratedPipeline here where fuel_signal.calibrate is importable.
+            from fuel_signal.calibrate import _CalibratedPipeline
+            self._pipeline = _CalibratedPipeline(
+                loaded["base_pipeline"], loaded["calibrator"], loaded["calibration_method"]
+            )
+        elif isinstance(loaded, dict):
+            self._pipeline = loaded["pipeline"]
+        else:
+            self._pipeline = loaded
 
     def decide(self, as_of: str, station_code: int, history: PriceHistory) -> bool:
         state = history.cycle_state(as_of)

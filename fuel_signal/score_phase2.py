@@ -38,6 +38,28 @@ without discarding normal high-damage cases.
 
 Run this command once to lock Phase 2. Do not re-run to tune τ after seeing
 test scores. If test numbers disappoint, that is a Phase 3 problem.
+
+## Realised-spend re-validation (Issue #64)
+
+backtest_phase2.py swept τ ∈ [0.30, 0.55] on the test window via the backtest
+engine (preferred stations, 2025-07-01 → 2025-12-31, isotonic-calibrated logreg).
+
+| τ    | CPL (c/L) | vs always-buy |
+|------|-----------|---------------|
+| 0.30 | 189.35    | +1.27%        |
+| 0.35 | 189.61    | +1.13%        |
+| 0.40 | 190.35    | +0.74%  ← Phase 2 |
+| 0.45 | 190.35    | +0.74%        |
+| 0.50 | 190.72    | +0.55%        |
+| 0.55 | 191.42    | +0.19%        |
+
+Always-buy baseline: 191.78 c/L.
+
+Spend-optimal τ = 0.30; Phase 2 locked at τ = 0.40.
+Gap: 1.01 c/L (≈0.5%). Small but real — the synthetic proxy slightly over-valued
+precision, pushing τ higher than the spend-optimal value.
+
+Phase 3 must beat τ=0.40 (190.35 c/L) to show improvement over the locked baseline.
 """
 
 from __future__ import annotations
