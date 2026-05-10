@@ -1,0 +1,3 @@
+# Experiment log: append-only CSV — use union merge to avoid conflicts when
+# multiple branches each add rows. Duplicate rows (same timestamp) are benign.
+experiments/results.csv merge=union

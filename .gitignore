@@ -4,7 +4,6 @@
 # Local data — not committed; rebuild with history.py + db.py
 data/raw/
 data/cleaned/
-data/labels.csv
 fuel_signal.db
 fuel_signal.db-shm
 fuel_signal.db-wal
@@ -20,12 +19,23 @@ venv/
 .tox/
 .mypy_cache/
 .pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Logs
+*.log
+
+# SQLite (any name, not just fuel_signal.db)
+*.sqlite
+*.sqlite3
 
 # Generated locally by fuel_signal.inspect
 inspect.html
-# Generated locally
-data/positive_rate_by_station.png
-data/positive_rate_by_date.png
+# Generated locally — charts, labels, other derived artefacts
+data/**/*.png
+data/labels.csv
 
 # Scratch planning docs — kept in the tree for stable paths, not committed
 PLAN_*.md
