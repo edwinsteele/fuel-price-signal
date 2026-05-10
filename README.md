@@ -275,6 +275,56 @@ uv run python -m fuel_signal.train_logreg \
 
 Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output prints train/val sizes and class balance, val log-loss / Brier, and the delta versus the constant-predictor baseline. The reliability plot uses 10 quantile bins with a `y=x` reference line; points below the diagonal indicate over-confidence, above indicate under-confidence.
 
+## Calibrating the model
+
+Check calibration quality and produce a calibrated model artifact:
+
+```bash
+# Default: reads data/features.csv + data/models/logreg.joblib,
+# writes data/models/logreg_calibrated.joblib
+uv run python -m fuel_signal.calibrate
+
+# Custom paths or skip writing to experiments/results.csv
+uv run python -m fuel_signal.calibrate \
+    --features-csv /tmp/features.csv \
+    --model-in /tmp/logreg.joblib \
+    --model-out /tmp/logreg_calibrated.joblib \
+    --skip-results-csv
+```
+
+Reports class balance (BUY rate) for all splits and prints a 10-bin reliability table on val. If miscalibrated (max |gap| > 0.05), compares sigmoid (Platt) vs isotonic calibration wrappers and saves the better one. Appends a result row to `experiments/results.csv`.
+
+## Cost model diagnostics
+
+Three commands ground the TP reward and FP/FN penalties used in `score_phase2.py` in empirical data.
+
+### TP benefit
+
+Measures how much cheaper label=1 days are compared to the subsequent `--horizon` days at the same station:
+
+```bash
+uv run python -m fuel_signal.tp_benefit
+uv run python -m fuel_signal.tp_benefit --horizon 14 --plot data/tp_benefit_14d.png
+```
+
+### FP cost
+
+Shows the actual damage of a false-positive BUY on label=0 days. The label=0 population is bimodal: cluster A (only the percentile gate failed — small damage) vs cluster B (a cheaper price was coming — larger damage):
+
+```bash
+uv run python -m fuel_signal.fp_cost
+uv run python -m fuel_signal.fp_cost --features-csv data/features.csv --plot data/fp.png --threshold 3.0
+```
+
+### FN cost
+
+Measures the cost of a false-negative WAIT on label=1 days — the price `--delay` days after a missed BUY opportunity:
+
+```bash
+uv run python -m fuel_signal.fn_cost
+uv run python -m fuel_signal.fn_cost --delay 14 --plot data/fn_cost_14d.png
+```
+
 ## Phase 2 final evaluation (lock the model)
 
 Threshold sweep on val → pick τ → **score test once** → append to `experiments/results.csv`. Run this command once to lock Phase 2. Do not re-run to tune τ after seeing test results.
@@ -304,6 +354,34 @@ uv run python -m fuel_signal.score_phase2 --features-csv /tmp/features.csv
 | Logreg cycle features (τ=0.40) | 0.4029 | 0.1346 | −0.1792 logloss, −0.0620 brier |
 
 At τ=0.40: precision=0.618, recall=0.581, F1=0.599, BUY rate=25.0% on test.
+
+## Backtesting purchasing strategies
+
+Replay a purchasing strategy over historical prices and compare realised spend against an always-buy baseline:
+
+```bash
+# All preferred stations, rule-based signal, 2023–2024
+uv run python -m fuel_signal.backtest --preferred --strategy rule_based \
+    --start 2023-01-01 --end 2024-12-31
+
+# Single station, model strategy (requires fitted model)
+uv run python -m fuel_signal.backtest \
+    --station 414 --strategy model \
+    --model-path data/models/logreg.joblib --threshold 0.40 \
+    --start 2023-01-01 --end 2024-12-31
+
+# Compare all strategies side-by-side
+uv run python -m fuel_signal.backtest --preferred --strategy all \
+    --model-path data/models/logreg.joblib \
+    --start 2023-01-01 --end 2024-12-31
+
+# Custom tank size and consumption (default: 50L tank, 50L/14d)
+uv run python -m fuel_signal.backtest --preferred --strategy rule_based \
+    --start 2023-01-01 --end 2024-12-31 \
+    --tank-size 60 --daily-use 4.5 --eval-interval 7
+```
+
+Output is a table per station showing cents-per-litre (CPL), savings vs always-buy, fill events, and total litres for each strategy. Available strategies: `always_buy` (baseline, always included), `rule_based` (four-signal heuristic), `model` (logistic regression at `--threshold`), `all` (all three side-by-side).
 
 ## Running tests
 
