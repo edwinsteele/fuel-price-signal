@@ -355,6 +355,30 @@ uv run python -m fuel_signal.score_phase2 --features-csv /tmp/features.csv
 
 At τ=0.40: precision=0.618, recall=0.581, F1=0.599, BUY rate=25.0% on test.
 
+## Phase 2 τ re-validation on realised spend (Issue #64)
+
+Sweeps τ ∈ [0.30, 0.55] on the test window via the backtest engine using the calibrated logreg model, then patches `experiments/results.csv` with realised-spend columns for the Phase 2 and always-buy baseline rows.
+
+```bash
+# Dry-run: print sweep table only, do not patch results.csv
+uv run python -m fuel_signal.backtest_phase2 \
+    --model-path data/models/logreg_calibrated.joblib --no-patch
+
+# Run and patch results.csv (default)
+uv run python -m fuel_signal.backtest_phase2 \
+    --model-path data/models/logreg_calibrated.joblib
+```
+
+**Phase 2 realised-spend result** (2026-05-10, preferred stations, test window 2025-07-01 → 2025-12-31):
+
+| Strategy | CPL (c/L) | vs always-buy |
+|---|---|---|
+| Always-buy baseline | 191.78 | — |
+| Logreg τ=0.40 (Phase 2) | 190.35 | +0.74% |
+| Logreg τ=0.30 (spend-optimal) | 189.35 | +1.27% |
+
+Spend-optimal τ=0.30 beats τ=0.40 by 1.01 c/L (≈0.5%). Gap is real but modest — Phase 2 τ=0.40 is confirmed as the locked baseline. Phase 3 must beat 190.35 c/L.
+
 ## Backtesting purchasing strategies
 
 Replay a purchasing strategy over historical prices and compare realised spend against an always-buy baseline:

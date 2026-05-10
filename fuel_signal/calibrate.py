@@ -383,8 +383,17 @@ def main(features_csv: str, model_in: str, model_out: str, skip_results_csv: boo
         joblib.dump({"pipeline": raw_pipe, "feature_columns": feature_columns, "calibrated": False}, out_path)
         click.echo(f"Calibration decision: raw pipeline is sufficient — saved as-is to {out_path}")
     else:
+        # Store sklearn primitives rather than the _CalibratedPipeline instance so that
+        # the artifact can be loaded from any entry point (the custom class has a
+        # __module__='__main__' when calibrate.py is run with -m, which breaks joblib).
         joblib.dump(
-            {"pipeline": best_model, "feature_columns": feature_columns, "calibrated": True, "method": best_name},
+            {
+                "base_pipeline": best_model.base_pipeline,
+                "calibrator": best_model.calibrator,
+                "calibration_method": best_name,
+                "feature_columns": feature_columns,
+                "calibrated": True,
+            },
             out_path,
         )
         click.echo(f"Calibration decision: {best_name} applied — saved calibrated model to {out_path}")

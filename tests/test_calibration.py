@@ -276,13 +276,24 @@ class TestCalibrateCLI:
         assert result.exit_code == 0, result.output
 
         saved = joblib.load(model_out)
-        assert "pipeline" in saved
         assert "feature_columns" in saved
         assert "calibrated" in saved
 
-        # Saved pipeline can produce probabilities on new data.
+        # Reconstruct the pipeline and verify predict_proba works.
+        # Calibrated artifacts store sklearn primitives; raw artifacts store "pipeline" directly.
         X = df[FEATURE_COLUMNS].to_numpy(dtype=float)[:5]
-        proba = saved["pipeline"].predict_proba(X)
+        if saved.get("calibrated"):
+            from fuel_signal.calibrate import _CalibratedPipeline
+            assert "base_pipeline" in saved
+            assert "calibrator" in saved
+            assert "calibration_method" in saved
+            pipeline = _CalibratedPipeline(
+                saved["base_pipeline"], saved["calibrator"], saved["calibration_method"]
+            )
+        else:
+            assert "pipeline" in saved
+            pipeline = saved["pipeline"]
+        proba = pipeline.predict_proba(X)
         assert proba.shape == (5, 2)
         assert np.all((proba >= 0.0) & (proba <= 1.0))
 
