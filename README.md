@@ -370,7 +370,7 @@ uv run python -m fuel_signal.backtest \
     --model-path data/models/logreg.joblib --threshold 0.40 \
     --start 2023-01-01 --end 2024-12-31
 
-# Compare all strategies side-by-side
+# Compare all strategies side-by-side (threshold defaults to 0.40)
 uv run python -m fuel_signal.backtest --preferred --strategy all \
     --model-path data/models/logreg.joblib \
     --start 2023-01-01 --end 2024-12-31
