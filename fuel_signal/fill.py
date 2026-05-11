@@ -40,6 +40,8 @@ def find_daily_gaps(
     behaviour — in practice the prices table PK prevents duplicates, but handled
     defensively here for testability).
     """
+    if max_gap_days < 0:
+        raise ValueError("max_gap_days must be non-negative")
     gaps: list[tuple[str, float]] = []
     one_day = timedelta(days=1)
     last_date: date | None = None
@@ -91,6 +93,8 @@ def fill_all(
 
     Returns the total number of rows written to daily_prices.
     """
+    if max_gap_days < 0:
+        raise ValueError("max_gap_days must be non-negative")
     if end_date is None:
         end_date = date.today().isoformat()
 

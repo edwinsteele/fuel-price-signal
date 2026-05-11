@@ -95,6 +95,10 @@ class TestFindDailyGaps:
         gaps = find_daily_gaps(rows, end_date="2024-04-01", max_gap_days=28)
         assert gaps == []
 
+    def test_negative_max_gap_days_raises(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            find_daily_gaps([("2024-01-01", 150.0)], max_gap_days=-1)
+
     def test_mixed_gaps_only_short_ones_filled(self):
         # Long gap (>28) skipped; short gap (<28) filled; subsequent obs still processed.
         rows = [
@@ -226,6 +230,12 @@ class TestFillAll:
         assert len(rows) == 2
         assert rows[0][0] == "2024-01-01"
         assert rows[1][0] == "2024-04-01"
+
+    def test_negative_max_gap_days_raises(self, conn):
+        upsert_stations(conn, [_station(1001)])
+        insert_prices(conn, [_price(1001, "2024-01-01", 150.0)])
+        with pytest.raises(ValueError, match="non-negative"):
+            fill_all(conn, end_date="2024-01-05", max_gap_days=-1)
 
     def test_trailing_gap_beyond_threshold_not_filled(self, conn):
         upsert_stations(conn, [_station(1001)])
