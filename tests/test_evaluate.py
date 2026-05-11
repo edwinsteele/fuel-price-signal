@@ -17,6 +17,7 @@ from fuel_signal.evaluate import (
     log_experiment,
     log_loss,
     split,
+    walk_forward_folds,
 )
 
 # ---------------------------------------------------------------------------
@@ -277,3 +278,149 @@ def test_log_experiment_raises_on_schema_drift(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(ValueError, match="header does not match current schema"):
         log_experiment("m", [], holdout_logloss=0.5, holdout_brier=0.2)
+
+
+# ---------------------------------------------------------------------------
+# walk_forward_folds — helpers
+# ---------------------------------------------------------------------------
+
+def _make_daily_df(start: str, end: str) -> pd.DataFrame:
+    """Daily-resolution DataFrame from start to end inclusive."""
+    dates = pd.date_range(start, end, freq="D")
+    return pd.DataFrame({
+        "price_date": dates.strftime("%Y-%m-%d"),
+        "label": 0,
+        "station_code": 1,
+        "today_price_cents": 160.0,
+        "future_min_cents": 162.0,
+    })
+
+
+# ---------------------------------------------------------------------------
+# walk_forward_folds — structural properties
+# ---------------------------------------------------------------------------
+
+def test_wff_no_overlap():
+    """No date appears in both train and val within any fold."""
+    df = _make_daily_df("2020-01-01", "2023-12-31")
+    for train_df, val_df in walk_forward_folds(
+        df, train_min_days=100, val_days=30, step_days=30, buffer_days=7
+    ):
+        train_dates = set(train_df["price_date"])
+        val_dates = set(val_df["price_date"])
+        assert train_dates.isdisjoint(val_dates)
+
+
+def test_wff_buffer_gap_respected():
+    """No date from the buffer window appears in either train or val."""
+    buffer_days = 7
+    df = _make_daily_df("2020-01-01", "2023-12-31")
+    for train_df, val_df in walk_forward_folds(
+        df, train_min_days=100, val_days=30, step_days=30, buffer_days=buffer_days
+    ):
+        train_end = pd.to_datetime(train_df["price_date"]).max()
+        val_start = pd.to_datetime(val_df["price_date"]).min()
+        buffer_dates = set(
+            pd.date_range(
+                train_end + pd.Timedelta(days=1),
+                val_start - pd.Timedelta(days=1),
+                freq="D",
+            ).strftime("%Y-%m-%d")
+        )
+        all_fold_dates = set(train_df["price_date"]) | set(val_df["price_date"])
+        overlap = buffer_dates & all_fold_dates
+        assert not overlap, f"Buffer dates found in fold: {overlap}"
+
+
+def test_wff_train_always_before_val():
+    """In every fold the max train date is strictly before the min val date."""
+    df = _make_daily_df("2020-01-01", "2023-12-31")
+    for train_df, val_df in walk_forward_folds(
+        df, train_min_days=100, val_days=30, step_days=30, buffer_days=7
+    ):
+        train_max = pd.to_datetime(train_df["price_date"]).max()
+        val_min = pd.to_datetime(val_df["price_date"]).min()
+        assert train_max < val_min
+
+
+def test_wff_monotonic_val_windows():
+    """Each successive fold's val window starts strictly later than the previous."""
+    df = _make_daily_df("2020-01-01", "2023-12-31")
+    folds = list(walk_forward_folds(
+        df, train_min_days=100, val_days=30, step_days=30, buffer_days=7
+    ))
+    assert len(folds) >= 2, "Need at least 2 folds to check monotonicity"
+    prev_val_start = None
+    for train_df, val_df in folds:
+        val_start = pd.to_datetime(val_df["price_date"]).min()
+        if prev_val_start is not None:
+            assert val_start > prev_val_start
+        prev_val_start = val_start
+
+
+# ---------------------------------------------------------------------------
+# walk_forward_folds — fold count and boundary conditions
+# ---------------------------------------------------------------------------
+
+def test_wff_fold_count():
+    """Generator yields exactly the expected number of folds.
+
+    With min_date=2020-01-01, max_date=2020-12-31 (365-day span in a leap year),
+    train_min_days=30, val_days=10, step_days=10, buffer_days=3:
+
+      val_end(i) = min_date + (30−1) + i×10 + (3+1) + (10−1) = min_date + 42 + 10i
+
+    Valid while 42 + 10i ≤ 365  →  i ≤ 32.3  →  folds 0…32 = 33 folds.
+    """
+    df = _make_daily_df("2020-01-01", "2020-12-31")
+    folds = list(walk_forward_folds(
+        df, train_min_days=30, val_days=10, step_days=10, buffer_days=3
+    ))
+    assert len(folds) == 33
+
+
+def test_wff_excludes_test_window():
+    """Rows from TEST_START onwards never appear in any fold even if present in df."""
+    df = _make_daily_df("2024-01-01", "2025-12-31")
+    for train_df, val_df in walk_forward_folds(
+        df, train_min_days=30, val_days=10, step_days=10, buffer_days=3
+    ):
+        for part in [train_df, val_df]:
+            late = pd.to_datetime(part["price_date"]) >= pd.Timestamp(TEST_START)
+            assert not late.any(), (
+                f"Post-test date in fold: {part.loc[late, 'price_date'].tolist()}"
+            )
+
+
+def test_wff_empty_df_yields_nothing():
+    """Empty DataFrame produces no folds."""
+    df = pd.DataFrame(
+        columns=["price_date", "label", "station_code", "today_price_cents", "future_min_cents"]
+    )
+    assert list(walk_forward_folds(df)) == []
+
+
+@pytest.mark.parametrize("kwargs,match", [
+    ({"step_days": 0},        "step_days"),
+    ({"step_days": -1},       "step_days"),
+    ({"val_days": 0},         "val_days"),
+    ({"train_min_days": 0},   "train_min_days"),
+    ({"buffer_days": -1},     "buffer_days"),
+])
+def test_wff_invalid_params_raise(kwargs, match):
+    """Non-positive step/val/train or negative buffer raises ValueError immediately."""
+    df = _make_daily_df("2020-01-01", "2023-12-31")
+    with pytest.raises(ValueError, match=match):
+        list(walk_forward_folds(df, **kwargs))
+
+
+def test_wff_train_grows_each_fold():
+    """Training set grows by step_days rows between consecutive folds."""
+    df = _make_daily_df("2020-01-01", "2023-12-31")
+    step = 30
+    folds = list(walk_forward_folds(
+        df, train_min_days=100, val_days=30, step_days=step, buffer_days=7
+    ))
+    assert len(folds) >= 2
+    for (t1, _), (t2, _) in zip(folds, folds[1:]):
+        assert len(t2) - len(t1) == step

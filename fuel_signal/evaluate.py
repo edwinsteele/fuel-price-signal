@@ -40,6 +40,7 @@ import csv
 import datetime
 import pathlib
 import subprocess
+from collections.abc import Iterator
 
 import numpy as np
 import pandas as pd
@@ -81,6 +82,63 @@ def split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     val = df[(dates >= VAL_START) & (dates <= VAL_END)].copy()
     test = df[(dates >= TEST_START) & (dates <= TEST_END)].copy()
     return train, val, test
+
+
+def walk_forward_folds(
+    df: pd.DataFrame,
+    *,
+    train_min_days: int = 1825,
+    val_days: int = 90,
+    step_days: int = 90,
+    buffer_days: int = 7,
+) -> Iterator[tuple[pd.DataFrame, pd.DataFrame]]:
+    """Yield (train_df, val_df) walk-forward CV folds over the pre-test portion of df.
+
+    Uses an expanding training window advancing by step_days per fold. Each fold
+    has a buffer gap of buffer_days between train and val to prevent label leakage,
+    matching the split() leakage gap. Rows at or after TEST_START are never included.
+
+    Fold i boundaries (0-indexed):
+      train_end(i) = min_date + (train_min_days − 1) + i × step_days
+      val_start(i) = train_end(i) + buffer_days + 1
+      val_end(i)   = val_start(i) + val_days − 1
+
+    Stops when val_end would exceed the latest date present in the pre-test portion.
+    """
+    if train_min_days <= 0:
+        raise ValueError("walk_forward_folds(): train_min_days must be > 0.")
+    if val_days <= 0:
+        raise ValueError("walk_forward_folds(): val_days must be > 0.")
+    if step_days <= 0:
+        raise ValueError("walk_forward_folds(): step_days must be > 0.")
+    if buffer_days < 0:
+        raise ValueError("walk_forward_folds(): buffer_days must be >= 0.")
+
+    dates = pd.to_datetime(df["price_date"])
+    pre_test = df[dates < pd.Timestamp(TEST_START)].copy()
+    if pre_test.empty:
+        return
+
+    pre_test_dates = pd.to_datetime(pre_test["price_date"])
+    min_date = pre_test_dates.min().normalize()
+    max_date = pre_test_dates.max().normalize()
+
+    i = 0
+    while True:
+        train_end = min_date + pd.Timedelta(days=train_min_days - 1 + i * step_days)
+        val_start = train_end + pd.Timedelta(days=buffer_days + 1)
+        val_end = val_start + pd.Timedelta(days=val_days - 1)
+
+        if val_end > max_date:
+            break
+
+        train_df = pre_test[pre_test_dates <= train_end].copy()
+        val_df = pre_test[
+            (pre_test_dates >= val_start) & (pre_test_dates <= val_end)
+        ].copy()
+
+        yield train_df, val_df
+        i += 1
 
 
 # ---------------------------------------------------------------------------
