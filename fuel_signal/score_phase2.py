@@ -334,6 +334,8 @@ def main(features_csv: str) -> None:
     click.echo(_format_sweep_table(sweep))
 
     # Step 3: pick τ.
+    _, _, test_df = _ev.split(df)
+    test_label_rate = float(test_df["label"].mean())
     chosen_tau = pick_tau(sweep)
     best_row = max(sweep, key=lambda r: r["expected_cents_per_row"])
     click.echo(f"\nChosen τ = {chosen_tau:.2f}")
@@ -343,7 +345,7 @@ def main(features_csv: str) -> None:
     )
     click.echo(
         f"  Adjusted +{_TAU_STEP:.2f} for val/test BUY-rate gap "
-        f"({_VAL_LABEL_RATE:.3f} vs {_TEST_LABEL_RATE:.3f})"
+        f"({result['val_positive_rate']:.3f} vs {test_label_rate:.3f})"
     )
 
     # Step 4: score test once at chosen τ.
@@ -376,8 +378,8 @@ def main(features_csv: str) -> None:
         f"cost_model=TP+{_TP_REWARD_CENTS}c_FP-{_FP_COST_CENTS}c_FN-{_FN_COST_CENTS}c; "
         f"val_logloss={result['val_logloss']:.4f}; "
         f"test_logloss={test_result['test_logloss']:.4f}; "
-        f"val_BUY_rate={_VAL_LABEL_RATE:.3f}; "
-        f"test_BUY_rate={_TEST_LABEL_RATE:.3f}; "
+        f"val_BUY_rate={result['val_positive_rate']:.3f}; "
+        f"test_BUY_rate={test_label_rate:.3f}; "
         f"val_P={val_p:.3f}/R={val_r:.3f}/F1={val_f1:.3f}; "
         f"test_P={test_result['test_precision']:.3f}"
         f"/R={test_result['test_recall']:.3f}"
