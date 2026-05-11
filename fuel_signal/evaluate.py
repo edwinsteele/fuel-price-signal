@@ -105,6 +105,15 @@ def walk_forward_folds(
 
     Stops when val_end would exceed the latest date present in the pre-test portion.
     """
+    if train_min_days <= 0:
+        raise ValueError("walk_forward_folds(): train_min_days must be > 0.")
+    if val_days <= 0:
+        raise ValueError("walk_forward_folds(): val_days must be > 0.")
+    if step_days <= 0:
+        raise ValueError("walk_forward_folds(): step_days must be > 0.")
+    if buffer_days < 0:
+        raise ValueError("walk_forward_folds(): buffer_days must be >= 0.")
+
     dates = pd.to_datetime(df["price_date"])
     pre_test = df[dates < pd.Timestamp(TEST_START)].copy()
     if pre_test.empty:

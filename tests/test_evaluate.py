@@ -400,6 +400,20 @@ def test_wff_empty_df_yields_nothing():
     assert list(walk_forward_folds(df)) == []
 
 
+@pytest.mark.parametrize("kwargs,match", [
+    ({"step_days": 0},        "step_days"),
+    ({"step_days": -1},       "step_days"),
+    ({"val_days": 0},         "val_days"),
+    ({"train_min_days": 0},   "train_min_days"),
+    ({"buffer_days": -1},     "buffer_days"),
+])
+def test_wff_invalid_params_raise(kwargs, match):
+    """Non-positive step/val/train or negative buffer raises ValueError immediately."""
+    df = _make_daily_df("2020-01-01", "2023-12-31")
+    with pytest.raises(ValueError, match=match):
+        list(walk_forward_folds(df, **kwargs))
+
+
 def test_wff_train_grows_each_fold():
     """Training set grows by step_days rows between consecutive folds."""
     df = _make_daily_df("2020-01-01", "2023-12-31")
