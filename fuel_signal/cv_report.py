@@ -65,8 +65,14 @@ def run_cv(
         val_logloss = _ev.log_loss(y_val, p_val)
         baseline_logloss = _ev.log_loss(y_val, np.full(len(y_val), prior))
 
+        train_dates = pd.to_datetime(train_df["price_date"])
+        val_dates = pd.to_datetime(val_df["price_date"])
         results.append({
             "fold": i + 1,
+            "train_start": train_dates.min().strftime("%Y-%m-%d"),
+            "train_end": train_dates.max().strftime("%Y-%m-%d"),
+            "val_start": val_dates.min().strftime("%Y-%m-%d"),
+            "val_end": val_dates.max().strftime("%Y-%m-%d"),
             "train_rows": len(train_df),
             "val_rows": len(val_df),
             "val_buy_rate": float(y_val.mean()),
@@ -81,6 +87,8 @@ def _format_fold(r: dict) -> str:
     delta = r["val_logloss"] - r["baseline_logloss"]
     return (
         f"fold {r['fold']:>3}  "
+        f"train {r['train_start']}→{r['train_end']}  "
+        f"val {r['val_start']}→{r['val_end']}  "
         f"train={r['train_rows']:>7,}  "
         f"val={r['val_rows']:>5,}  "
         f"buy_rate={r['val_buy_rate']:.3f}  "
