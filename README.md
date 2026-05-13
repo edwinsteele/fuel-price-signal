@@ -275,14 +275,37 @@ uv run python -m fuel_signal.train_logreg \
 
 Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output prints train/val sizes and class balance, val log-loss / Brier, and the delta versus the constant-predictor baseline. The reliability plot uses 10 quantile bins with a `y=x` reference line; points below the diagonal indicate over-confidence, above indicate under-confidence.
 
-## Calibrating the model
+## Training the LightGBM baseline (Phase 3a.1)
 
-Check calibration quality and produce a calibrated model artifact:
+Vanilla LightGBM on the **same 10 features** as Phase 2 — no new features, no tuning, `random_state=42`. No `StandardScaler` (trees are scale-invariant). This is the apples-to-apples model-class comparison. Does **not** write to `experiments/results.csv`.
 
 ```bash
-# Default: reads data/features.csv + data/models/logreg.joblib,
-# writes data/models/logreg_calibrated.joblib
+# Default: reads data/features.csv, writes data/models/lgbm.joblib
+# and experiments/reliability_lgbm_val.png
+uv run python -m fuel_signal.train_lgbm
+
+# Custom paths
+uv run python -m fuel_signal.train_lgbm \
+    --features-csv /tmp/features.csv \
+    --model-out /tmp/lgbm.joblib \
+    --reliability-out /tmp/reliability_lgbm.png
+```
+
+**Phase 3a.1 val result** (2026-05-14, real DB): val logloss 0.3926 (baseline 0.6428, Δ −0.2501) vs logreg val logloss 0.4112. LGBM captures non-linearities logreg cannot.
+
+## Calibrating the model
+
+Check calibration quality and produce a calibrated model artifact. Works with any fitted model (logreg or LightGBM).
+
+```bash
+# Logreg (default): reads data/features.csv + data/models/logreg.joblib
 uv run python -m fuel_signal.calibrate
+
+# LightGBM (Phase 3a): specify model-in, model-out, and model-name
+uv run python -m fuel_signal.calibrate \
+    --model-in data/models/lgbm.joblib \
+    --model-out data/models/lgbm_calibrated.joblib \
+    --model-name lgbm
 
 # Custom paths or skip writing to experiments/results.csv
 uv run python -m fuel_signal.calibrate \
@@ -292,7 +315,7 @@ uv run python -m fuel_signal.calibrate \
     --skip-results-csv
 ```
 
-Reports class balance (BUY rate) for all splits and prints a 10-bin reliability table on val. If miscalibrated (max |gap| > 0.05), compares sigmoid (Platt) vs isotonic calibration wrappers and saves the better one. Appends a result row to `experiments/results.csv`.
+Reports class balance (BUY rate) for all splits and prints a 10-bin reliability table on val. If miscalibrated (max |gap| > 0.05), compares sigmoid (Platt) vs isotonic calibration wrappers and saves the better one. Calibration uses `sklearn.base.clone` of the input model, so it works generically for any sklearn-compatible estimator. Appends a result row to `experiments/results.csv`.
 
 ## Cost model diagnostics
 
@@ -329,22 +352,26 @@ uv run python -m fuel_signal.fn_cost --delay 14 --plot data/fn_cost_14d.png
 
 Threshold sweep on val → pick τ → **score test once** → append to `experiments/results.csv`. Run this command once to lock Phase 2. Do not re-run to tune τ after seeing test results.
 
+Also used for Phase 3+ models via `--model-path` and `--model-name`.
+
 ```bash
-# Default: reads data/features.csv
+# Phase 2 (default): re-trains logreg from scratch
 uv run python -m fuel_signal.score_phase2
 
-# Custom features CSV
-uv run python -m fuel_signal.score_phase2 --features-csv /tmp/features.csv
+# Phase 3+: load a pre-trained/calibrated model artifact
+uv run python -m fuel_signal.score_phase2 \
+    --model-path data/models/lgbm_calibrated.joblib \
+    --model-name lgbm_cycle_features
 ```
 
 **What it does:**
 
-1. Trains the logreg pipeline on the train split (reuses `train_logreg` internals).
+1. Without `--model-path`: trains the logreg pipeline on train, scores on val. With `--model-path`: loads the artifact and scores val directly.
 2. Sweeps τ ∈ [0.05, 0.95] (step 0.05) on val — prints precision, recall, F1, BUY%, and expected-cents-saved per row.
-3. Picks τ = argmax(expected cents/row on val) + 0.05 adjustment. The +0.05 corrects for val's elevated BUY rate (36.1% vs test's 26.9%): the cost-optimal τ on val is slightly too aggressive for the test distribution.
-4. Scores test at chosen τ. Appends one row to `experiments/results.csv`.
+3. Picks τ = argmax(expected cents/row on val) + 0.05 adjustment to correct for val's elevated BUY rate.
+4. Scores test at chosen τ. Appends one row to `experiments/results.csv` using `--model-name`.
 
-**Cost model:** TP → +3.0c saved; FP → −1.5c penalty; FN/TN → 0.
+**Cost model:** TP → +6.37c; FP → −5.80c; FN → −11.14c.
 
 **Phase 2 result** (2026-05-09, real DB):
 
@@ -357,7 +384,7 @@ At τ=0.40: precision=0.618, recall=0.581, F1=0.599, BUY rate=25.0% on test.
 
 ## Phase 2 τ re-validation on realised spend (Issue #64)
 
-Sweeps τ ∈ [0.30, 0.55] on the test window via the backtest engine using the calibrated logreg model, then patches `experiments/results.csv` with realised-spend columns for the Phase 2 and always-buy baseline rows.
+Sweeps τ ∈ [0.30, 0.70] on the test window via the backtest engine. Use `--no-patch` to dry-run; without it, patches `experiments/results.csv` with realised-spend columns for the Phase 2 and always-buy baseline rows.
 
 ```bash
 # Dry-run: print sweep table only, do not patch results.csv
@@ -377,7 +404,53 @@ uv run python -m fuel_signal.backtest_phase2 \
 | Logreg τ=0.40 (Phase 2) | 190.35 | +0.74% |
 | Logreg τ=0.30 (spend-optimal) | 189.35 | +1.27% |
 
-Spend-optimal τ=0.30 beats τ=0.40 by 1.01 c/L (≈0.5%). Gap is real but modest — Phase 2 τ=0.40 is confirmed as the locked baseline. Phase 3 must beat 190.35 c/L.
+Spend-optimal τ=0.30 beats τ=0.40 by 1.01 c/L (≈0.5%). Phase 3 must beat 190.35 c/L.
+
+## Phase 3a.1 LightGBM baseline (Issue #73)
+
+Apples-to-apples LightGBM vs logreg — same 10 features, vanilla defaults, `random_state=42`.
+
+```bash
+# Full sequence: train → calibrate → score → backtest
+uv run python -m fuel_signal.train_lgbm
+uv run python -m fuel_signal.calibrate \
+    --model-in data/models/lgbm.joblib \
+    --model-out data/models/lgbm_calibrated.joblib \
+    --model-name lgbm --skip-results-csv
+uv run python -m fuel_signal.score_phase2 \
+    --model-path data/models/lgbm_calibrated.joblib \
+    --model-name lgbm_cycle_features
+uv run python -m fuel_signal.backtest_phase2 \
+    --model-path data/models/lgbm_calibrated.joblib --no-patch
+```
+
+**Phase 3a.1 result** (2026-05-14, real DB):
+
+Calibration: LGBM is heavily over-confident out of the box (max |gap| = 0.38). Isotonic calibration chosen: val logloss 0.3926 (raw) → 0.3613 (isotonic), vs sigmoid 0.3904.
+
+| Model | Val logloss | Test logloss | Test brier | vs baseline |
+|---|---|---|---|---|
+| Marginal-rate baseline | — | 0.5579 | 0.1855 | — |
+| Logreg (Phase 2, τ=0.40) | 0.4112 | 0.4029 | 0.1346 | −0.155 logloss, −0.051 brier |
+| LightGBM (Phase 3a.1, τ=0.65) | 0.3613 | 0.3444 | 0.1110 | −0.214 logloss, −0.074 brier |
+
+LGBM val logloss beats raw-logreg val logloss (0.3926 < 0.4112) ✓
+
+Realised-spend backtest (τ sweep, preferred stations, test window 2025-07-01 → 2025-12-31):
+
+| τ | CPL (c/L) | vs always-buy |
+|---|---|---|
+| 0.30 | 185.02 | +3.53% |
+| 0.35 | 186.60 | +2.70% |
+| 0.40 | 186.60 | +2.70% |
+| 0.45 | 187.34 | +2.31% |
+| 0.50 | 188.83 | +1.54% |
+| 0.55 | 189.37 | +1.26% |
+| 0.60 | 189.57 | +1.15% |
+| **0.65** | **189.57** | **+1.15%** ← chosen |
+| 0.70 | 189.69 | +1.09% |
+
+LGBM τ=0.65: **189.57 c/L (+1.15% vs always-buy)**, beating Phase 2 logreg τ=0.40 (190.35, +0.74%) by **0.78 c/L**. Spend-optimal τ=0.30 (185.02 c/L); gap to chosen τ is 4.55 c/L — the val-based τ selection is conservative relative to the realised-spend optimum.
 
 ## Backtesting purchasing strategies
 

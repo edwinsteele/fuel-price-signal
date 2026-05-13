@@ -40,12 +40,12 @@ import click
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import FEATURE_COLUMNS
-from fuel_signal.train_logreg import build_pipeline
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 DEFAULT_MODEL_IN = pathlib.Path("data/models/logreg.joblib")
@@ -158,7 +158,7 @@ def compare_calibrations(
             "cannot fit sigmoid or isotonic calibrators."
         )
 
-    base = build_pipeline()
+    base = clone(raw_pipe)
     base.fit(X_fit, y_fit)
     p_calib_raw = base.predict_proba(X_calib)[:, 1]
     p_val_from_base = base.predict_proba(X_val)[:, 1]
@@ -322,13 +322,20 @@ def _build_notes(cb: pd.DataFrame, max_gap: float, best_name: str, compare: dict
     help="Where to save the chosen model artifact (raw or calibrated).",
 )
 @click.option(
+    "--model-name",
+    "model_name",
+    default="logreg",
+    show_default=True,
+    help="Prefix used for the experiment name in results.csv (e.g. 'logreg' or 'lgbm').",
+)
+@click.option(
     "--skip-results-csv",
     "skip_results_csv",
     is_flag=True,
     default=False,
     help="Do not append a row to experiments/results.csv (useful in tests).",
 )
-def main(features_csv: str, model_in: str, model_out: str, skip_results_csv: bool) -> None:
+def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip_results_csv: bool) -> None:
     """Calibration check and artifact for the logreg baseline (issue #36).
 
     Prints class balance, reliability table, and calibration comparison on val.
@@ -403,7 +410,7 @@ def main(features_csv: str, model_in: str, model_out: str, skip_results_csv: boo
         notes = _build_notes(cb, max_gap, best_name, compare)
         chosen = compare[best_name]
         _ev.log_experiment(
-            name=f"logreg_calibration_check_{best_name}",
+            name=f"{model_name}_calibration_check_{best_name}",
             features=feature_columns,
             holdout_logloss=chosen["val_logloss"],
             holdout_brier=chosen["val_brier"],

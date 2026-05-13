@@ -1,6 +1,6 @@
 """Phase 2 τ re-validation on realised spend (Issue #64).
 
-Sweeps τ ∈ [0.30, 0.55] on the test window via the backtest engine
+Sweeps τ ∈ [0.30, 0.70] on the test window via the backtest engine
 using data/models/logreg_calibrated.joblib, then patches
 experiments/results.csv with realised-spend columns for the Phase 2
 (τ=0.40) and always-buy baseline rows.
@@ -34,7 +34,7 @@ from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.evaluate import _RESULTS_CSV, TEST_END, TEST_START
 
 DEFAULT_MODEL_PATH = pathlib.Path("data/models/logreg_calibrated.joblib")
-TAU_SWEEP: list[float] = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
+TAU_SWEEP: list[float] = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +172,9 @@ def patch_results_csv(
     help="Print sweep results only; do not patch experiments/results.csv.",
 )
 def main(model_path: pathlib.Path, db_path: str, no_patch: bool) -> None:
-    """Sweep τ ∈ [0.30, 0.55] on the test window and re-validate Phase 2 τ=0.40.
+    """Sweep τ ∈ [0.30, 0.70] on the test window and re-validate Phase 2 τ=0.40.
 
-    Runs the calibrated logreg model through the backtest engine at six
+    Runs the calibrated model through the backtest engine at nine
     thresholds, compares realised CPL against always-buy, and identifies
     the spend-optimal τ. Unless --no-patch is set, patches
     experiments/results.csv with realised-spend columns for the
