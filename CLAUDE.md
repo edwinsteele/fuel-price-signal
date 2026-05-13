@@ -43,6 +43,7 @@ You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `pol
 1. Implement the minimal change — do not scope-creep.
 2. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
 3. Open PR titled `fix: <issue title> (closes #N)` targeting `main` (`--base main`) with labels `claude-authored` + the issue's original label. PR body must include a 3–5 bullet plan (what changed, what didn't, what test was added).
+4. Wait 270s, then check for CodeRabbit comments (`gh pr view N --json comments,reviewThreads`). Implement appropriate ones, run `uv run ruff check . && uv run pytest -q`, push. Repeat this step until no actionable comments remain.
 
 **PR maintenance:**
 When pickup rule 1 triggers, for each qualifying PR:
