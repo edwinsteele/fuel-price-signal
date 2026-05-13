@@ -272,9 +272,24 @@ def test_resolve_members_unknown_lga_returns_empty(conn):
 
 def test_resolve_members_lga_exact_match_over_substring(conn):
     """Exact match for Sydney LGA must not collide with North Sydney."""
-    members = resolve_members(conn, "lga:Sydney")
-    # No stations seeded in Sydney LGA, so empty — but it must not error.
-    assert members == []
+    north_sydney_station = {
+        "station_code": 900,
+        "name": "Ampol North Sydney",
+        "address": "1 Miller St, North Sydney",
+        "suburb": "North Sydney",
+        "postcode": "2060",
+        "brand": "Ampol",
+    }
+    upsert_stations(conn, [north_sydney_station])
+    upsert_daily_prices(conn, [(900, "E10", "2024-03-01", 170.0)])
+    conn.commit()
+
+    # Exact match "Sydney" must not return the North Sydney station.
+    assert resolve_members(conn, "lga:Sydney") == []
+    # Exact match "North Sydney" must return the seeded station.
+    members = resolve_members(conn, "lga:North Sydney")
+    assert len(members) == 1
+    assert members[0].spec == "station:900"
 
 
 def test_resolve_members_only_returns_stations_with_data(conn):
