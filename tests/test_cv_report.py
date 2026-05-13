@@ -55,7 +55,10 @@ def test_run_cv_returns_list_of_dicts():
     results = run_cv(df, train_min_days=200, val_days=30, step_days=90)
     assert isinstance(results, list)
     assert len(results) >= 1
-    expected_keys = {"fold", "train_rows", "val_rows", "val_buy_rate", "val_logloss", "baseline_logloss"}
+    expected_keys = {
+        "fold", "train_start", "train_end", "val_start", "val_end",
+        "train_rows", "val_rows", "val_buy_rate", "val_logloss", "baseline_logloss",
+    }
     for r in results:
         assert expected_keys == set(r.keys())
 
@@ -67,6 +70,18 @@ def test_run_cv_fold_numbers_are_positive():
         assert r["fold"] >= 1
         assert r["train_rows"] > 0
         assert r["val_rows"] > 0
+
+
+def test_run_cv_dates_are_iso_strings_and_ordered():
+    """Date fields are YYYY-MM-DD strings; train precedes val in every fold."""
+    df = _synthetic_cv_df()
+    results = run_cv(df, train_min_days=200, val_days=30, step_days=90)
+    for r in results:
+        for key in ("train_start", "train_end", "val_start", "val_end"):
+            assert len(r[key]) == 10 and r[key][4] == "-" and r[key][7] == "-"
+        assert r["train_end"] < r["val_start"]
+        assert r["train_start"] <= r["train_end"]
+        assert r["val_start"] <= r["val_end"]
 
 
 def test_run_cv_buy_rate_is_proportion():
@@ -161,6 +176,7 @@ def test_cli_runs_end_to_end(tmp_path):
     assert "fold" in res.output
     assert "logloss" in res.output
     assert "folds:" in res.output
+    assert "→" in res.output
 
 
 def test_cli_output_contains_summary_line(tmp_path):
