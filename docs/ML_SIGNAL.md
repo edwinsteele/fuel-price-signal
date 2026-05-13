@@ -4,7 +4,7 @@ This document captures the decisions behind the ML model so agents don't inadver
 
 ## Target formulation
 
-Binary classification: **P(min price over next H days < today − X cents)**.
+Binary classification: **P(min price over next H days >= today − X cents)**.
 
 The decision rule falls out of the probability — "BUY when P ≥ threshold". Trains on log loss; evaluated with reliability plots, Brier score, and realised-spend backtest.
 
