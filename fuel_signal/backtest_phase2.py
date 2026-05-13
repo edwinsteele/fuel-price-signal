@@ -34,7 +34,7 @@ from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.evaluate import _RESULTS_CSV, TEST_END, TEST_START
 
 DEFAULT_MODEL_PATH = pathlib.Path("data/models/logreg_calibrated.joblib")
-TAU_SWEEP: list[float] = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
+TAU_SWEEP: list[float] = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
 
 
 # ---------------------------------------------------------------------------

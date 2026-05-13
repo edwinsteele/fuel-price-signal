@@ -110,6 +110,7 @@ def save_reliability_plot(
     out_path: pathlib.Path,
     n_bins: int = 10,
     title: str = "Reliability — logreg, val split",
+    model_label: str = "logreg",
 ) -> None:
     """Save predicted-vs-actual quantile-bin reliability plot with y=x reference."""
     bin_pred, bin_actual, bin_count = reliability_bins(y_true, y_pred, n_bins=n_bins)
@@ -117,7 +118,7 @@ def save_reliability_plot(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.plot([0, 1], [0, 1], linestyle="--", color="grey", label="perfect calibration (y=x)")
-    ax.plot(bin_pred, bin_actual, marker="o", color="C0", label="logreg")
+    ax.plot(bin_pred, bin_actual, marker="o", color="C0", label=model_label)
     for x, y, n in zip(bin_pred, bin_actual, bin_count):
         ax.annotate(f"n={n}", (x, y), textcoords="offset points", xytext=(5, 5), fontsize=8)
     ax.set_xlim(0, 1)

@@ -65,11 +65,12 @@ Phase 3 must beat τ=0.40 (190.35 c/L) to show improvement over the locked basel
 from __future__ import annotations
 
 import pathlib
+from typing import Any
 
 import click
+import joblib
 import numpy as np
 import pandas as pd
-from sklearn.pipeline import Pipeline
 
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import FEATURE_COLUMNS
@@ -186,8 +187,27 @@ def pick_tau(
     return float(np.clip(adjusted, lo, hi))
 
 
+def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str]]:
+    """Load any saved model artifact and return (model_with_predict_proba, feature_columns).
+
+    Handles both raw pipeline artifacts and calibrated artifacts produced by calibrate.py.
+    """
+    loaded = joblib.load(path)
+    feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS) if isinstance(loaded, dict) else FEATURE_COLUMNS
+    if isinstance(loaded, dict) and loaded.get("calibrated"):
+        from fuel_signal.calibrate import _CalibratedPipeline
+        model = _CalibratedPipeline(
+            loaded["base_pipeline"], loaded["calibrator"], loaded["calibration_method"]
+        )
+    elif isinstance(loaded, dict):
+        model = loaded["pipeline"]
+    else:
+        model = loaded
+    return model, feature_columns
+
+
 def score_test(
-    pipeline: Pipeline,
+    pipeline: Any,
     df: pd.DataFrame,
     tau: float,
     feature_columns: list[str] | None = None,
@@ -245,26 +265,29 @@ def _format_sweep_table(sweep_rows: list[dict]) -> str:
 
 
 def _format_comparison(
-    result: dict,
+    val_logloss: float,
+    val_positive_rate: float,
     test_result: dict,
     baseline_test_logloss: float,
     baseline_test_brier: float,
     tau: float,
+    model_label: str = "Logreg",
 ) -> str:
     delta_ll = test_result["test_logloss"] - baseline_test_logloss
     delta_br = test_result["test_brier"] - baseline_test_brier
     lines = [
         "",
-        "Phase 2 final results — test split",
+        f"{model_label} — test split results",
         f"  Chosen τ               : {tau:.2f}",
         f"  Test rows              : {test_result['test_size']:>8,}"
         f"  (pos rate {test_result['test_positive_rate']:.3f})",
+        f"  Val  logloss           : {val_logloss:.4f}  (val pos rate {val_positive_rate:.3f})",
         "",
         f"  Baseline test logloss  : {baseline_test_logloss:.4f}",
-        f"  Logreg  test logloss   : {test_result['test_logloss']:.4f}  (Δ {delta_ll:+.4f})",
+        f"  {model_label:<8} test logloss   : {test_result['test_logloss']:.4f}  (Δ {delta_ll:+.4f})",
         "",
         f"  Baseline test brier    : {baseline_test_brier:.4f}",
-        f"  Logreg  test brier     : {test_result['test_brier']:.4f}  (Δ {delta_br:+.4f})",
+        f"  {model_label:<8} test brier     : {test_result['test_brier']:.4f}  (Δ {delta_br:+.4f})",
         "",
         f"  At τ={tau:.2f}: P={test_result['test_precision']:.3f}  R={test_result['test_recall']:.3f}"
         f"  F1={test_result['test_f1']:.3f}  BUY%={test_result['test_buy_rate']:.3f}",
@@ -286,14 +309,31 @@ def _format_comparison(
     show_default=True,
     help="Path to feature rows CSV produced by `python -m fuel_signal.features`.",
 )
-def main(features_csv: str) -> None:
-    """Phase 2: threshold sweep on val, one-time test scoring, log to results.csv.
+@click.option(
+    "--model-path",
+    "model_path",
+    default=None,
+    show_default=True,
+    help=(
+        "Path to a pre-trained (optionally calibrated) model joblib artifact. "
+        "If omitted, re-trains logreg from scratch (Phase 2 backward-compat mode)."
+    ),
+)
+@click.option(
+    "--model-name",
+    "model_name",
+    default="logreg_cycle_features",
+    show_default=True,
+    help="Experiment name written to results.csv (e.g. 'lgbm_cycle_features').",
+)
+def main(features_csv: str, model_path: str | None, model_name: str) -> None:
+    """Threshold sweep on val, one-time test scoring, append to results.csv.
 
-    Trains the logreg pipeline on the train split, sweeps τ ∈ [0.05, 0.95] on val
-    to pick the best decision threshold, then scores test once and appends one row
-    to experiments/results.csv.
+    Without --model-path: re-trains the logreg pipeline (Phase 2 mode).
+    With --model-path: loads any pre-trained/calibrated artifact and scores it,
+    enabling Phase 3+ models (e.g. LightGBM) to reuse this evaluation harness.
 
-    Do not re-run to tune τ after seeing test results — cardinal rule from evaluate.py.
+    Do not re-run to tune τ after seeing test results — cardinal rule.
     """
     features_path = pathlib.Path(features_csv)
     if not features_path.exists():
@@ -310,23 +350,47 @@ def main(features_csv: str) -> None:
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
 
-    # Step 1: train on train split, score on val (test untouched).
-    click.echo("Training logreg on train split …")
-    result = train_and_evaluate(df)
-    pipeline = result["pipeline"]
-    feature_columns = result["feature_columns"]
-    y_val = result["y_val"]
-    p_val = result["p_val"]
+    # Step 1: obtain model + val predictions.
+    if model_path is not None:
+        artifact_path = pathlib.Path(model_path)
+        if not artifact_path.exists():
+            raise click.ClickException(
+                f"Model artifact not found: {model_path}. "
+                "Run calibrate.py (or train_lgbm.py) first."
+            )
+        click.echo(f"Loading pre-trained model from {model_path} …")
+        pipeline, feature_columns = load_model_artifact(artifact_path)
 
-    click.echo(
-        f"  Train: {result['train_size']:,} rows  (pos rate {result['train_positive_rate']:.3f})"
-    )
-    click.echo(
-        f"  Val:   {result['val_size']:,} rows  (pos rate {result['val_positive_rate']:.3f})"
-    )
-    click.echo(
-        f"  Val logloss: {result['val_logloss']:.4f}  (baseline {result['baseline_val_logloss']:.4f})"
-    )
+        train, val, _ = _ev.split(df)
+        X_val = val[feature_columns].to_numpy(dtype=float)
+        y_val = val["label"].to_numpy(dtype=int)
+        p_val = pipeline.predict_proba(X_val)[:, 1]
+
+        p_baseline = _ev.baseline_prior(train)
+        baseline_val_logloss = _ev.log_loss(y_val, np.full(len(y_val), p_baseline))
+        val_logloss = _ev.log_loss(y_val, p_val)
+        val_positive_rate = float(y_val.mean())
+        train_positive_rate = float(train["label"].mean())
+        train_size = len(train)
+        val_size = len(val)
+    else:
+        click.echo("Training logreg on train split …")
+        result = train_and_evaluate(df)
+        pipeline = result["pipeline"]
+        feature_columns = result["feature_columns"]
+        y_val = result["y_val"]
+        p_val = result["p_val"]
+        val_logloss = result["val_logloss"]
+        val_positive_rate = result["val_positive_rate"]
+        train_positive_rate = result["train_positive_rate"]
+        baseline_val_logloss = result["baseline_val_logloss"]
+        train_size = result["train_size"]
+        val_size = result["val_size"]
+        p_baseline = result["baseline_prior"]
+
+    click.echo(f"  Train: {train_size:,} rows  (pos rate {train_positive_rate:.3f})")
+    click.echo(f"  Val:   {val_size:,} rows  (pos rate {val_positive_rate:.3f})")
+    click.echo(f"  Val logloss: {val_logloss:.4f}  (baseline {baseline_val_logloss:.4f})")
 
     # Step 2: threshold sweep on val.
     click.echo("\nThreshold sweep on val:")
@@ -345,7 +409,7 @@ def main(features_csv: str) -> None:
     )
     click.echo(
         f"  Adjusted +{_TAU_STEP:.2f} for val/test BUY-rate gap "
-        f"({result['val_positive_rate']:.3f} vs {test_label_rate:.3f})"
+        f"({val_positive_rate:.3f} vs {test_label_rate:.3f})"
     )
 
     # Step 4: score test once at chosen τ.
@@ -353,8 +417,6 @@ def main(features_csv: str) -> None:
     test_result = score_test(pipeline, df, chosen_tau, feature_columns)
 
     # Baseline constant predictor on test.
-    train, _, _ = _ev.split(df)
-    p_baseline = _ev.baseline_prior(train)
     n_test = test_result["test_size"]
     baseline_test_logloss = _ev.log_loss(
         test_result["y_test"], np.full(n_test, p_baseline)
@@ -363,8 +425,13 @@ def main(features_csv: str) -> None:
         test_result["y_test"], np.full(n_test, p_baseline)
     )
 
+    model_label = model_name.split("_")[0].capitalize()
     click.echo(
-        _format_comparison(result, test_result, baseline_test_logloss, baseline_test_brier, chosen_tau)
+        _format_comparison(
+            val_logloss, val_positive_rate,
+            test_result, baseline_test_logloss, baseline_test_brier,
+            chosen_tau, model_label=model_label,
+        )
     )
 
     # Step 5: val metrics at chosen τ (for notes).
@@ -376,9 +443,9 @@ def main(features_csv: str) -> None:
         f"tau={chosen_tau:.2f}; "
         f"criterion=max_expected_cents_val_adj+0.05; "
         f"cost_model=TP+{_TP_REWARD_CENTS}c_FP-{_FP_COST_CENTS}c_FN-{_FN_COST_CENTS}c; "
-        f"val_logloss={result['val_logloss']:.4f}; "
+        f"val_logloss={val_logloss:.4f}; "
         f"test_logloss={test_result['test_logloss']:.4f}; "
-        f"val_BUY_rate={result['val_positive_rate']:.3f}; "
+        f"val_BUY_rate={val_positive_rate:.3f}; "
         f"test_BUY_rate={test_label_rate:.3f}; "
         f"val_P={val_p:.3f}/R={val_r:.3f}/F1={val_f1:.3f}; "
         f"test_P={test_result['test_precision']:.3f}"
@@ -386,13 +453,13 @@ def main(features_csv: str) -> None:
         f"/F1={test_result['test_f1']:.3f}"
     )
     _ev.log_experiment(
-        name="logreg_cycle_features",
+        name=model_name,
         features=feature_columns,
         holdout_logloss=test_result["test_logloss"],
         holdout_brier=test_result["test_brier"],
         notes=notes,
     )
-    click.echo("\nAppended Phase 2 result to experiments/results.csv")
+    click.echo(f"\nAppended result to experiments/results.csv  (name={model_name})")
 
 
 if __name__ == "__main__":
