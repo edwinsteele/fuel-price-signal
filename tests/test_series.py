@@ -144,6 +144,21 @@ def test_resolve_lga_ambiguous_raises(conn):
         resolve(conn, "lga:e")  # matches multiple LGAs
 
 
+def test_resolve_lga_exact_match_over_substring(conn):
+    """Exact case-insensitive match wins over substring collisions (e.g. Sydney vs North Sydney)."""
+    r = resolve(conn, "lga:Sydney")
+    assert r.kind == "lga"
+    assert r.spec == "lga:Sydney"
+    assert "Sydney" in r.label
+    assert "North" not in r.label
+
+
+def test_resolve_lga_exact_match_case_insensitive(conn):
+    r = resolve(conn, "lga:sydney")
+    assert r.kind == "lga"
+    assert r.spec == "lga:Sydney"
+
+
 # ---------------------------------------------------------------------------
 # resolve() — brand:
 # ---------------------------------------------------------------------------
@@ -253,6 +268,28 @@ def test_resolve_members_station_returns_empty(conn):
 
 def test_resolve_members_unknown_lga_returns_empty(conn):
     assert resolve_members(conn, "lga:NoSuchPlace") == []
+
+
+def test_resolve_members_lga_exact_match_over_substring(conn):
+    """Exact match for Sydney LGA must not collide with North Sydney."""
+    north_sydney_station = {
+        "station_code": 900,
+        "name": "Ampol North Sydney",
+        "address": "1 Miller St, North Sydney",
+        "suburb": "North Sydney",
+        "postcode": "2060",
+        "brand": "Ampol",
+    }
+    upsert_stations(conn, [north_sydney_station])
+    upsert_daily_prices(conn, [(900, "E10", "2024-03-01", 170.0)])
+    conn.commit()
+
+    # Exact match "Sydney" must not return the North Sydney station.
+    assert resolve_members(conn, "lga:Sydney") == []
+    # Exact match "North Sydney" must return the seeded station.
+    members = resolve_members(conn, "lga:North Sydney")
+    assert len(members) == 1
+    assert members[0].spec == "station:900"
 
 
 def test_resolve_members_only_returns_stations_with_data(conn):
