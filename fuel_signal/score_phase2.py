@@ -191,19 +191,37 @@ def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str]]:
     """Load any saved model artifact and return (model_with_predict_proba, feature_columns).
 
     Handles both raw pipeline artifacts and calibrated artifacts produced by calibrate.py.
+    Raises ValueError with an actionable message on unexpected artifact shapes.
     """
     loaded = joblib.load(path)
-    feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS) if isinstance(loaded, dict) else FEATURE_COLUMNS
     if isinstance(loaded, dict) and loaded.get("calibrated"):
+        required = {"base_pipeline", "calibrator", "calibration_method"}
+        missing = sorted(required - set(loaded.keys()))
+        if missing:
+            raise ValueError(f"Calibrated artifact missing required keys: {missing}")
         from fuel_signal.calibrate import _CalibratedPipeline
         model = _CalibratedPipeline(
             loaded["base_pipeline"], loaded["calibrator"], loaded["calibration_method"]
         )
+        feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
     elif isinstance(loaded, dict):
+        if "pipeline" not in loaded:
+            raise ValueError(
+                "Unsupported model artifact: dict format with no 'pipeline' key. "
+                "Expected artifact saved by train_logreg.py or train_lgbm.py."
+            )
         model = loaded["pipeline"]
+        feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
     else:
         model = loaded
-    return model, feature_columns
+        feature_columns = FEATURE_COLUMNS
+
+    if not hasattr(model, "predict_proba"):
+        raise ValueError(
+            f"Loaded artifact ({type(model).__name__}) does not provide predict_proba(). "
+            "Pass a fitted sklearn-compatible classifier or a calibrated pipeline artifact."
+        )
+    return model, list(feature_columns)
 
 
 def score_test(
@@ -360,6 +378,13 @@ def main(features_csv: str, model_path: str | None, model_name: str) -> None:
             )
         click.echo(f"Loading pre-trained model from {model_path} …")
         pipeline, feature_columns = load_model_artifact(artifact_path)
+
+        missing_cols = [c for c in feature_columns if c not in df.columns]
+        if missing_cols:
+            raise click.ClickException(
+                f"Features CSV is missing columns required by the model artifact: {missing_cols}. "
+                "Re-run 'uv run python -m fuel_signal.features' to regenerate."
+            )
 
         train, val, _ = _ev.split(df)
         X_val = val[feature_columns].to_numpy(dtype=float)
