@@ -97,7 +97,12 @@ def resolve_members(
     for prefix in ("lga:", "council:"):
         if sl.startswith(prefix):
             query = sl[len(prefix):].strip()
-            matches = [c for c in SYDNEY_METRO_COUNCILS if query in c.lower()]
+            lower_query = query.lower()
+            exact = [c for c in SYDNEY_METRO_COUNCILS if c.lower() == lower_query]
+            if exact:
+                matches = exact
+            else:
+                matches = [c for c in SYDNEY_METRO_COUNCILS if lower_query in c.lower()]
             if not matches:
                 return []
             council = matches[0]
@@ -161,7 +166,13 @@ def enumerate_groups(conn: sqlite3.Connection) -> dict:
 # ---------------------------------------------------------------------------
 
 def _resolve_lga(conn: sqlite3.Connection, query: str, fuel: str) -> ResolvedSeries:
-    matches = [c for c in SYDNEY_METRO_COUNCILS if query in c.lower()]
+    # Prefer exact case-insensitive match; fall back to substring.
+    lower_query = query.lower()
+    exact = [c for c in SYDNEY_METRO_COUNCILS if c.lower() == lower_query]
+    if exact:
+        matches = exact
+    else:
+        matches = [c for c in SYDNEY_METRO_COUNCILS if lower_query in c.lower()]
     if not matches:
         known = ", ".join(sorted(SYDNEY_METRO_COUNCILS))
         raise SeriesError(f"No LGA matching {query!r}. Known LGAs: {known}")
