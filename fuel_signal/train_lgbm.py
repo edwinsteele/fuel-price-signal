@@ -85,6 +85,11 @@ def train_and_evaluate(
     feature_columns = feature_columns or FEATURE_COLUMNS
     if categorical_columns is None:
         categorical_columns = CATEGORICAL_COLUMNS
+    overlap = set(feature_columns).intersection(categorical_columns)
+    if overlap:
+        raise ValueError(
+            f"train_and_evaluate(): columns in both feature_columns and categorical_columns: {sorted(overlap)}"
+        )
     all_columns = feature_columns + categorical_columns
 
     train, val, _test = _ev.split(df)

@@ -98,6 +98,13 @@ def test_train_and_evaluate_predict_proba_shape():
     assert (result["p_val"] <= 1).all()
 
 
+def test_train_and_evaluate_overlap_raises():
+    """feature_columns and categorical_columns must not share columns."""
+    df = _synthetic_features_df()
+    with pytest.raises(ValueError, match="both feature_columns and categorical_columns"):
+        train_and_evaluate(df, feature_columns=FEATURE_COLUMNS + ["station_code"])
+
+
 def test_train_and_evaluate_empty_train_raises():
     df = _synthetic_features_df()
     df = df[pd.to_datetime(df["price_date"]) >= _ev.VAL_START]
