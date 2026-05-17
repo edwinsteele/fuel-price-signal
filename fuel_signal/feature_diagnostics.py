@@ -31,6 +31,11 @@ DEFAULT_THRESHOLD = 0.40
 
 def _load_artifact(model_path: pathlib.Path) -> dict:
     artifact = joblib.load(model_path)
+    if not isinstance(artifact, dict):
+        raise click.ClickException(
+            f"Model artifact at {model_path} has invalid format. "
+            "Expected a calibrated LightGBM artifact produced by calibrate.py."
+        )
     for key in ("base_pipeline", "calibrator", "calibration_method", "feature_columns"):
         if key not in artifact:
             raise click.ClickException(
@@ -136,6 +141,10 @@ def run_diagnostics(
     features_csv: pathlib.Path,
     threshold: float,
 ) -> str:
+    if not 0.0 <= threshold <= 1.0:
+        raise click.ClickException(
+            f"Invalid threshold {threshold}. Expected a value in [0, 1]."
+        )
     artifact = _load_artifact(model_path)
     feature_columns: list[str] = artifact["feature_columns"]
 

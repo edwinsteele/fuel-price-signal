@@ -191,9 +191,14 @@ def test_run_diagnostics_returns_three_sections(artifact_path, features_csv):
 def test_run_diagnostics_threshold_affects_counts(artifact_path, features_csv):
     low_threshold = run_diagnostics(artifact_path, features_csv, threshold=0.10)
     high_threshold = run_diagnostics(artifact_path, features_csv, threshold=0.90)
-    # Lower threshold → more predicted BUYs; higher → fewer
-    assert "predicted-BUY rate" in low_threshold
-    assert "predicted-BUY rate" in high_threshold
+
+    def _extract_rate(text: str) -> float:
+        for line in text.splitlines():
+            if "predicted-BUY rate:" in line:
+                return float(line.rsplit(":", 1)[1].strip().rstrip("%"))
+        raise AssertionError("predicted-BUY rate not found in output")
+
+    assert _extract_rate(low_threshold) > _extract_rate(high_threshold)
 
 
 # ---------------------------------------------------------------------------
