@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import CATEGORICAL_COLUMNS, FEATURE_COLUMNS
+from fuel_signal.features import FEATURE_COLUMNS
 from fuel_signal.train_lgbm import (
     main,
     train_and_evaluate,
@@ -61,8 +61,7 @@ def test_train_and_evaluate_returns_expected_keys():
     df = _synthetic_features_df()
     result = train_and_evaluate(df)
     expected_keys = {
-        "pipeline", "feature_columns", "categorical_columns",
-        "effective_station_count",
+        "pipeline", "feature_columns",
         "train_size", "val_size",
         "train_positive_rate", "val_positive_rate",
         "val_logloss", "val_brier",
@@ -98,57 +97,11 @@ def test_train_and_evaluate_predict_proba_shape():
     assert (result["p_val"] <= 1).all()
 
 
-def test_train_and_evaluate_overlap_raises():
-    """feature_columns and categorical_columns must not share columns."""
-    df = _synthetic_features_df()
-    with pytest.raises(ValueError, match="both feature_columns and categorical_columns"):
-        train_and_evaluate(df, feature_columns=FEATURE_COLUMNS + ["station_code"])
-
-
 def test_train_and_evaluate_empty_train_raises():
     df = _synthetic_features_df()
     df = df[pd.to_datetime(df["price_date"]) >= _ev.VAL_START]
     with pytest.raises(ValueError, match="train split is empty"):
         train_and_evaluate(df)
-
-
-def test_train_and_evaluate_categorical_default():
-    """Default call uses CATEGORICAL_COLUMNS; feature_columns includes station_code."""
-    df = _synthetic_features_df()
-    result = train_and_evaluate(df)
-    assert result["categorical_columns"] == CATEGORICAL_COLUMNS
-    assert "station_code" in result["feature_columns"]
-    assert result["effective_station_count"] is not None
-    assert result["effective_station_count"] > 0
-
-
-def test_train_and_evaluate_no_categorical():
-    """categorical_columns=[] reproduces Phase 3a.1 numeric-only mode."""
-    df = _synthetic_features_df()
-    result = train_and_evaluate(df, categorical_columns=[])
-    assert result["categorical_columns"] == []
-    assert result["feature_columns"] == FEATURE_COLUMNS
-    assert result["effective_station_count"] is None
-
-
-def test_cold_station_inference():
-    """Unseen station_code at predict time lands in LightGBM's missing bucket.
-
-    LightGBM stores categorical feature metadata by column index during fit.
-    A station_code never seen during training produces a valid probability —
-    it is routed to the leaf learned from the missing-value split.
-    """
-    df = _synthetic_features_df()
-    result = train_and_evaluate(df)
-    model = result["pipeline"]
-    all_columns = result["feature_columns"]
-
-    cold_row = pd.DataFrame(
-        {col: [0.0] for col in FEATURE_COLUMNS} | {"station_code": [999999]}
-    )[all_columns]
-    proba = model.predict_proba(cold_row)
-    assert proba.shape == (1, 2)
-    assert 0.0 <= float(proba[0, 1]) <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -179,12 +132,9 @@ def test_cli_runs_end_to_end(tmp_path):
 
     saved = joblib.load(model_path)
     assert "pipeline" in saved
-    assert saved["feature_columns"] == FEATURE_COLUMNS + CATEGORICAL_COLUMNS
-    assert saved["categorical_columns"] == CATEGORICAL_COLUMNS
+    assert saved["feature_columns"] == FEATURE_COLUMNS
 
-    # Saved model can score new data with all columns (numeric + categorical).
-    all_cols = FEATURE_COLUMNS + CATEGORICAL_COLUMNS
-    X = df[all_cols].head(5)
+    X = df[FEATURE_COLUMNS].head(5).to_numpy(dtype=float)
     proba = saved["pipeline"].predict_proba(X)
     assert proba.shape == (5, 2)
 
