@@ -371,6 +371,12 @@ def _lead_lag_sign_css(days: int | None) -> str:
     return "ll-zero"
 
 
+def _window_slice(
+    points: list[tuple[str, float]], w_start: str, w_end: str
+) -> list[tuple[str, float]]:
+    return [(d, p) for d, p in points if w_start <= d <= w_end]
+
+
 def _compute_lead_lag(
     conn: sqlite3.Connection,
     reference_spec: str,
@@ -423,7 +429,7 @@ def _compute_lead_lag(
     ref_troughs: list[str | None] = []
     for i in range(len(peak_dates) - 1):
         w_start, w_end = peak_dates[i], peak_dates[i + 1]
-        ref_window = [(d, p) for d, p in ref.points if w_start <= d <= w_end]
+        ref_window = _window_slice(ref.points, w_start, w_end)
         if ref_window:
             trough_date, _ = min(ref_window, key=lambda x: x[1])
             ref_troughs.append(trough_date)
@@ -446,7 +452,7 @@ def _compute_lead_lag(
                 lead_days_per_cycle.append(None)
                 continue
             w_start, w_end = peak_dates[i], peak_dates[i + 1]
-            window = [(d, p) for d, p in cmp.points if w_start <= d <= w_end]
+            window = _window_slice(cmp.points, w_start, w_end)
             if not window:
                 lead_days_per_cycle.append(None)
                 continue
