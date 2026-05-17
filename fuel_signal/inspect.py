@@ -357,6 +357,112 @@ def _build_coverage_heatmap(
 
 
 # ---------------------------------------------------------------------------
+# Lead/lag computation
+# ---------------------------------------------------------------------------
+
+def _lead_lag_sign_css(days: int | None) -> str:
+    """CSS class for a lead/lag cell: green for leads, red for lags, grey for zero/None."""
+    if days is None:
+        return "ll-none"
+    if days < 0:
+        return "ll-lead"
+    if days > 0:
+        return "ll-lag"
+    return "ll-zero"
+
+
+def _compute_lead_lag(
+    conn: sqlite3.Connection,
+    reference_spec: str,
+    comparison_specs: list[str],
+) -> dict:
+    """Return lead/lag table data relative to the reference series' peaks.
+
+    For each inter-peak window [peak_i, peak_{i+1}] in the reference series,
+    find the argmin (trough) date of each comparison series within that window.
+
+    lead_days = trough_date - peak_{i+1}
+      Negative → comparison troughs before the reference peak (leads)
+      Positive → comparison troughs after the reference peak (lags)
+
+    Returns:
+        {
+            "error":         str or None,
+            "ref_label":     human-readable reference label,
+            "cycle_labels":  ["YYYY-MM", ...],  one per inter-peak window
+            "rows": [
+                {
+                    "label":     str,
+                    "kind":      "lga"|"brand"|...,
+                    "lead_days": [int|None, ...],  one per cycle window
+                    "median":    int|None,
+                },
+                ...
+            ],
+        }
+    """
+    try:
+        ref = _series.resolve(conn, reference_spec)
+    except _series.SeriesError as e:
+        return {"error": str(e), "ref_label": reference_spec,
+                "cycle_labels": [], "rows": []}
+
+    cd = CycleDetector(ref.points, smooth=(ref.kind != "sydney"))
+    peak_dates = cd.peaks_for_plot()["peak_dates"]
+
+    if len(peak_dates) < 2:
+        return {
+            "error": "Reference series has fewer than 2 peaks; cannot compute lead/lag.",
+            "ref_label": ref.label, "cycle_labels": [], "rows": [],
+        }
+
+    # Each window ends at peak_dates[i+1]; label it by YYYY-MM of that end peak.
+    cycle_labels = [p[:7] for p in peak_dates[1:]]
+
+    rows = []
+    for spec in comparison_specs:
+        try:
+            cmp = _series.resolve(conn, spec)
+        except _series.SeriesError:
+            continue
+        if not cmp.points:
+            continue
+
+        lead_days_per_cycle: list[int | None] = []
+        for i in range(len(peak_dates) - 1):
+            w_start, w_end = peak_dates[i], peak_dates[i + 1]
+            window = [(d, p) for d, p in cmp.points if w_start <= d <= w_end]
+            if not window:
+                lead_days_per_cycle.append(None)
+                continue
+            trough_date, _ = min(window, key=lambda x: x[1])
+            delta = (
+                datetime.date.fromisoformat(trough_date)
+                - datetime.date.fromisoformat(w_end)
+            ).days
+            lead_days_per_cycle.append(delta)
+
+        valid = [d for d in lead_days_per_cycle if d is not None]
+        median = int(round(float(np.median(valid)))) if valid else None
+
+        rows.append({
+            "label": cmp.label,
+            "kind": cmp.kind,
+            "lead_days": lead_days_per_cycle,
+            "median": median,
+        })
+
+    rows.sort(key=lambda r: (r["median"] is None, r["median"] or 0))
+
+    return {
+        "error": None,
+        "ref_label": ref.label,
+        "cycle_labels": cycle_labels,
+        "rows": rows,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Flask app factory
 # ---------------------------------------------------------------------------
 
@@ -540,6 +646,35 @@ def _create_app(
             {"code": code, "name": name, "suburb": suburb, "brand": brand}
             for code, name, suburb, brand in results
         ])
+
+    @app.route("/lead-lag")
+    def lead_lag():
+        # First visit (no query string) → apply defaults.
+        # Submitted form with all boxes unchecked → empty list → show warning.
+        first_visit = not request.args
+        ref_spec = request.args.get("ref", "sydney")
+        cmp_specs = request.args.getlist("cmp")
+
+        groups = _series.enumerate_groups(conn)
+        if first_visit:
+            cmp_specs = (
+                [f"lga:{lga}" for lga, _ in groups["lgas"]]
+                + [f"brand:{brand}" for brand, _ in groups["brands"]]
+            )
+
+        data = _compute_lead_lag(conn, ref_spec, cmp_specs)
+
+        return render_template(
+            "lead_lag.html",
+            now=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            ref_spec=ref_spec,
+            cmp_specs=cmp_specs,
+            groups=groups,
+            data=data,
+            summary=summary,
+            today=today,
+            ll_css=_lead_lag_sign_css,
+        )
 
     @app.route("/healthz")
     def healthz():

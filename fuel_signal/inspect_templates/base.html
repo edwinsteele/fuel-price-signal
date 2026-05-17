@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fuel Price Signal — Workbench</title>
+<title>{% block title %}Fuel Price Signal{% endblock %}</title>
 {% if chart_type in ('line', 'scatter') %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
@@ -89,9 +89,31 @@ details[open] summary { color: #222; }
 table { border-collapse: collapse; font-size: .875rem; }
 th, td { text-align: left; padding: .4rem .7rem; border: 1px solid #ddd; }
 th { background: #f0f0f0; }
+
+/* Nav */
+nav { display: flex; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: .5rem;
+      border-bottom: 1px solid #e0e0e0; font-size: .875rem; }
+nav a { color: #2563eb; text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+nav a.active { font-weight: 700; color: #111; }
+
+/* Lead/lag table */
+.ll-table { border-collapse: collapse; font-size: .82rem; white-space: nowrap; }
+.ll-table th, .ll-table td { padding: .3rem .55rem; border: 1px solid #ddd; text-align: right; }
+.ll-table th:first-child, .ll-table td:first-child { text-align: left; min-width: 200px; }
+.ll-table th { background: #f0f0f0; }
+.ll-lead { background: #d1fae5; color: #065f46; }  /* green */
+.ll-lag  { background: #fee2e2; color: #991b1b; }  /* red  */
+.ll-zero { background: #f3f4f6; color: #4b5563; }
+.ll-none { background: #f9f9f9; color: #6b7280; }
+.ll-median { font-weight: 700; border-left: 2px solid #aaa !important; }
 </style>
 </head>
 <body>
+<nav>
+  <a href="/" {% if request.path == '/' %}class="active"{% endif %}>Workbench</a>
+  <a href="/lead-lag" {% if request.path == '/lead-lag' %}class="active"{% endif %}>Lead / Lag</a>
+</nav>
 {% block content %}{% endblock %}
 </body>
 </html>
