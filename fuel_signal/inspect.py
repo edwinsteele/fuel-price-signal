@@ -376,14 +376,14 @@ def _compute_lead_lag(
     reference_spec: str,
     comparison_specs: list[str],
 ) -> dict:
-    """Return lead/lag table data relative to the reference series' peaks.
+    """Return lead/lag table data relative to the reference series' troughs.
 
     For each inter-peak window [peak_i, peak_{i+1}] in the reference series,
-    find the argmin (trough) date of each comparison series within that window.
+    find the argmin (trough) date of the reference and each comparison series.
 
-    lead_days = trough_date - peak_{i+1}
-      Negative → comparison troughs before the reference peak (leads)
-      Positive → comparison troughs after the reference peak (lags)
+    lead_days = comparison_trough_date - reference_trough_date
+      Negative → comparison troughs before the reference trough (leads)
+      Positive → comparison troughs after the reference trough (lags)
 
     Returns:
         {
@@ -419,6 +419,17 @@ def _compute_lead_lag(
     # Each window ends at peak_dates[i+1]; label it by YYYY-MM of that end peak.
     cycle_labels = [p[:7] for p in peak_dates[1:]]
 
+    # Pre-compute the reference trough date for each window.
+    ref_troughs: list[str | None] = []
+    for i in range(len(peak_dates) - 1):
+        w_start, w_end = peak_dates[i], peak_dates[i + 1]
+        ref_window = [(d, p) for d, p in ref.points if w_start <= d <= w_end]
+        if ref_window:
+            trough_date, _ = min(ref_window, key=lambda x: x[1])
+            ref_troughs.append(trough_date)
+        else:
+            ref_troughs.append(None)
+
     rows = []
     for spec in comparison_specs:
         try:
@@ -430,6 +441,10 @@ def _compute_lead_lag(
 
         lead_days_per_cycle: list[int | None] = []
         for i in range(len(peak_dates) - 1):
+            ref_trough = ref_troughs[i]
+            if ref_trough is None:
+                lead_days_per_cycle.append(None)
+                continue
             w_start, w_end = peak_dates[i], peak_dates[i + 1]
             window = [(d, p) for d, p in cmp.points if w_start <= d <= w_end]
             if not window:
@@ -438,7 +453,7 @@ def _compute_lead_lag(
             trough_date, _ = min(window, key=lambda x: x[1])
             delta = (
                 datetime.date.fromisoformat(trough_date)
-                - datetime.date.fromisoformat(w_end)
+                - datetime.date.fromisoformat(ref_trough)
             ).days
             lead_days_per_cycle.append(delta)
 
@@ -657,10 +672,7 @@ def _create_app(
 
         groups = _series.enumerate_groups(conn)
         if first_visit:
-            cmp_specs = (
-                [f"lga:{lga}" for lga, _ in groups["lgas"]]
-                + [f"brand:{brand}" for brand, _ in groups["brands"]]
-            )
+            cmp_specs = []
 
         data = _compute_lead_lag(conn, ref_spec, cmp_specs)
 
