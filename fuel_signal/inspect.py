@@ -262,7 +262,7 @@ def _build_line_spec(
     )
     peak_summary = f"{n_peaks} scipy peaks{plateau_note}"
     if last_cycle_note:
-        peak_summary += f" &mdash; {last_cycle_note}"
+        peak_summary += f" — {last_cycle_note}"
 
     return {
         "labels": all_dates,
