@@ -61,11 +61,6 @@ FEATURE_COLUMNS: list[str] = [
     "station_minus_sydney_avg_cents",
 ]
 
-# Categorical feature columns passed to LightGBM via categorical_feature=.
-# station_code is an integer key — LightGBM bins it natively without label encoding.
-# Unseen station_codes at predict time land in LightGBM's "missing" bin.
-CATEGORICAL_COLUMNS: list[str] = ["station_code"]
-
 
 def _date_to_int(s: str) -> int:
     return int(s[:10].replace("-", ""))
