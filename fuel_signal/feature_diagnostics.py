@@ -28,6 +28,16 @@ DEFAULT_MODEL_PATH = pathlib.Path("data/models/lgbm_calibrated.joblib")
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 DEFAULT_THRESHOLD = 0.40
 
+_KNOWN_ID_COLUMNS: frozenset[str] = frozenset({"station_code"})
+_ID_CARDINALITY_THRESHOLD = 20
+
+
+def _is_id_column(col: str, series: pd.Series) -> bool:
+    """Return True if col is an identifier rather than a numeric feature."""
+    if col in _KNOWN_ID_COLUMNS:
+        return True
+    return pd.api.types.is_integer_dtype(series) and series.nunique() > _ID_CARDINALITY_THRESHOLD
+
 
 def _load_artifact(model_path: pathlib.Path) -> dict:
     artifact = joblib.load(model_path)
@@ -86,7 +96,11 @@ def fn_fp_delta_section(
     fn_mask = (pred == 0) & (y == 1)
 
     rows = []
+    id_cols: list[str] = []
     for col in feature_columns:
+        if _is_id_column(col, val[col]):
+            id_cols.append(col)
+            continue
         values = val[col].to_numpy(dtype=float)
         mean_tp = values[tp_mask].mean() if tp_mask.any() else float("nan")
         mean_fn = values[fn_mask].mean() if fn_mask.any() else float("nan")
@@ -109,6 +123,8 @@ def fn_fp_delta_section(
         lines.append(
             f"  {row['feature']:<40} {row['fn_tp_delta']:>+10.3f} {row['fp_tn_delta']:>+10.3f}"
         )
+    if id_cols:
+        lines.append(f"  Excluded (ID columns — delta not meaningful): {', '.join(id_cols)}")
     return "\n".join(lines)
 
 

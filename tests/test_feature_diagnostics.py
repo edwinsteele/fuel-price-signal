@@ -148,6 +148,31 @@ def test_fn_fp_delta_section_sorted_by_abs_fn_tp():
     assert fn_tp_vals == sorted(fn_tp_vals, reverse=True)
 
 
+def test_fn_fp_delta_section_excludes_id_columns():
+    """station_code is excluded from delta rows; an exclusion note appears in the output."""
+    df = _synthetic_df()
+    _train, val, _test = _ev.split(df)
+    pred = np.zeros(len(val), dtype=int)
+    pred[: len(val) // 2] = 1
+
+    output = fn_fp_delta_section(val, list(FEATURE_COLUMNS) + ["station_code"], pred)
+
+    # station_code must not appear as a delta data row (lines with numeric deltas)
+    for line in output.splitlines():
+        if line.strip().startswith("station_code"):
+            assert "Excluded" in line or "ID" in line, (
+                f"station_code appeared as a delta data row: {line!r}"
+            )
+
+    # Exclusion note mentions station_code and ID
+    assert "station_code" in output
+    assert "ID" in output
+
+    # Regular numeric features are still present
+    for col in FEATURE_COLUMNS:
+        assert col in output
+
+
 def test_error_summary_counts_sum_to_n():
     df = _synthetic_df()
     _train, val, _test = _ev.split(df)
