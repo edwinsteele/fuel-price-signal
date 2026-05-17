@@ -2,7 +2,7 @@
 {% block title %}Fuel Price Signal — Lead / Lag{% endblock %}
 {% block content %}
 <h1>Lead / Lag Analysis</h1>
-<p class="meta">How many days each series' trough leads (&minus;) or lags (+) the reference cycle peak &mdash; as of {{ now }}</p>
+<p class="meta">How many days each series' trough leads (&minus;) or lags (+) the reference series' trough &mdash; as of {{ now }}</p>
 
 <!-- Controls -->
 <div class="controls">
@@ -90,10 +90,14 @@
 <!-- Lead/lag table -->
 <h2>Results — reference: {{ data.ref_label }}</h2>
 <p style="font-size:.82rem; color:#555">
-  <strong>Negative days</strong> = series troughs <em>before</em> the reference peak (leads). &nbsp;
-  <strong>Positive days</strong> = series troughs <em>after</em> the reference peak (lags).
+  <strong>Negative days</strong> = series troughs <em>before</em> the reference trough (leads). &nbsp;
+  <strong>Positive days</strong> = series troughs <em>after</em> the reference trough (lags).
 </p>
 
+<div class="heatmap-legend" style="justify-content:flex-end; margin-bottom:.3rem">
+  <button class="hm-scroll-btn" onclick="document.querySelector('.heatmap-outer').scrollBy({left:-300,behavior:'smooth'})">&#9664;</button>
+  <button class="hm-scroll-btn" onclick="document.querySelector('.heatmap-outer').scrollBy({left:300,behavior:'smooth'})">&#9654;</button>
+</div>
 <div class="heatmap-outer">
 <table class="ll-table">
   <thead>
