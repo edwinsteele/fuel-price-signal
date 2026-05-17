@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Lead / Lag Analysis</h1>
+<p class="meta">How many days each series' trough leads (+) or lags (&minus;) the reference cycle peak &mdash; as of {{ now }}</p>
+
+<!-- Controls -->
+<div class="controls">
+  <h3>Controls</h3>
+  <form method="get" action="/lead-lag" id="leadlag-form">
+
+    <div class="controls-row">
+
+      <!-- Reference series -->
+      <div class="control-group">
+        <label>Reference series</label>
+        <select name="ref" style="font-size:.875rem; padding:.35rem .5rem; border:1px solid #ccc; border-radius:4px">
+          <option value="sydney" {% if ref_spec == 'sydney' %}selected{% endif %}>Sydney E10 mean</option>
+          {% for lga, _ in groups.lgas %}
+          <option value="lga:{{ lga }}" {% if ref_spec == 'lga:' + lga %}selected{% endif %}>{{ lga }} LGA</option>
+          {% endfor %}
+          {% for brand, _ in groups.brands %}
+          <option value="brand:{{ brand }}" {% if ref_spec == 'brand:' + brand %}selected{% endif %}>{{ brand }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Comparison series -->
+      <div class="control-group" style="flex:1; min-width:280px">
+        <label>Comparison series</label>
+
+        {% if groups.lgas %}
+        <details open>
+          <summary>By LGA ({{ groups.lgas | length }})</summary>
+          <div class="series-group">
+            <div class="group-toggles">
+              <a href="#" data-toggle="all">all</a> ·
+              <a href="#" data-toggle="none">none</a>
+            </div>
+            <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+              {% for lga, count in groups.lgas %}
+              <label>
+                <input type="checkbox" name="cmp" value="lga:{{ lga }}"
+                       {% if 'lga:' + lga in cmp_specs %}checked{% endif %}>
+                {{ lga }} ({{ count }})
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+        {% endif %}
+
+        {% if groups.brands %}
+        <details open>
+          <summary>By Brand ({{ groups.brands | length }})</summary>
+          <div class="series-group">
+            <div class="group-toggles">
+              <a href="#" data-toggle="all">all</a> ·
+              <a href="#" data-toggle="none">none</a>
+            </div>
+            <div class="series-grid" style="padding:.4rem 0 .4rem .5rem">
+              {% for brand, count in groups.brands %}
+              <label>
+                <input type="checkbox" name="cmp" value="brand:{{ brand }}"
+                       {% if 'brand:' + brand in cmp_specs %}checked{% endif %}>
+                {{ brand }} ({{ count }})
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+        {% endif %}
+      </div>
+
+      <div class="control-group" style="justify-content:flex-end; padding-top:1.3rem">
+        <button type="submit" class="btn">Update</button>
+      </div>
+
+    </div><!-- .controls-row -->
+  </form>
+</div>
+
+<!-- Error banner -->
+{% if data.error %}
+<div class="banner banner-error">{{ data.error }}</div>
+{% endif %}
+
+{% if not data.error and data.rows %}
+
+<!-- Lead/lag table -->
+<h2>Results — reference: {{ data.ref_label }}</h2>
+<p style="font-size:.82rem; color:#555">
+  <strong>Negative days</strong> = series troughs <em>before</em> the reference peak (leads). &nbsp;
+  <strong>Positive days</strong> = series troughs <em>after</em> the reference peak (lags).
+</p>
+
+<div class="heatmap-outer">
+<table class="ll-table">
+  <thead>
+    <tr>
+      <th>Series</th>
+      {% for label in data.cycle_labels %}
+      <th>{{ label }}</th>
+      {% endfor %}
+      <th class="ll-median">Median</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in data.rows %}
+    <tr>
+      <td>{{ row.label }}</td>
+      {% for days in row.lead_days %}
+      <td class="{{ ll_css(days) }}">
+        {% if days is none %}&mdash;
+        {% elif days == 0 %}0
+        {% elif days < 0 %}{{ days }}
+        {% else %}+{{ days }}
+        {% endif %}
+      </td>
+      {% endfor %}
+      <td class="ll-median {{ ll_css(row.median) }}">
+        {% if row.median is none %}&mdash;
+        {% elif row.median == 0 %}0
+        {% elif row.median < 0 %}{{ row.median }}
+        {% else %}+{{ row.median }}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<p style="font-size:.78rem; color:#888; margin-top:.5rem">
+  {{ data.rows | length }} series &times; {{ data.cycle_labels | length }} cycles.
+  Rows sorted by median lead (most leading first).
+</p>
+
+{% elif not data.error %}
+<div class="banner banner-warn">No comparison series selected or no data available.</div>
+{% endif %}
+
+<script>
+// Group all/none toggles (same as workbench)
+(function() {
+  document.querySelectorAll('.group-toggles').forEach(bar => {
+    bar.addEventListener('click', e => {
+      const link = e.target.closest('[data-toggle]');
+      if (!link) return;
+      e.preventDefault();
+      const checked = link.dataset.toggle === 'all';
+      const group = bar.closest('.series-group');
+      group.querySelectorAll('input[type="checkbox"][name="cmp"]')
+           .forEach(cb => { cb.checked = checked; });
+    });
+  });
+})();
+</script>
+
+{% endblock %}
