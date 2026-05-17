@@ -649,11 +649,14 @@ def _create_app(
 
     @app.route("/lead-lag")
     def lead_lag():
+        # First visit (no query string) → apply defaults.
+        # Submitted form with all boxes unchecked → empty list → show warning.
+        first_visit = not request.args
         ref_spec = request.args.get("ref", "sydney")
         cmp_specs = request.args.getlist("cmp")
 
         groups = _series.enumerate_groups(conn)
-        if not cmp_specs:
+        if first_visit:
             cmp_specs = (
                 [f"lga:{lga}" for lga, _ in groups["lgas"]]
                 + [f"brand:{brand}" for brand, _ in groups["brands"]]
