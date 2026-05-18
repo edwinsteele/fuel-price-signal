@@ -87,6 +87,19 @@ details summary {
 }
 details[open] summary { color: var(--text); }
 
+/* Workbench layout helpers */
+.controls-series {
+  flex: 1; min-width: 280px;
+  max-height: 420px; overflow-y: auto; padding-right: .25rem;
+}
+.controls-right-col {
+  display: flex; flex-direction: column;
+  gap: .75rem; min-width: 200px;
+}
+.controls-submit-row {
+  margin-top: auto; display: flex; justify-content: flex-end;
+}
+
 /* Form inputs */
 select, input[type="date"] {
   background: var(--surface-alt);

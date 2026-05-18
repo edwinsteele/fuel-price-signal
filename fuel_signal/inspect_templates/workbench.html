@@ -33,7 +33,7 @@
     <div class="controls-row">
 
       <!-- Series selector -->
-      <div class="control-group" style="flex:1; min-width:280px; max-height:420px; overflow-y:auto; padding-right:.25rem">
+      <div class="control-group controls-series">
         <label>Series</label>
 
         <details {% if 'sydney' in specs %}open{% endif %}>
@@ -139,14 +139,14 @@
       </div>
 
       <!-- Right column: chart params + submit -->
-      <div style="display:flex; flex-direction:column; gap:.75rem; min-width:200px">
+      <div class="controls-right-col">
 
         <div class="control-group">
           <label>Chart type</label>
           <label><input type="radio" name="chart" value="line" {% if chart_type == 'line' %}checked{% endif %}> Line</label>
           <label><input type="radio" name="chart" value="heatmap-gradient" {% if chart_type == 'heatmap-gradient' %}checked{% endif %}> Gradient heatmap</label>
           <label><input type="radio" name="chart" value="heatmap-coverage" {% if chart_type == 'heatmap-coverage' %}checked{% endif %}> Coverage heatmap</label>
-          <label style="margin-top:.5rem; font-size:.85rem; color:#666">
+          <label style="margin-top:.5rem; font-size:.85rem; color:var(--text-muted)">
             <input type="checkbox" name="annotations" value="1"
                    {% if show_annotations %}checked{% endif %}>
             Show cycle annotations
@@ -160,7 +160,7 @@
             <option value="{{ val }}" {% if window == val %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
-          <div style="margin-top:.5rem; font-size:.8rem; color:#666">Custom range (overrides preset):</div>
+          <div style="margin-top:.5rem; font-size:.8rem; color:var(--text-muted)">Custom range (overrides preset):</div>
           <div style="display:flex; gap:.3rem; align-items:center; margin-top:.2rem; flex-wrap:wrap">
             <input type="date" name="start" id="range-start"
                    value="{{ range_start }}" style="font-size:.85rem; flex:1; min-width:0">
@@ -179,7 +179,7 @@
           </select>
         </div>
 
-        <div style="margin-top:auto; display:flex; justify-content:flex-end">
+        <div class="controls-submit-row">
           <button type="submit" class="btn">Update</button>
         </div>
 
