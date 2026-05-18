@@ -33,7 +33,7 @@
     <div class="controls-row">
 
       <!-- Series selector -->
-      <div class="control-group" style="flex:1; min-width:280px">
+      <div class="control-group controls-series">
         <label>Series</label>
 
         <details {% if 'sydney' in specs %}open{% endif %}>
@@ -138,48 +138,52 @@
         </div>
       </div>
 
-      <!-- Chart options -->
-      <div class="control-group">
-        <label>Chart type</label>
-        <label><input type="radio" name="chart" value="line" {% if chart_type == 'line' %}checked{% endif %}> Line</label>
-        <label><input type="radio" name="chart" value="heatmap-gradient" {% if chart_type == 'heatmap-gradient' %}checked{% endif %}> Gradient heatmap</label>
-        <label><input type="radio" name="chart" value="heatmap-coverage" {% if chart_type == 'heatmap-coverage' %}checked{% endif %}> Coverage heatmap</label>
-        <label style="margin-top:.5rem; font-size:.85rem; color:#666">
-          <input type="checkbox" name="annotations" value="1"
-                 {% if show_annotations %}checked{% endif %}>
-          Show cycle annotations
-        </label>
-      </div>
+      <!-- Right column: chart params + submit -->
+      <div class="controls-right-col">
 
-      <div class="control-group">
-        <label>Time window</label>
-        <select name="window" id="window-preset">
-          {% for val, label in [('6m','Last 6 months'),('1y','Last year'),('2y','Last 2 years'),('4y','Last 4 years'),('all','Full history')] %}
-          <option value="{{ val }}" {% if window == val %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        <div style="margin-top:.5rem; font-size:.8rem; color:#666">Custom range (overrides preset):</div>
-        <div style="display:flex; gap:.3rem; align-items:center; margin-top:.2rem; flex-wrap:wrap">
-          <input type="date" name="start" id="range-start"
-                 value="{{ range_start }}" style="font-size:.85rem; flex:1; min-width:0">
-          <span style="color:#888; flex-shrink:0">to</span>
-          <input type="date" name="end" id="range-end"
-                 value="{{ range_end }}" style="font-size:.85rem; flex:1; min-width:0">
+        <div class="control-group">
+          <label>Chart type</label>
+          <label><input type="radio" name="chart" value="line" {% if chart_type == 'line' %}checked{% endif %}> Line</label>
+          <label><input type="radio" name="chart" value="heatmap-gradient" {% if chart_type == 'heatmap-gradient' %}checked{% endif %}> Gradient heatmap</label>
+          <label><input type="radio" name="chart" value="heatmap-coverage" {% if chart_type == 'heatmap-coverage' %}checked{% endif %}> Coverage heatmap</label>
+          <label style="margin-top:.5rem; font-size:.85rem; color:var(--text-muted)">
+            <input type="checkbox" name="annotations" value="1"
+                   {% if show_annotations %}checked{% endif %}>
+            Show cycle annotations
+          </label>
         </div>
-      </div>
 
-      <div class="control-group">
-        <label>Group display <span style="font-size:.75rem; color:#888">(LGA/brand only)</span></label>
-        <select name="display">
-          <option value="mean" {% if display == 'mean' %}selected{% endif %}>Mean only</option>
-          <option value="members" {% if display == 'members' %}selected{% endif %}>Individual stations</option>
-          <option value="both" {% if display == 'both' %}selected{% endif %}>Both</option>
-        </select>
-      </div>
+        <div class="control-group">
+          <label>Time window</label>
+          <select name="window" id="window-preset">
+            {% for val, label in [('6m','Last 6 months'),('1y','Last year'),('2y','Last 2 years'),('4y','Last 4 years'),('all','Full history')] %}
+            <option value="{{ val }}" {% if window == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <div style="margin-top:.5rem; font-size:.8rem; color:var(--text-muted)">Custom range (overrides preset):</div>
+          <div style="display:flex; gap:.3rem; align-items:center; margin-top:.2rem; flex-wrap:wrap">
+            <input type="date" name="start" id="range-start"
+                   value="{{ range_start }}" style="font-size:.85rem; flex:1; min-width:0">
+            <span style="color:#888; flex-shrink:0">to</span>
+            <input type="date" name="end" id="range-end"
+                   value="{{ range_end }}" style="font-size:.85rem; flex:1; min-width:0">
+          </div>
+        </div>
 
-<div class="control-group" style="justify-content:flex-end; padding-top:1.3rem">
-        <button type="submit" class="btn">Update</button>
-      </div>
+        <div class="control-group">
+          <label>Group display <span style="font-size:.75rem; color:#888">(LGA/brand only)</span></label>
+          <select name="display">
+            <option value="mean" {% if display == 'mean' %}selected{% endif %}>Mean only</option>
+            <option value="members" {% if display == 'members' %}selected{% endif %}>Individual stations</option>
+            <option value="both" {% if display == 'both' %}selected{% endif %}>Both</option>
+          </select>
+        </div>
+
+        <div class="controls-submit-row">
+          <button type="submit" class="btn">Update</button>
+        </div>
+
+      </div><!-- right column -->
 
     </div><!-- .controls-row -->
   </form>
