@@ -8,6 +8,7 @@ Then open http://localhost:5000 in a browser.
 
 from __future__ import annotations
 
+import bisect
 import datetime
 import logging
 import pathlib
@@ -74,7 +75,7 @@ def _coverage_color(n: int, max_n: int = 30) -> str:
 
 def _cutoff_date(window: str) -> str | None:
     today = datetime.date.today()
-    offsets = {"6m": 182, "1y": 365, "2y": 730, "4y": 1461}
+    offsets = {"3m": 91, "6m": 182, "1y": 365, "2y": 730, "4y": 1461}
     if window in offsets:
         return (today - datetime.timedelta(days=offsets[window])).isoformat()
     return None  # "all"
@@ -377,64 +378,87 @@ def _window_slice(
     return [(d, p) for d, p in points if w_start <= d <= w_end]
 
 
+def _cycle_header_groups(
+    cycle_labels: list[str],
+) -> tuple[list[tuple[str, int]], list[str]]:
+    """Split YYYY-MM cycle labels into year-groups and two-digit months.
+
+    Returns:
+        year_groups: [(year_str, colspan), ...]
+        months: ["01", "02", ...]
+    """
+    year_groups: list[tuple[str, int]] = []
+    for label in cycle_labels:
+        year = label[:4]
+        if year_groups and year_groups[-1][0] == year:
+            year_groups[-1] = (year, year_groups[-1][1] + 1)
+        else:
+            year_groups.append((year, 1))
+    months = [label[5:7] for label in cycle_labels]
+    return year_groups, months
+
+
 def _compute_lead_lag(
     conn: sqlite3.Connection,
     reference_spec: str,
     comparison_specs: list[str],
+    date_start: str | None = None,
+    date_end: str | None = None,
 ) -> dict:
     """Return lead/lag table data relative to the reference series' troughs.
 
-    For each inter-peak window [peak_i, peak_{i+1}] in the reference series,
-    find the argmin (trough) date of the reference and each comparison series.
+    For each inter-peak window [peak_i, peak_{i+1}] in the reference series
+    whose end-peak falls within [date_start, date_end], find the argmin
+    (trough) date of the reference and each comparison series.
 
     lead_days = comparison_trough_date - reference_trough_date
       Negative → comparison troughs before the reference trough (leads)
       Positive → comparison troughs after the reference trough (lags)
-
-    Returns:
-        {
-            "error":         str or None,
-            "ref_label":     human-readable reference label,
-            "cycle_labels":  ["YYYY-MM", ...],  one per inter-peak window
-            "rows": [
-                {
-                    "label":     str,
-                    "kind":      "lga"|"brand"|...,
-                    "lead_days": [int|None, ...],  one per cycle window
-                    "median":    int|None,
-                },
-                ...
-            ],
-        }
     """
+    _empty: dict = {
+        "error": None, "ref_label": "", "cycle_labels": [],
+        "cycle_year_groups": [], "cycle_months": [], "rows": [],
+    }
+
     try:
         ref = _series.resolve(conn, reference_spec)
     except _series.SeriesError as e:
-        return {"error": str(e), "ref_label": reference_spec,
-                "cycle_labels": [], "rows": []}
+        return {**_empty, "error": str(e), "ref_label": reference_spec}
 
     cd = CycleDetector(ref.points, smooth=(ref.kind != "sydney"))
     peak_dates = cd.peaks_for_plot()["peak_dates"]
 
     if len(peak_dates) < 2:
         return {
+            **_empty,
             "error": "Reference series has fewer than 2 peaks; cannot compute lead/lag.",
-            "ref_label": ref.label, "cycle_labels": [], "rows": [],
+            "ref_label": ref.label,
         }
 
-    # Each window ends at peak_dates[i+1]; label it by YYYY-MM of that end peak.
-    cycle_labels = [p[:7] for p in peak_dates[1:]]
+    # Filter windows: keep only those whose end-peak falls in [date_start, date_end].
+    filtered_idxs = [
+        i for i in range(len(peak_dates) - 1)
+        if (date_start is None or peak_dates[i + 1] >= date_start)
+        and (date_end is None or peak_dates[i + 1] <= date_end)
+    ]
 
-    # Pre-compute the reference trough date for each window.
-    ref_troughs: list[str | None] = []
-    for i in range(len(peak_dates) - 1):
+    cycle_labels = [peak_dates[i + 1][:7] for i in filtered_idxs]
+    cycle_year_groups, cycle_months = _cycle_header_groups(cycle_labels)
+
+    # Pre-index ref series for O(log N) window slicing.
+    ref_dates = [d for d, _ in ref.points]
+    ref_prices = [p for _, p in ref.points]
+
+    ref_troughs: dict[int, str | None] = {}
+    for i in filtered_idxs:
         w_start, w_end = peak_dates[i], peak_dates[i + 1]
-        ref_window = _window_slice(ref.points, w_start, w_end)
-        if ref_window:
-            trough_date, _ = min(ref_window, key=lambda x: x[1])
-            ref_troughs.append(trough_date)
+        lo = bisect.bisect_left(ref_dates, w_start)
+        hi = bisect.bisect_right(ref_dates, w_end)
+        if lo < hi:
+            min_idx = min(range(lo, hi), key=lambda k: ref_prices[k])
+            ref_troughs[i] = ref_dates[min_idx]
         else:
-            ref_troughs.append(None)
+            ref_troughs[i] = None
 
     rows = []
     for spec in comparison_specs:
@@ -445,18 +469,24 @@ def _compute_lead_lag(
         if not cmp.points:
             continue
 
+        # Pre-index cmp series for O(log N) window slicing.
+        cmp_dates = [d for d, _ in cmp.points]
+        cmp_prices = [p for _, p in cmp.points]
+
         lead_days_per_cycle: list[int | None] = []
-        for i in range(len(peak_dates) - 1):
+        for i in filtered_idxs:
             ref_trough = ref_troughs[i]
             if ref_trough is None:
                 lead_days_per_cycle.append(None)
                 continue
             w_start, w_end = peak_dates[i], peak_dates[i + 1]
-            window = _window_slice(cmp.points, w_start, w_end)
-            if not window:
+            lo = bisect.bisect_left(cmp_dates, w_start)
+            hi = bisect.bisect_right(cmp_dates, w_end)
+            if lo >= hi:
                 lead_days_per_cycle.append(None)
                 continue
-            trough_date, _ = min(window, key=lambda x: x[1])
+            min_idx = min(range(lo, hi), key=lambda k: cmp_prices[k])
+            trough_date = cmp_dates[min_idx]
             delta = (
                 datetime.date.fromisoformat(trough_date)
                 - datetime.date.fromisoformat(ref_trough)
@@ -479,6 +509,8 @@ def _compute_lead_lag(
         "error": None,
         "ref_label": ref.label,
         "cycle_labels": cycle_labels,
+        "cycle_year_groups": cycle_year_groups,
+        "cycle_months": cycle_months,
         "rows": rows,
     }
 
@@ -675,12 +707,27 @@ def _create_app(
         first_visit = not request.args
         ref_spec = request.args.get("ref", "sydney")
         cmp_specs = request.args.getlist("cmp")
+        ll_window = request.args.get("ll_window", "2y")
+        ll_start = request.args.get("ll_start", "").strip()
+        ll_end = request.args.get("ll_end", "").strip()
 
         groups = _series.enumerate_groups(conn)
         if first_visit:
             cmp_specs = []
 
-        data = _compute_lead_lag(conn, ref_spec, cmp_specs)
+        # Free-form dates take precedence over the preset window.
+        if ll_start or ll_end:
+            date_start = ll_start or None
+            date_end = ll_end or None
+        elif ll_window != "all":
+            date_start = _cutoff_date(ll_window)
+            date_end = None
+        else:
+            date_start = None
+            date_end = None
+
+        data = _compute_lead_lag(conn, ref_spec, cmp_specs,
+                                 date_start=date_start, date_end=date_end)
 
         return render_template(
             "lead_lag.html",
@@ -692,6 +739,9 @@ def _create_app(
             summary=summary,
             today=today,
             ll_css=_lead_lag_sign_css,
+            ll_window=ll_window,
+            ll_start=ll_start,
+            ll_end=ll_end,
         )
 
     @app.route("/healthz")

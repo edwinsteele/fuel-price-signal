@@ -72,6 +72,24 @@
         {% endif %}
       </div>
 
+      <!-- Cycle date range -->
+      <div class="control-group">
+        <label>Cycle range</label>
+        <select name="ll_window" id="ll-window-preset">
+          {% for val, label in [('3m','Last 3 months'),('6m','Last 6 months'),('1y','Last year'),('2y','Last 2 years'),('all','Full history')] %}
+          <option value="{{ val }}" {% if ll_window == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <div style="margin-top:.5rem; font-size:.8rem; color:#666">Custom range (overrides preset):</div>
+        <div style="display:flex; gap:.3rem; align-items:center; margin-top:.2rem; flex-wrap:wrap">
+          <input type="date" name="ll_start" id="ll-range-start"
+                 value="{{ ll_start }}" style="font-size:.85rem; flex:1; min-width:0">
+          <span style="color:#888; flex-shrink:0">to</span>
+          <input type="date" name="ll_end" id="ll-range-end"
+                 value="{{ ll_end }}" style="font-size:.85rem; flex:1; min-width:0">
+        </div>
+      </div>
+
       <div class="control-group" style="justify-content:flex-end; padding-top:1.3rem">
         <button type="submit" class="btn">Update</button>
       </div>
@@ -102,11 +120,16 @@
 <table class="ll-table">
   <thead>
     <tr>
-      <th>Series</th>
-      {% for label in data.cycle_labels %}
-      <th>{{ label }}</th>
+      <th rowspan="2">Series</th>
+      {% for year, count in data.cycle_year_groups %}
+      <th colspan="{{ count }}" style="text-align:center; border-bottom:0; background:#e8e8e8">{{ year }}</th>
       {% endfor %}
-      <th class="ll-median">Median</th>
+      <th rowspan="2" class="ll-median">Median</th>
+    </tr>
+    <tr>
+      {% for month in data.cycle_months %}
+      <th style="min-width:28px; padding:.2rem .15rem; text-align:center">{{ month }}</th>
+      {% endfor %}
     </tr>
   </thead>
   <tbody>
@@ -158,6 +181,17 @@
            .forEach(cb => { cb.checked = checked; });
     });
   });
+})();
+
+// Selecting a window preset clears the custom date range so both don't coexist.
+(function() {
+  const preset = document.getElementById('ll-window-preset');
+  if (preset) {
+    preset.addEventListener('change', () => {
+      document.getElementById('ll-range-start').value = '';
+      document.getElementById('ll-range-end').value = '';
+    });
+  }
 })();
 </script>
 
