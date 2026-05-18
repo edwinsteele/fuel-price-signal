@@ -29,7 +29,7 @@ DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 DEFAULT_THRESHOLD = 0.40
 
 _KNOWN_ID_COLUMNS: frozenset[str] = frozenset({"station_code"})
-_ID_CARDINALITY_THRESHOLD = 20
+_ID_CARDINALITY_THRESHOLD: int = 20
 
 
 def _is_id_column(col: str, series: pd.Series) -> bool:
