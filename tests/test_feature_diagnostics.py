@@ -148,6 +148,61 @@ def test_fn_fp_delta_section_sorted_by_abs_fn_tp():
     assert fn_tp_vals == sorted(fn_tp_vals, reverse=True)
 
 
+def test_fn_fp_delta_section_excludes_id_columns():
+    """station_code is excluded from delta rows; an exclusion note appears in the output."""
+    df = _synthetic_df()
+    _train, val, _test = _ev.split(df)
+    pred = np.zeros(len(val), dtype=int)
+    pred[: len(val) // 2] = 1
+
+    output = fn_fp_delta_section(val, list(FEATURE_COLUMNS) + ["station_code"], pred)
+
+    # station_code must not appear as a delta data row (lines with numeric deltas)
+    for line in output.splitlines():
+        if line.strip().startswith("station_code"):
+            pytest.fail(f"station_code appeared as a delta data row: {line!r}")
+
+    # Exclusion note mentions station_code and ID
+    assert "station_code" in output
+    assert "ID" in output
+
+    # Regular numeric features are still present
+    for col in FEATURE_COLUMNS:
+        assert col in output
+
+
+def test_fn_fp_delta_section_excludes_heuristic_id_columns():
+    """High-cardinality integer columns are excluded from delta rows via the heuristic path."""
+    df = _synthetic_df().copy()
+    df["synthetic_id"] = np.arange(len(df), dtype=int)
+
+    _train, val, _test = _ev.split(df)
+    pred = np.zeros(len(val), dtype=int)
+    pred[: len(val) // 2] = 1
+
+    feature_cols = list(FEATURE_COLUMNS) + ["synthetic_id"]
+    output = fn_fp_delta_section(val, feature_cols, pred)
+    lines = output.splitlines()
+
+    for line in lines:
+        if line.strip().startswith("synthetic_id"):
+            pytest.fail(f"synthetic_id appeared as a delta data row: {line!r}")
+
+    assert any(
+        "Excluded" in line and "ID" in line and "synthetic_id" in line for line in lines
+    ), "Expected synthetic_id in the excluded ID columns note."
+
+    numeric_features = [
+        col for col in FEATURE_COLUMNS if pd.api.types.is_numeric_dtype(val[col].dtype)
+    ]
+    assert numeric_features
+    non_id_col = numeric_features[0]
+    assert any(
+        line.strip().startswith(non_id_col) and any(ch.isdigit() for ch in line)
+        for line in lines
+    ), f"Expected {non_id_col} to appear as a delta row."
+
+
 def test_error_summary_counts_sum_to_n():
     df = _synthetic_df()
     _train, val, _test = _ev.split(df)
