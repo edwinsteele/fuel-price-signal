@@ -11,12 +11,16 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-  if (typeof Chart !== 'undefined') {
-    Chart.defaults.color = '#94a3b8';
-    Chart.defaults.borderColor = '#1e2d40';
-  }
-});
+(function() {
+  if (typeof Chart === 'undefined') return;
+  const s = getComputedStyle(document.documentElement);
+  const muted = s.getPropertyValue('--text-muted').trim();
+  const text   = s.getPropertyValue('--text').trim();
+  const grid   = s.getPropertyValue('--border-dim').trim();
+  Chart.defaults.color = muted;
+  Chart.defaults.borderColor = grid;
+  Chart.defaults.plugins.legend.labels.color = text;
+})();
 </script>
 {% endif %}
 <style>
@@ -34,9 +38,9 @@ document.addEventListener('DOMContentLoaded', () => {
   --blue:         #38bdf8;
   --green:        #34d399;
   --red:          #f87171;
-  --font-ui:      'DM Sans', sans-serif;
-  --font-head:    'Syne', sans-serif;
-  --font-mono:    'JetBrains Mono', monospace;
+  --font-ui:      'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-head:    'Syne', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; }
 body {

@@ -29,19 +29,12 @@
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {position: 'top', labels: {color: '#e2e8f0', boxWidth: 20, padding: 14}},
+        legend: {position: 'top', labels: {boxWidth: 20, padding: 14}},
         annotation: {annotations: spec.annotations}
       },
       scales: {
-        x: {
-          ticks: {maxTicksLimit: 16, maxRotation: 45, minRotation: 45, color: '#94a3b8'},
-          grid: {color: '#1e2d40'}
-        },
-        y: {
-          title: {display: true, text: 'cents/litre', color: '#94a3b8'},
-          ticks: {color: '#94a3b8'},
-          grid: {color: '#1e2d40'}
-        }
+        x: {ticks: {maxTicksLimit: 16, maxRotation: 45, minRotation: 45}},
+        y: {title: {display: true, text: 'cents/litre'}}
       }
     }
   });
