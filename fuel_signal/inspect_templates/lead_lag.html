@@ -186,10 +186,12 @@
 // Selecting a window preset clears the custom date range so both don't coexist.
 (function() {
   const preset = document.getElementById('ll-window-preset');
-  if (preset) {
+  const rangeStart = document.getElementById('ll-range-start');
+  const rangeEnd = document.getElementById('ll-range-end');
+  if (preset && rangeStart && rangeEnd) {
     preset.addEventListener('change', () => {
-      document.getElementById('ll-range-start').value = '';
-      document.getElementById('ll-range-end').value = '';
+      rangeStart.value = '';
+      rangeEnd.value = '';
     });
   }
 })();
