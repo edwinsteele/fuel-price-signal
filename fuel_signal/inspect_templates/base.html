@@ -7,22 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-{% if chart_type in ('line', 'scatter') %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
-<script>
-(function() {
-  if (typeof Chart === 'undefined') return;
-  const s = getComputedStyle(document.documentElement);
-  const muted = s.getPropertyValue('--text-muted').trim();
-  const text   = s.getPropertyValue('--text').trim();
-  const grid   = s.getPropertyValue('--border-dim').trim();
-  Chart.defaults.color = muted;
-  Chart.defaults.borderColor = grid;
-  Chart.defaults.plugins.legend.labels.color = text;
-})();
-</script>
-{% endif %}
 <style>
 :root {
   --bg:           #0d1117;
@@ -227,6 +211,19 @@ nav a.active { font-weight: 600; color: var(--accent); }
 .ll-none { background: var(--surface);     color: var(--text-dim); }
 .ll-median { font-weight: 700; border-left: 2px solid var(--accent) !important; }
 </style>
+{% if chart_type in ('line', 'scatter') %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
+<script>
+(function() {
+  if (typeof Chart === 'undefined') return;
+  const s = getComputedStyle(document.documentElement);
+  Chart.defaults.color = s.getPropertyValue('--text-muted').trim();
+  Chart.defaults.borderColor = s.getPropertyValue('--border-dim').trim();
+  Chart.defaults.plugins.legend.labels.color = s.getPropertyValue('--text').trim();
+})();
+</script>
+{% endif %}
 </head>
 <body>
 <nav>
