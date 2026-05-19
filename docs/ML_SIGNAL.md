@@ -32,6 +32,14 @@ A common mistake: treating label=0 as the "positive" class (waiting). Don't. BUY
 
 Per-station models were considered and rejected on data volume grounds. One model, all stations contribute training rows. Station enters as a categorical feature alongside brand/suburb.
 
+## Station classification and aggregate features
+
+LGA- and Brand-level mean features used by the model must reflect **current pricing that buyers can act on**. Stations are classified Competitive / Discount / Sticky based on their median price premium versus the LGA competitive cluster over a rolling 45-day window. Sticky stations (persistently above cluster) are **excluded** from LGA/Brand means; Competitive and Discount stations are blended into the aggregate.
+
+See AGENTS.md § "Station classification" for the taxonomy, classifier mechanics, and PIT discipline. See [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) for the open implementation questions (materialisation strategy, brand bootstrap reference, recency threshold, cold-start handling).
+
+When constructing new aggregate features in Phase 3, default to the classifier-filtered aggregate, not the raw all-station mean.
+
 ## Cycle detector: kept as feature source
 
 `CycleDetector` is not replaced by ML — it's a feature source. Its outputs (`cycle_pct_through`, `days_since_peak`, plateau flag, last-cycle min/max, deviation from cycle mean) feed into the model. The user-facing "Day 41/46" narrative stays as the interpretability anchor.

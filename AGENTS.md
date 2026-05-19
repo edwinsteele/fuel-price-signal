@@ -120,6 +120,63 @@ When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verif
 ### Aggregation
 `sydney_average_series` / `average_price_series` is a temporary convenience for cycle detection. Future analyses will need flexible groupings — by region, corridor, LGA cluster, etc. Don't treat it as permanent infrastructure; don't patch it when new groupings are needed, design a proper aggregation layer instead.
 
+### Station classification (Competitive / Discount / Sticky)
+
+LGA- and Brand-level mean features used by the ML model must reflect **current pricing that buyers can actually act on**. Stations fall into three behavioural classes; aggregation policy depends on which class they're in. See [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) for the design discussion and open implementation questions.
+
+**The three classes:**
+
+| Class | Description | Examples |
+|---|---|---|
+| **Competitive** | Price tracks the cycle; sits within ±10c of the LGA competitive cluster | Metro Tuggerah, Pearl Energy Wyong North, most BP/Caltex/Ampol metro stations |
+| **Sticky** | Set-and-forget pricing; sits persistently above the competitive cluster | Shell Reddy Express Woy Woy, EG Ampol Umina, Ampol Foodary motorway sites, BP Berowra |
+| **Discount** | Sits persistently below the competitive cluster; real, accessible cheap prices | Costco, Powerfuel, Speedway, Budget Petroleum |
+
+**Aggregation policy:** blended Competitive + Discount means **exclude Sticky only**. Discount stations stay in because their low prices are real and accessible to a buyer; Sticky stations leave because their stale peak prices don't reflect what buyers are currently being offered.
+
+**Why blended (not Competitive-only):** the level shift introduced by including Discount stations (LGAs with discounters look cheaper) reflects real prices buyers can access. Competitive-only would be a cleaner cycle-position signal but discards level information that matters for a purchasing decision.
+
+**Brand aggregates use the same classification.** Brand mean is computed Sydney-wide across stations of brand B where `class != Sticky` (using the same per-LGA-derived classification). One classifier, one `station_class` table; LGA and Brand aggregates are just different slicings. The principle "ML features for pricing decisions must exclude stations that aren't informative about current pricing" applies regardless of slicing dimension — a Sticky Shell in Woy Woy is stale whether you aggregate it by LGA or by brand.
+
+**Out of scope here:** Members-only stations (e.g. Costco) have prices that aren't accessible to a non-member. A separate accessibility filter may be warranted before they enter any "available to buyer" feature — deferred.
+
+**The classifier (1D on premium):**
+
+| Setting | Value |
+|---|---|
+| Classification axis | Median price-vs-cluster premium |
+| Window | 45 days (NSW mean cycle length) |
+| Band | ±10c (Sticky if median premium > +10c; Discount if < −10c; else Competitive) |
+| Frequency role | Bootstrap seeding of the initial cluster only. Not in the classifier itself, and not a recency filter at aggregation time (see below). |
+
+The classifier is deliberately 1D on premium, not 2D on (frequency, premium). Frequency was a noisy proxy for the property premium measures directly — Sticky stations update less because they're set-and-forget at high prices. A high-frequency station with persistently high premium (e.g. BP Berowra) is still Sticky.
+
+The 45-day window is the empirical mean NSW cycle length. The classifier does **not** try to model cycle-length variation (cycles run 35–70 days) — cycle modelling is out of scope for the current ML model.
+
+**PIT discipline:** The classification window for a training row at date D ends at D−1. Past price classifying past behaviour is not target leakage; the prediction target (future price) is not in the classification window.
+
+**Median is computed in Python**, not SQL — SQLite has no native MEDIAN. Classification is a batch step (daily re-computation across ~800 stations), so the per-call cost doesn't matter.
+
+**Materialisation:** classifications are pre-computed and stored in a `station_class` table:
+
+```sql
+CREATE TABLE station_class (
+    station_code             INTEGER NOT NULL REFERENCES stations(station_code),
+    snapshot_date            INTEGER NOT NULL,   -- YYYYMMDD; classification valid as of this date
+    class                    TEXT    NOT NULL,   -- 'Competitive' | 'Sticky' | 'Discount'
+    median_premium_decicents INTEGER NOT NULL,   -- median (station_price − cluster_mean) over 45d
+    PRIMARY KEY (station_code, snapshot_date)
+);
+```
+
+**Daily cadence.** Each day's classification uses the 45-day window ending at `snapshot_date − 1`. Daily (rather than monthly) snapshots avoid step-changes in LGA aggregates when borderline stations flip class — the rolling window smooths drift, so daily materialisation just propagates that smoothness into the feature. Storage cost is trivial (~290k rows/year × 5 years ≈ 1.5M rows). Compute cost is sub-second per day.
+
+**No active-reporter recency filter.** An earlier design floated a 14d "last raw observation" filter at aggregation time as a guard against stale forward-filled prices. It was dropped (2026-05-19) for KISS reasons: empirical measurement showed it would exclude 5–10% of non-Sticky stations during peak plateaus where the forward-fill is *correct* (price genuinely unchanged), in exchange for limited protection against downcycle staleness that the 28d forward-fill cap and the classifier already partially handle. If model artefacts traceable to ramp-day staleness appear later, revisit — likely with a phase-aware filter rather than a static threshold.
+
+**Aggregation floor:** if fewer than 3 non-Sticky stations are available for a given LGA/brand/date, emit NULL rather than fall back. A silently-thin aggregate is worse than a gap. The floor protects against *thin samples* (high-variance aggregates from few stations); it does **not** protect against staleness — staleness protection lives entirely in the 28d forward-fill cap and the classifier.
+
+**Cold-start handling:** a station gets a classification entry as soon as it has at least one raw observation in the 45-day window. No minimum-observation threshold, no `is_classified` boolean, no default class. Stations with zero observations in the window have no entry and are excluded from aggregates (consistent with their absence from `daily_prices`). Because the pooled ML model has no station/brand/suburb categorical features (only 10 numeric features from cycle and price deltas — see `fuel_signal/features.py:FEATURE_COLUMNS`), there is no OOV problem at inference for a brand-new station — its numeric features can be computed from a single observation and the model produces a prediction without special handling.
+
 ### Snapshot CSV schema
 
 ```
