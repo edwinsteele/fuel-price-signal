@@ -300,3 +300,57 @@ def test_route_form_submit_without_annotations_param_unchecked(flask_client):
     html = resp.data.decode()
     assert 'name="annotations"' in html
     assert not re.search(r'<input[^>]*name="annotations"[^>]*\bchecked\b', html)
+
+
+# ---------------------------------------------------------------------------
+# Coverage heatmap: LGA/brand/station selections honoured alongside sydney
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def flask_client_two_lgas(conn):
+    """Flask test client with one Blue Mountains station and one Parramatta station."""
+    upsert_stations(conn, [_STATION_BM, _STATION_SYD])
+    # Populate prices (for coverage_matrix) and daily_prices (for resolve_members).
+    _insert_raw_prices(conn, 1001)
+    _insert_raw_prices(conn, 2001)
+    base = datetime.date.today() - datetime.timedelta(days=30)
+    for code in (1001, 2001):
+        upsert_daily_prices(conn, [
+            (code, "E10", (base + datetime.timedelta(days=i)).isoformat(), 160.0 + i)
+            for i in range(5)
+        ])
+    conn.commit()
+    app = _create_app(
+        conn,
+        cd=None,
+        today=datetime.date.today().isoformat(),
+        cycle_state=None,
+        peak_data={},
+        summary=db_summary(conn),
+        boundaries={},
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        yield client
+
+
+def test_route_coverage_heatmap_honours_lga_when_sydney_also_selected(flask_client_two_lgas):
+    """LGA filter applies to coverage heatmap even when sydney is also selected."""
+    resp = flask_client_two_lgas.get(
+        "/?series=sydney&series=lga:Blue+Mountains&chart=heatmap-coverage"
+    )
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    assert "Shell Springwood" in html
+    assert "Ampol Parramatta" not in html
+
+
+def test_route_coverage_heatmap_sydney_only_shows_all(flask_client_two_lgas):
+    """When only sydney is selected, all stations appear in the coverage heatmap."""
+    resp = flask_client_two_lgas.get(
+        "/?series=sydney&chart=heatmap-coverage"
+    )
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    assert "Shell Springwood" in html
+    assert "Ampol Parramatta" in html

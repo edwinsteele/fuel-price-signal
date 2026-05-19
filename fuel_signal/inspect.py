@@ -653,17 +653,22 @@ def _create_app(
         elif chart_type == "heatmap-gradient":
             heatmap_data = _build_gradient_heatmap(resolved, cutoff) or None
         elif chart_type == "heatmap-coverage":
-            # Filter to selected stations; expand group specs to their members.
-            # No filter (None) when sydney is selected — show all metro stations.
-            coverage_codes: set[int] | None = None
-            if not any(r.kind == "sydney" for r in resolved):
-                coverage_codes = set()
-                for r in resolved:
-                    if r.kind == "station":
-                        coverage_codes.add(int(r.spec.split(":")[1]))
-                    elif r.kind in ("lga", "brand"):
-                        for m in _series.resolve_members(conn, r.spec):
-                            coverage_codes.add(int(m.spec.split(":")[1]))
+            # Expand any LGA/brand/station selections to station codes.
+            # Show all metro stations only when sydney is the sole selection.
+            specific_codes: set[int] = set()
+            for r in resolved:
+                if r.kind == "station":
+                    specific_codes.add(int(r.spec.split(":")[1]))
+                elif r.kind in ("lga", "brand"):
+                    for m in _series.resolve_members(conn, r.spec):
+                        specific_codes.add(int(m.spec.split(":")[1]))
+            has_sydney = any(r.kind == "sydney" for r in resolved)
+            if specific_codes:
+                coverage_codes: set[int] | None = specific_codes
+            elif has_sydney:
+                coverage_codes = None  # show all metro stations
+            else:
+                coverage_codes = set()  # nothing meaningful selected
             heatmap_data = _build_coverage_heatmap(conn, cutoff, coverage_codes, end_date) or None
 
         return render_template(
