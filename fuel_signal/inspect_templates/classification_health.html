@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}LGA Classification Health{% endblock %}
+{% block content %}
+<h1>LGA Classification Health</h1>
+<p class="meta">Station class = Competitive / Sticky / Discount per LGA — as of {{ now }}</p>
+
+{% if zero_competitive_lgas %}
+<div style="background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.4);border-radius:6px;padding:.75rem 1rem;margin-bottom:1.5rem;">
+  <strong style="color:var(--red)">⚠ Zero-Competitive LGAs on latest snapshot:</strong>
+  {% for lga, n_comp, n_sticky, n_disc, snap_date in zero_competitive_lgas %}
+  <span style="margin-left:.5rem;color:var(--text-muted)">{{ lga }}</span>{% if not loop.last %},{% endif %}
+  {% endfor %}
+  <p style="margin:.5rem 0 0;font-size:.85rem;color:var(--text-muted)">
+    LGA mean features will be NULL for these LGAs on {{ snap_date }}. Check for data gaps or a Sticky-majority LGA.
+  </p>
+</div>
+{% endif %}
+
+<!-- LGA filter -->
+<div class="controls" style="margin-bottom:1.5rem;">
+  <form method="get" action="/classification">
+    <label style="font-weight:600;margin-right:.5rem;">Filter by LGA:</label>
+    <select name="lga" style="background:var(--surface-alt);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:.3rem .6rem;">
+      <option value="">— all —</option>
+      {% for lga, n_comp, n_sticky, n_disc, snap_date in latest %}
+      <option value="{{ lga }}" {% if lga == lga_filter %}selected{% endif %}>{{ lga }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" style="margin-left:.5rem;background:var(--accent);color:#000;border:none;border-radius:4px;padding:.3rem .8rem;cursor:pointer;font-weight:600;">View history</button>
+  </form>
+</div>
+
+<!-- Latest snapshot table -->
+<h2>Latest snapshot{% if latest %} — {{ latest[0][4] }}{% endif %}</h2>
+{% if latest %}
+<table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+  <thead>
+    <tr style="border-bottom:2px solid var(--border);color:var(--text-muted);">
+      <th style="text-align:left;padding:.4rem .6rem;">LGA</th>
+      <th style="text-align:right;padding:.4rem .6rem;">Competitive</th>
+      <th style="text-align:right;padding:.4rem .6rem;">Sticky</th>
+      <th style="text-align:right;padding:.4rem .6rem;">Discount</th>
+      <th style="text-align:right;padding:.4rem .6rem;">Total</th>
+      <th style="text-align:right;padding:.4rem .6rem;">Sticky %</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for lga, n_comp, n_sticky, n_disc, snap_date in latest %}
+    {% set total = n_comp + n_sticky + n_disc %}
+    {% set sticky_pct = (n_sticky / total * 100) if total > 0 else 0 %}
+    <tr style="border-bottom:1px solid var(--border-dim);{% if n_comp == 0 %}background:rgba(248,113,113,.06);{% elif sticky_pct > 20 %}background:rgba(251,191,36,.04);{% endif %}">
+      <td style="padding:.4rem .6rem;font-weight:{% if n_comp == 0 %}600{% else %}400{% endif %};color:{% if n_comp == 0 %}var(--red){% else %}var(--text){% endif %};">
+        <a href="/classification?lga={{ lga }}" style="color:inherit;text-decoration:none;">{{ lga }}</a>
+        {% if n_comp == 0 %} ⚠{% endif %}
+      </td>
+      <td style="text-align:right;padding:.4rem .6rem;color:var(--green);">{{ n_comp }}</td>
+      <td style="text-align:right;padding:.4rem .6rem;color:{% if n_sticky > 0 %}var(--red){% else %}var(--text-dim){% endif %};">{{ n_sticky }}</td>
+      <td style="text-align:right;padding:.4rem .6rem;color:{% if n_disc > 0 %}var(--blue){% else %}var(--text-dim){% endif %};">{{ n_disc }}</td>
+      <td style="text-align:right;padding:.4rem .6rem;color:var(--text-muted);">{{ total }}</td>
+      <td style="text-align:right;padding:.4rem .6rem;color:{% if sticky_pct > 20 %}var(--accent){% else %}var(--text-muted){% endif %};">
+        {{ "%.0f"|format(sticky_pct) }}%
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:var(--text-muted);">No classification data found. Run <code>uv run python -m fuel_signal.classify</code> first.</p>
+{% endif %}
+
+<!-- Per-LGA history -->
+{% if lga_filter and history %}
+<h2 style="margin-top:2rem;">History — {{ lga_filter }}</h2>
+<table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+  <thead>
+    <tr style="border-bottom:2px solid var(--border);color:var(--text-muted);">
+      <th style="text-align:left;padding:.35rem .6rem;">Date</th>
+      <th style="text-align:right;padding:.35rem .6rem;">Competitive</th>
+      <th style="text-align:right;padding:.35rem .6rem;">Sticky</th>
+      <th style="text-align:right;padding:.35rem .6rem;">Discount</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for snap_date, n_comp, n_sticky, n_disc in history %}
+    <tr style="border-bottom:1px solid var(--border-dim);{% if n_comp == 0 %}background:rgba(248,113,113,.06);{% endif %}">
+      <td style="padding:.35rem .6rem;font-family:var(--font-mono);font-size:.8rem;">{{ snap_date }}</td>
+      <td style="text-align:right;padding:.35rem .6rem;color:var(--green);">{{ n_comp }}</td>
+      <td style="text-align:right;padding:.35rem .6rem;color:{% if n_sticky > 0 %}var(--red){% else %}var(--text-dim){% endif %};">{{ n_sticky }}</td>
+      <td style="text-align:right;padding:.35rem .6rem;color:{% if n_disc > 0 %}var(--blue){% else %}var(--text-dim){% endif %};">{{ n_disc }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% elif lga_filter %}
+<p style="color:var(--text-muted);margin-top:1rem;">No history found for {{ lga_filter }}.</p>
+{% endif %}
+
+<p style="margin-top:2rem;font-size:.8rem;color:var(--text-dim);">
+  Classifier: 1D median premium, 45-day window, ±10c band. Sticky stations are excluded from LGA/brand mean features.
+  <a href="/" style="color:var(--accent);">← Back to workbench</a>
+</p>
+{% endblock %}

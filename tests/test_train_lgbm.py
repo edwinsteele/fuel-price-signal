@@ -38,11 +38,14 @@ def _synthetic_features_df(seed: int = 0) -> pd.DataFrame:
     all_dates = train_dates + val_dates + test_dates
 
     n = len(all_dates)
-    X = rng.normal(size=(n, len(FEATURE_COLUMNS)))
-
-    logits = 1.5 * X[:, 0] - 1.0 * X[:, 1] - 0.5
+    # Generate 2 predictive features first so the logistic signal is stable
+    # regardless of how many total FEATURE_COLUMNS exist.
+    X_pred = rng.normal(size=(n, 2))
+    logits = 1.5 * X_pred[:, 0] - 1.0 * X_pred[:, 1] - 0.5
     probs = 1.0 / (1.0 + np.exp(-logits))
     labels = (rng.uniform(size=n) < probs).astype(int)
+    X_noise = rng.normal(size=(n, len(FEATURE_COLUMNS) - 2))
+    X = np.hstack([X_pred, X_noise])
 
     rows = {col: X[:, i] for i, col in enumerate(FEATURE_COLUMNS)}
     rows["price_date"] = all_dates

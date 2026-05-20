@@ -59,7 +59,15 @@ FEATURE_COLUMNS: list[str] = [
     "station_minus_last_min_cents",
     "station_minus_last_max_cents",
     "station_minus_sydney_avg_cents",
+    "lga_mean_cents",
+    "station_minus_lga_mean_cents",
+    "brand_mean_cents",
+    "station_minus_brand_mean_cents",
 ]
+
+# Minimum non-Sticky station count for LGA and brand aggregates to be valid.
+# Rows below this floor emit NULL for the aggregate feature and are dropped.
+AGGREGATE_MIN_STATIONS: int = 3
 
 
 def _date_to_int(s: str) -> int:
@@ -69,6 +77,61 @@ def _date_to_int(s: str) -> int:
 def _date_from_int(v: int) -> str:
     s = str(v)
     return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
+
+def _station_meta(
+    conn: sqlite3.Connection,
+    station_code: int,
+) -> tuple[str | None, str | None]:
+    """Return (council, brand) for a station, or (None, None) if not found."""
+    row = conn.execute(
+        "SELECT council, brand FROM stations WHERE station_code = ?", (station_code,)
+    ).fetchone()
+    return (row[0], row[1]) if row else (None, None)
+
+
+def _lga_mean_on_date(
+    conn: sqlite3.Connection,
+    date_d: str,
+    council: str,
+    fuel_type_id: int,
+) -> float | None:
+    """Return LGA mean (cents) excluding Sticky stations, or None if < 3 stations."""
+    date_int = _date_to_int(date_d)
+    row = conn.execute(
+        "SELECT AVG(dp.price_decicents), COUNT(*)"
+        " FROM daily_prices dp"
+        " JOIN stations s USING(station_code)"
+        " JOIN station_class sc ON sc.station_code = dp.station_code AND sc.snapshot_date = dp.price_date"
+        " WHERE dp.fuel_type_id = ? AND dp.price_date = ? AND s.council = ?"
+        "   AND sc.class != 'Sticky'",
+        (fuel_type_id, date_int, council),
+    ).fetchone()
+    if row is None or row[0] is None or row[1] < AGGREGATE_MIN_STATIONS:
+        return None
+    return row[0] / 10
+
+
+def _brand_mean_on_date(
+    conn: sqlite3.Connection,
+    date_d: str,
+    brand: str,
+    fuel_type_id: int,
+) -> float | None:
+    """Return Sydney-wide brand mean (cents) excluding Sticky, or None if < 3 stations."""
+    date_int = _date_to_int(date_d)
+    row = conn.execute(
+        "SELECT AVG(dp.price_decicents), COUNT(*)"
+        " FROM daily_prices dp"
+        " JOIN stations s USING(station_code)"
+        " JOIN station_class sc ON sc.station_code = dp.station_code AND sc.snapshot_date = dp.price_date"
+        " WHERE dp.fuel_type_id = ? AND dp.price_date = ? AND s.brand = ?"
+        "   AND sc.class != 'Sticky'",
+        (fuel_type_id, date_int, brand),
+    ).fetchone()
+    if row is None or row[0] is None or row[1] < AGGREGATE_MIN_STATIONS:
+        return None
+    return row[0] / 10
 
 
 def _station_price_on_date(
@@ -106,6 +169,8 @@ def _build_feature_dict(
     state: CycleState,
     station_price: float,
     sydney_avg: float,
+    lga_mean: float,
+    brand_mean: float,
 ) -> dict[str, float]:
     return {
         "cycle_pct_through": state.pct_through_cycle,
@@ -118,6 +183,10 @@ def _build_feature_dict(
         "station_minus_last_min_cents": station_price - state.last_cycle_min,
         "station_minus_last_max_cents": station_price - state.last_cycle_max,
         "station_minus_sydney_avg_cents": station_price - sydney_avg,
+        "lga_mean_cents": lga_mean,
+        "station_minus_lga_mean_cents": station_price - lga_mean,
+        "brand_mean_cents": brand_mean,
+        "station_minus_brand_mean_cents": station_price - brand_mean,
     }
 
 
@@ -142,6 +211,8 @@ def compute_features(
     - Station has no price on date_d in daily_prices
     - CycleDetector.detect(date_d) returns None (fewer than 2 peaks)
     - Sydney average is absent on date_d (data gap)
+    - LGA mean is NULL (< 3 non-Sticky stations for the station's council on date_d)
+    - Brand mean is NULL (< 3 non-Sticky stations for the station's brand Sydney-wide on date_d)
     """
     fid = _db.fuel_type_id(conn, "E10")
 
@@ -160,7 +231,19 @@ def compute_features(
     if sydney_avg is None:
         return None
 
-    return _build_feature_dict(state, station_price, sydney_avg)
+    council, brand = _station_meta(conn, station_code)
+    if council is None or brand is None:
+        return None
+
+    lga_mean = _lga_mean_on_date(conn, date_d, council, fid)
+    if lga_mean is None:
+        return None
+
+    brand_mean = _brand_mean_on_date(conn, date_d, brand, fid)
+    if brand_mean is None:
+        return None
+
+    return _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean)
 
 
 def assemble_feature_rows(
@@ -238,20 +321,70 @@ def assemble_feature_rows(
         )
     }
 
+    # Cache 4: station metadata (council, brand). One lookup per station.
+    station_meta_by_code: dict[int, tuple[str | None, str | None]] = {
+        row[0]: (row[1], row[2])
+        for row in conn.execute("SELECT station_code, council, brand FROM stations")
+    }
+
+    # Cache 5: LGA mean by (date_iso, council), excluding Sticky stations.
+    # NULL floor (< AGGREGATE_MIN_STATIONS) produces no entry — rows that miss are dropped.
+    lga_mean_by_key: dict[tuple[str, str], float] = {}
+    for date_int, council, avg_dc, cnt in conn.execute(
+        "SELECT dp.price_date, s.council, AVG(dp.price_decicents), COUNT(*)"
+        " FROM daily_prices dp"
+        " JOIN stations s USING(station_code)"
+        " JOIN station_class sc ON sc.station_code = dp.station_code AND sc.snapshot_date = dp.price_date"
+        " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky' AND s.council IS NOT NULL"
+        " GROUP BY dp.price_date, s.council"
+        " HAVING COUNT(*) >= ?",
+        (fid, AGGREGATE_MIN_STATIONS),
+    ):
+        lga_mean_by_key[(_date_from_int(date_int), council)] = avg_dc / 10
+
+    # Cache 6: brand mean by (date_iso, brand), Sydney-wide, excluding Sticky.
+    brand_mean_by_key: dict[tuple[str, str], float] = {}
+    for date_int, brand, avg_dc, cnt in conn.execute(
+        "SELECT dp.price_date, s.brand, AVG(dp.price_decicents), COUNT(*)"
+        " FROM daily_prices dp"
+        " JOIN stations s USING(station_code)"
+        " JOIN station_class sc ON sc.station_code = dp.station_code AND sc.snapshot_date = dp.price_date"
+        " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
+        "   AND s.brand IS NOT NULL AND s.brand != ''"
+        " GROUP BY dp.price_date, s.brand"
+        " HAVING COUNT(*) >= ?",
+        (fid, AGGREGATE_MIN_STATIONS),
+    ):
+        brand_mean_by_key[(_date_from_int(date_int), brand)] = avg_dc / 10
+
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
     # on station_price / sydney_avg are upstream bugs, not data conditions.
     # Letting dict[key] raise KeyError surfaces them rather than silently
     # dropping rows the per-row path would have kept.
+    # LGA/brand misses are data conditions (classifier not run, thin LGA) — drop.
     records = []
     for row_dict in label_df.to_dict("records"):
         date_d: str = row_dict["price_date"]
         state = cycle_state_by_date[date_d]
         if state is None:
             continue
-        station_price = station_price_by_key[(row_dict["station_code"], date_d)]
+        sc = row_dict["station_code"]
+        station_price = station_price_by_key[(sc, date_d)]
         sydney_avg = sydney_avg_by_date[date_d]
-        records.append({**row_dict, **_build_feature_dict(state, station_price, sydney_avg)})
+        council, brand = station_meta_by_code.get(sc, (None, None))
+        if council is None or brand is None:
+            continue
+        lga_mean = lga_mean_by_key.get((date_d, council))
+        if lga_mean is None:
+            continue
+        brand_mean = brand_mean_by_key.get((date_d, brand))
+        if brand_mean is None:
+            continue
+        records.append({
+            **row_dict,
+            **_build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean),
+        })
 
     if not records:
         return pd.DataFrame(columns=all_cols)

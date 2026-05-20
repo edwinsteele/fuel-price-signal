@@ -130,6 +130,25 @@ CREATE TABLE IF NOT EXISTS loaded_files (
     filename  TEXT PRIMARY KEY,
     loaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS station_class (
+    station_code             INTEGER NOT NULL REFERENCES stations(station_code),
+    snapshot_date            INTEGER NOT NULL,
+    class                    TEXT    NOT NULL,
+    median_premium_decicents INTEGER NOT NULL,
+    PRIMARY KEY (station_code, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS station_class_date ON station_class(snapshot_date);
+
+CREATE TABLE IF NOT EXISTS classification_summary (
+    snapshot_date INTEGER NOT NULL,
+    lga           TEXT    NOT NULL,
+    n_competitive INTEGER NOT NULL,
+    n_sticky      INTEGER NOT NULL,
+    n_discount    INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_date, lga)
+);
 """
 
 
@@ -819,6 +838,77 @@ def coverage_matrix(
     )
     rows = conn.execute(sql, params).fetchall()
     return [(r[0], r[1], r[2], r[3]) for r in rows]
+
+
+def upsert_station_classes(
+    conn: sqlite3.Connection,
+    rows: list[tuple[int, int, str, int]],
+) -> None:
+    """Upsert rows into station_class.
+
+    rows: list of (station_code, snapshot_date_int, class, median_premium_decicents).
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR REPLACE INTO station_class"
+        " (station_code, snapshot_date, class, median_premium_decicents)"
+        " VALUES (?, ?, ?, ?)",
+        rows,
+    )
+
+
+def upsert_classification_summaries(
+    conn: sqlite3.Connection,
+    rows: list[tuple[int, str, int, int, int]],
+) -> None:
+    """Upsert rows into classification_summary.
+
+    rows: list of (snapshot_date_int, lga, n_competitive, n_sticky, n_discount).
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR REPLACE INTO classification_summary"
+        " (snapshot_date, lga, n_competitive, n_sticky, n_discount)"
+        " VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
+
+
+def latest_classification_summary(conn: sqlite3.Connection) -> list[tuple[str, int, int, int, str]]:
+    """Return per-LGA class counts for the most recent snapshot date.
+
+    Returns [(lga, n_competitive, n_sticky, n_discount, snapshot_date_str)] sorted by lga.
+    """
+    row = conn.execute(
+        "SELECT MAX(snapshot_date) FROM classification_summary"
+    ).fetchone()
+    if row is None or row[0] is None:
+        return []
+    latest = row[0]
+    rows = conn.execute(
+        "SELECT lga, n_competitive, n_sticky, n_discount FROM classification_summary"
+        " WHERE snapshot_date = ? ORDER BY lga",
+        (latest,),
+    ).fetchall()
+    date_str = _date_from_int(latest)
+    return [(r[0], r[1], r[2], r[3], date_str) for r in rows]
+
+
+def classification_summary_history(
+    conn: sqlite3.Connection,
+    lga: str,
+    limit: int = 90,
+) -> list[tuple[str, int, int, int]]:
+    """Return (snapshot_date_str, n_competitive, n_sticky, n_discount) for an LGA, most recent first."""
+    rows = conn.execute(
+        "SELECT snapshot_date, n_competitive, n_sticky, n_discount"
+        " FROM classification_summary WHERE lga = ?"
+        " ORDER BY snapshot_date DESC LIMIT ?",
+        (lga, limit),
+    ).fetchall()
+    return [(_date_from_int(r[0]), r[1], r[2], r[3]) for r in rows]
 
 
 def gradient_by_lga(

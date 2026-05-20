@@ -30,9 +30,11 @@ fuel_signal/
 ├── labels.py          # ML label generation + training-row assembly
 ├── label_viz.py       # Diagnostic plots for label distributions
 ├── label_inspect.py   # Per-station per-day label decomposition table
+├── classify.py        # Station classifier: Competitive/Sticky/Discount daily snapshot
 ├── features.py        # Join cycle features onto labels → model-ready CSV
 ├── evaluate.py        # Canonical train/val/test split + scoring utilities
 ├── train_logreg.py    # Train logistic regression baseline (val only)
+├── train_lgbm.py      # Train LightGBM classifier + calibration
 ├── calibrate.py       # Calibration diagnostics + calibrated model artifact
 ├── score_phase2.py    # Threshold sweep on val → score test → append results.csv
 ├── tp_benefit.py      # Diagnostic: empirical TP benefit distribution
@@ -122,7 +124,7 @@ When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verif
 
 ### Station classification (Competitive / Discount / Sticky)
 
-LGA- and Brand-level mean features used by the ML model must reflect **current pricing that buyers can actually act on**. Stations fall into three behavioural classes; aggregation policy depends on which class they're in. See [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) for the design discussion and open implementation questions.
+LGA- and Brand-level mean features used by the ML model must reflect **current pricing that buyers can actually act on**. Stations fall into three behavioural classes; aggregation policy depends on which class they're in. See [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) for the design discussion. Implemented in `fuel_signal/classify.py` (issues #110, #111).
 
 **The three classes:**
 
@@ -157,7 +159,11 @@ The 45-day window is the empirical mean NSW cycle length. The classifier does **
 
 **Median is computed in Python**, not SQL — SQLite has no native MEDIAN. Classification is a batch step (daily re-computation across ~800 stations), so the per-call cost doesn't matter.
 
-**Materialisation:** classifications are pre-computed and stored in a `station_class` table:
+**Materialisation:** classifications are pre-computed and stored in `station_class` and `classification_summary` tables (added to db.py schema alongside existing tables). Run via `classify.py`:
+
+```
+uv run python -m fuel_signal.classify [--db PATH] [--start-date DATE] [--end-date DATE]
+```
 
 ```sql
 CREATE TABLE station_class (
@@ -167,6 +173,14 @@ CREATE TABLE station_class (
     median_premium_decicents INTEGER NOT NULL,   -- median (station_price − cluster_mean) over 45d
     PRIMARY KEY (station_code, snapshot_date)
 );
+CREATE TABLE classification_summary (
+    snapshot_date INTEGER NOT NULL,
+    lga           TEXT    NOT NULL,
+    n_competitive INTEGER NOT NULL,
+    n_sticky      INTEGER NOT NULL,
+    n_discount    INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_date, lga)
+);
 ```
 
 **Daily cadence.** Each day's classification uses the 45-day window ending at `snapshot_date − 1`. Daily (rather than monthly) snapshots avoid step-changes in LGA aggregates when borderline stations flip class — the rolling window smooths drift, so daily materialisation just propagates that smoothness into the feature. Storage cost is trivial (~290k rows/year × 5 years ≈ 1.5M rows). Compute cost is sub-second per day.
@@ -175,7 +189,7 @@ CREATE TABLE station_class (
 
 **Aggregation floor:** if fewer than 3 non-Sticky stations are available for a given LGA/brand/date, emit NULL rather than fall back. A silently-thin aggregate is worse than a gap. The floor protects against *thin samples* (high-variance aggregates from few stations); it does **not** protect against staleness — staleness protection lives entirely in the 28d forward-fill cap and the classifier.
 
-**Cold-start handling:** a station gets a classification entry as soon as it has at least one raw observation in the 45-day window. No minimum-observation threshold, no `is_classified` boolean, no default class. Stations with zero observations in the window have no entry and are excluded from aggregates (consistent with their absence from `daily_prices`). Because the pooled ML model has no station/brand/suburb categorical features (only 10 numeric features from cycle and price deltas — see `fuel_signal/features.py:FEATURE_COLUMNS`), there is no OOV problem at inference for a brand-new station — its numeric features can be computed from a single observation and the model produces a prediction without special handling.
+**Cold-start handling:** a station gets a classification entry as soon as it has at least one raw observation in the 45-day window. No minimum-observation threshold, no `is_classified` boolean, no default class. Stations with zero observations in the window have no entry and are excluded from aggregates (consistent with their absence from `daily_prices`). Because the pooled ML model has no station/brand/suburb categorical features (only 14 numeric features from cycle, price deltas, and LGA/brand means — see `fuel_signal/features.py:FEATURE_COLUMNS`), there is no OOV problem at inference for a brand-new station — its numeric features can be computed from a single observation and the model produces a prediction without special handling.
 
 ### Snapshot CSV schema
 

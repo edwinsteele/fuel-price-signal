@@ -749,6 +749,24 @@ def _create_app(
             ll_end=ll_end,
         )
 
+    @app.route("/classification")
+    def classification():
+        lga_filter = request.args.get("lga", "").strip()
+        latest = _db.latest_classification_summary(conn)
+        history: list[tuple[str, int, int, int]] = []
+        if lga_filter:
+            history = _db.classification_summary_history(conn, lga_filter, limit=365)
+        zero_competitive_lgas = [row for row in latest if row[1] == 0]
+        return render_template(
+            "classification_health.html",
+            now=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            summary=summary,
+            latest=latest,
+            zero_competitive_lgas=zero_competitive_lgas,
+            lga_filter=lga_filter,
+            history=history,
+        )
+
     @app.route("/healthz")
     def healthz():
         return "ok", 200
