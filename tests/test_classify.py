@@ -9,6 +9,7 @@ from fuel_signal.classify import (
     _classify_lga,
     _run_classification,
     _window_bounds,
+    classify_all,
     classify_snapshot,
 )
 from fuel_signal.db import (
@@ -453,3 +454,37 @@ class TestClassifySnapshot:
             (snap_int,),
         ).fetchall()
         assert all(r[0] == "Competitive" for r in classes)
+
+
+# ---------------------------------------------------------------------------
+# classify_all — batch API tests
+# ---------------------------------------------------------------------------
+
+class TestClassifyAll:
+    def test_empty_db_returns_zero(self, conn):
+        total = classify_all(conn)
+        assert total == 0
+
+    def test_processes_dates_and_returns_row_count(self, conn):
+        # _seed_window seeds WINDOW_DAYS daily_prices ending at today-1.
+        # classify_all treats each distinct price_date as a snapshot_date.
+        # Snapshot dates near the end of the window will have enough prior data
+        # to produce station_class rows.
+        _seed_window(conn, {1: 160.0, 2: 160.0, 3: 170.0})
+        total = classify_all(conn)
+        count = conn.execute("SELECT COUNT(*) FROM station_class").fetchone()[0]
+        assert count > 0
+        assert total == count
+
+    def test_end_date_before_all_data_returns_zero(self, conn):
+        _seed_window(conn, {1: 160.0, 2: 160.0, 3: 170.0})
+        total = classify_all(conn, end_date="2000-01-01")
+        assert total == 0
+        count = conn.execute("SELECT COUNT(*) FROM station_class").fetchone()[0]
+        assert count == 0
+
+    def test_start_date_after_all_data_returns_zero(self, conn):
+        _seed_window(conn, {1: 160.0, 2: 160.0, 3: 170.0})
+        future = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        total = classify_all(conn, start_date=future)
+        assert total == 0

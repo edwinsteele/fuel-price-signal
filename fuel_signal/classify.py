@@ -141,14 +141,16 @@ def classify_snapshot(
     conn: sqlite3.Connection,
     snapshot_date: int,
     fuel_code: str = "E10",
+    fuel_type_id: int | None = None,
 ) -> tuple[int, int]:
     """Classify all stations for one snapshot_date using WINDOW_DAYS-day window.
 
     Returns (station_class_rows_written, lgas_processed).
+    fuel_type_id: optional precomputed id — pass from classify_all to avoid repeated lookups.
     """
     window_start, window_end = _window_bounds(snapshot_date)
 
-    fid = _db.fuel_type_id(conn, fuel_code)
+    fid = fuel_type_id if fuel_type_id is not None else _db.fuel_type_id(conn, fuel_code)
 
     # Load all forward-filled prices in the window with station → LGA mapping.
     raw = conn.execute(
@@ -201,18 +203,20 @@ def classify_all(
 ) -> int:
     """Classify all snapshot dates present in daily_prices.
 
-    start_date / end_date: YYYY-MM-DD bounds (inclusive); defaults to full range.
+    start_date / end_date: YYYY-MM-DD bounds (inclusive) on which snapshot_dates
+    to classify. Each snapshot_date D uses daily_prices for [D-45, D-1]; the
+    date bounds here filter which Ds are processed, not the underlying price data.
     Returns total station_class rows written.
     """
     fid = _db.fuel_type_id(conn, fuel_code)
 
-    params: list = [fid]
-    where = "fuel_type_id = ?"
-    if start_date:
-        # Window needs WINDOW_DAYS of data before start_date, so load all dates.
-        pass
-    q = f"SELECT DISTINCT price_date FROM daily_prices WHERE {where} ORDER BY price_date"
-    dates: list[int] = [r[0] for r in conn.execute(q, params)]
+    dates: list[int] = [
+        r[0]
+        for r in conn.execute(
+            "SELECT DISTINCT price_date FROM daily_prices WHERE fuel_type_id = ? ORDER BY price_date",
+            (fid,),
+        )
+    ]
 
     if start_date:
         start_int = int(start_date.replace("-", ""))
@@ -223,7 +227,7 @@ def classify_all(
 
     total = 0
     for snapshot_date in dates:
-        rows_written, _ = classify_snapshot(conn, snapshot_date, fuel_code=fuel_code)
+        rows_written, _ = classify_snapshot(conn, snapshot_date, fuel_type_id=fid)
         total += rows_written
 
     logger.info("classify_all: %d total station_class rows written", total)
