@@ -130,6 +130,25 @@ CREATE TABLE IF NOT EXISTS loaded_files (
     filename  TEXT PRIMARY KEY,
     loaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS station_class (
+    station_code             INTEGER NOT NULL REFERENCES stations(station_code),
+    snapshot_date            INTEGER NOT NULL,   -- YYYYMMDD; classification valid as of this date
+    class                    TEXT    NOT NULL,   -- 'Competitive' | 'Sticky' | 'Discount'
+    median_premium_decicents INTEGER NOT NULL,   -- median (station_price − cluster_ref) over 45d
+    PRIMARY KEY (station_code, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS station_class_snapshot ON station_class(snapshot_date);
+
+CREATE TABLE IF NOT EXISTS classification_summary (
+    snapshot_date INTEGER NOT NULL,   -- YYYYMMDD
+    lga           TEXT    NOT NULL,
+    n_competitive INTEGER NOT NULL,
+    n_sticky      INTEGER NOT NULL,
+    n_discount    INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_date, lga)
+);
 """
 
 
@@ -881,6 +900,111 @@ def gradient_by_lga(
                 results.append((council, week_start, float(np.mean(grads))))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Station classification helpers
+# ---------------------------------------------------------------------------
+
+def daily_prices_in_window(
+    conn: sqlite3.Connection,
+    start_date: str,
+    end_date: str,
+    fuel_code: str = "E10",
+) -> list[tuple[int, str, str, float]]:
+    """Return [(station_code, council, price_date, price_cents)] from daily_prices.
+
+    Rows are restricted to price_date in [start_date, end_date] inclusive,
+    and to stations with a non-null council (LGA classification key).
+
+    Used by the station classifier to compute per-(LGA, day) cluster medians
+    and per-station premium series in a single pass.
+    """
+    fid = fuel_type_id(conn, fuel_code)
+    rows = conn.execute(
+        "SELECT dp.station_code, s.council, dp.price_date, dp.price_decicents"
+        " FROM daily_prices dp JOIN stations s USING(station_code)"
+        " WHERE dp.fuel_type_id = ? AND s.council IS NOT NULL"
+        "   AND dp.price_date >= ? AND dp.price_date <= ?",
+        (fid, _date_to_int(start_date), _date_to_int(end_date)),
+    ).fetchall()
+    return [(r[0], r[1], _date_from_int(r[2]), r[3] / 10) for r in rows]
+
+
+def upsert_station_class_rows(
+    conn: sqlite3.Connection,
+    rows: list[tuple[int, str, str, int]],
+) -> None:
+    """Insert/replace station_class rows.
+
+    rows: list of (station_code, snapshot_date YYYY-MM-DD, class, median_premium_decicents).
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR REPLACE INTO station_class"
+        " (station_code, snapshot_date, class, median_premium_decicents)"
+        " VALUES (?, ?, ?, ?)",
+        [(r[0], _date_to_int(r[1]), r[2], r[3]) for r in rows],
+    )
+
+
+def delete_station_class_for_date(conn: sqlite3.Connection, snapshot_date: str) -> int:
+    """Remove all station_class rows for snapshot_date. Returns rows deleted."""
+    cur = conn.execute(
+        "DELETE FROM station_class WHERE snapshot_date = ?",
+        (_date_to_int(snapshot_date),),
+    )
+    return cur.rowcount or 0
+
+
+def upsert_classification_summary_rows(
+    conn: sqlite3.Connection,
+    rows: list[tuple[str, str, int, int, int]],
+) -> None:
+    """Insert/replace classification_summary rows.
+
+    rows: list of (snapshot_date YYYY-MM-DD, lga, n_competitive, n_sticky, n_discount).
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR REPLACE INTO classification_summary"
+        " (snapshot_date, lga, n_competitive, n_sticky, n_discount)"
+        " VALUES (?, ?, ?, ?, ?)",
+        [(_date_to_int(r[0]), r[1], r[2], r[3], r[4]) for r in rows],
+    )
+
+
+def delete_classification_summary_for_date(
+    conn: sqlite3.Connection, snapshot_date: str
+) -> int:
+    """Remove all classification_summary rows for snapshot_date. Returns rows deleted."""
+    cur = conn.execute(
+        "DELETE FROM classification_summary WHERE snapshot_date = ?",
+        (_date_to_int(snapshot_date),),
+    )
+    return cur.rowcount or 0
+
+
+def get_station_class(
+    conn: sqlite3.Connection,
+    station_code: int,
+    snapshot_date: str,
+) -> tuple[str, int] | None:
+    """Return (class, median_premium_decicents) for a station on snapshot_date, or None."""
+    row = conn.execute(
+        "SELECT class, median_premium_decicents FROM station_class"
+        " WHERE station_code = ? AND snapshot_date = ?",
+        (station_code, _date_to_int(snapshot_date)),
+    ).fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def latest_station_class_date(conn: sqlite3.Connection) -> str | None:
+    """Return the most recent snapshot_date (YYYY-MM-DD) in station_class, or None."""
+    row = conn.execute("SELECT MAX(snapshot_date) FROM station_class").fetchone()
+    return _date_from_int(row[0]) if row and row[0] else None
 
 
 # ---------------------------------------------------------------------------
