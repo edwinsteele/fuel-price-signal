@@ -20,6 +20,7 @@ fuel_signal/
 ├── history.py         # Download + clean bulk CSVs; dynamic resource discovery
 ├── db.py              # SQLite schema + read/write helpers
 ├── fill.py            # Forward-fill daily price gaps → daily_prices table
+├── classify.py        # Daily station classifier → station_class + classification_summary tables
 ├── live.py            # FuelCheck API snapshot → append to DB
 ├── series.py          # Series resolution (station/lga/brand/sydney) used by compare + inspect
 ├── cycle.py           # Cycle detection + current phase calculation

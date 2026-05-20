@@ -130,6 +130,23 @@ CREATE TABLE IF NOT EXISTS loaded_files (
     filename  TEXT PRIMARY KEY,
     loaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS station_class (
+    station_code             INTEGER NOT NULL REFERENCES stations(station_code),
+    snapshot_date            INTEGER NOT NULL,
+    class                    TEXT    NOT NULL,
+    median_premium_decicents INTEGER NOT NULL,
+    PRIMARY KEY (station_code, snapshot_date)
+);
+
+CREATE TABLE IF NOT EXISTS classification_summary (
+    snapshot_date INTEGER NOT NULL,
+    lga           TEXT    NOT NULL,
+    n_competitive INTEGER NOT NULL,
+    n_sticky      INTEGER NOT NULL,
+    n_discount    INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_date, lga)
+);
 """
 
 
@@ -273,6 +290,42 @@ def insert_prices(conn: sqlite3.Connection, rows: list[dict], source: str = "h")
         ],
     )
     conn.commit()
+
+
+def upsert_station_class(
+    conn: sqlite3.Connection,
+    rows: list[tuple[int, int, str, int]],
+) -> None:
+    """Write station classifications.
+
+    rows: list of (station_code, snapshot_date, class, median_premium_decicents).
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR REPLACE INTO station_class"
+        " (station_code, snapshot_date, class, median_premium_decicents)"
+        " VALUES (?, ?, ?, ?)",
+        rows,
+    )
+
+
+def upsert_classification_summary(
+    conn: sqlite3.Connection,
+    rows: list[tuple[int, str, int, int, int]],
+) -> None:
+    """Write per-(snapshot_date, lga) classification counts.
+
+    rows: list of (snapshot_date, lga, n_competitive, n_sticky, n_discount).
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR REPLACE INTO classification_summary"
+        " (snapshot_date, lga, n_competitive, n_sticky, n_discount)"
+        " VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
 
 
 # ---------------------------------------------------------------------------
