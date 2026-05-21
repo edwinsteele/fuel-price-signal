@@ -150,6 +150,23 @@ def train_and_evaluate(
     if val.empty:
         raise ValueError("train_and_evaluate(): val split is empty.")
 
+    # Logreg cannot handle NaN. Nullable features (lga_mean_cents,
+    # brand_mean_cents and their deltas) drop ~3% of rows. LightGBM handles
+    # NaN natively and does not need this filter.
+    n_train_before, n_val_before = len(train), len(val)
+    train = train.dropna(subset=list(feature_columns))
+    val = val.dropna(subset=list(feature_columns))
+    n_train_dropped = n_train_before - len(train)
+    n_val_dropped = n_val_before - len(val)
+    if n_train_dropped or n_val_dropped:
+        print(
+            f"[train_logreg] dropped NaN rows: "
+            f"train {n_train_dropped:,}/{n_train_before:,} "
+            f"({100*n_train_dropped/n_train_before:.2f}%); "
+            f"val {n_val_dropped:,}/{n_val_before:,} "
+            f"({100*n_val_dropped/n_val_before:.2f}%)"
+        )
+
     X_train = train[feature_columns].to_numpy(dtype=float)
     y_train = train["label"].to_numpy(dtype=int)
     X_val = val[feature_columns].to_numpy(dtype=float)
