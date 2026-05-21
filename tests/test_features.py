@@ -659,3 +659,43 @@ def test_assembler_lga_mean_matches_compute_features(conn):
         assert row["lga_mean_cents"] != row["lga_mean_cents"]  # NaN
     else:
         assert abs(row["lga_mean_cents"] - per_row["lga_mean_cents"]) < 0.1
+
+
+def test_assembler_brand_mean_matches_compute_features(conn):
+    """assemble_feature_rows brand_mean_cents matches compute_features for same row.
+
+    Mirrors test_assembler_lga_mean_matches_compute_features but for the brand
+    bulk-cache path.
+    """
+    # Three Competitive stations of brand "TestBrand" (clears the 3-station floor)
+    for code, offset in [(BRAND_CHEAP, 0.0), (BRAND_CHEAP2, 3.0), (BRAND_CHEAP3, -3.0)]:
+        _add_station_in_lga(conn, code, "Alpha", brand="TestBrand")
+        _add_prices(conn, code, [(d, p + offset) for d, p in _3_CYCLES])
+        _set_station_class(conn, code, _LGA_DATE, "Competitive")
+
+    # Also need STATION_A for the cycle detector series (sydney avg)
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    conn.execute(
+        "UPDATE stations SET council = 'Alpha', brand = 'TestBrand' WHERE station_code = ?",
+        (STATION_A,),
+    )
+    _set_station_class(conn, STATION_A, _LGA_DATE, "Competitive")
+    conn.commit()
+
+    per_row = compute_features(conn, STATION_A, _LGA_DATE)
+    assert per_row is not None
+
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+    matching = df[df["price_date"] == _LGA_DATE]
+    assert len(matching) == 1
+
+    row = matching.iloc[0]
+    if per_row["brand_mean_cents"] is None:
+        assert row["brand_mean_cents"] != row["brand_mean_cents"]  # NaN
+    else:
+        assert abs(row["brand_mean_cents"] - per_row["brand_mean_cents"]) < 0.1
+    if per_row["station_minus_brand_mean_cents"] is None:
+        assert row["station_minus_brand_mean_cents"] != row["station_minus_brand_mean_cents"]
+    else:
+        assert abs(row["station_minus_brand_mean_cents"] - per_row["station_minus_brand_mean_cents"]) < 0.1

@@ -99,13 +99,11 @@
     </tr>
   </thead>
   <tbody>
-  {% for lga, entries in data.timeseries.items() %}
-    {% set entry_map = {} %}
-    {% for d, nc, ns, nd in entries %}{% if entry_map.update({d: nc}) %}{% endif %}{% endfor %}
+  {% for lga, nc_map in data.timeseries.items() %}
     <tr>
       <td class="hm-row-head">{{ lga }}</td>
       {% for d in data.all_ts_dates %}
-        {% set nc = entry_map.get(d) %}
+        {% set nc = nc_map.get(d) %}
         {% if nc is none %}
           <td style="background:var(--surface)"></td>
         {% elif nc == 0 %}

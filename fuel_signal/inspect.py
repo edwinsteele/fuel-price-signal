@@ -519,14 +519,20 @@ def _compute_lead_lag(
 # Classification health
 # ---------------------------------------------------------------------------
 
+_EMPTY_HEALTH: dict = {
+    "latest_date": None, "current": [], "ever_zero": [],
+    "timeseries": {}, "all_ts_dates": [], "n_current_zero": 0,
+}
+
+
 def _classification_health_data(conn: sqlite3.Connection) -> dict:
     """Query classification_summary for the health panel."""
-    row = conn.execute("SELECT MAX(snapshot_date) FROM classification_summary").fetchone()
+    try:
+        row = conn.execute("SELECT MAX(snapshot_date) FROM classification_summary").fetchone()
+    except sqlite3.OperationalError:
+        return _EMPTY_HEALTH
     if row is None or row[0] is None:
-        return {
-            "latest_date": None, "current": [], "ever_zero": [],
-            "timeseries": {}, "all_ts_dates": [], "n_current_zero": 0,
-        }
+        return _EMPTY_HEALTH
 
     latest_date = _db._date_from_int(row[0])
 
@@ -553,11 +559,13 @@ def _classification_health_data(conn: sqlite3.Connection) -> dict:
         (cutoff,),
     ).fetchall()
 
-    timeseries: dict[str, list[tuple[str, int, int, int]]] = {}
-    for date_int, lga, nc, ns, nd in ts_rows:
-        timeseries.setdefault(lga, []).append((_db._date_from_int(date_int), nc, ns, nd))
+    # Build {lga: {date_iso: n_competitive}} so the template can look up
+    # values directly without side-effect mutations.
+    timeseries: dict[str, dict[str, int]] = {}
+    for date_int, lga, nc, _ns, _nd in ts_rows:
+        timeseries.setdefault(lga, {})[_db._date_from_int(date_int)] = nc
 
-    all_ts_dates = sorted({d for entries in timeseries.values() for d, _, _, _ in entries})
+    all_ts_dates = sorted({d for nc_map in timeseries.values() for d in nc_map})
 
     return {
         "latest_date": latest_date,

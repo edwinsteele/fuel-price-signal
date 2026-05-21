@@ -316,16 +316,24 @@ def assemble_feature_rows(
         )
     }
 
-    # Cache 4: station LGA and brand by station_code.
+    # Derive scoping sets once so caches 4–6 only cover the label slice.
+    label_station_codes = label_df["station_code"].unique().tolist()
+    label_date_ints = [_date_to_int(d) for d in label_df["price_date"].unique()]
+    _sc_ph = ", ".join(["?"] * len(label_station_codes))
+    _dt_ph = ", ".join(["?"] * len(label_date_ints))
+
+    # Cache 4: station LGA and brand by station_code (scoped to label stations).
     station_info_by_code: dict[int, tuple[str | None, str | None]] = {
         sc: (council, brand)
         for sc, council, brand in conn.execute(
-            "SELECT station_code, council, brand FROM stations"
+            f"SELECT station_code, council, brand FROM stations"
+            f" WHERE station_code IN ({_sc_ph})",
+            label_station_codes,
         )
     }
 
     # Cache 5: LGA mean (non-Sticky, ≥3 stations) by (date_iso, lga).
-    # One bulk JOIN replaces per-(date, lga) point-lookups.
+    # Scoped to dates in label_df so the JOIN only touches the relevant slice.
     lga_mean_by_key: dict[tuple[str, str], float] = {
         (_date_from_int(date_int), lga): avg_decicents / 10
         for date_int, lga, avg_decicents in conn.execute(
@@ -334,16 +342,18 @@ def assemble_feature_rows(
             " JOIN stations s ON dp.station_code = s.station_code"
             " JOIN station_class sc ON dp.station_code = sc.station_code"
             "   AND dp.price_date = sc.snapshot_date"
-            " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
-            "   AND s.council IS NOT NULL"
+            f" WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
+            f"   AND s.council IS NOT NULL"
+            f"   AND dp.price_date IN ({_dt_ph})"
             " GROUP BY dp.price_date, s.council"
             " HAVING COUNT(*) >= 3",
-            (fid,),
+            [fid, *label_date_ints],
         )
     }
 
     # Cache 6: brand mean (non-Sticky, ≥3 stations) by (date_iso, brand).
     # Sydney-wide — not per-LGA-Brand, to avoid thin cells.
+    # Scoped to dates in label_df.
     brand_mean_by_key: dict[tuple[str, str], float] = {
         (_date_from_int(date_int), brand): avg_decicents / 10
         for date_int, brand, avg_decicents in conn.execute(
@@ -352,11 +362,12 @@ def assemble_feature_rows(
             " JOIN stations s ON dp.station_code = s.station_code"
             " JOIN station_class sc ON dp.station_code = sc.station_code"
             "   AND dp.price_date = sc.snapshot_date"
-            " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
-            "   AND s.brand IS NOT NULL"
+            f" WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
+            f"   AND s.brand IS NOT NULL"
+            f"   AND dp.price_date IN ({_dt_ph})"
             " GROUP BY dp.price_date, s.brand"
             " HAVING COUNT(*) >= 3",
-            (fid,),
+            [fid, *label_date_ints],
         )
     }
 
