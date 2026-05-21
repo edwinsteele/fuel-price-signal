@@ -11,6 +11,7 @@ WAIT | Day 12/46 of cycle | E10 @ Caltex Springwood: 179.2c | Trough est. ~34 da
 
 See [docs/STATUS.md](docs/STATUS.md) for current build status and pending phases.
 See [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) for ML model design decisions and results.
+See [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for code style, test patterns, definition-of-done, and git workflow rules.
 
 ## Module structure
 
