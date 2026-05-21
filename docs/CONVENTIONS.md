@@ -61,7 +61,7 @@ When a design decision is made during a session, capture it in [AGENTS.md](../AG
 
 ## PR feedback loop
 
-After pushing to a PR branch, wait 270 seconds, then check `gh pr view <N> --json comments,reviewThreads`. Implement appropriate review comments (use judgement on style nits that conflict with project conventions), push, and repeat until no actionable comments remain. If no automated reviewer (e.g. CodeRabbit) has commented yet, move on — don't block on a specific tool being present.
+Immediately after `gh pr create` returns a PR number, call `ScheduleWakeup(delaySeconds=270)` with a prompt that runs `gh pr view <N> --json comments,reviewThreads`. This is a mandatory mechanical step, not a suggestion — do it before writing any response to the user. When the wakeup fires: implement appropriate review comments (use judgement on style nits that conflict with project conventions), run `uv run ruff check . && uv run pytest -q`, push, and repeat until no actionable comments remain. If no automated reviewer (e.g. CodeRabbit) has commented yet, move on — don't block on a specific tool being present.
 
 ## Code review caution
 

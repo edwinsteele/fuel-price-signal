@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Fuel Price Signal — Classification Health{% endblock %}
+{% block content %}
+<h1>LGA Classification Health</h1>
+<p class="meta">Station class counts from <code>classification_summary</code> &mdash; as of {{ now }}</p>
+
+{% if not data.latest_date %}
+<div class="banner banner-warn">No classification data found. Run <code>uv run python -m fuel_signal.classify</code> first.</div>
+{% else %}
+
+<!-- Summary stats -->
+<div class="stats">
+  <div class="stat">
+    <div class="stat-value">{{ data.latest_date }}</div>
+    <div class="stat-label">latest snapshot</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ data.current | length }}</div>
+    <div class="stat-label">LGAs classified</div>
+  </div>
+  <div class="stat" style="{% if data.n_current_zero > 0 %}border-color: var(--red); background: rgba(248,113,113,.07){% endif %}">
+    <div class="stat-value" style="{% if data.n_current_zero > 0 %}color: var(--red){% endif %}">{{ data.n_current_zero }}</div>
+    <div class="stat-label">LGAs with 0 Competitive today</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ data.ever_zero | length }}</div>
+    <div class="stat-label">LGAs ever with 0 Competitive</div>
+  </div>
+</div>
+
+<!-- Current snapshot table -->
+<h2>Current snapshot — {{ data.latest_date }}</h2>
+{% if data.current %}
+<div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr>
+      <th>LGA</th>
+      <th style="text-align:right">Competitive</th>
+      <th style="text-align:right">Sticky</th>
+      <th style="text-align:right">Discount</th>
+      <th style="text-align:right">Total</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for lga, nc, ns, nd in data.current %}
+    {% set total = nc + ns + nd %}
+    <tr {% if nc == 0 %}style="background: rgba(248,113,113,.08)"{% endif %}>
+      <td style="font-weight:600">{{ lga }}</td>
+      <td style="text-align:right; font-family:var(--font-mono); {% if nc == 0 %}color:var(--red); font-weight:700{% elif nc < 3 %}color:var(--accent){% else %}color:var(--green){% endif %}">{{ nc }}</td>
+      <td style="text-align:right; font-family:var(--font-mono); {% if ns > 0 %}color:var(--accent){% endif %}">{{ ns }}</td>
+      <td style="text-align:right; font-family:var(--font-mono)">{{ nd }}</td>
+      <td style="text-align:right; font-family:var(--font-mono); color:var(--text-muted)">{{ total }}</td>
+      <td style="font-size:.8rem; color:var(--text-muted)">
+        {% if nc == 0 %}
+          <span style="color:var(--red); font-weight:600">⚠ LGA mean → NULL</span>
+        {% elif nc < 3 %}
+          <span style="color:var(--accent)">below 3-station floor</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="meta">No rows for latest date.</p>
+{% endif %}
+
+<!-- LGAs ever with n_competitive = 0 -->
+{% if data.ever_zero %}
+<h2>LGAs ever with Competitive = 0</h2>
+<p style="font-size:.875rem; color:var(--text-muted); margin-top:-.5rem">
+  These LGAs had no Competitive stations on at least one snapshot date, causing their LGA mean feature to be NULL for those dates.
+</p>
+<div style="display:flex; flex-wrap:wrap; gap:.4rem; margin:.75rem 0">
+{% for lga in data.ever_zero %}
+  <span style="background:rgba(248,113,113,.12); border:1px solid rgba(248,113,113,.3); color:#f87171; border-radius:4px; padding:.2rem .6rem; font-size:.82rem; font-family:var(--font-mono)">{{ lga }}</span>
+{% endfor %}
+</div>
+{% endif %}
+
+<!-- Time series table (last 90 days) -->
+{% if data.timeseries and data.all_ts_dates %}
+<h2>Competitive count — last 90 days</h2>
+<p style="font-size:.8rem; color:var(--text-muted); margin-top:-.5rem">
+  Each cell shows n_competitive. Red = 0, amber = below 3-station floor, green ≥ 3.
+  Columns show every date with data.
+</p>
+<div class="heatmap-outer">
+<table class="heatmap-table" style="font-size:.72rem">
+  <thead>
+    <tr>
+      <th class="hm-row-head" style="min-width:160px">LGA</th>
+      {% for d in data.all_ts_dates %}
+      <th style="min-width:28px; text-align:center; font-weight:400; color:var(--text-dim); writing-mode:vertical-rl; transform:rotate(180deg); padding:.2rem .1rem; font-size:.65rem">{{ d[5:] }}</th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+  {% for lga, nc_map in data.timeseries.items() %}
+    <tr>
+      <td class="hm-row-head">{{ lga }}</td>
+      {% for d in data.all_ts_dates %}
+        {% set nc = nc_map.get(d) %}
+        {% if nc is none %}
+          <td style="background:var(--surface)"></td>
+        {% elif nc == 0 %}
+          <td style="background:rgba(248,113,113,.35); color:#fff; text-align:center; font-weight:700">0</td>
+        {% elif nc < 3 %}
+          <td style="background:rgba(245,158,11,.25); text-align:center; color:var(--accent)">{{ nc }}</td>
+        {% else %}
+          <td style="background:rgba(52,211,153,.15); text-align:center; color:var(--green)">{{ nc }}</td>
+        {% endif %}
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

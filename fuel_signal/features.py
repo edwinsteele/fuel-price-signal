@@ -59,6 +59,10 @@ FEATURE_COLUMNS: list[str] = [
     "station_minus_last_min_cents",
     "station_minus_last_max_cents",
     "station_minus_sydney_avg_cents",
+    "lga_mean_cents",
+    "station_minus_lga_mean_cents",
+    "brand_mean_cents",
+    "station_minus_brand_mean_cents",
 ]
 
 
@@ -102,11 +106,67 @@ def _sydney_avg_on_date(
     return row[0] / 10
 
 
+def _lga_mean_on_date(
+    conn: sqlite3.Connection,
+    date_d: str,
+    lga: str,
+    fuel_type_id: int,
+) -> float | None:
+    """Return mean price (cents) for non-Sticky stations in lga on date_d, or None.
+
+    Returns None when fewer than 3 non-Sticky stations contributed (NULL floor),
+    or when no station_class rows exist for the LGA on that date (zero-Competitive gap).
+    """
+    row = conn.execute(
+        "SELECT AVG(dp.price_decicents)"
+        " FROM daily_prices dp"
+        " JOIN stations s ON dp.station_code = s.station_code"
+        " JOIN station_class sc ON dp.station_code = sc.station_code"
+        "   AND dp.price_date = sc.snapshot_date"
+        " WHERE s.council = ? AND dp.fuel_type_id = ? AND dp.price_date = ?"
+        "   AND sc.class != 'Sticky'"
+        " HAVING COUNT(*) >= 3",
+        (lga, fuel_type_id, _date_to_int(date_d)),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return row[0] / 10
+
+
+def _brand_mean_on_date(
+    conn: sqlite3.Connection,
+    date_d: str,
+    brand: str,
+    fuel_type_id: int,
+) -> float | None:
+    """Return Sydney-wide mean price (cents) for non-Sticky stations of brand on date_d.
+
+    Sydney-wide (not per-LGA-Brand) to avoid thin cells. Returns None when fewer
+    than 3 non-Sticky stations contributed (NULL floor), or no station_class rows exist.
+    """
+    row = conn.execute(
+        "SELECT AVG(dp.price_decicents)"
+        " FROM daily_prices dp"
+        " JOIN stations s ON dp.station_code = s.station_code"
+        " JOIN station_class sc ON dp.station_code = sc.station_code"
+        "   AND dp.price_date = sc.snapshot_date"
+        " WHERE s.brand = ? AND dp.fuel_type_id = ? AND dp.price_date = ?"
+        "   AND sc.class != 'Sticky'"
+        " HAVING COUNT(*) >= 3",
+        (brand, fuel_type_id, _date_to_int(date_d)),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return row[0] / 10
+
+
 def _build_feature_dict(
     state: CycleState,
     station_price: float,
     sydney_avg: float,
-) -> dict[str, float]:
+    lga_mean: float | None,
+    brand_mean: float | None,
+) -> dict[str, float | None]:
     return {
         "cycle_pct_through": state.pct_through_cycle,
         "cycle_days_since_peak": float(state.days_since_last_peak),
@@ -118,6 +178,10 @@ def _build_feature_dict(
         "station_minus_last_min_cents": station_price - state.last_cycle_min,
         "station_minus_last_max_cents": station_price - state.last_cycle_max,
         "station_minus_sydney_avg_cents": station_price - sydney_avg,
+        "lga_mean_cents": lga_mean,
+        "station_minus_lga_mean_cents": station_price - lga_mean if lga_mean is not None else None,
+        "brand_mean_cents": brand_mean,
+        "station_minus_brand_mean_cents": station_price - brand_mean if brand_mean is not None else None,
     }
 
 
@@ -126,7 +190,7 @@ def compute_features(
     station_code: int,
     date_d: str,
     cycle_detector: CycleDetector | None = None,
-) -> dict[str, float] | None:
+) -> dict[str, float | None] | None:
     """Return a feature dict for (station, date), or None if insufficient data.
 
     If cycle_detector is None, build one from average_price_series(conn).
@@ -142,6 +206,10 @@ def compute_features(
     - Station has no price on date_d in daily_prices
     - CycleDetector.detect(date_d) returns None (fewer than 2 peaks)
     - Sydney average is absent on date_d (data gap)
+
+    lga_mean_cents and brand_mean_cents may be None (NaN in DataFrame) when fewer
+    than 3 non-Sticky stations are classified for that LGA/brand/date — this does
+    not cause the row to be dropped.
     """
     fid = _db.fuel_type_id(conn, "E10")
 
@@ -160,7 +228,17 @@ def compute_features(
     if sydney_avg is None:
         return None
 
-    return _build_feature_dict(state, station_price, sydney_avg)
+    row = conn.execute(
+        "SELECT council, brand FROM stations WHERE station_code = ?",
+        (station_code,),
+    ).fetchone()
+    lga = row[0] if row else None
+    brand = row[1] if row else None
+
+    lga_mean = _lga_mean_on_date(conn, date_d, lga, fid) if lga else None
+    brand_mean = _brand_mean_on_date(conn, date_d, brand, fid) if brand else None
+
+    return _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean)
 
 
 def assemble_feature_rows(
@@ -238,20 +316,80 @@ def assemble_feature_rows(
         )
     }
 
+    # Derive scoping sets once so caches 4–6 only cover the label slice.
+    label_station_codes = label_df["station_code"].unique().tolist()
+    label_date_ints = [_date_to_int(d) for d in label_df["price_date"].unique()]
+    _sc_ph = ", ".join(["?"] * len(label_station_codes))
+    _dt_ph = ", ".join(["?"] * len(label_date_ints))
+
+    # Cache 4: station LGA and brand by station_code (scoped to label stations).
+    station_info_by_code: dict[int, tuple[str | None, str | None]] = {
+        sc: (council, brand)
+        for sc, council, brand in conn.execute(
+            f"SELECT station_code, council, brand FROM stations"
+            f" WHERE station_code IN ({_sc_ph})",
+            label_station_codes,
+        )
+    }
+
+    # Cache 5: LGA mean (non-Sticky, ≥3 stations) by (date_iso, lga).
+    # Scoped to dates in label_df so the JOIN only touches the relevant slice.
+    lga_mean_by_key: dict[tuple[str, str], float] = {
+        (_date_from_int(date_int), lga): avg_decicents / 10
+        for date_int, lga, avg_decicents in conn.execute(
+            "SELECT dp.price_date, s.council, AVG(dp.price_decicents)"
+            " FROM daily_prices dp"
+            " JOIN stations s ON dp.station_code = s.station_code"
+            " JOIN station_class sc ON dp.station_code = sc.station_code"
+            "   AND dp.price_date = sc.snapshot_date"
+            f" WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
+            f"   AND s.council IS NOT NULL"
+            f"   AND dp.price_date IN ({_dt_ph})"
+            " GROUP BY dp.price_date, s.council"
+            " HAVING COUNT(*) >= 3",
+            [fid, *label_date_ints],
+        )
+    }
+
+    # Cache 6: brand mean (non-Sticky, ≥3 stations) by (date_iso, brand).
+    # Sydney-wide — not per-LGA-Brand, to avoid thin cells.
+    # Scoped to dates in label_df.
+    brand_mean_by_key: dict[tuple[str, str], float] = {
+        (_date_from_int(date_int), brand): avg_decicents / 10
+        for date_int, brand, avg_decicents in conn.execute(
+            "SELECT dp.price_date, s.brand, AVG(dp.price_decicents)"
+            " FROM daily_prices dp"
+            " JOIN stations s ON dp.station_code = s.station_code"
+            " JOIN station_class sc ON dp.station_code = sc.station_code"
+            "   AND dp.price_date = sc.snapshot_date"
+            f" WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
+            f"   AND s.brand IS NOT NULL"
+            f"   AND dp.price_date IN ({_dt_ph})"
+            " GROUP BY dp.price_date, s.brand"
+            " HAVING COUNT(*) >= 3",
+            [fid, *label_date_ints],
+        )
+    }
+
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
     # on station_price / sydney_avg are upstream bugs, not data conditions.
     # Letting dict[key] raise KeyError surfaces them rather than silently
     # dropping rows the per-row path would have kept.
+    # lga_mean / brand_mean are legitimately absent (no classification) → .get()
     records = []
     for row_dict in label_df.to_dict("records"):
         date_d: str = row_dict["price_date"]
         state = cycle_state_by_date[date_d]
         if state is None:
             continue
-        station_price = station_price_by_key[(row_dict["station_code"], date_d)]
+        sc = row_dict["station_code"]
+        station_price = station_price_by_key[(sc, date_d)]
         sydney_avg = sydney_avg_by_date[date_d]
-        records.append({**row_dict, **_build_feature_dict(state, station_price, sydney_avg)})
+        lga, brand = station_info_by_code.get(sc, (None, None))
+        lga_mean = lga_mean_by_key.get((date_d, lga)) if lga else None
+        brand_mean = brand_mean_by_key.get((date_d, brand)) if brand else None
+        records.append({**row_dict, **_build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean)})
 
     if not records:
         return pd.DataFrame(columns=all_cols)
