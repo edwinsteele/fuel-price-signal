@@ -158,13 +158,15 @@ def train_and_evaluate(
     val = val.dropna(subset=list(feature_columns))
     n_train_dropped = n_train_before - len(train)
     n_val_dropped = n_val_before - len(val)
-    if n_train_dropped or n_val_dropped:
-        print(
-            f"[train_logreg] dropped NaN rows: "
-            f"train {n_train_dropped:,}/{n_train_before:,} "
-            f"({100*n_train_dropped/n_train_before:.2f}%); "
-            f"val {n_val_dropped:,}/{n_val_before:,} "
-            f"({100*n_val_dropped/n_val_before:.2f}%)"
+    if train.empty:
+        raise ValueError(
+            f"train_and_evaluate(): train split is empty after dropping NaN rows "
+            f"(dropped {n_train_dropped:,}/{n_train_before:,})."
+        )
+    if val.empty:
+        raise ValueError(
+            f"train_and_evaluate(): val split is empty after dropping NaN rows "
+            f"(dropped {n_val_dropped:,}/{n_val_before:,})."
         )
 
     X_train = train[feature_columns].to_numpy(dtype=float)
@@ -192,6 +194,10 @@ def train_and_evaluate(
         "feature_columns": list(feature_columns),
         "train_size": int(len(train)),
         "val_size": int(len(val)),
+        "train_size_before_dropna": int(n_train_before),
+        "val_size_before_dropna": int(n_val_before),
+        "train_dropna_count": int(n_train_dropped),
+        "val_dropna_count": int(n_val_dropped),
         "train_positive_rate": float(y_train.mean()),
         "val_positive_rate": float(y_val.mean()),
         "val_logloss": float(val_logloss),
@@ -266,6 +272,15 @@ def main(features_csv: str, model_out: str, reliability_out: str) -> None:
         )
 
     result = train_and_evaluate(df)
+
+    if result["train_dropna_count"] or result["val_dropna_count"]:
+        click.echo(
+            f"[train_logreg] dropped NaN rows: "
+            f"train {result['train_dropna_count']:,}/{result['train_size_before_dropna']:,} "
+            f"({100*result['train_dropna_count']/result['train_size_before_dropna']:.2f}%); "
+            f"val {result['val_dropna_count']:,}/{result['val_size_before_dropna']:,} "
+            f"({100*result['val_dropna_count']/result['val_size_before_dropna']:.2f}%)"
+        )
 
     click.echo(_format_results(result))
 
