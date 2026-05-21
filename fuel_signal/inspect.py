@@ -516,6 +516,60 @@ def _compute_lead_lag(
 
 
 # ---------------------------------------------------------------------------
+# Classification health
+# ---------------------------------------------------------------------------
+
+def _classification_health_data(conn: sqlite3.Connection) -> dict:
+    """Query classification_summary for the health panel."""
+    row = conn.execute("SELECT MAX(snapshot_date) FROM classification_summary").fetchone()
+    if row is None or row[0] is None:
+        return {
+            "latest_date": None, "current": [], "ever_zero": [],
+            "timeseries": {}, "all_ts_dates": [], "n_current_zero": 0,
+        }
+
+    latest_date = _db._date_from_int(row[0])
+
+    current = conn.execute(
+        "SELECT lga, n_competitive, n_sticky, n_discount"
+        " FROM classification_summary WHERE snapshot_date = ?"
+        " ORDER BY lga",
+        (_db._date_to_int(latest_date),),
+    ).fetchall()
+
+    ever_zero_rows = conn.execute(
+        "SELECT DISTINCT lga FROM classification_summary"
+        " WHERE n_competitive = 0 ORDER BY lga"
+    ).fetchall()
+    ever_zero = [r[0] for r in ever_zero_rows]
+
+    cutoff = _db._date_to_int(
+        (datetime.date.fromisoformat(latest_date) - datetime.timedelta(days=90)).isoformat()
+    )
+    ts_rows = conn.execute(
+        "SELECT snapshot_date, lga, n_competitive, n_sticky, n_discount"
+        " FROM classification_summary WHERE snapshot_date >= ?"
+        " ORDER BY lga, snapshot_date",
+        (cutoff,),
+    ).fetchall()
+
+    timeseries: dict[str, list[tuple[str, int, int, int]]] = {}
+    for date_int, lga, nc, ns, nd in ts_rows:
+        timeseries.setdefault(lga, []).append((_db._date_from_int(date_int), nc, ns, nd))
+
+    all_ts_dates = sorted({d for entries in timeseries.values() for d, _, _, _ in entries})
+
+    return {
+        "latest_date": latest_date,
+        "current": [(lga, nc, ns, nd) for lga, nc, ns, nd in current],
+        "ever_zero": ever_zero,
+        "timeseries": timeseries,
+        "all_ts_dates": all_ts_dates,
+        "n_current_zero": sum(1 for _, nc, _, _ in current if nc == 0),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Flask app factory
 # ---------------------------------------------------------------------------
 
@@ -747,6 +801,17 @@ def _create_app(
             ll_window=ll_window,
             ll_start=ll_start,
             ll_end=ll_end,
+        )
+
+    @app.route("/classification-health")
+    def classification_health():
+        data = _classification_health_data(conn)
+        return render_template(
+            "classification_health.html",
+            now=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            data=data,
+            summary=summary,
+            today=today,
         )
 
     @app.route("/healthz")

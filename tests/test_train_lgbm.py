@@ -40,7 +40,9 @@ def _synthetic_features_df(seed: int = 0) -> pd.DataFrame:
     n = len(all_dates)
     X = rng.normal(size=(n, len(FEATURE_COLUMNS)))
 
-    logits = 1.5 * X[:, 0] - 1.0 * X[:, 1] - 0.5
+    # Use strong coefficients so the model beats the baseline regardless of
+    # how many noise features are in FEATURE_COLUMNS.
+    logits = 3.0 * X[:, 0] - 2.0 * X[:, 1] - 0.5
     probs = 1.0 / (1.0 + np.exp(-logits))
     labels = (rng.uniform(size=n) < probs).astype(int)
 
