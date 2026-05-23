@@ -353,6 +353,37 @@ uv run python -m fuel_signal.feature_diagnostics --threshold 0.35
 
 Outputs three sections: (1) gain % and split count per feature sorted by gain; (2) FN−TP and FP−TN mean delta per feature sorted by |FN−TP|, showing where the model mis-ranks BUY vs WAIT rows; (3) TP/FP/TN/FN counts and predicted-BUY rate.
 
+## LOO ablation (feature contribution check)
+
+Measures whether dropping one or more features hurts, helps, or has no effect on val logloss. Fits LightGBM at multiple seeds with and without the dropped column(s), then reports mean ± std and a one-line verdict.
+
+```bash
+# Ablate a single feature (5-seed protocol)
+uv run python -m fuel_signal.loo_ablation \
+    --features-csv data/features.csv \
+    --drop station_minus_lga_mean_cents \
+    --seeds 1,7,42,99,2024
+
+# Ablate a group of features at once
+uv run python -m fuel_signal.loo_ablation \
+    --features-csv data/features.csv \
+    --drop lga_mean_cents \
+    --drop station_minus_lga_mean_cents \
+    --seeds 1,7,42,99,2024
+```
+
+`--drop` is repeatable. Omitting it entirely is an error (`nothing to ablate`). Each named column must appear in `FEATURE_COLUMNS` or the command exits with a clear error.
+
+**Verdict thresholds** (relative to baseline std across seeds):
+
+| Condition | Verdict |
+|---|---|
+| \|Δ\| < baseline_std | `within noise / redundant` |
+| Δ > 0, outside band | `feature contributes (starved)` |
+| Δ < 0, outside band | `feature harmful (unexpected)` |
+
+Δ = LOO mean − baseline mean; positive means removing the feature(s) raised logloss (feature was useful).
+
 ## Calibrating the model
 
 Check calibration quality and produce a calibrated model artifact. Works with any fitted model (logreg or LightGBM).
