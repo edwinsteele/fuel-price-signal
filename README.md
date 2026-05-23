@@ -60,6 +60,23 @@ uv run python -m fuel_signal.fill
 
 Rebuilds the `daily_prices` table by forward-filling gaps between observations. Required after `db` — analysis commands read from `daily_prices`, not from the raw observations.
 
+### 5. Classify stations (required before assembling features)
+
+Classifies each station per date as Competitive, Sticky, or Discount based on its 45-day median price premium relative to LGA peers. Must run after `fill` and before `features` — the LGA/brand mean feature joins rely on `station_class`.
+
+```bash
+# Single snapshot (today):
+uv run python -m fuel_signal.classify
+
+# Backfill from a start date (use this for first-time setup):
+uv run python -m fuel_signal.classify --start-date 2016-08-01
+
+# Backfill up to a specific end date:
+uv run python -m fuel_signal.classify --start-date 2016-08-01 --snapshot-date 2026-01-01
+```
+
+Writes `station_class` and `classification_summary` tables. Idempotent — re-running a date range is safe. The full end-to-end pipeline order is: `history` → `live` → `db` → `fill` → **`classify`** → `features` → `train_logreg` → `calibrate` → `score_phase2`.
+
 ## Inspecting the data
 
 Starts a local Flask workbench and opens it in your browser:
@@ -87,6 +104,10 @@ The workbench is a single GET-driven page — all state lives in the URL query s
 **Cycle state box** is always computed against the Sydney metro average (matches the CLI signal), regardless of what's plotted.
 
 **Group display** toggle (mean / individual stations / both) applies to `lga:` and `brand:` series on line and scatter charts.
+
+**Standalone pages:**
+- `/lead-lag` — lead/lag table showing how much earlier or later each series (LGA, brand, or station) reaches the Sydney metro trough, relative to a configurable reference series.
+- `/classification-health` — surfaces `classification_summary` per LGA: Competitive/Sticky/Discount counts, ever-zero LGAs (where no Competitive stations were found), and a 90-day competitive-count heatmap.
 
 ## Station lookup
 
@@ -228,7 +249,17 @@ uv run python -m fuel_signal.features --horizon 14 --threshold 5.0
 uv run python -m fuel_signal.features --output /tmp/features.csv
 ```
 
-Output includes all label columns (`station_code`, `price_date`, `today_price_cents`, `future_min_cents`, `label`) plus cycle features (`cycle_pct_through`, `cycle_days_since_peak`, `cycle_mean_length`, `cycle_last_min_cents`, `cycle_last_max_cents`, `cycle_peak_count`) and station-vs-aggregate features (`station_price_cents`, `station_minus_last_min_cents`, `station_minus_last_max_cents`, `station_minus_sydney_avg_cents`). Rows with insufficient history for cycle detection are excluded.
+Requires `classify` to have run first — the LGA/brand mean joins fail silently to NULL otherwise.
+
+Output includes all label columns (`station_code`, `price_date`, `today_price_cents`, `future_min_cents`, `label`) plus 14 feature columns:
+
+- **Cycle features:** `cycle_pct_through`, `cycle_days_since_peak`, `cycle_mean_length`, `cycle_last_min_cents`, `cycle_last_max_cents`, `cycle_peak_count`
+- **Station-vs-aggregate features:** `station_price_cents`, `station_minus_last_min_cents`, `station_minus_last_max_cents`, `station_minus_sydney_avg_cents`
+- **LGA/brand mean features (Phase 3):** `lga_mean_cents`, `station_minus_lga_mean_cents`, `brand_mean_cents`, `station_minus_brand_mean_cents`
+
+The four LGA/brand mean columns can be NaN when fewer than 3 non-Sticky stations are classified for that LGA or brand on a given date. Rows are kept rather than dropped — downstream training scripts must handle the NaN (e.g. with imputation or a NaN-tolerant model like LightGBM).
+
+Rows with insufficient history for cycle detection are excluded.
 
 ## Evaluation harness
 
@@ -275,6 +306,20 @@ uv run python -m fuel_signal.train_logreg \
 
 Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output prints train/val sizes and class balance, val log-loss / Brier, and the delta versus the constant-predictor baseline. The reliability plot uses 10 quantile bins with a `y=x` reference line; points below the diagonal indicate over-confidence, above indicate under-confidence.
 
+## Walk-forward cross-validation report
+
+Assesses whether any single validation window is an outlier by training the logreg baseline on each 90-day fold and reporting per-fold val logloss + BUY rate. Run this before committing to Optuna tuning.
+
+```bash
+# Default: 5-year minimum train window, 90-day folds, reads data/features.csv
+uv run python -m fuel_signal.cv_report
+
+# Custom fold geometry
+uv run python -m fuel_signal.cv_report --train-min-days 1825 --val-days 90 --step-days 90
+```
+
+Output is one line per fold (train/val date ranges, row counts, val logloss, baseline logloss, Δ) followed by a mean ± std summary across all folds.
+
 ## Training the LightGBM baseline (Phase 3a.1)
 
 Vanilla LightGBM on the **same 10 features** as Phase 2 — no new features, no tuning, `random_state=42`. No `StandardScaler` (trees are scale-invariant). This is the apples-to-apples model-class comparison. Does **not** write to `experiments/results.csv`.
@@ -292,6 +337,21 @@ uv run python -m fuel_signal.train_lgbm \
 ```
 
 **Phase 3a.1 val result** (2026-05-14, real DB): val logloss 0.3926 (baseline 0.6428, Δ −0.2501) vs logreg val logloss 0.4112. LGBM captures non-linearities logreg cannot.
+
+## Feature diagnostics (LightGBM)
+
+Prints feature importance, FN/FP mean-delta analysis, and an error-group summary against the canonical val split. Use this to understand which features drive misclassifications.
+
+```bash
+# Default: reads data/models/lgbm_calibrated.joblib and data/features.csv
+uv run python -m fuel_signal.feature_diagnostics
+
+# Custom model artifact or threshold
+uv run python -m fuel_signal.feature_diagnostics --model-path data/models/lgbm_calibrated.joblib
+uv run python -m fuel_signal.feature_diagnostics --threshold 0.35
+```
+
+Outputs three sections: (1) gain % and split count per feature sorted by gain; (2) FN−TP and FP−TN mean delta per feature sorted by |FN−TP|, showing where the model mis-ranks BUY vs WAIT rows; (3) TP/FP/TN/FN counts and predicted-BUY rate.
 
 ## Calibrating the model
 
