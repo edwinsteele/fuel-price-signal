@@ -38,6 +38,7 @@ data/**/*.png
 data/*.csv
 data/models/
 experiments/**/*.png
+experiments/shap/
 
 # Scratch planning docs — kept in the tree for stable paths, not committed
 PLAN_*.md
