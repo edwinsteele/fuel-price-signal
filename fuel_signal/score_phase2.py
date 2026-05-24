@@ -169,27 +169,58 @@ def threshold_sweep(
     return rows
 
 
+def _resolve_tau_adjustment(
+    calibration_method: str | None,
+    tau_adjustment: float | None,
+) -> float:
+    """Return the effective τ adjustment given model calibration and any explicit override.
+
+    Isotonic calibration produces a piecewise-constant probability surface (~162
+    unique values on a 124k-row test set). A fixed +0.05 step can cross a plateau
+    boundary and drop thousands of correctly-classified BUYs into WAIT in a single
+    step — the Phase 3b incident documented in memory project_threshold_policy_lesson.md.
+    For isotonic models the correct default is 0.0 (use val argmax directly).
+    For sigmoid or raw models, the original +0.05 bump remains appropriate.
+    An explicit tau_adjustment always takes precedence.
+    """
+    if tau_adjustment is not None:
+        return tau_adjustment
+    return 0.0 if calibration_method == "isotonic" else _TAU_STEP
+
+
 def pick_tau(
     sweep_rows: list[dict],
-    tau_adjustment: float = _TAU_STEP,
+    calibration_method: str | None = None,
+    tau_adjustment: float | None = None,
 ) -> float:
-    """Return the chosen τ: argmax(expected_cents_per_row) on val, adjusted upward.
+    """Return the chosen τ: argmax(expected_cents_per_row) on val, model-aware adjusted.
 
-    The +tau_adjustment step accounts for val's elevated BUY rate vs test (#34):
-    the cost-optimal τ on val would be too aggressive on test without this bump.
+    The adjustment accounts for val's elevated BUY rate vs test (#34). The default
+    adjustment depends on the model's calibration scheme:
+      - calibration_method == 'isotonic': default tau_adjustment = 0.0
+        Isotonic calibration is piecewise constant; a fixed step can jump a plateau
+        and discard thousands of correct BUYs. Use val argmax directly instead.
+        See memory project_threshold_policy_lesson.md for the Phase 3b diagnosis.
+      - sigmoid or raw (None): default tau_adjustment = +_TAU_STEP (0.05)
+        Original behaviour — smooth probability surface makes a fixed step safe.
+
+    An explicit tau_adjustment argument always overrides the model-aware default.
     Result is clamped to [_TAU_STEP, 1.0 - _TAU_STEP].
     """
     if not sweep_rows:
         raise ValueError("pick_tau() requires at least one sweep row.")
+    effective_adj = _resolve_tau_adjustment(calibration_method, tau_adjustment)
     best = max(sweep_rows, key=lambda r: r["expected_cents_per_row"])
-    adjusted = round(best["tau"] + tau_adjustment, 4)
+    adjusted = round(best["tau"] + effective_adj, 4)
     lo, hi = _TAU_STEP, 1.0 - _TAU_STEP
     return float(np.clip(adjusted, lo, hi))
 
 
-def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str]]:
-    """Load any saved model artifact and return (model_with_predict_proba, feature_columns).
+def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str], str | None]:
+    """Load any saved model artifact and return (model, feature_columns, calibration_method).
 
+    calibration_method is the string stored in the artifact (e.g. 'isotonic', 'sigmoid',
+    'raw') for calibrated artifacts, or None for raw pipeline artifacts.
     Handles both raw pipeline artifacts and calibrated artifacts produced by calibrate.py.
     Raises ValueError with an actionable message on unexpected artifact shapes.
     """
@@ -200,8 +231,9 @@ def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str]]:
         if missing:
             raise ValueError(f"Calibrated artifact missing required keys: {missing}")
         from fuel_signal.calibrate import _CalibratedPipeline
+        cal_method: str | None = loaded["calibration_method"]
         model = _CalibratedPipeline(
-            loaded["base_pipeline"], loaded["calibrator"], loaded["calibration_method"]
+            loaded["base_pipeline"], loaded["calibrator"], cal_method
         )
         feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
     elif isinstance(loaded, dict):
@@ -212,16 +244,18 @@ def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str]]:
             )
         model = loaded["pipeline"]
         feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
+        cal_method = None
     else:
         model = loaded
         feature_columns = FEATURE_COLUMNS
+        cal_method = None
 
     if not hasattr(model, "predict_proba"):
         raise ValueError(
             f"Loaded artifact ({type(model).__name__}) does not provide predict_proba(). "
             "Pass a fitted sklearn-compatible classifier or a calibrated pipeline artifact."
         )
-    return model, list(feature_columns)
+    return model, list(feature_columns), cal_method
 
 
 def score_test(
@@ -344,7 +378,24 @@ def _format_comparison(
     show_default=True,
     help="Experiment name written to results.csv (e.g. 'lgbm_cycle_features').",
 )
-def main(features_csv: str, model_path: str | None, model_name: str) -> None:
+@click.option(
+    "--tau-adjustment",
+    "tau_adjustment",
+    default=None,
+    type=float,
+    show_default=True,
+    help=(
+        "Override the τ adjustment applied to the val argmax. "
+        "Default is model-aware: 0.0 for isotonic-calibrated models, "
+        f"+{_TAU_STEP} for sigmoid or raw models."
+    ),
+)
+def main(
+    features_csv: str,
+    model_path: str | None,
+    model_name: str,
+    tau_adjustment: float | None,
+) -> None:
     """Threshold sweep on val, one-time test scoring, append to results.csv.
 
     Without --model-path: re-trains the logreg pipeline (Phase 2 mode).
@@ -377,7 +428,7 @@ def main(features_csv: str, model_path: str | None, model_name: str) -> None:
                 "Run calibrate.py (or train_lgbm.py) first."
             )
         click.echo(f"Loading pre-trained model from {model_path} …")
-        pipeline, feature_columns = load_model_artifact(artifact_path)
+        pipeline, feature_columns, calibration_method = load_model_artifact(artifact_path)
 
         missing_cols = [c for c in feature_columns if c not in df.columns]
         if missing_cols:
@@ -412,6 +463,7 @@ def main(features_csv: str, model_path: str | None, model_name: str) -> None:
         train_size = result["train_size"]
         val_size = result["val_size"]
         p_baseline = result["baseline_prior"]
+        calibration_method = None
 
     click.echo(f"  Train: {train_size:,} rows  (pos rate {train_positive_rate:.3f})")
     click.echo(f"  Val:   {val_size:,} rows  (pos rate {val_positive_rate:.3f})")
@@ -425,7 +477,8 @@ def main(features_csv: str, model_path: str | None, model_name: str) -> None:
     # Step 3: pick τ.
     _, _, test_df = _ev.split(df)
     test_label_rate = float(test_df["label"].mean())
-    chosen_tau = pick_tau(sweep)
+    chosen_tau = pick_tau(sweep, calibration_method=calibration_method, tau_adjustment=tau_adjustment)
+    effective_adj = _resolve_tau_adjustment(calibration_method, tau_adjustment)
     best_row = max(sweep, key=lambda r: r["expected_cents_per_row"])
     click.echo(f"\nChosen τ = {chosen_tau:.2f}")
     click.echo(
@@ -433,8 +486,9 @@ def main(features_csv: str, model_path: str | None, model_name: str) -> None:
         f" ({best_row['expected_cents_per_row']:.4f} c/row)"
     )
     click.echo(
-        f"  Adjusted +{_TAU_STEP:.2f} for val/test BUY-rate gap "
+        f"  Adjusted {effective_adj:+.2f} for val/test BUY-rate gap "
         f"({val_positive_rate:.3f} vs {test_label_rate:.3f})"
+        + (f"  [calibration={calibration_method}]" if calibration_method else "")
     )
 
     # Step 4: score test once at chosen τ.
@@ -466,7 +520,7 @@ def main(features_csv: str, model_path: str | None, model_name: str) -> None:
     # Step 6: log to results.csv.
     notes = (
         f"tau={chosen_tau:.2f}; "
-        f"criterion=max_expected_cents_val_adj+0.05; "
+        f"criterion=max_expected_cents_val_adj{effective_adj:+.2f}; "
         f"cost_model=TP+{_TP_REWARD_CENTS}c_FP-{_FP_COST_CENTS}c_FN-{_FN_COST_CENTS}c; "
         f"val_logloss={val_logloss:.4f}; "
         f"test_logloss={test_result['test_logloss']:.4f}; "
