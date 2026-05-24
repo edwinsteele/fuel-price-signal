@@ -39,6 +39,7 @@ data/*.csv
 data/models/
 experiments/**/*.png
 experiments/shap/
+experiments/shap_15feat/shap_values.npy
 
 # Scratch planning docs — kept in the tree for stable paths, not committed
 PLAN_*.md
