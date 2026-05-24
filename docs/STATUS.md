@@ -75,6 +75,32 @@ Phase 3 target: beat 190.35 c/L.
 - Separate longer-horizon model (~30/60/90 days)
 - Upstream commodity features dominate at this horizon
 
+## Model artifact paths (IMPORTANT)
+
+Models are written to fixed canonical paths. **Each Phase lock overwrites the previous Phase's artifact** — there is no per-phase suffix on the filename. Phase identification lives in `experiments/results.csv` (`name` column) and in commit history, not the filename.
+
+| Path | Writer | Currently (as of Phase 3c lock, 2026-05-24) |
+|------|--------|--------------------------------------------|
+| `data/models/lgbm.joblib` | `train_lgbm.py` | Phase 3c 15-feat raw |
+| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | Phase 3c 15-feat isotonic-calibrated |
+| `data/models/logreg.joblib` | `train_logreg.py` | Phase 2 10-feat raw |
+| `data/models/logreg_calibrated.joblib` | `calibrate.py` | Phase 2 10-feat (raw chosen over calibration) |
+
+To verify what's currently on disk before scoring:
+
+```python
+import joblib
+m = joblib.load("data/models/lgbm_calibrated.joblib")
+print(len(m["feature_columns"]), m["feature_columns"][-1])
+# 15 + ending in 'stickiness_score' → Phase 3c
+# 14 + ending in 'station_minus_brand_mean_cents' → Phase 3b
+# 10 + ending in 'station_minus_sydney_avg_cents' → Phase 3a
+```
+
+Reproducing an older lock requires `git checkout <commit>` (Phase 3b = pre-#127, commit `0ed9795`) followed by re-running train + calibrate. The joblib binaries are gitignored.
+
+Worker-run logs may reference different filenames (e.g. `lgbm_stickiness_calibrated.joblib`); those are worktree-local aliases and were never persisted on `main`.
+
 ## Key architectural notes
 
 - `station_code` primary key comes only from FuelCheck API live snapshot — `stations` table cannot be populated from historical CSVs alone.
