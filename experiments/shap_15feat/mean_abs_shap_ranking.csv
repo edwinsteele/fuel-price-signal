@@ -1,0 +1,16 @@
+feature,mean_abs_shap
+station_minus_last_max_cents,1.580230563963627
+station_minus_last_min_cents,1.4294497280043588
+cycle_mean_length,0.6840157125785645
+stickiness_score,0.511940058087925
+cycle_pct_through,0.36991445473789003
+station_minus_lga_mean_cents,0.3282139402061071
+station_minus_sydney_avg_cents,0.30029816320964936
+station_price_cents,0.2531930165046631
+cycle_days_since_peak,0.13730514935209284
+station_minus_brand_mean_cents,0.13701384928151336
+cycle_last_max_cents,0.06206950472264319
+cycle_last_min_cents,0.056771916600285674
+cycle_peak_count,0.05642476165459506
+brand_mean_cents,0.046604827656741794
+lga_mean_cents,0.015536962455924482
