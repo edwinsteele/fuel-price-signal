@@ -185,11 +185,18 @@ def _resolve_tau_adjustment(
     """
     if tau_adjustment is not None:
         return tau_adjustment
+    _KNOWN = {"isotonic", "sigmoid", "raw", None}
+    if calibration_method not in _KNOWN:
+        raise ValueError(
+            f"Unknown calibration_method {calibration_method!r}. "
+            f"Expected one of {sorted(str(v) for v in _KNOWN if v is not None) + [None]}."
+        )
     return 0.0 if calibration_method == "isotonic" else _TAU_STEP
 
 
 def pick_tau(
     sweep_rows: list[dict],
+    *,
     calibration_method: str | None = None,
     tau_adjustment: float | None = None,
 ) -> float:
@@ -383,7 +390,6 @@ def _format_comparison(
     "tau_adjustment",
     default=None,
     type=float,
-    show_default=True,
     help=(
         "Override the τ adjustment applied to the val argmax. "
         "Default is model-aware: 0.0 for isotonic-calibrated models, "
