@@ -661,6 +661,63 @@ def test_assembler_lga_mean_matches_compute_features(conn):
         assert abs(row["lga_mean_cents"] - per_row["lga_mean_cents"]) < 0.1
 
 
+# ---------------------------------------------------------------------------
+# stickiness_score feature
+# ---------------------------------------------------------------------------
+
+def test_stickiness_score_nan_when_no_classification(conn):
+    """stickiness_score is None when station has no station_class row for date."""
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    features = compute_features(conn, STATION_A, _DATE_D)
+    assert features is not None
+    assert features["stickiness_score"] is None
+
+
+def test_stickiness_score_value(conn):
+    """stickiness_score equals median_premium_decicents / 10 for a present (station, date)."""
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    _set_station_class(conn, STATION_A, _DATE_D, "Competitive", 150)  # 150 decicents = 15.0 cents
+    features = compute_features(conn, STATION_A, _DATE_D)
+    assert features is not None
+    assert abs(features["stickiness_score"] - 15.0) < 1e-9
+
+
+def test_stickiness_score_pit_safety(tmp_path):
+    """stickiness_score cannot read station_class rows where snapshot_date > target_date."""
+    conn = open_db(tmp_path / "pit.db")
+    create_schema(conn)
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+
+    future_date = _date_at_day(130)  # after _DATE_D (day 120)
+    _set_station_class(conn, STATION_A, future_date, "Sticky", 200)
+
+    features = compute_features(conn, STATION_A, _DATE_D)
+    assert features is not None
+    assert features["stickiness_score"] is None, (
+        "stickiness_score must be None at _DATE_D when only a future station_class row exists"
+    )
+    conn.close()
+
+
+def test_assembler_stickiness_score_matches_compute_features(conn):
+    """assemble_feature_rows stickiness_score matches compute_features for same row."""
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    _set_station_class(conn, STATION_A, _DATE_D, "Competitive", 120)  # 12.0 cents
+
+    per_row = compute_features(conn, STATION_A, _DATE_D)
+    assert per_row is not None
+    assert abs(per_row["stickiness_score"] - 12.0) < 1e-9
+
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+    matching = df[df["price_date"] == _DATE_D]
+    assert len(matching) == 1
+    assert abs(matching.iloc[0]["stickiness_score"] - 12.0) < 1e-9
+
+
 def test_assembler_brand_mean_matches_compute_features(conn):
     """assemble_feature_rows brand_mean_cents matches compute_features for same row.
 

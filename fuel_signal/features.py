@@ -63,6 +63,7 @@ FEATURE_COLUMNS: list[str] = [
     "station_minus_lga_mean_cents",
     "brand_mean_cents",
     "station_minus_brand_mean_cents",
+    "stickiness_score",
 ]
 
 
@@ -133,6 +134,24 @@ def _lga_mean_on_date(
     return row[0] / 10
 
 
+def _stickiness_score_on_date(
+    conn: sqlite3.Connection,
+    station_code: int,
+    date_d: str,
+) -> float | None:
+    """Return stickiness_score (cents) = station_class.median_premium_decicents / 10.
+
+    Returns None when no station_class row exists for (station_code, date_d).
+    PIT-safe: queries by exact snapshot_date, so future rows are never read.
+    """
+    row = conn.execute(
+        "SELECT median_premium_decicents FROM station_class"
+        " WHERE station_code = ? AND snapshot_date = ?",
+        (station_code, _date_to_int(date_d)),
+    ).fetchone()
+    return row[0] / 10 if row else None
+
+
 def _brand_mean_on_date(
     conn: sqlite3.Connection,
     date_d: str,
@@ -166,6 +185,7 @@ def _build_feature_dict(
     sydney_avg: float,
     lga_mean: float | None,
     brand_mean: float | None,
+    stickiness_score: float | None,
 ) -> dict[str, float | None]:
     return {
         "cycle_pct_through": state.pct_through_cycle,
@@ -182,6 +202,7 @@ def _build_feature_dict(
         "station_minus_lga_mean_cents": station_price - lga_mean if lga_mean is not None else None,
         "brand_mean_cents": brand_mean,
         "station_minus_brand_mean_cents": station_price - brand_mean if brand_mean is not None else None,
+        "stickiness_score": stickiness_score,
     }
 
 
@@ -237,8 +258,9 @@ def compute_features(
 
     lga_mean = _lga_mean_on_date(conn, date_d, lga, fid) if lga else None
     brand_mean = _brand_mean_on_date(conn, date_d, brand, fid) if brand else None
+    stickiness_score = _stickiness_score_on_date(conn, station_code, date_d)
 
-    return _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean)
+    return _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean, stickiness_score)
 
 
 def assemble_feature_rows(
@@ -371,6 +393,20 @@ def assemble_feature_rows(
         )
     }
 
+    # Cache 7: stickiness_score (cents) by (station_code, date_iso).
+    # Reads median_premium_decicents from station_class for each (station, date)
+    # pair in the label set. Absent pairs → .get() returns None (NaN in DataFrame).
+    stickiness_by_key: dict[tuple[int, str], float] = {
+        (sc, _date_from_int(date_int)): decicents / 10
+        for sc, date_int, decicents in conn.execute(
+            "SELECT station_code, snapshot_date, median_premium_decicents"
+            " FROM station_class"
+            f" WHERE station_code IN ({_sc_ph})"
+            f"   AND snapshot_date IN ({_dt_ph})",
+            [*label_station_codes, *label_date_ints],
+        )
+    }
+
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
     # on station_price / sydney_avg are upstream bugs, not data conditions.
@@ -389,7 +425,9 @@ def assemble_feature_rows(
         lga, brand = station_info_by_code.get(sc, (None, None))
         lga_mean = lga_mean_by_key.get((date_d, lga)) if lga else None
         brand_mean = brand_mean_by_key.get((date_d, brand)) if brand else None
-        records.append({**row_dict, **_build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean)})
+        stickiness_score = stickiness_by_key.get((sc, date_d))
+        feature_dict = _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean, stickiness_score)
+        records.append({**row_dict, **feature_dict})
 
     if not records:
         return pd.DataFrame(columns=all_cols)
