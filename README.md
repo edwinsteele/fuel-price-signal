@@ -251,13 +251,14 @@ uv run python -m fuel_signal.features --output /tmp/features.csv
 
 Requires `classify` to have run first — the LGA/brand mean joins fail silently to NULL otherwise.
 
-Output includes all label columns (`station_code`, `price_date`, `today_price_cents`, `future_min_cents`, `label`) plus 14 feature columns:
+Output includes all label columns (`station_code`, `price_date`, `today_price_cents`, `future_min_cents`, `label`) plus 15 feature columns:
 
 - **Cycle features:** `cycle_pct_through`, `cycle_days_since_peak`, `cycle_mean_length`, `cycle_last_min_cents`, `cycle_last_max_cents`, `cycle_peak_count`
 - **Station-vs-aggregate features:** `station_price_cents`, `station_minus_last_min_cents`, `station_minus_last_max_cents`, `station_minus_sydney_avg_cents`
 - **LGA/brand mean features (Phase 3):** `lga_mean_cents`, `station_minus_lga_mean_cents`, `brand_mean_cents`, `station_minus_brand_mean_cents`
+- **Station identity features:** `stickiness_score` — 45-day median of `station_price − LGA-Competitive-cluster median` (cents), sourced from `station_class.median_premium_decicents`. Provides a dedicated channel for the persistent-price-identity signal. Sticky stations receive the largest scores. NaN when no `station_class` row exists for that (station, date) pair.
 
-The four LGA/brand mean columns can be NaN when fewer than 3 non-Sticky stations are classified for that LGA or brand on a given date. Rows are kept rather than dropped — downstream training scripts must handle the NaN (e.g. with imputation or a NaN-tolerant model like LightGBM).
+The `stickiness_score` and the four LGA/brand mean columns can be NaN when `station_class` data is absent for that (station, date) pair. Rows are kept rather than dropped — downstream training scripts must handle the NaN (e.g. with imputation or a NaN-tolerant model like LightGBM).
 
 Rows with insufficient history for cycle detection are excluded.
 
