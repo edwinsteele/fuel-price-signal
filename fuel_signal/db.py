@@ -9,6 +9,8 @@ import sqlite3
 import click
 
 from fuel_signal.config import KNOWN_DUPLICATE_STATION_CODES
+from fuel_signal.dates import date_from_int as _date_from_int
+from fuel_signal.dates import date_to_int as _date_to_int
 from fuel_signal.postcode_council import SYDNEY_METRO_POSTCODES, primary_council
 
 logger = logging.getLogger(__name__)
@@ -169,16 +171,6 @@ CREATE INDEX IF NOT EXISTS lga_leadership_snapshot ON lga_leadership(snapshot_da
 # ---------------------------------------------------------------------------
 # Storage format helpers
 # ---------------------------------------------------------------------------
-
-def _date_to_int(s: str) -> int:
-    """'2024-01-15' → 20240115"""
-    return int(s[:10].replace("-", ""))
-
-
-def _date_from_int(v: int) -> str:
-    """20240115 → '2024-01-15'"""
-    s = str(v)
-    return f"{s[:4]}-{s[4:6]}-{s[6:]}"
 
 
 def _ensure_fuel_types(conn: sqlite3.Connection, codes: set[str]) -> dict[str, int]:

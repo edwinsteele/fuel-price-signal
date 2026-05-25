@@ -25,13 +25,14 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
-from datetime import date as _date
 
 import click
 import pandas as pd
 
 from fuel_signal import db as _db
 from fuel_signal.cycle import CycleDetector, CycleState
+from fuel_signal.dates import date_from_int as _date_from_int
+from fuel_signal.dates import date_to_int as _date_to_int
 from fuel_signal.labels import assemble_training_rows
 from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
@@ -79,18 +80,6 @@ FEATURE_COLUMNS: list[str] = [
 LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
 
 
-def _date_to_int(s: str) -> int:
-    return int(s[:10].replace("-", ""))
-
-
-def _date_from_int(v: int) -> str:
-    s = str(v)
-    return f"{s[:4]}-{s[4:6]}-{s[6:]}"
-
-
-def _int_to_date(v: int) -> _date:
-    s = str(v)
-    return _date(int(s[:4]), int(s[4:6]), int(s[6:]))
 
 
 def _station_price_on_date(
