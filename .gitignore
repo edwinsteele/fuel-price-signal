@@ -40,6 +40,8 @@ data/models/
 experiments/**/*.png
 experiments/shap/
 experiments/shap_15feat/shap_values.npy
+experiments/trough_weakness/
+experiments/lga_lead_lag/
 
 # Scratch planning docs — kept in the tree for stable paths, not committed
 PLAN_*.md
