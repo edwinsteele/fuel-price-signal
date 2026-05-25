@@ -15,13 +15,16 @@ from fuel_signal.db import (
 )
 from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
+    LGA_LEADERSHIP_EXCLUSIONS,
     build_lga_trough_lookups,
+    compute_pit_strict_days_since_trough,
     detect_trough_events,
     lga_feature_columns,
     lga_slug,
     score_leadership_range,
     score_leadership_snapshot,
 )
+from fuel_signal.postcode_council import SYDNEY_METRO_COUNCILS
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -285,3 +288,102 @@ def test_build_lga_trough_parramatta_leads_penrith(conn):
     assert 0 < median_lead <= lead_days + 10, (
         f"Median Penrith lag {median_lead}d outside expected range (0, {lead_days + 10}]"
     )
+
+
+# ---------------------------------------------------------------------------
+# Exclusion mechanism — Central Coast scoped out of leadership only
+# ---------------------------------------------------------------------------
+
+def test_excluded_lgas_missing_from_feature_schema():
+    """LGA_LEADERSHIP_EXCLUSIONS members must not appear in the feature schema."""
+    assert "Central Coast" in LGA_LEADERSHIP_EXCLUSIONS
+    assert "Central Coast" in SYDNEY_METRO_COUNCILS
+    assert "Central Coast" not in LGA_FEATURE_COUNCILS
+    # Schema size must match SYDNEY_METRO_COUNCILS minus exclusions
+    assert len(LGA_FEATURE_COUNCILS) == len(SYDNEY_METRO_COUNCILS) - len(LGA_LEADERSHIP_EXCLUSIONS)
+
+
+def test_excluded_lga_absent_from_scoring(conn):
+    """Excluded LGAs must not produce a leadership row.
+
+    Anchor-side exclusion is the same mechanism (_load_lga_sums drops excluded
+    rows via NOT IN), so excluded LGAs also can't contribute to other LGAs'
+    rest-of-Sydney anchor; this test doesn't separately assert that because
+    a 2-LGA fixture has no surviving non-excluded LGA whose anchor could
+    differ. The SQL path is shared, so the absence-from-scoring assertion
+    indirectly covers absence-from-anchor."""
+    # Patch the exclusion set to include 'Penrith' so we can use the existing fixture.
+    import fuel_signal.lga_leadership as lga_mod
+    original = lga_mod.LGA_LEADERSHIP_EXCLUSIONS
+    lga_mod.LGA_LEADERSHIP_EXCLUSIONS = frozenset({"Penrith"})
+    try:
+        _build_two_lga_db(conn, lead_days=5)
+        snapshot = "2022-04-01"
+        n = score_leadership_snapshot(conn, snapshot)
+        # Only Parramatta should be scored. Penrith excluded.
+        assert n == 1
+        board = get_lga_leadership_board(conn, snapshot)
+        lgas = {r[0] for r in board}
+        assert "Parramatta" in lgas
+        assert "Penrith" not in lgas
+    finally:
+        lga_mod.LGA_LEADERSHIP_EXCLUSIONS = original
+
+
+# ---------------------------------------------------------------------------
+# PIT-strict days_since_trough — adding future prices must not change the past
+# ---------------------------------------------------------------------------
+
+def test_pit_strict_days_since_immune_to_future_data(tmp_path):
+    """For a fixed query date d, compute_pit_strict_days_since_trough must
+    return the same value whether the DB ends at d or extends well past d.
+
+    This is the PIT contract: the feature value at d depends only on prices ≤ d.
+    """
+    from fuel_signal.db import open_db as _open
+
+    # Build a synthetic 800-day cosine cycle for Parramatta (in LGA_FEATURE_COUNCILS).
+    start = date(2020, 1, 1)
+    n_days_full = 800
+    n_days_truncated = 400  # query date sits well inside this window
+    query_date = (start + timedelta(days=350)).isoformat()
+    t_full = np.arange(n_days_full, dtype=float)
+    prices_full = 150.0 + 10.0 * np.cos(2 * np.pi * t_full / 45)
+
+    def _populate(conn, n_days: int) -> None:
+        for code in (1000, 1001, 1002):
+            upsert_stations(conn, [_station(code, PC_PARRAMATTA)])
+            _seed_daily_prices(conn, code, start, list(prices_full[:n_days]))
+            _seed_station_class(conn, code, start, n_days)
+
+    db_full = _open(tmp_path / "full.db")
+    create_schema(db_full)
+    _populate(db_full, n_days_full)
+
+    db_truncated = _open(tmp_path / "trunc.db")
+    create_schema(db_truncated)
+    _populate(db_truncated, n_days_truncated)
+
+    full = compute_pit_strict_days_since_trough(db_full, [query_date])
+    trunc = compute_pit_strict_days_since_trough(db_truncated, [query_date])
+
+    db_full.close()
+    db_truncated.close()
+
+    key = (query_date, "Parramatta")
+    assert key in full and key in trunc
+    assert full[key] == trunc[key], (
+        f"days_since drift: full-db={full[key]}, truncated-db={trunc[key]} — "
+        f"future data leaked into past detection"
+    )
+
+
+def test_pit_strict_days_since_returns_none_when_too_early(conn):
+    """Before enough history accumulates for trough detection, value must be None."""
+    _build_two_lga_db(conn, lead_days=5)
+    # Day 10 is too early — smoothing window needs at least 14 days of data.
+    early_date = "2020-01-10"
+    result = compute_pit_strict_days_since_trough(conn, [early_date])
+    key = (early_date, "Parramatta")
+    assert key in result
+    assert result[key] is None
