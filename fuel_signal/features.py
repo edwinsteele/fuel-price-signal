@@ -25,13 +25,21 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
+from datetime import date as _date
 
 import click
+import numpy as np
 import pandas as pd
 
 from fuel_signal import db as _db
 from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.labels import assemble_training_rows
+from fuel_signal.lga_leadership import (
+    LGA_FEATURE_COUNCILS,
+    build_lga_trough_lookups,
+    lga_feature_columns,
+    lga_slug,
+)
 
 # Minimum label rows a station must have to be included in the training dataset.
 # Roughly one year of daily observations. Stations below this threshold are
@@ -47,7 +55,7 @@ MIN_TRAINING_ROWS_PER_STATION: int = 365
 #   20133 — Metro Condell Park West: median 143.7c, positive rate 0.72
 EXCLUDED_STATION_CODES: frozenset[int] = frozenset({20133, 20528})
 
-# Canonical ordered list of feature column names.
+# Canonical ordered list of feature column names for the current trained model.
 FEATURE_COLUMNS: list[str] = [
     "cycle_pct_through",
     "cycle_days_since_peak",
@@ -66,6 +74,11 @@ FEATURE_COLUMNS: list[str] = [
     "stickiness_score",
 ]
 
+# Phase 4 LGA trough features — separate from FEATURE_COLUMNS so the existing
+# trained model contract is not broken until a Phase 4 retrain is complete.
+# Compose with FEATURE_COLUMNS when training / evaluating the Phase 4 model.
+LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
+
 
 def _date_to_int(s: str) -> int:
     return int(s[:10].replace("-", ""))
@@ -74,6 +87,11 @@ def _date_to_int(s: str) -> int:
 def _date_from_int(v: int) -> str:
     s = str(v)
     return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
+
+def _int_to_date(v: int) -> _date:
+    s = str(v)
+    return _date(int(s[:4]), int(s[4:6]), int(s[6:]))
 
 
 def _station_price_on_date(
@@ -294,7 +312,7 @@ def assemble_feature_rows(
         percentile_pct=percentile_pct,
         station_codes=station_codes,
     )
-    all_cols = list(label_df.columns) + FEATURE_COLUMNS
+    all_cols = list(label_df.columns) + FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
 
@@ -407,12 +425,38 @@ def assemble_feature_rows(
         )
     }
 
+    # Cache 8: per-LGA trough-entry date lookup → days_since_trough_entry_<lga>.
+    # build_lga_trough_lookups runs trough detection over the full price history;
+    # for each unique label date we pre-compute the days-since for every LGA so
+    # the inner row loop is a plain dict.get() rather than a binary search.
+    _trough_lookups = build_lga_trough_lookups(conn)
+    label_date_strs: list[str] = list(label_df["price_date"].unique())
+    # Precompute date conversions once per unique label date — the nested loop
+    # below runs 36 LGAs × ~4000 dates, so avoiding repeated parsing matters.
+    _ld_ints: dict[str, int] = {d: _date_to_int(d) for d in label_date_strs}
+    _ld_objs: dict[str, _date] = {d: _int_to_date(_ld_ints[d]) for d in label_date_strs}
+
+    lga_days_since_by_key: dict[tuple[str, str], int | None] = {}
+    for _lga in LGA_FEATURE_COUNCILS:
+        _trough_ints = _trough_lookups.get(_lga, np.array([], dtype=int))
+        for _d_str in label_date_strs:
+            if len(_trough_ints) == 0:
+                lga_days_since_by_key[(_d_str, _lga)] = None
+            else:
+                _pos = int(np.searchsorted(_trough_ints, _ld_ints[_d_str], side="right")) - 1
+                if _pos < 0:
+                    lga_days_since_by_key[(_d_str, _lga)] = None
+                else:
+                    lga_days_since_by_key[(_d_str, _lga)] = (
+                        _ld_objs[_d_str] - _int_to_date(int(_trough_ints[_pos]))
+                    ).days
+
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
     # on station_price / sydney_avg are upstream bugs, not data conditions.
     # Letting dict[key] raise KeyError surfaces them rather than silently
     # dropping rows the per-row path would have kept.
-    # lga_mean / brand_mean are legitimately absent (no classification) → .get()
+    # lga_mean / brand_mean / trough features are legitimately absent → .get()
     records = []
     for row_dict in label_df.to_dict("records"):
         date_d: str = row_dict["price_date"]
@@ -427,6 +471,10 @@ def assemble_feature_rows(
         brand_mean = brand_mean_by_key.get((date_d, brand)) if brand else None
         stickiness_score = stickiness_by_key.get((sc, date_d))
         feature_dict = _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean, stickiness_score)
+        for _lga in LGA_FEATURE_COUNCILS:
+            feature_dict[f"days_since_trough_entry_{lga_slug(_lga)}"] = (
+                lga_days_since_by_key.get((date_d, _lga))
+            )
         records.append({**row_dict, **feature_dict})
 
     if not records:
