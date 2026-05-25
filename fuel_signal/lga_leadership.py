@@ -319,7 +319,7 @@ def score_leadership_snapshot(
         trough_median = float(np.median(leads))
         if len(leads) >= 2:
             std = float(np.std(leads))
-            trough_consistency: float | None = (1.0 / std) if std > 0 else float("inf")
+            trough_consistency: float | None = (1.0 / std) if std > 0 else None
         else:
             trough_consistency = None
 

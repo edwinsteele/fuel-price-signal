@@ -219,8 +219,8 @@ def test_score_leadership_parramatta_leads(conn):
 def test_score_leadership_range(conn):
     _build_two_lga_db(conn)
     n = score_leadership_range(conn, "2022-01-01", "2022-01-22", step_days=7)
-    # Three snapshots: Jan 1, Jan 8, Jan 15 (Jan 22 is included too)
-    assert n >= 6  # at least 2 LGAs × 3 snapshots
+    # Four snapshots: Jan 1, Jan 8, Jan 15, Jan 22 (end_date inclusive)
+    assert n >= 8  # at least 2 LGAs × 4 snapshots
 
 
 def test_latest_lga_leadership_date(conn):

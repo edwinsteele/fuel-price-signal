@@ -55,8 +55,7 @@ MIN_TRAINING_ROWS_PER_STATION: int = 365
 #   20133 — Metro Condell Park West: median 143.7c, positive rate 0.72
 EXCLUDED_STATION_CODES: frozenset[int] = frozenset({20133, 20528})
 
-# Canonical ordered list of feature column names.
-# Phase 4: 15 existing + ~36 days_since_trough_entry_<lga> columns.
+# Canonical ordered list of feature column names for the current trained model.
 FEATURE_COLUMNS: list[str] = [
     "cycle_pct_through",
     "cycle_days_since_peak",
@@ -73,8 +72,12 @@ FEATURE_COLUMNS: list[str] = [
     "brand_mean_cents",
     "station_minus_brand_mean_cents",
     "stickiness_score",
-    *lga_feature_columns(),
 ]
+
+# Phase 4 LGA trough features — separate from FEATURE_COLUMNS so the existing
+# trained model contract is not broken until a Phase 4 retrain is complete.
+# Compose with FEATURE_COLUMNS when training / evaluating the Phase 4 model.
+LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
 
 
 def _date_to_int(s: str) -> int:
@@ -275,12 +278,7 @@ def compute_features(
     brand_mean = _brand_mean_on_date(conn, date_d, brand, fid) if brand else None
     stickiness_score = _stickiness_score_on_date(conn, station_code, date_d)
 
-    feat = _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean, stickiness_score)
-    # LGA trough features require pre-built lookups (expensive to build per call).
-    # Single-row path returns None for all LGA columns; use assemble_feature_rows for training.
-    for _col in lga_feature_columns():
-        feat[_col] = None
-    return feat
+    return _build_feature_dict(state, station_price, sydney_avg, lga_mean, brand_mean, stickiness_score)
 
 
 def assemble_feature_rows(
@@ -314,7 +312,7 @@ def assemble_feature_rows(
         percentile_pct=percentile_pct,
         station_codes=station_codes,
     )
-    all_cols = list(label_df.columns) + FEATURE_COLUMNS
+    all_cols = list(label_df.columns) + FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
 
