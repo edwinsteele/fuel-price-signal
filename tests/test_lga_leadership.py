@@ -15,6 +15,7 @@ from fuel_signal.db import (
 )
 from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
+    LGA_LEADERSHIP_EXCLUSIONS,
     build_lga_trough_lookups,
     detect_trough_events,
     lga_feature_columns,
@@ -22,6 +23,7 @@ from fuel_signal.lga_leadership import (
     score_leadership_range,
     score_leadership_snapshot,
 )
+from fuel_signal.postcode_council import SYDNEY_METRO_COUNCILS
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -285,3 +287,37 @@ def test_build_lga_trough_parramatta_leads_penrith(conn):
     assert 0 < median_lead <= lead_days + 10, (
         f"Median Penrith lag {median_lead}d outside expected range (0, {lead_days + 10}]"
     )
+
+
+# ---------------------------------------------------------------------------
+# Exclusion mechanism — Central Coast scoped out of leadership only
+# ---------------------------------------------------------------------------
+
+def test_excluded_lgas_missing_from_feature_schema():
+    """LGA_LEADERSHIP_EXCLUSIONS members must not appear in the feature schema."""
+    assert "Central Coast" in LGA_LEADERSHIP_EXCLUSIONS
+    assert "Central Coast" in SYDNEY_METRO_COUNCILS
+    assert "Central Coast" not in LGA_FEATURE_COUNCILS
+    # Schema size must match SYDNEY_METRO_COUNCILS minus exclusions
+    assert len(LGA_FEATURE_COUNCILS) == len(SYDNEY_METRO_COUNCILS) - len(LGA_LEADERSHIP_EXCLUSIONS)
+
+
+def test_excluded_lga_not_scored_and_not_in_anchor(conn):
+    """Stations in an excluded LGA must not produce a leadership row and must not
+    contribute to other LGAs' rest-of-Sydney anchor."""
+    # Patch the exclusion set to include 'Penrith' so we can use the existing fixture.
+    import fuel_signal.lga_leadership as lga_mod
+    original = lga_mod.LGA_LEADERSHIP_EXCLUSIONS
+    lga_mod.LGA_LEADERSHIP_EXCLUSIONS = frozenset({"Penrith"})
+    try:
+        _build_two_lga_db(conn, lead_days=5)
+        snapshot = "2022-04-01"
+        n = score_leadership_snapshot(conn, snapshot)
+        # Only Parramatta should be scored. Penrith excluded.
+        assert n == 1
+        board = get_lga_leadership_board(conn, snapshot)
+        lgas = {r[0] for r in board}
+        assert "Parramatta" in lgas
+        assert "Penrith" not in lgas
+    finally:
+        lga_mod.LGA_LEADERSHIP_EXCLUSIONS = original
