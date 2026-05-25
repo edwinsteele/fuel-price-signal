@@ -149,6 +149,20 @@ CREATE TABLE IF NOT EXISTS classification_summary (
     n_discount    INTEGER NOT NULL,
     PRIMARY KEY (snapshot_date, lga)
 );
+
+CREATE TABLE IF NOT EXISTS lga_leadership (
+    lga                     TEXT    NOT NULL,
+    snapshot_date           INTEGER NOT NULL,   -- YYYYMMDD; scores valid as of this date
+    trough_lead_median_days REAL,               -- NULL when no matched events
+    trough_lead_consistency REAL,               -- 1/std; NULL when fewer than 2 matched events
+    trough_match_fraction   REAL    NOT NULL,
+    peak_lead_median_days   REAL,               -- v2; NULL in Phase 4
+    peak_lead_consistency   REAL,               -- v2; NULL in Phase 4
+    peak_match_fraction     REAL,               -- v2; NULL in Phase 4
+    n_events_in_window      INTEGER NOT NULL,   -- LGA trough events detected in window
+    PRIMARY KEY (lga, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS lga_leadership_snapshot ON lga_leadership(snapshot_date);
 """
 
 
@@ -1005,6 +1019,67 @@ def latest_station_class_date(conn: sqlite3.Connection) -> str | None:
     """Return the most recent snapshot_date (YYYY-MM-DD) in station_class, or None."""
     row = conn.execute("SELECT MAX(snapshot_date) FROM station_class").fetchone()
     return _date_from_int(row[0]) if row and row[0] else None
+
+
+# ---------------------------------------------------------------------------
+# LGA leadership helpers
+# ---------------------------------------------------------------------------
+
+def upsert_lga_leadership_rows(
+    conn: sqlite3.Connection,
+    rows: list[tuple],
+) -> None:
+    """Insert/replace lga_leadership rows.
+
+    rows: list of 9-tuples (lga, snapshot_date YYYY-MM-DD,
+          trough_lead_median_days, trough_lead_consistency, trough_match_fraction,
+          peak_lead_median_days, peak_lead_consistency, peak_match_fraction,
+          n_events_in_window).
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR REPLACE INTO lga_leadership"
+        " (lga, snapshot_date, trough_lead_median_days, trough_lead_consistency,"
+        "  trough_match_fraction, peak_lead_median_days, peak_lead_consistency,"
+        "  peak_match_fraction, n_events_in_window)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(r[0], _date_to_int(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in rows],
+    )
+
+
+def delete_lga_leadership_for_date(conn: sqlite3.Connection, snapshot_date: str) -> int:
+    """Remove all lga_leadership rows for snapshot_date. Returns rows deleted."""
+    cur = conn.execute(
+        "DELETE FROM lga_leadership WHERE snapshot_date = ?",
+        (_date_to_int(snapshot_date),),
+    )
+    return cur.rowcount or 0
+
+
+def latest_lga_leadership_date(conn: sqlite3.Connection) -> str | None:
+    """Return the most recent snapshot_date (YYYY-MM-DD) in lga_leadership, or None."""
+    row = conn.execute("SELECT MAX(snapshot_date) FROM lga_leadership").fetchone()
+    return _date_from_int(row[0]) if row and row[0] else None
+
+
+def get_lga_leadership_board(
+    conn: sqlite3.Connection,
+    snapshot_date: str,
+) -> list[tuple]:
+    """Return leadership rows for snapshot_date, sorted by trough_lead_consistency desc.
+
+    Returns list of (lga, trough_lead_median_days, trough_lead_consistency,
+    trough_match_fraction, n_events_in_window).
+    """
+    rows = conn.execute(
+        "SELECT lga, trough_lead_median_days, trough_lead_consistency,"
+        "       trough_match_fraction, n_events_in_window"
+        " FROM lga_leadership WHERE snapshot_date = ?"
+        " ORDER BY trough_lead_consistency DESC NULLS LAST",
+        (_date_to_int(snapshot_date),),
+    ).fetchall()
+    return list(rows)
 
 
 # ---------------------------------------------------------------------------
