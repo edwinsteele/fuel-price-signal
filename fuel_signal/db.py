@@ -1076,7 +1076,7 @@ def get_lga_leadership_board(
         "SELECT lga, trough_lead_median_days, trough_lead_consistency,"
         "       trough_match_fraction, n_events_in_window"
         " FROM lga_leadership WHERE snapshot_date = ?"
-        " ORDER BY trough_lead_consistency DESC NULLS LAST",
+        " ORDER BY (trough_lead_consistency IS NULL), trough_lead_consistency DESC",
         (_date_to_int(snapshot_date),),
     ).fetchall()
     return list(rows)

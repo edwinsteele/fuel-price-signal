@@ -433,21 +433,24 @@ def assemble_feature_rows(
     # the inner row loop is a plain dict.get() rather than a binary search.
     _trough_lookups = build_lga_trough_lookups(conn)
     label_date_strs: list[str] = list(label_df["price_date"].unique())
+    # Precompute date conversions once per unique label date — the nested loop
+    # below runs 36 LGAs × ~4000 dates, so avoiding repeated parsing matters.
+    _ld_ints: dict[str, int] = {d: _date_to_int(d) for d in label_date_strs}
+    _ld_objs: dict[str, _date] = {d: _int_to_date(_ld_ints[d]) for d in label_date_strs}
+
     lga_days_since_by_key: dict[tuple[str, str], int | None] = {}
     for _lga in LGA_FEATURE_COUNCILS:
         _trough_ints = _trough_lookups.get(_lga, np.array([], dtype=int))
         for _d_str in label_date_strs:
-            _d_int = _date_to_int(_d_str)
             if len(_trough_ints) == 0:
                 lga_days_since_by_key[(_d_str, _lga)] = None
             else:
-                _pos = int(np.searchsorted(_trough_ints, _d_int, side="right")) - 1
+                _pos = int(np.searchsorted(_trough_ints, _ld_ints[_d_str], side="right")) - 1
                 if _pos < 0:
                     lga_days_since_by_key[(_d_str, _lga)] = None
                 else:
-                    _last = int(_trough_ints[_pos])
                     lga_days_since_by_key[(_d_str, _lga)] = (
-                        _int_to_date(_d_int) - _int_to_date(_last)
+                        _ld_objs[_d_str] - _int_to_date(int(_trough_ints[_pos]))
                     ).days
 
     # Every (station_code, price_date) in label_df came from daily_prices, and

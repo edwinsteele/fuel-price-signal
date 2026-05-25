@@ -262,15 +262,26 @@ def test_build_lga_trough_lookups_empty_db(conn):
 
 
 def test_build_lga_trough_parramatta_leads_penrith(conn):
-    """With lead_days=7, Parramatta troughs should precede Penrith troughs."""
-    _build_two_lga_db(conn, lead_days=7)
+    """With lead_days=7, Parramatta troughs should precede Penrith troughs by ~7 days."""
+    from fuel_signal.lga_leadership import _int_to_date
+
+    lead_days = 7
+    _build_two_lga_db(conn, lead_days=lead_days)
     lookups = build_lga_trough_lookups(conn)
     p_arr = lookups["Parramatta"]
     pe_arr = lookups["Penrith"]
     assert len(p_arr) >= 2 and len(pe_arr) >= 2
-    # For each Parramatta trough, there should be a Penrith trough ~7 days later
+
+    # Use proper date arithmetic (YYYYMMDD integer subtraction is wrong cross-month).
+    pe_dates = [_int_to_date(int(t)) for t in pe_arr]
+    pair_leads = []
     for p_t in p_arr:
-        diffs = [int(pe_t) - int(p_t) for pe_t in pe_arr]
-        nearest = min(diffs, key=abs)
-        # Penrith is behind, so nearest diff should be positive (Penrith fires after)
-        assert nearest > 0 or abs(nearest) <= 10  # loose tolerance for snap + cycle variance
+        p_date = _int_to_date(int(p_t))
+        diffs = [(pe_d - p_date).days for pe_d in pe_dates]
+        pair_leads.append(min(diffs, key=abs))
+
+    median_lead = sorted(pair_leads)[len(pair_leads) // 2]
+    # Penrith fires after Parramatta (positive), within a generous tolerance of lead_days
+    assert 0 < median_lead <= lead_days + 10, (
+        f"Median Penrith lag {median_lead}d outside expected range (0, {lead_days + 10}]"
+    )
