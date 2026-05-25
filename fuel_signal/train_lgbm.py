@@ -1,9 +1,10 @@
-"""LightGBM classifier — Phase 3a numeric-only baseline.
+"""LightGBM classifier — numeric-only.
 
-Trains on FEATURE_COLUMNS (10 numeric features). No categorical features.
-random_state=42, no hyperparameter tuning. Test split is intentionally
-left untouched — reserved for score_phase2.py once calibration + threshold
-is locked.
+Default feature set is FEATURE_COLUMNS (15 cents/cycle columns, Phase 3c).
+Pass --include-lga-features to also train on LGA_FEATURE_COLUMNS
+(days_since_trough_entry_<lga>, Phase 4). random_state=42, no hyperparameter
+tuning. Test split is intentionally left untouched — reserved for
+score_phase2.py once calibration + threshold is locked.
 
 ## Reliability plot
 
@@ -140,7 +141,7 @@ def _format_results(result: dict) -> str:
     help="Append Phase 4 LGA_FEATURE_COLUMNS (days_since_trough_entry_<lga>) to the training feature set.",
 )
 def main(features_csv: str, model_out: str, reliability_out: str, include_lga_features: bool) -> None:
-    """Train LightGBM on numeric features (Phase 3a baseline).
+    """Train LightGBM on numeric features.
 
     No hyperparameter tuning, random_state=42. Test is intentionally left
     untouched. This command does not append to experiments/results.csv.
@@ -164,6 +165,20 @@ def main(features_csv: str, model_out: str, reliability_out: str, include_lga_fe
             f"Features CSV is missing required columns: {missing}. "
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
+
+    # If the CSV carries LGA columns but the flag wasn't passed, the user is
+    # probably running Phase 3c by accident on a Phase 4 features.csv. Warn
+    # loudly — this exact mismatch produced byte-identical val log-loss in
+    # the Phase 4 retrain and cost a debugging round-trip.
+    if not include_lga_features:
+        present_lga = [c for c in LGA_FEATURE_COLUMNS if c in df.columns]
+        if present_lga:
+            click.echo(
+                f"WARNING: features CSV contains {len(present_lga)} LGA columns "
+                "but --include-lga-features was not passed. Training on the "
+                "15-feat Phase 3c schema; LGA columns will be ignored.",
+                err=True,
+            )
 
     schema_label = "Phase 4" if include_lga_features else "Phase 3c"
     click.echo(f"Training on {len(feature_columns)} features ({schema_label} schema).")
