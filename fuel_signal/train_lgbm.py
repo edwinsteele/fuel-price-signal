@@ -25,7 +25,7 @@ import pandas as pd  # noqa: E402
 from lightgbm import LGBMClassifier  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
-from fuel_signal.features import FEATURE_COLUMNS  # noqa: E402
+from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS  # noqa: E402
 from fuel_signal.train_logreg import save_reliability_plot  # noqa: E402
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
@@ -132,7 +132,14 @@ def _format_results(result: dict) -> str:
     show_default=True,
     help="Where to save the val reliability plot.",
 )
-def main(features_csv: str, model_out: str, reliability_out: str) -> None:
+@click.option(
+    "--include-lga-features",
+    "include_lga_features",
+    is_flag=True,
+    default=False,
+    help="Append Phase 4 LGA_FEATURE_COLUMNS (days_since_trough_entry_<lga>) to the training feature set.",
+)
+def main(features_csv: str, model_out: str, reliability_out: str, include_lga_features: bool) -> None:
     """Train LightGBM on numeric features (Phase 3a baseline).
 
     No hyperparameter tuning, random_state=42. Test is intentionally left
@@ -145,8 +152,12 @@ def main(features_csv: str, model_out: str, reliability_out: str) -> None:
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
+    feature_columns = (
+        FEATURE_COLUMNS + LGA_FEATURE_COLUMNS if include_lga_features else FEATURE_COLUMNS
+    )
+
     df = pd.read_csv(features_path)
-    required = FEATURE_COLUMNS + ["label", "price_date"]
+    required = feature_columns + ["label", "price_date"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise click.ClickException(
@@ -154,7 +165,9 @@ def main(features_csv: str, model_out: str, reliability_out: str) -> None:
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
 
-    result = train_and_evaluate(df)
+    schema_label = "Phase 4" if include_lga_features else "Phase 3c"
+    click.echo(f"Training on {len(feature_columns)} features ({schema_label} schema).")
+    result = train_and_evaluate(df, feature_columns=feature_columns)
 
     click.echo(_format_results(result))
 
