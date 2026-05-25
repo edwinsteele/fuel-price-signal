@@ -17,6 +17,7 @@ from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
     LGA_LEADERSHIP_EXCLUSIONS,
     build_lga_trough_lookups,
+    compute_pit_strict_days_since_trough,
     detect_trough_events,
     lga_feature_columns,
     lga_slug,
@@ -321,3 +322,62 @@ def test_excluded_lga_not_scored_and_not_in_anchor(conn):
         assert "Penrith" not in lgas
     finally:
         lga_mod.LGA_LEADERSHIP_EXCLUSIONS = original
+
+
+# ---------------------------------------------------------------------------
+# PIT-strict days_since_trough — adding future prices must not change the past
+# ---------------------------------------------------------------------------
+
+def test_pit_strict_days_since_immune_to_future_data(tmp_path):
+    """For a fixed query date d, compute_pit_strict_days_since_trough must
+    return the same value whether the DB ends at d or extends well past d.
+
+    This is the PIT contract: the feature value at d depends only on prices ≤ d.
+    """
+    from fuel_signal.db import open_db as _open
+
+    # Build a synthetic 800-day cosine cycle for Parramatta (in LGA_FEATURE_COUNCILS).
+    start = date(2020, 1, 1)
+    n_days_full = 800
+    n_days_truncated = 400  # query date sits well inside this window
+    query_date = (start + timedelta(days=350)).isoformat()
+    t_full = np.arange(n_days_full, dtype=float)
+    prices_full = 150.0 + 10.0 * np.cos(2 * np.pi * t_full / 45)
+
+    def _populate(conn, n_days: int) -> None:
+        for code in (1000, 1001, 1002):
+            upsert_stations(conn, [_station(code, PC_PARRAMATTA)])
+            _seed_daily_prices(conn, code, start, list(prices_full[:n_days]))
+            _seed_station_class(conn, code, start, n_days)
+
+    db_full = _open(tmp_path / "full.db")
+    create_schema(db_full)
+    _populate(db_full, n_days_full)
+
+    db_truncated = _open(tmp_path / "trunc.db")
+    create_schema(db_truncated)
+    _populate(db_truncated, n_days_truncated)
+
+    full = compute_pit_strict_days_since_trough(db_full, [query_date])
+    trunc = compute_pit_strict_days_since_trough(db_truncated, [query_date])
+
+    db_full.close()
+    db_truncated.close()
+
+    key = (query_date, "Parramatta")
+    assert key in full and key in trunc
+    assert full[key] == trunc[key], (
+        f"days_since drift: full-db={full[key]}, truncated-db={trunc[key]} — "
+        f"future data leaked into past detection"
+    )
+
+
+def test_pit_strict_days_since_returns_none_when_too_early(conn):
+    """Before enough history accumulates for trough detection, value must be None."""
+    _build_two_lga_db(conn, lead_days=5)
+    # Day 10 is too early — smoothing window needs at least 14 days of data.
+    early_date = "2020-01-10"
+    result = compute_pit_strict_days_since_trough(conn, [early_date])
+    key = (early_date, "Parramatta")
+    assert key in result
+    assert result[key] is None

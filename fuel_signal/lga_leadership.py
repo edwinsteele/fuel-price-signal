@@ -219,8 +219,11 @@ def build_lga_trough_lookups(
 ) -> dict[str, np.ndarray]:
     """Build per-LGA sorted arrays of trough-entry date integers (YYYYMMDD).
 
-    Covers the full available history with PIT-safe Sticky exclusion.
-    Called once per features.py batch; results used for O(log n) date lookups.
+    Runs detect_trough_events on the FULL price history per LGA.  NOT PIT-safe:
+    centered smoothing + snap to argmin use up to ~8 days of look-ahead at
+    detection time.  Use this only for diagnostics / inspect.py where the full
+    historical trough set is wanted.  For features.py, use
+    compute_pit_strict_days_since_trough.
 
     Returns {lga_name: np.ndarray[int]} — empty arrays where no troughs detected.
     """
@@ -244,6 +247,76 @@ def build_lga_trough_lookups(
         )
 
     return lookups
+
+
+def compute_pit_strict_days_since_trough(
+    conn: sqlite3.Connection,
+    label_date_strs: list[str],
+) -> dict[tuple[str, str], int | None]:
+    """PIT-safe days_since_trough_entry_<lga> per (label_date, lga).
+
+    For each unique label_date d and each LGA, runs detect_trough_events on
+    that LGA's prices restricted to [≤ d].  The most recent trough in the
+    restricted detection is used to compute days_since.  This is the
+    PIT-correct version of the trough-lookup path for features.py: centered
+    smoothing and snap-to-argmin only see data available on or before d, so
+    the recorded trough date never depends on future prices.
+
+    Cost: ~one detect_trough_events call per (date, lga).  For ~3500 unique
+    label dates and ~29 LGAs the work is ~100k detection calls; each is fast
+    (numpy + scipy), and the rebuild runs in a few minutes.
+
+    Returns {(label_date_str, lga_name): days_since}.  None where the
+    restricted detection finds no troughs (too early in history) or the LGA
+    has no data.
+    """
+    fid = fuel_type_id(conn, "E10")
+    sums = _load_lga_sums(conn, fid)
+
+    by_lga_series: dict[str, dict[int, float]] = {}
+    for (date_int, lga), (s, n) in sums.items():
+        if lga not in by_lga_series:
+            by_lga_series[lga] = {}
+        by_lga_series[lga][date_int] = s / n
+
+    # Sorted per-LGA (date_int, price) arrays for fast slicing.
+    lga_arrays: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for lga, series_dict in by_lga_series.items():
+        date_ints = sorted(series_dict.keys())
+        lga_arrays[lga] = (
+            np.array(date_ints, dtype=int),
+            np.array([series_dict[d] for d in date_ints], dtype=float),
+        )
+
+    label_date_ints: dict[str, int] = {d: _date_to_int(d) for d in label_date_strs}
+    label_date_objs: dict[str, date] = {d: _int_to_date(label_date_ints[d]) for d in label_date_strs}
+
+    result: dict[tuple[str, str], int | None] = {}
+
+    for lga in LGA_FEATURE_COUNCILS:
+        if lga not in lga_arrays:
+            for d_str in label_date_strs:
+                result[(d_str, lga)] = None
+            continue
+        dates_arr, prices_arr = lga_arrays[lga]
+
+        for d_str in label_date_strs:
+            d_int = label_date_ints[d_str]
+            # Include prices on d itself (side="right" returns index past d).
+            cutoff = int(np.searchsorted(dates_arr, d_int, side="right"))
+            if cutoff < TROUGH_SMOOTH_WINDOW * 2:
+                result[(d_str, lga)] = None
+                continue
+            trough_idx = detect_trough_events(prices_arr[:cutoff])
+            if len(trough_idx) == 0:
+                result[(d_str, lga)] = None
+                continue
+            last_trough_date_int = int(dates_arr[trough_idx[-1]])
+            result[(d_str, lga)] = (
+                label_date_objs[d_str] - _int_to_date(last_trough_date_int)
+            ).days
+
+    return result
 
 
 # ---------------------------------------------------------------------------

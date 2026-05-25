@@ -28,7 +28,6 @@ import sqlite3
 from datetime import date as _date
 
 import click
-import numpy as np
 import pandas as pd
 
 from fuel_signal import db as _db
@@ -36,7 +35,7 @@ from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.labels import assemble_training_rows
 from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
-    build_lga_trough_lookups,
+    compute_pit_strict_days_since_trough,
     lga_feature_columns,
     lga_slug,
 )
@@ -425,31 +424,13 @@ def assemble_feature_rows(
         )
     }
 
-    # Cache 8: per-LGA trough-entry date lookup → days_since_trough_entry_<lga>.
-    # build_lga_trough_lookups runs trough detection over the full price history;
-    # for each unique label date we pre-compute the days-since for every LGA so
-    # the inner row loop is a plain dict.get() rather than a binary search.
-    _trough_lookups = build_lga_trough_lookups(conn)
+    # Cache 8: per-LGA days_since_trough_entry, PIT-strict.
+    # For each unique label date d, detect_trough_events runs on prices[..d]
+    # only — so the recorded trough date never depends on prices after d.
+    # See compute_pit_strict_days_since_trough docstring for why the naive
+    # full-history detect (build_lga_trough_lookups) leaks future data.
     label_date_strs: list[str] = list(label_df["price_date"].unique())
-    # Precompute date conversions once per unique label date — the nested loop
-    # below runs 36 LGAs × ~4000 dates, so avoiding repeated parsing matters.
-    _ld_ints: dict[str, int] = {d: _date_to_int(d) for d in label_date_strs}
-    _ld_objs: dict[str, _date] = {d: _int_to_date(_ld_ints[d]) for d in label_date_strs}
-
-    lga_days_since_by_key: dict[tuple[str, str], int | None] = {}
-    for _lga in LGA_FEATURE_COUNCILS:
-        _trough_ints = _trough_lookups.get(_lga, np.array([], dtype=int))
-        for _d_str in label_date_strs:
-            if len(_trough_ints) == 0:
-                lga_days_since_by_key[(_d_str, _lga)] = None
-            else:
-                _pos = int(np.searchsorted(_trough_ints, _ld_ints[_d_str], side="right")) - 1
-                if _pos < 0:
-                    lga_days_since_by_key[(_d_str, _lga)] = None
-                else:
-                    lga_days_since_by_key[(_d_str, _lga)] = (
-                        _ld_objs[_d_str] - _int_to_date(int(_trough_ints[_pos]))
-                    ).days
+    lga_days_since_by_key = compute_pit_strict_days_since_trough(conn, label_date_strs)
 
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
