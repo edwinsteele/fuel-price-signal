@@ -96,10 +96,15 @@ def _signed_days_to_trough(station_df: pd.DataFrame) -> pd.Series:
     trough_idx = np.unique(snapped)
 
     all_idx = np.arange(len(prices))
+    if len(trough_idx) == 1:
+        return pd.Series((all_idx - trough_idx[0]).astype(float), index=original_index)
+
     nearest_pos = np.searchsorted(trough_idx, all_idx)
-    nearest_pos = np.clip(nearest_pos, 1, len(trough_idx) - 1)
-    left = trough_idx[nearest_pos - 1]
-    right = trough_idx[nearest_pos]
+    nearest_pos = np.clip(nearest_pos, 0, len(trough_idx) - 1)
+    left_idx = np.maximum(nearest_pos - 1, 0)
+    right_idx = np.minimum(nearest_pos, len(trough_idx) - 1)
+    left = trough_idx[left_idx]
+    right = trough_idx[right_idx]
     left_dist = all_idx - left
     right_dist = all_idx - right
     use_left = np.abs(left_dist) <= np.abs(right_dist)

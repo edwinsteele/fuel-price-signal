@@ -63,7 +63,7 @@ At τ=0.40: P=0.618, R=0.581, F1=0.599, BUY%=25% on test.
 
 ### Phase 3 progression — locks not narrated here (see `experiments/results.csv` + commit history)
 
-Phase 3a (10-feat LGBM cycle features) → Phase 3b (14-feat, +LGA/brand aggregates) → Phase 3c (15-feat, +stickiness_score). Each lock's row sits in `experiments/results.csv`; design notes in the `project_*` memory files.
+Phase 3a (10-feat LGBM cycle features) → Phase 3b (14-feat, +LGA/brand aggregates) → Phase 3c (15-feat, +stickiness_score). Each lock's row sits in `experiments/results.csv`; design notes are in the `project_*` memory files.
 
 ### Phase 4 locked (2026-05-25)
 
