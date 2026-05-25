@@ -255,12 +255,17 @@ def compute_pit_strict_days_since_trough(
 ) -> dict[tuple[str, str], int | None]:
     """PIT-safe days_since_trough_entry_<lga> per (label_date, lga).
 
-    For each unique label_date d and each LGA, runs detect_trough_events on
-    that LGA's prices restricted to [≤ d].  The most recent trough in the
-    restricted detection is used to compute days_since.  This is the
-    PIT-correct version of the trough-lookup path for features.py: centered
-    smoothing and snap-to-argmin only see data available on or before d, so
-    the recorded trough date never depends on future prices.
+    For each unique label_date d and each LGA in LGA_FEATURE_COUNCILS
+    (i.e. SYDNEY_METRO_COUNCILS minus LGA_LEADERSHIP_EXCLUSIONS), runs
+    detect_trough_events on that LGA's prices restricted to [≤ d].  The
+    most recent trough in the restricted detection is used to compute
+    days_since.  This is the PIT-correct version of the trough-lookup
+    path for features.py: centered smoothing and snap-to-argmin only see
+    data available on or before d, so the recorded trough date never
+    depends on future prices.
+
+    Excluded LGAs are intentionally absent from the result; LGAs in
+    LGA_FEATURE_COUNCILS with no DB rows are present with value None.
 
     Cost: ~one detect_trough_events call per (date, lga).  For ~3500 unique
     label dates and ~29 LGAs the work is ~100k detection calls; each is fast

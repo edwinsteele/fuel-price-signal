@@ -303,9 +303,15 @@ def test_excluded_lgas_missing_from_feature_schema():
     assert len(LGA_FEATURE_COUNCILS) == len(SYDNEY_METRO_COUNCILS) - len(LGA_LEADERSHIP_EXCLUSIONS)
 
 
-def test_excluded_lga_not_scored_and_not_in_anchor(conn):
-    """Stations in an excluded LGA must not produce a leadership row and must not
-    contribute to other LGAs' rest-of-Sydney anchor."""
+def test_excluded_lga_absent_from_scoring(conn):
+    """Excluded LGAs must not produce a leadership row.
+
+    Anchor-side exclusion is the same mechanism (_load_lga_sums drops excluded
+    rows via NOT IN), so excluded LGAs also can't contribute to other LGAs'
+    rest-of-Sydney anchor; this test doesn't separately assert that because
+    a 2-LGA fixture has no surviving non-excluded LGA whose anchor could
+    differ. The SQL path is shared, so the absence-from-scoring assertion
+    indirectly covers absence-from-anchor."""
     # Patch the exclusion set to include 'Penrith' so we can use the existing fixture.
     import fuel_signal.lga_leadership as lga_mod
     original = lga_mod.LGA_LEADERSHIP_EXCLUSIONS
