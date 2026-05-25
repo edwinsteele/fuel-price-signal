@@ -1,9 +1,10 @@
-"""LightGBM classifier — Phase 3a numeric-only baseline.
+"""LightGBM classifier — numeric-only.
 
-Trains on FEATURE_COLUMNS (10 numeric features). No categorical features.
-random_state=42, no hyperparameter tuning. Test split is intentionally
-left untouched — reserved for score_phase2.py once calibration + threshold
-is locked.
+Default feature set is FEATURE_COLUMNS (15 cents/cycle columns, Phase 3c).
+Pass --include-lga-features to also train on LGA_FEATURE_COLUMNS
+(days_since_trough_entry_<lga>, Phase 4). random_state=42, no hyperparameter
+tuning. Test split is intentionally left untouched — reserved for
+score_phase2.py once calibration + threshold is locked.
 
 ## Reliability plot
 
@@ -25,7 +26,7 @@ import pandas as pd  # noqa: E402
 from lightgbm import LGBMClassifier  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
-from fuel_signal.features import FEATURE_COLUMNS  # noqa: E402
+from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS  # noqa: E402
 from fuel_signal.train_logreg import save_reliability_plot  # noqa: E402
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
@@ -132,8 +133,15 @@ def _format_results(result: dict) -> str:
     show_default=True,
     help="Where to save the val reliability plot.",
 )
-def main(features_csv: str, model_out: str, reliability_out: str) -> None:
-    """Train LightGBM on numeric features (Phase 3a baseline).
+@click.option(
+    "--include-lga-features",
+    "include_lga_features",
+    is_flag=True,
+    default=False,
+    help="Append Phase 4 LGA_FEATURE_COLUMNS (days_since_trough_entry_<lga>) to the training feature set.",
+)
+def main(features_csv: str, model_out: str, reliability_out: str, include_lga_features: bool) -> None:
+    """Train LightGBM on numeric features.
 
     No hyperparameter tuning, random_state=42. Test is intentionally left
     untouched. This command does not append to experiments/results.csv.
@@ -145,8 +153,12 @@ def main(features_csv: str, model_out: str, reliability_out: str) -> None:
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
+    feature_columns = (
+        FEATURE_COLUMNS + LGA_FEATURE_COLUMNS if include_lga_features else FEATURE_COLUMNS
+    )
+
     df = pd.read_csv(features_path)
-    required = FEATURE_COLUMNS + ["label", "price_date"]
+    required = feature_columns + ["label", "price_date"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise click.ClickException(
@@ -154,7 +166,23 @@ def main(features_csv: str, model_out: str, reliability_out: str) -> None:
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
 
-    result = train_and_evaluate(df)
+    # If the CSV carries LGA columns but the flag wasn't passed, the user is
+    # probably running Phase 3c by accident on a Phase 4 features.csv. Warn
+    # loudly — this exact mismatch produced byte-identical val log-loss in
+    # the Phase 4 retrain and cost a debugging round-trip.
+    if not include_lga_features:
+        present_lga = [c for c in LGA_FEATURE_COLUMNS if c in df.columns]
+        if present_lga:
+            click.echo(
+                f"WARNING: features CSV contains {len(present_lga)} LGA columns "
+                "but --include-lga-features was not passed. Training on the "
+                "15-feat Phase 3c schema; LGA columns will be ignored.",
+                err=True,
+            )
+
+    schema_label = "Phase 4" if include_lga_features else "Phase 3c"
+    click.echo(f"Training on {len(feature_columns)} features ({schema_label} schema).")
+    result = train_and_evaluate(df, feature_columns=feature_columns)
 
     click.echo(_format_results(result))
 
