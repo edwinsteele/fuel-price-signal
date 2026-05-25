@@ -61,28 +61,48 @@ At τ=0.40: P=0.618, R=0.581, F1=0.599, BUY%=25% on test.
 | Always-buy baseline | 191.78 | — |
 | Logreg τ=0.40 (Phase 2 locked) | 190.35 | +0.74% |
 
-Phase 3 target: beat 190.35 c/L.
+### Phase 3 progression — locks not narrated here (see `experiments/results.csv` + commit history)
+
+Phase 3a (10-feat LGBM cycle features) → Phase 3b (14-feat, +LGA/brand aggregates) → Phase 3c (15-feat, +stickiness_score). Each lock's row sits in `experiments/results.csv`; design notes in the `project_*` memory files.
+
+### Phase 4 locked (2026-05-25)
+
+50-feature LightGBM: 15 base (Phase 3c set) + 35 `days_since_trough_entry_<lga>` event-based leadership features. Raw (uncalibrated) selected over isotonic — the 35 LGA features absorbed enough of the calibration slack that the 80%-train handicap of `compare_calibrations` dominated; isotonic regressed +0.006 vs raw. τ=0.60 (val argmax) with model-aware +0.05 adjustment since raw is not isotonic-calibrated.
+
+| Model | Test logloss | Test brier | Test F1 | vs Phase 3c logloss |
+|-------|-------------|------------|---------|---------------------|
+| Phase 3c (15-feat isotonic, τ=0.60) | 0.3395 | 0.1115 | 0.749 | — |
+| **Phase 4 (50-feat raw, τ=0.60+0.05)** | **0.3012** | **0.0973** | **0.769** | **−0.0383 (−11.3%)** |
+
+At τ=0.65 test: P=0.702, R=0.851, F1=0.769, BUY%=29.9%.
+
+**Validation (all three gates passed):**
+
+- `experiments/trough_weakness/` — target cohort: `lead −7..−4` 0.522 → 0.4794 (Δ −0.043), `lead −3..−1` 0.630 → 0.6096 (Δ −0.020). Acceptance ≥0.02 in either, both hit.
+- `experiments/cv_compare_phase4/` — paired walk-forward CV vs Phase 3c: 13 of 14 folds improve; median Δ −0.029, mean Δ −0.081. **Fold 5 (2022-10 → 2023-01, Ukraine spike)** — the known stickiness regime-lag tail risk — inverted from Phase 3c's +0.353 regression to a −0.486 improvement (50-feat 0.295 vs 15-feat 0.781). Event-based trough features don't carry the 45-day rolling lag that hurt Phase 3c.
+- `experiments/shap_phase4/` — 6 zero-station-floor LGAs have SHAP exactly 0 ✓. 8 of 35 LGA features make the overall top-25 (woollahra #10, randwick #11, blue_mountains #13). LGA mean|SHAP| is materially higher in trough-adjacent cohorts than mid-cycle (woollahra 0.18–0.19 in lead/trough vs 0.11 mid-cycle) — exactly the event-locked behaviour the design predicted.
+
+**Open follow-ups from validation:**
+
+- **#136 (design)** — SHAP-importance ranking disagrees with `trough_lead_consistency` ranking from `lga_leadership`. Investigate whether the metric is measuring the wrong thing for predictive value.
+- Camden missing-data chore — outer-metro Sydney LGA with real petrol stations but 0 stations in our DB; trace upstream feed.
+- v2 peak features — `lead −8+` and `lead −7..−4` cohorts remain miscalibrated by +0.12 and +0.22 (over-confident BUY). Symmetric `days_since_peak_entry_<lga>` design worth scoping after #136 lands.
 
 ## Pending work
-
-### Phase 3: LightGBM with cross-station features
-- Station features: `station_code` as categorical, brand, suburb
-- Cross-station lead features: same-brand mean, same-LGA mean, leading-indicator LGAs
-- Walk-forward CV report CLI (`cv_report.py`) — reads `walk_forward_folds()` output, reports per-fold variance
-- Upstream features (TGP first, then MOPS/crude/FX) — Phase 4
 
 ### Phase 5 (macro model)
 - Separate longer-horizon model (~30/60/90 days)
 - Upstream commodity features dominate at this horizon
+- Upstream features (TGP first, then MOPS/crude/FX)
 
 ## Model artifact paths (IMPORTANT)
 
 Models are written to fixed canonical paths. **Each Phase lock overwrites the previous Phase's artifact** — there is no per-phase suffix on the filename. Phase identification lives in `experiments/results.csv` (`name` column) and in commit history, not the filename.
 
-| Path | Writer | Currently (as of Phase 3c lock, 2026-05-24) |
+| Path | Writer | Currently (as of Phase 4 lock, 2026-05-25) |
 |------|--------|--------------------------------------------|
-| `data/models/lgbm.joblib` | `train_lgbm.py` | Phase 3c 15-feat raw |
-| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | Phase 3c 15-feat isotonic-calibrated |
+| `data/models/lgbm.joblib` | `train_lgbm.py` | Phase 4 50-feat raw |
+| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | Phase 4 50-feat (raw chosen over isotonic) |
 | `data/models/logreg.joblib` | `train_logreg.py` | Phase 2 10-feat raw |
 | `data/models/logreg_calibrated.joblib` | `calibrate.py` | Phase 2 10-feat (raw chosen over calibration) |
 
@@ -92,12 +112,13 @@ To verify what's currently on disk before scoring:
 import joblib
 m = joblib.load("data/models/lgbm_calibrated.joblib")
 print(len(m["feature_columns"]), m["feature_columns"][-1])
+# 50 + ending in 'days_since_trough_entry_woollahra' → Phase 4
 # 15 + ending in 'stickiness_score' → Phase 3c
 # 14 + ending in 'station_minus_brand_mean_cents' → Phase 3b
 # 10 + ending in 'station_minus_sydney_avg_cents' → Phase 3a
 ```
 
-Reproducing an older lock requires `git checkout <commit>` (Phase 3b = pre-#127, commit `0ed9795`) followed by re-running train + calibrate. The joblib binaries are gitignored.
+Reproducing an older lock requires `git checkout <commit>` followed by re-running train + calibrate. The joblib binaries are gitignored. Phase 3c reproducible from pre-Phase-4-lock commits; Phase 3b from pre-#127 (`0ed9795`).
 
 Worker-run logs may reference different filenames (e.g. `lgbm_stickiness_calibrated.joblib`); those are worktree-local aliases and were never persisted on `main`.
 
