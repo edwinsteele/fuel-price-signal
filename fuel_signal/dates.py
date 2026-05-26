@@ -16,5 +16,4 @@ def date_from_int(v: int) -> str:
 
 def int_to_date(v: int) -> date:
     """20240115 → date(2024, 1, 15)"""
-    s = str(v)
-    return date(int(s[:4]), int(s[4:6]), int(s[6:]))
+    return date.fromisoformat(date_from_int(v))
