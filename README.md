@@ -22,7 +22,29 @@ FUELAPI_API_SECRET=your_secret_here
 
 ## Building the database
 
-The signal runs from a local SQLite database (`fuel_signal.db`, gitignored). Build it once, then refresh as needed.
+The signal runs from a local SQLite database (`fuel_signal.db`, gitignored) and a trained model (`data/models/`, gitignored). Everything is rebuilt from committed inputs: historical CSVs downloaded from data.nsw.gov.au plus the daily snapshot CSVs already tracked in `data/snapshots/`.
+
+### Build from scratch (full sequence)
+
+Run this once for a clean rebuild. Each step is explained in the subsections below.
+
+```bash
+uv run python -m fuel_signal.history                       # 1. download + clean historical CSVs
+uv run python -m fuel_signal.db                            # 2. load snapshots + history into SQLite
+uv run python -m fuel_signal.fill                          # 3. forward-fill daily price gaps
+uv run python -m fuel_signal.classify --start-date 2016-08-01   # 4. classify stations
+uv run python -m fuel_signal.features                      # 5. assemble ML feature rows
+uv run python -m fuel_signal.train_lgbm                    # 6. train LightGBM model
+uv run python -m fuel_signal.calibrate \
+    --model-in data/models/lgbm.joblib \
+    --model-out data/models/lgbm_calibrated.joblib \
+    --model-name lgbm --skip-results-csv                   # 7. calibrate
+uv run python -m fuel_signal.score_phase2 \
+    --model-path data/models/lgbm_calibrated.joblib \
+    --model-name lgbm_cycle_features                       # 8. final test-set eval (run once)
+```
+
+You do **not** need to run `fuel_signal.live` first — station reference data comes from the snapshot CSVs committed in `data/snapshots/`. Run `live` only to pull today's prices manually (see below). The `lga_leadership` table (used by `inspect.py`'s `/lead-lag` page) is a separate optional artifact, not part of the model pipeline; rebuild it with `uv run python -m fuel_signal.lga_leadership --start-date 2016-08-01` if you need it.
 
 ### 1. Download and clean historical CSVs
 
@@ -34,15 +56,15 @@ uv run python -m fuel_signal.history
 
 Takes a few minutes on first run (100+ files).
 
-### 2. Collect a live snapshot (populates station reference data)
+### 2. (Optional) Collect a live snapshot
 
-The database needs station reference data (codes, addresses) from the FuelCheck API before historical data can be loaded. Run this first:
+Station reference data (codes, addresses) is already provided by the snapshot CSVs committed in `data/snapshots/`, so a from-scratch build does **not** require this step. Run it only when you want to pull today's prices:
 
 ```bash
 uv run --env-file .env python -m fuel_signal.live
 ```
 
-This writes one snapshot CSV to `data/snapshots/YYYY/MM/YYYY-MM-DD.csv` and is also what GitHub Actions runs daily. You only need to run it manually when bootstrapping or if you need today's prices immediately.
+This writes one snapshot CSV to `data/snapshots/YYYY/MM/YYYY-MM-DD.csv` and is also what GitHub Actions runs daily.
 
 ### 3. Load everything into SQLite
 
@@ -75,7 +97,7 @@ uv run python -m fuel_signal.classify --start-date 2016-08-01
 uv run python -m fuel_signal.classify --start-date 2016-08-01 --snapshot-date 2026-01-01
 ```
 
-Writes `station_class` and `classification_summary` tables. Idempotent — re-running a date range is safe. The full end-to-end pipeline order is: `history` → `live` → `db` → `fill` → **`classify`** → `features` → `train_logreg` → `calibrate` → `score_phase2`.
+Writes `station_class` and `classification_summary` tables. Idempotent — re-running a date range is safe. This is step 4 of the [full build sequence](#build-from-scratch-full-sequence) above; the remaining steps (`features` → `train_lgbm` → `calibrate` → `score_phase2`) train and evaluate the model.
 
 ## Inspecting the data
 
