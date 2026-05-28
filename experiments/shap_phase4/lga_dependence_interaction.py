@@ -89,6 +89,12 @@ def main() -> None:
         s = sv[mask, idx]
         c = c_full[mask]
 
+        slug = feature_columns[idx].replace(LGA_PREFIX, "")
+        if len(v) == 0:
+            ax.text(0.5, 0.5, "no finite data", ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(f"{rank + 1}. {slug}", fontsize=7)
+            continue
+
         n_plot = min(N_PLOT_PER_PANEL, len(v))
         sub = rng.choice(len(v), size=n_plot, replace=False)
         sc = ax.scatter(
@@ -100,7 +106,6 @@ def main() -> None:
             scatter_handle = sc
 
         ax.axhline(0, color="k", lw=0.5, alpha=0.4)
-        slug = feature_columns[idx].replace(LGA_PREFIX, "")
         mean_abs = stats[rank][1]
         if np.std(v) and np.std(s):
             r = float(np.corrcoef(v, s)[0, 1])
