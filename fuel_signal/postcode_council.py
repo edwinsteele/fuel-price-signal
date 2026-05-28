@@ -2,9 +2,14 @@
 
 Derived from 2016 ABS ASGS census data (Postal Areas × Local Government Areas).
 Where a postcode spans multiple LGAs, only the last LGA listed in the ABS data
-is retained here (Python dict semantics on the source). This is sufficient for
-Sydney metro membership tests; boundary postcodes are typically split between
-two metro councils anyway.
+is retained here (Python dict semantics on the source).
+
+Known limitation: for boundary postcodes that straddle two LGAs, the "last LGA
+wins" behaviour can assign a postcode to the minority LGA.  Six entries have
+been manually corrected below (_BOUNDARY_OVERRIDES) based on which LGA holds
+the majority of fuel stations in that postcode.  The override block documents
+the ABS-derived value that was displaced so a future ABS resync can validate or
+replace these corrections using majority-area logic instead.
 """
 
 # Full NSW postcode → LGA mapping (2016 ABS names, pre-amalgamation).
@@ -213,7 +218,7 @@ _PC_MAP: dict[str, str] = {
     "2232": "Sutherland Shire",
     "2233": "Sutherland Shire",
     "2234": "Sutherland Shire",
-    "2250": "Hawkesbury",
+    "2250": "Central Coast",  # ABS last-wins gave Hawkesbury; all stations are Gosford-area
     "2251": "Central Coast",
     "2256": "Central Coast",
     "2257": "Central Coast",
@@ -424,15 +429,15 @@ _PC_MAP: dict[str, str] = {
     "2557": "Liverpool",
     "2558": "Campbelltown",
     "2559": "Campbelltown",
-    "2560": "Wollondilly",
+    "2560": "Campbelltown",  # ABS last-wins gave Wollondilly; 18/21 stations are Campbelltown (Appin is Wollondilly)
     "2563": "Campbelltown",
     "2564": "Campbelltown",
-    "2565": "Liverpool",
+    "2565": "Campbelltown",  # ABS last-wins gave Liverpool; 7/9 stations are Ingleburn (Campbelltown)
     "2566": "Campbelltown",
-    "2567": "Campbelltown",
+    "2567": "Camden",        # ABS last-wins gave Campbelltown; all stations are Narellan/Mount Annan (Camden)
     "2568": "Wollondilly",
     "2569": "Wollondilly",
-    "2570": "Wollondilly",
+    "2570": "Camden",        # ABS last-wins gave Wollondilly; 7/8 stations are Camden suburbs (The Oaks is Wollondilly)
     "2571": "Wollondilly",
     "2572": "Wollondilly",
     "2573": "Wollondilly",
@@ -532,7 +537,7 @@ _PC_MAP: dict[str, str] = {
     "2737": "Wentworth",
     "2738": "Wentworth",
     "2739": "Wentworth",
-    "2745": "Wollondilly",
+    "2745": "Penrith",       # ABS last-wins gave Wollondilly; Glenmore Park/Regentville are Penrith
     "2747": "Penrith",
     "2748": "Penrith",
     "2749": "Penrith",
