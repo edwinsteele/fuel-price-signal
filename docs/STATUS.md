@@ -84,9 +84,9 @@ At τ=0.65 test: P=0.702, R=0.851, F1=0.769, BUY%=29.9%.
 
 **Open follow-ups from validation:**
 
-- **#136 (design)** — SHAP-importance ranking disagrees with `trough_lead_consistency` ranking from `lga_leadership`. Investigate whether the metric is measuring the wrong thing for predictive value.
+- **#136 (design) — RESOLVED 2026-05-28.** SHAP vs `trough_lead_consistency` disagreement investigated (`experiments/shap_phase4/nan_analysis.py`, `dependence_grid.py`, `lga_shap_plots.py`, `lga_dependence_interaction.py`). Findings: (1) NaN-routing artefact ruled out — val window is 0% NaN on the LGA features (the 5.59% woollahra figure is full-CSV cold-start only). (2) Three empirical roles by sign of Pearson r(feature, SHAP): **leaders** (woollahra r=−0.42, randwick r=−0.91 → recent trough toward BUY), **inverted-phase** (blue_mountains r=+0.79, parramatta r=+0.67 → recent trough toward WAIT; LGA leads the rise), **inert** (the four highest-consistency LGAs — sutherland/northern_beaches/penrith/ku_ring_gai — all |SHAP|<0.013, signal already in stickiness_score + station_minus_last_min). **Decision:** model unchanged (per-LGA features, no weighting — validated); `trough_lead_consistency` demoted to a descriptive stat (information value ≠ price-space consistency); future `inspect.py /leadership` view ranks by mean|SHAP| + sign, not consistency.
 - Camden missing-data chore — outer-metro Sydney LGA with real petrol stations but 0 stations in our DB; trace upstream feed.
-- v2 peak features — `lead −8+` and `lead −7..−4` cohorts remain miscalibrated by +0.12 and +0.22 (over-confident BUY). Symmetric `days_since_peak_entry_<lga>` design worth scoping after #136 lands.
+- v2 peak features — `lead −8+` and `lead −7..−4` cohorts remain miscalibrated by +0.12 and +0.22 (over-confident BUY). Symmetric `days_since_peak_entry_<lga>` design worth scoping next; expect the same leader/inverted/inert split — design symmetrically, do not curate by consistency.
 
 ## Pending work
 
