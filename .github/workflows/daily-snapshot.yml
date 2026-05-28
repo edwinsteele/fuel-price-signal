@@ -31,4 +31,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/snapshots/
           git diff --cached --quiet || git commit -m "snapshot: $(date -u +%Y-%m-%d)"
-          git push
+          for attempt in 1 2 3 4 5; do
+            git push && break
+            if [ "$attempt" -lt 5 ]; then
+              sleep_time=$((2 ** attempt))
+              echo "Push failed (attempt $attempt/5), retrying in ${sleep_time}s..."
+              sleep "$sleep_time"
+            else
+              echo "Push failed after 5 attempts"
+              exit 1
+            fi
+          done
