@@ -43,7 +43,7 @@ You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `pol
 1. Implement the minimal change — do not scope-creep.
 2. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
 3. Open PR titled `fix: <issue title> (closes #N)` targeting `main` (`--base main`) with labels `claude-authored` + the issue's original label. PR body must include a 3–5 bullet plan (what changed, what didn't, what test was added).
-4. Wait 270s, then check for review comments (`gh pr view N --json comments,reviewThreads`). Implement appropriate ones, run `uv run ruff check . && uv run pytest -q`, push. Repeat this step until no actionable comments remain. If no reviewer has commented yet, move on — do not block on a specific tool being present.
+4. Wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
 
 **PR maintenance:**
 When pickup rule 1 triggers, for each qualifying PR:
@@ -55,7 +55,7 @@ When pickup rule 1 triggers, for each qualifying PR:
 4. `git push --force-with-lease`.
 
 *Unresolved review threads:*
-1. Run `gh pr view N --json reviewThreads` and filter to threads where `isResolved` is false and no comment body starts with `[worker]`.
+1. Run `gh pr view N --json comments,reviews` and inspect each review body for actionable inline comments not yet addressed (i.e. no reply starting with `[worker]`).
 2. Read all such threads together to understand the full set of requested changes.
 3. For any thread that is ambiguous or requires a design decision: reply `[worker] Needs owner input — <question>` and skip it. Do not make changes for that thread.
 4. Make the minimal changes to address the remaining threads.
@@ -71,7 +71,7 @@ Handle conflicts first, then review threads, in a single pass per PR.
 - **`design` issues are fair game** for interactive work.
 - Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
 - After each commit + push, open a PR immediately without asking.
-- After submitting a PR, wait 270s, check for review comments (`gh pr view N --json comments,reviewThreads`), implement appropriate ones, push, repeat until no actionable comments remain. If no reviewer has commented, move on.
+- After submitting a PR, wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, push, repeat until no actionable comments remain.
 
 ## spawn_task → gh issue create redirect
 
