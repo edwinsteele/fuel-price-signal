@@ -263,7 +263,7 @@ def upsert_stations(conn: sqlite3.Connection, stations: list[dict]) -> int:
         """UPDATE stations
            SET name      = ?,
                brand     = ?,
-               council   = ?,
+               council   = COALESCE(?, council),
                suburb    = COALESCE(NULLIF(?, ''), suburb),
                latitude  = COALESCE(?, latitude),
                longitude = COALESCE(?, longitude)
