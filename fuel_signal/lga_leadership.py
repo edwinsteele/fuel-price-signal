@@ -23,6 +23,8 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
+from fuel_signal.dates import date_to_int as _date_to_int
+from fuel_signal.dates import int_to_date as _int_to_date
 from fuel_signal.db import (
     DEFAULT_DB_PATH,
     create_schema,
@@ -73,20 +75,6 @@ def lga_slug(name: str) -> str:
 def lga_feature_columns() -> list[str]:
     """Return ordered list of days_since_trough_entry_<lga> column names."""
     return [f"days_since_trough_entry_{lga_slug(lga)}" for lga in LGA_FEATURE_COUNCILS]
-
-
-def _date_to_int(s: str) -> int:
-    return int(s[:10].replace("-", ""))
-
-
-def _date_from_int(v: int) -> str:
-    s = str(v)
-    return f"{s[:4]}-{s[4:6]}-{s[6:]}"
-
-
-def _int_to_date(v: int) -> date:
-    s = str(v)
-    return date(int(s[:4]), int(s[4:6]), int(s[6:]))
 
 
 # ---------------------------------------------------------------------------
