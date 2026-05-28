@@ -76,7 +76,20 @@ Phase 3a (10-feat LGBM cycle features) → Phase 3b (14-feat, +LGA/brand aggrega
 
 At τ=0.65 test: P=0.702, R=0.851, F1=0.769, BUY%=29.9%.
 
-**Validation (all three gates passed):**
+#### Re-locked 2026-05-29 (post-#144 boundary-postcode fix)
+
+The #144 from-scratch DB rebuild corrected postcode→LGA boundaries (which feed every `days_since_trough_entry_<lga>` feature) but its retrain silently dropped the LGA features (`--include-lga-features` defaults off), leaving a 15-feat model on disk. Retrained 50-feat on the corrected data and re-locked. The boundary fix *improved* the model:
+
+| Model | Test logloss | Test brier | Test F1 |
+|-------|-------------|------------|---------|
+| Phase 4 pre-fix (buggy LGA boundaries, single seed) | 0.3012 | 0.0973 | 0.769 |
+| **Phase 4 post-fix (corrected boundaries)** | **0.2854** | **0.0914** | **0.767** |
+
+Calibrate again chose raw over isotonic. Seed-banked (raw uncalibrated test logloss, seeds {1,7,42,99,2024}): **mean 0.2919, std 0.0053 (3σ=0.0158)** — vs `lgbm_council_fix` raw mean 0.3205, a leadership lift of −0.0286, beyond the 3σ band of both. See `experiments/results.csv` row `phase4_event_leadership_postfix` and the throwaway `experiments/seed_bank_phase4/run.py` (superseded once #145 lands a real `--seeds` flag).
+
+**Not re-run post-fix:** the three validation gates below were computed pre-fix. The from-scratch rebuild also left `lga_leadership` empty (0 rows), so `inspect.py`'s board and the SHAP cross-reference can't run until it's repopulated. Re-validation is a follow-up, not done in the re-lock.
+
+**Validation (all three gates passed — pre-#144-fix numbers):**
 
 - `experiments/trough_weakness/` — target cohort: `lead −7..−4` 0.522 → 0.4794 (Δ −0.043), `lead −3..−1` 0.630 → 0.6096 (Δ −0.020). Acceptance ≥0.02 in either, both hit.
 - `experiments/cv_compare_phase4/` — paired walk-forward CV vs Phase 3c: 13 of 14 folds improve; median Δ −0.029, mean Δ −0.081. **Fold 5 (2022-10 → 2023-01, Ukraine spike)** — the known stickiness regime-lag tail risk — inverted from Phase 3c's +0.353 regression to a −0.486 improvement (50-feat 0.295 vs 15-feat 0.781). Event-based trough features don't carry the 45-day rolling lag that hurt Phase 3c.
@@ -99,10 +112,10 @@ At τ=0.65 test: P=0.702, R=0.851, F1=0.769, BUY%=29.9%.
 
 Models are written to fixed canonical paths. **Each Phase lock overwrites the previous Phase's artifact** — there is no per-phase suffix on the filename. Phase identification lives in `experiments/results.csv` (`name` column) and in commit history, not the filename.
 
-| Path | Writer | Currently (as of Phase 4 lock, 2026-05-25) |
+| Path | Writer | Currently (as of Phase 4 re-lock, 2026-05-29) |
 |------|--------|--------------------------------------------|
-| `data/models/lgbm.joblib` | `train_lgbm.py` | Phase 4 50-feat raw |
-| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | Phase 4 50-feat (raw chosen over isotonic) |
+| `data/models/lgbm.joblib` | `train_lgbm.py` | Phase 4 50-feat raw (post-#144 boundary fix) |
+| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | Phase 4 50-feat (raw chosen over isotonic), post-#144 |
 | `data/models/logreg.joblib` | `train_logreg.py` | Phase 2 10-feat raw |
 | `data/models/logreg_calibrated.joblib` | `calibrate.py` | Phase 2 10-feat (raw chosen over calibration) |
 
