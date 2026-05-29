@@ -48,19 +48,10 @@ LEADERSHIP_WINDOW_DAYS: int = 730
 EVENT_MATCH_MAX_LAG: int = 60
 MIN_STATION_FLOOR: int = 3
 
-# LGAs excluded from leadership scoring and from the Phase 4 feature schema.
-# Central Coast's cycle is decoupled from Sydney metro proper: empirically
-# (2018-2026 backfill) its trough_lead_median is -3.69d (worst by far),
-# consistency is 0.097 (next worst is 0.26), and its per-snapshot lead swings
-# between -6d and +6d across adjacent windows. Including it in the
-# rest-of-Sydney anchor pollutes every other LGA's score; including it as a
-# leader candidate adds noise. Scoped to leadership only — CC remains a valid
-# LGA for lga_mean, series.py, etc. See issue for project-wide removal.
-LGA_LEADERSHIP_EXCLUSIONS: frozenset[str] = frozenset({"Central Coast"})
-
 # Stable sorted list of Sydney metro LGAs used for leadership scoring and
-# the Phase 4 feature schema. Excludes LGA_LEADERSHIP_EXCLUSIONS.
-LGA_FEATURE_COUNCILS: list[str] = sorted(SYDNEY_METRO_COUNCILS - LGA_LEADERSHIP_EXCLUSIONS)
+# the Phase 4 feature schema. Central Coast is absent from SYDNEY_METRO_COUNCILS
+# (removed project-wide — see postcode_council.py for rationale).
+LGA_FEATURE_COUNCILS: list[str] = sorted(SYDNEY_METRO_COUNCILS)
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +159,6 @@ def _load_lga_sums(
     ]
     params: list = [fid]
 
-    if LGA_LEADERSHIP_EXCLUSIONS:
-        placeholders = ", ".join(["?"] * len(LGA_LEADERSHIP_EXCLUSIONS))
-        where.append(f"s.council NOT IN ({placeholders})")
-        params.extend(sorted(LGA_LEADERSHIP_EXCLUSIONS))
-
     if start_date is not None:
         where.append("dp.price_date >= ?")
         params.append(_date_to_int(start_date))
@@ -244,7 +230,7 @@ def compute_pit_strict_days_since_trough(
     """PIT-safe days_since_trough_entry_<lga> per (label_date, lga).
 
     For each unique label_date d and each LGA in LGA_FEATURE_COUNCILS
-    (i.e. SYDNEY_METRO_COUNCILS minus LGA_LEADERSHIP_EXCLUSIONS), runs
+    (i.e. SYDNEY_METRO_COUNCILS, which excludes Central Coast project-wide), runs
     detect_trough_events on that LGA's prices restricted to [≤ d].  The
     most recent trough in the restricted detection is used to compute
     days_since.  This is the PIT-correct version of the trough-lookup

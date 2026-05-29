@@ -59,9 +59,9 @@ class TestIsSydneyMetro:
     def test_wollongong_is_not_metro(self):
         assert is_sydney_metro("2500") is False
 
-    def test_central_coast_is_metro(self):
-        # Central Coast was included in the original implementation
-        assert is_sydney_metro("2250") is True
+    def test_central_coast_is_not_metro(self):
+        # Central Coast excluded: cycle decoupled from Sydney metro (issue #133)
+        assert is_sydney_metro("2250") is False
 
     def test_hawkesbury_is_metro(self):
         assert is_sydney_metro("2753") is True
