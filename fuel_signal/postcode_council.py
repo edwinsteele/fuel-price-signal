@@ -653,8 +653,10 @@ _PC_MAP: dict[str, str] = {
 }
 
 # Greater Sydney metro councils (2016 ABS LGA names).
-# Includes Blue Mountains, Hawkesbury, Central Coast, and Wollondilly as
-# outer metro areas, consistent with the previous petrol_prices implementation.
+# Includes Blue Mountains, Hawkesbury, and Wollondilly as outer metro areas,
+# consistent with the previous petrol_prices implementation. Central Coast is
+# excluded: 2018-2026 backfill showed its cycle is genuinely decoupled from
+# Sydney metro (trough_lead_median -3.69d, consistency 0.097 — worst by far).
 # "Botany Bay" and "Rockdale" are pre-2017 names that still appear in older data;
 # post-2017 they merged into "Bayside" (included here for forward compatibility).
 SYDNEY_METRO_COUNCILS: frozenset[str] = frozenset({
@@ -667,7 +669,6 @@ SYDNEY_METRO_COUNCILS: frozenset[str] = frozenset({
     "Campbelltown",
     "Canterbury-Bankstown",
     "Canada Bay",
-    "Central Coast",
     "Cumberland",
     "Fairfield",
     "Georges River",

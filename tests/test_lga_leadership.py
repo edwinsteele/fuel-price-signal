@@ -15,7 +15,6 @@ from fuel_signal.db import (
 )
 from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
-    LGA_LEADERSHIP_EXCLUSIONS,
     build_lga_trough_lookups,
     compute_pit_strict_days_since_trough,
     detect_trough_events,
@@ -291,43 +290,14 @@ def test_build_lga_trough_parramatta_leads_penrith(conn):
 
 
 # ---------------------------------------------------------------------------
-# Exclusion mechanism — Central Coast scoped out of leadership only
+# Central Coast — removed project-wide from SYDNEY_METRO_COUNCILS
 # ---------------------------------------------------------------------------
 
-def test_excluded_lgas_missing_from_feature_schema():
-    """LGA_LEADERSHIP_EXCLUSIONS members must not appear in the feature schema."""
-    assert "Central Coast" in LGA_LEADERSHIP_EXCLUSIONS
-    assert "Central Coast" in SYDNEY_METRO_COUNCILS
+def test_central_coast_absent_from_feature_schema():
+    """Central Coast must not appear in the metro set or the feature schema."""
+    assert "Central Coast" not in SYDNEY_METRO_COUNCILS
     assert "Central Coast" not in LGA_FEATURE_COUNCILS
-    # Schema size must match SYDNEY_METRO_COUNCILS minus exclusions
-    assert len(LGA_FEATURE_COUNCILS) == len(SYDNEY_METRO_COUNCILS) - len(LGA_LEADERSHIP_EXCLUSIONS)
-
-
-def test_excluded_lga_absent_from_scoring(conn):
-    """Excluded LGAs must not produce a leadership row.
-
-    Anchor-side exclusion is the same mechanism (_load_lga_sums drops excluded
-    rows via NOT IN), so excluded LGAs also can't contribute to other LGAs'
-    rest-of-Sydney anchor; this test doesn't separately assert that because
-    a 2-LGA fixture has no surviving non-excluded LGA whose anchor could
-    differ. The SQL path is shared, so the absence-from-scoring assertion
-    indirectly covers absence-from-anchor."""
-    # Patch the exclusion set to include 'Penrith' so we can use the existing fixture.
-    import fuel_signal.lga_leadership as lga_mod
-    original = lga_mod.LGA_LEADERSHIP_EXCLUSIONS
-    lga_mod.LGA_LEADERSHIP_EXCLUSIONS = frozenset({"Penrith"})
-    try:
-        _build_two_lga_db(conn, lead_days=5)
-        snapshot = "2022-04-01"
-        n = score_leadership_snapshot(conn, snapshot)
-        # Only Parramatta should be scored. Penrith excluded.
-        assert n == 1
-        board = get_lga_leadership_board(conn, snapshot)
-        lgas = {r[0] for r in board}
-        assert "Parramatta" in lgas
-        assert "Penrith" not in lgas
-    finally:
-        lga_mod.LGA_LEADERSHIP_EXCLUSIONS = original
+    assert len(LGA_FEATURE_COUNCILS) == len(SYDNEY_METRO_COUNCILS)
 
 
 # ---------------------------------------------------------------------------
