@@ -34,14 +34,20 @@ DEFAULT_MODEL_OUT = pathlib.Path("data/models/lgbm.joblib")
 DEFAULT_RELIABILITY_PNG = pathlib.Path("experiments/reliability_lgbm_val.png")
 
 
-def build_pipeline() -> LGBMClassifier:
-    """Vanilla LightGBM with deterministic seed and silenced console output."""
-    return LGBMClassifier(random_state=42, verbose=-1)
+def build_pipeline(random_state: int = 42) -> LGBMClassifier:
+    """LightGBM with bagging enabled so different random_state values produce distinct models."""
+    return LGBMClassifier(
+        random_state=random_state,
+        verbose=-1,
+        subsample=0.8,
+        subsample_freq=1,
+    )
 
 
 def train_and_evaluate(
     df: pd.DataFrame,
     feature_columns: list[str] | None = None,
+    random_state: int = 42,
 ) -> dict:
     """Fit LightGBM on train; score on val.
 
@@ -62,7 +68,7 @@ def train_and_evaluate(
     X_val = val[feature_columns].to_numpy(dtype=float)
     y_val = val["label"].to_numpy(dtype=int)
 
-    model = build_pipeline()
+    model = build_pipeline(random_state=random_state)
     model.fit(X_train, y_train)
 
     # predict_proba returns shape (n, 2); column 1 is P(label=1).

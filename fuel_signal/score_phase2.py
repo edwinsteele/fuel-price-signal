@@ -307,6 +307,46 @@ def score_test(
     }
 
 
+def multi_seed_raw_logloss(
+    df: pd.DataFrame,
+    feature_columns: list[str],
+    seeds: list[int],
+) -> dict:
+    """Retrain a raw LightGBM at each seed; return per-seed test-logloss vector + stats.
+
+    Metric: raw (uncalibrated) test logloss — avoids the calibration confound where
+    the calibrator is fit on the higher-BUY-rate val split, degrading test-set scores.
+    Policy: call only at lock time with a standard seed set (e.g. {1,7,42,99,2024}).
+    Do not multi-seed every experiment — that defeats the 3×std comparison gate.
+
+    Returns dict with:
+      logloss_vector: list[float]
+      logloss_mean: float
+      logloss_std: float (population std, ddof=0)
+    """
+    from fuel_signal.train_lgbm import train_and_evaluate as _lgbm_train
+
+    _, _, test = _ev.split(df)
+    if test.empty:
+        raise ValueError("multi_seed_raw_logloss(): test split is empty.")
+
+    X_test = test[feature_columns].to_numpy(dtype=float)
+    y_test = test["label"].to_numpy(dtype=int)
+
+    logloss_vector: list[float] = []
+    for seed in seeds:
+        result = _lgbm_train(df, feature_columns=feature_columns, random_state=seed)
+        p_test = result["pipeline"].predict_proba(X_test)[:, 1]
+        logloss_vector.append(float(_ev.log_loss(y_test, p_test)))
+
+    vec = np.array(logloss_vector)
+    return {
+        "logloss_vector": logloss_vector,
+        "logloss_mean": float(vec.mean()),
+        "logloss_std": float(vec.std()),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
@@ -396,11 +436,22 @@ def _format_comparison(
         f"+{_TAU_STEP} for sigmoid or raw models."
     ),
 )
+@click.option(
+    "--seeds",
+    "seeds_str",
+    default=None,
+    help=(
+        "Comma-separated list of random seeds for multi-seed raw test-logloss banking "
+        "(e.g. '1,7,42,99,2024'). Requires --model-path. "
+        "Policy: use only at lock time — not for development sniff-tests."
+    ),
+)
 def main(
     features_csv: str,
     model_path: str | None,
     model_name: str,
     tau_adjustment: float | None,
+    seeds_str: str | None,
 ) -> None:
     """Threshold sweep on val, one-time test scoring, append to results.csv.
 
@@ -416,6 +467,25 @@ def main(
             f"Features CSV not found: {features_csv}. "
             "Run 'uv run python -m fuel_signal.features' first."
         )
+
+    # Parse --seeds before any heavy work so errors surface immediately.
+    seeds: list[int] | None = None
+    if seeds_str is not None:
+        if model_path is None:
+            raise click.ClickException(
+                "--seeds requires --model-path. "
+                "Multi-seed runs retrain the model; pass the artifact whose "
+                "feature set should be reused."
+            )
+        try:
+            seeds = [int(s.strip()) for s in seeds_str.split(",") if s.strip()]
+        except ValueError:
+            raise click.ClickException(
+                f"--seeds must be a comma-separated list of integers "
+                f"(e.g. '1,7,42,99,2024'). Got: {seeds_str!r}"
+            )
+        if not seeds:
+            raise click.ClickException("--seeds must contain at least one seed.")
 
     df = pd.read_csv(features_path)
     missing = [c for c in FEATURE_COLUMNS + ["label", "price_date"] if c not in df.columns]
@@ -523,7 +593,21 @@ def main(
     y_hat_val = (p_val >= chosen_tau).astype(int)
     val_p, val_r, val_f1 = _precision_recall_f1(y_val, y_hat_val)
 
-    # Step 6: log to results.csv.
+    # Step 6 (optional): multi-seed raw test-logloss banking.
+    seed_result: dict | None = None
+    if seeds is not None:
+        click.echo(f"\nComputing multi-seed raw test-logloss for seeds={seeds} …")
+        seed_result = multi_seed_raw_logloss(df, feature_columns, seeds)
+        click.echo(
+            f"  Per-seed vector: {[f'{v:.4f}' for v in seed_result['logloss_vector']]}"
+        )
+        click.echo(
+            f"  Mean: {seed_result['logloss_mean']:.4f}  "
+            f"Std: {seed_result['logloss_std']:.4f}  "
+            f"(3σ = {3 * seed_result['logloss_std']:.4f})"
+        )
+
+    # Step 7: log to results.csv.
     notes = (
         f"tau={chosen_tau:.2f}; "
         f"criterion=max_expected_cents_val_adj{effective_adj:+.2f}; "
@@ -543,6 +627,9 @@ def main(
         holdout_logloss=test_result["test_logloss"],
         holdout_brier=test_result["test_brier"],
         notes=notes,
+        seed_test_logloss_vector=seed_result["logloss_vector"] if seed_result else None,
+        seed_test_logloss_mean=seed_result["logloss_mean"] if seed_result else None,
+        seed_test_logloss_std=seed_result["logloss_std"] if seed_result else None,
     )
     click.echo(f"\nAppended result to experiments/results.csv  (name={model_name})")
 
