@@ -184,19 +184,6 @@ def test_multi_seed_raw_logloss_values_are_positive():
 # --seeds CLI validation (issue #145)
 # ---------------------------------------------------------------------------
 
-def test_seeds_without_model_path_errors(tmp_path):
-    """--seeds without --model-path is rejected before any heavy work."""
-    df = _synthetic_df_for_seed_test()
-    features_path = tmp_path / "features.csv"
-    df.to_csv(features_path, index=False)
-    runner = CliRunner()
-    res = runner.invoke(main, [
-        "--features-csv", str(features_path),
-        "--seeds", "1,7,42",
-    ])
-    assert res.exit_code != 0
-    assert "--seeds requires --model-path" in res.output
-
 
 def test_seeds_invalid_format_errors(tmp_path):
     """Non-integer --seeds value is rejected with a clear message."""

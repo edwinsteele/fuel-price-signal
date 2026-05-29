@@ -48,8 +48,8 @@ from fuel_signal import evaluate as _ev
 from fuel_signal.features import FEATURE_COLUMNS
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
-DEFAULT_MODEL_IN = pathlib.Path("data/models/logreg.joblib")
-DEFAULT_MODEL_OUT = pathlib.Path("data/models/logreg_calibrated.joblib")
+DEFAULT_MODEL_IN = pathlib.Path("data/models/lgbm.joblib")
+DEFAULT_MODEL_OUT = pathlib.Path("data/models/lgbm_calibrated.joblib")
 
 _MISCAL_THRESHOLD = 0.05
 _BRIER_REGRESSION_LIMIT = 0.005
@@ -312,7 +312,7 @@ def _build_notes(cb: pd.DataFrame, max_gap: float, best_name: str, compare: dict
     "model_in",
     default=str(DEFAULT_MODEL_IN),
     show_default=True,
-    help="Fitted logreg pipeline from issue #35 (joblib).",
+    help="Fitted model artifact (joblib) produced by train_lgbm.py or train_logreg.py.",
 )
 @click.option(
     "--model-out",
@@ -324,9 +324,9 @@ def _build_notes(cb: pd.DataFrame, max_gap: float, best_name: str, compare: dict
 @click.option(
     "--model-name",
     "model_name",
-    default="logreg",
+    default="lgbm",
     show_default=True,
-    help="Prefix used for the experiment name in results.csv (e.g. 'logreg' or 'lgbm').",
+    help="Prefix used for the experiment name in results.csv (e.g. 'lgbm' or 'logreg').",
 )
 @click.option(
     "--skip-results-csv",
@@ -336,8 +336,9 @@ def _build_notes(cb: pd.DataFrame, max_gap: float, best_name: str, compare: dict
     help="Do not append a row to experiments/results.csv (useful in tests).",
 )
 def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip_results_csv: bool) -> None:
-    """Calibration check and artifact for the logreg baseline (issue #36).
+    """Calibration check and artifact for a fitted model.
 
+    Default: reads data/models/lgbm.joblib, writes data/models/lgbm_calibrated.joblib.
     Prints class balance, reliability table, and calibration comparison on val.
     Saves the best model (raw or calibrated) to --model-out.
     Appends a result row to experiments/results.csv unless --skip-results-csv.
