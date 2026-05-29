@@ -63,6 +63,13 @@ class TestIsSydneyMetro:
         # Central Coast excluded: cycle decoupled from Sydney metro (issue #133)
         assert is_sydney_metro("2250") is False
 
+    def test_central_coast_postcode_still_resolves_in_pc_map(self):
+        # _PC_MAP is all-NSW; CC postcodes still resolve to a council name
+        # even though CC is no longer metro.
+        assert primary_council("2250") == "Central Coast"
+        assert primary_council("2251") == "Central Coast"
+        assert is_sydney_metro("2251") is False
+
     def test_hawkesbury_is_metro(self):
         assert is_sydney_metro("2753") is True
 
