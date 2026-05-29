@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import FEATURE_COLUMNS
+from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS
 from fuel_signal.train_lgbm import (
     main,
     train_and_evaluate,
@@ -28,7 +28,10 @@ def _date_range(start: str, n_days: int) -> list[str]:
     return [(d0 + datetime.timedelta(days=i)).isoformat() for i in range(n_days)]
 
 
-def _synthetic_features_df(seed: int = 0) -> pd.DataFrame:
+_ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
+
+
+def _synthetic_features_df(seed: int = 0, include_lga: bool = True) -> pd.DataFrame:
     """Build a feature frame with rows in train + val + test windows."""
     rng = np.random.default_rng(seed)
 
@@ -37,8 +40,9 @@ def _synthetic_features_df(seed: int = 0) -> pd.DataFrame:
     test_dates = _date_range("2025-08-01", 60)
     all_dates = train_dates + val_dates + test_dates
 
+    feature_cols = _ALL_FEATURE_COLUMNS if include_lga else FEATURE_COLUMNS
     n = len(all_dates)
-    X = rng.normal(size=(n, len(FEATURE_COLUMNS)))
+    X = rng.normal(size=(n, len(feature_cols)))
 
     # Use strong coefficients so the model beats the baseline regardless of
     # how many noise features are in FEATURE_COLUMNS.
@@ -46,7 +50,7 @@ def _synthetic_features_df(seed: int = 0) -> pd.DataFrame:
     probs = 1.0 / (1.0 + np.exp(-logits))
     labels = (rng.uniform(size=n) < probs).astype(int)
 
-    rows = {col: X[:, i] for i, col in enumerate(FEATURE_COLUMNS)}
+    rows = {col: X[:, i] for i, col in enumerate(feature_cols)}
     rows["price_date"] = all_dates
     rows["label"] = labels
     rows["station_code"] = np.arange(n) % 10
@@ -111,8 +115,8 @@ def test_train_and_evaluate_empty_train_raises():
 # ---------------------------------------------------------------------------
 
 def test_cli_runs_end_to_end(tmp_path):
-    """Click smoke test: features CSV → trained model + reliability plot on disk."""
-    df = _synthetic_features_df()
+    """Click smoke test: Phase 4 features CSV → trained model + reliability plot on disk."""
+    df = _synthetic_features_df(include_lga=True)
     features_path = tmp_path / "features.csv"
     df.to_csv(features_path, index=False)
     model_path = tmp_path / "models" / "lgbm.joblib"
@@ -129,16 +133,60 @@ def test_cli_runs_end_to_end(tmp_path):
     )
     assert res.exit_code == 0, res.output
     assert "val log-loss" in res.output
+    assert "Phase 4" in res.output
     assert model_path.exists()
     assert reliability_path.exists()
 
     saved = joblib.load(model_path)
     assert "pipeline" in saved
-    assert saved["feature_columns"] == FEATURE_COLUMNS
+    assert saved["feature_columns"] == _ALL_FEATURE_COLUMNS
 
-    X = df[FEATURE_COLUMNS].head(5).to_numpy(dtype=float)
+    X = df[_ALL_FEATURE_COLUMNS].head(5).to_numpy(dtype=float)
     proba = saved["pipeline"].predict_proba(X)
     assert proba.shape == (5, 2)
+
+
+def test_cli_no_lga_features_flag_trains_phase3c(tmp_path):
+    """--no-lga-features trains the 15-feat Phase 3c schema on a CSV without LGA cols."""
+    df = _synthetic_features_df(include_lga=False)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+    model_path = tmp_path / "models" / "lgbm_phase3c.joblib"
+    reliability_path = tmp_path / "reliability_lgbm_phase3c.png"
+
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--model-out", str(model_path),
+            "--reliability-out", str(reliability_path),
+            "--no-lga-features",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Phase 3c" in res.output
+
+    saved = joblib.load(model_path)
+    assert saved["feature_columns"] == FEATURE_COLUMNS
+
+
+def test_cli_no_lga_features_with_lga_csv_errors(tmp_path):
+    """--no-lga-features against a Phase 4 CSV (LGA cols present) is a hard error."""
+    df = _synthetic_features_df(include_lga=True)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--no-lga-features",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "lga" in res.output.lower()
 
 
 def test_cli_missing_features_csv_errors(tmp_path):

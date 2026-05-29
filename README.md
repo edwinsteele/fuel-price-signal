@@ -34,14 +34,9 @@ uv run python -m fuel_signal.db                            # 2. load snapshots +
 uv run python -m fuel_signal.fill                          # 3. forward-fill daily price gaps
 uv run python -m fuel_signal.classify --start-date 2016-08-01   # 4. classify stations
 uv run python -m fuel_signal.features                      # 5. assemble ML feature rows
-uv run python -m fuel_signal.train_lgbm                    # 6. train LightGBM model
-uv run python -m fuel_signal.calibrate \
-    --model-in data/models/lgbm.joblib \
-    --model-out data/models/lgbm_calibrated.joblib \
-    --model-name lgbm --skip-results-csv                   # 7. calibrate
-uv run python -m fuel_signal.score_phase2 \
-    --model-path data/models/lgbm_calibrated.joblib \
-    --model-name lgbm_cycle_features                       # 8. final test-set eval (run once)
+uv run python -m fuel_signal.train_lgbm                    # 6. train LightGBM (Phase 4 default)
+uv run python -m fuel_signal.calibrate --skip-results-csv # 7. calibrate (lgbm defaults)
+uv run python -m fuel_signal.score_phase2                  # 8. final test-set eval (run once)
 ```
 
 You do **not** need to run `fuel_signal.live` first — station reference data comes from the snapshot CSVs committed in `data/snapshots/`. Run `live` only to pull today's prices manually (see below). The `lga_leadership` table (used by `inspect.py`'s `/lead-lag` page) is a separate optional artifact, not part of the model pipeline; rebuild it with `uv run python -m fuel_signal.lga_leadership --start-date 2016-08-01` if you need it.
@@ -348,9 +343,12 @@ Output is one line per fold (train/val date ranges, row counts, val logloss, bas
 Vanilla LightGBM on the **same 10 features** as Phase 2 — no new features, no tuning, `random_state=42`. No `StandardScaler` (trees are scale-invariant). This is the apples-to-apples model-class comparison. Does **not** write to `experiments/results.csv`.
 
 ```bash
-# Default: reads data/features.csv, writes data/models/lgbm.joblib
-# and experiments/reliability_lgbm_val.png
+# Default: Phase 4 schema (FEATURE_COLUMNS + LGA_FEATURE_COLUMNS, 50 features)
+# Reads data/features.csv, writes data/models/lgbm.joblib
 uv run python -m fuel_signal.train_lgbm
+
+# Opt-out: Phase 3c schema (15 features only)
+uv run python -m fuel_signal.train_lgbm --no-lga-features
 
 # Custom paths
 uv run python -m fuel_signal.train_lgbm \
@@ -412,21 +410,18 @@ uv run python -m fuel_signal.loo_ablation \
 Check calibration quality and produce a calibrated model artifact. Works with any fitted model (logreg or LightGBM).
 
 ```bash
-# Logreg (default): reads data/features.csv + data/models/logreg.joblib
+# Default: reads data/features.csv + data/models/lgbm.joblib,
+# writes data/models/lgbm_calibrated.joblib
 uv run python -m fuel_signal.calibrate
 
-# LightGBM (Phase 3a): specify model-in, model-out, and model-name
-uv run python -m fuel_signal.calibrate \
-    --model-in data/models/lgbm.joblib \
-    --model-out data/models/lgbm_calibrated.joblib \
-    --model-name lgbm
+# Skip writing to experiments/results.csv (e.g. during pipeline rebuild)
+uv run python -m fuel_signal.calibrate --skip-results-csv
 
-# Custom paths or skip writing to experiments/results.csv
+# Custom model artifact (e.g. logreg)
 uv run python -m fuel_signal.calibrate \
-    --features-csv /tmp/features.csv \
-    --model-in /tmp/logreg.joblib \
-    --model-out /tmp/logreg_calibrated.joblib \
-    --skip-results-csv
+    --model-in data/models/logreg.joblib \
+    --model-out data/models/logreg_calibrated.joblib \
+    --model-name logreg
 ```
 
 Reports class balance (BUY rate) for all splits and prints a 10-bin reliability table on val. If miscalibrated (max |gap| > 0.05), compares sigmoid (Platt) vs isotonic calibration wrappers and saves the better one. Calibration uses `sklearn.base.clone` of the input model, so it works generically for any sklearn-compatible estimator. Appends a result row to `experiments/results.csv`.
@@ -469,10 +464,10 @@ Threshold sweep on val → pick τ → **score test once** → append to `experi
 Also used for Phase 3+ models via `--model-path` and `--model-name`.
 
 ```bash
-# Phase 2 (default): re-trains logreg from scratch
+# Default: loads data/models/lgbm_calibrated.joblib, writes lgbm_cycle_features to results.csv
 uv run python -m fuel_signal.score_phase2
 
-# Phase 3+: load a pre-trained/calibrated model artifact
+# Custom artifact or name
 uv run python -m fuel_signal.score_phase2 \
     --model-path data/models/lgbm_calibrated.joblib \
     --model-name lgbm_cycle_features
@@ -480,7 +475,7 @@ uv run python -m fuel_signal.score_phase2 \
 
 **What it does:**
 
-1. Without `--model-path`: trains the logreg pipeline on train, scores on val. With `--model-path`: loads the artifact and scores val directly.
+1. Loads the model artifact at `--model-path` (default: `data/models/lgbm_calibrated.joblib`) and scores val directly.
 2. Sweeps τ ∈ [0.05, 0.95] (step 0.05) on val — prints precision, recall, F1, BUY%, and expected-cents-saved per row.
 3. Picks τ = argmax(expected cents/row on val) + 0.05 adjustment to correct for val's elevated BUY rate.
 4. Scores test at chosen τ. Appends one row to `experiments/results.csv` using `--model-name`.
@@ -525,15 +520,10 @@ Spend-optimal τ=0.30 beats τ=0.40 by 1.01 c/L (≈0.5%). Phase 3 must beat 190
 Apples-to-apples LightGBM vs logreg — same 10 features, vanilla defaults, `random_state=42`.
 
 ```bash
-# Full sequence: train → calibrate → score → backtest
+# Full sequence: train → calibrate → score → backtest (all use Phase 4 defaults)
 uv run python -m fuel_signal.train_lgbm
-uv run python -m fuel_signal.calibrate \
-    --model-in data/models/lgbm.joblib \
-    --model-out data/models/lgbm_calibrated.joblib \
-    --model-name lgbm --skip-results-csv
-uv run python -m fuel_signal.score_phase2 \
-    --model-path data/models/lgbm_calibrated.joblib \
-    --model-name lgbm_cycle_features
+uv run python -m fuel_signal.calibrate --skip-results-csv
+uv run python -m fuel_signal.score_phase2 --model-name lgbm_cycle_features
 uv run python -m fuel_signal.backtest_phase2 \
     --model-path data/models/lgbm_calibrated.joblib --no-patch
 ```

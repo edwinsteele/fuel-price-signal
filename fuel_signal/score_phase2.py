@@ -411,17 +411,17 @@ def _format_comparison(
 @click.option(
     "--model-path",
     "model_path",
-    default=None,
+    default="data/models/lgbm_calibrated.joblib",
     show_default=True,
     help=(
         "Path to a pre-trained (optionally calibrated) model joblib artifact. "
-        "If omitted, re-trains logreg from scratch (Phase 2 backward-compat mode)."
+        "Default: data/models/lgbm_calibrated.joblib (Phase 4 LGBM)."
     ),
 )
 @click.option(
     "--model-name",
     "model_name",
-    default="logreg_cycle_features",
+    default="lgbm_cycle_features",
     show_default=True,
     help="Experiment name written to results.csv (e.g. 'lgbm_cycle_features').",
 )
@@ -471,12 +471,6 @@ def main(
     # Parse --seeds before any heavy work so errors surface immediately.
     seeds: list[int] | None = None
     if seeds_str is not None:
-        if model_path is None:
-            raise click.ClickException(
-                "--seeds requires --model-path. "
-                "Multi-seed runs retrain the model; pass the artifact whose "
-                "feature set should be reused."
-            )
         try:
             seeds = [int(s.strip()) for s in seeds_str.split(",") if s.strip()]
         except ValueError:

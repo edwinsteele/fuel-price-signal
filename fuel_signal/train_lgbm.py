@@ -1,8 +1,8 @@
 """LightGBM classifier — numeric-only.
 
-Default feature set is FEATURE_COLUMNS (15 cents/cycle columns, Phase 3c).
-Pass --include-lga-features to also train on LGA_FEATURE_COLUMNS
-(days_since_trough_entry_<lga>, Phase 4). random_state=42, no hyperparameter
+Default feature set is Phase 4: FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
+(days_since_trough_entry_<lga>, 50 features). Pass --no-lga-features to train
+on the 15-feat Phase 3c schema instead. random_state=42, no hyperparameter
 tuning. Test split is intentionally left untouched — reserved for
 score_phase2.py once calibration + threshold is locked.
 
@@ -140,15 +140,17 @@ def _format_results(result: dict) -> str:
     help="Where to save the val reliability plot.",
 )
 @click.option(
-    "--include-lga-features",
-    "include_lga_features",
+    "--no-lga-features",
+    "no_lga_features",
     is_flag=True,
     default=False,
-    help="Append Phase 4 LGA_FEATURE_COLUMNS (days_since_trough_entry_<lga>) to the training feature set.",
+    help="Train on the 15-feat Phase 3c schema only; ignore LGA_FEATURE_COLUMNS.",
 )
-def main(features_csv: str, model_out: str, reliability_out: str, include_lga_features: bool) -> None:
+def main(features_csv: str, model_out: str, reliability_out: str, no_lga_features: bool) -> None:
     """Train LightGBM on numeric features.
 
+    Default: Phase 4 schema (FEATURE_COLUMNS + LGA_FEATURE_COLUMNS, 50 features).
+    Pass --no-lga-features to use the 15-feat Phase 3c schema instead.
     No hyperparameter tuning, random_state=42. Test is intentionally left
     untouched. This command does not append to experiments/results.csv.
     """
@@ -159,9 +161,7 @@ def main(features_csv: str, model_out: str, reliability_out: str, include_lga_fe
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
-    feature_columns = (
-        FEATURE_COLUMNS + LGA_FEATURE_COLUMNS if include_lga_features else FEATURE_COLUMNS
-    )
+    feature_columns = FEATURE_COLUMNS if no_lga_features else FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
 
     df = pd.read_csv(features_path)
     required = feature_columns + ["label", "price_date"]
@@ -172,21 +172,18 @@ def main(features_csv: str, model_out: str, reliability_out: str, include_lga_fe
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
 
-    # If the CSV carries LGA columns but the flag wasn't passed, the user is
-    # probably running Phase 3c by accident on a Phase 4 features.csv. Warn
-    # loudly — this exact mismatch produced byte-identical val log-loss in
-    # the Phase 4 retrain and cost a debugging round-trip.
-    if not include_lga_features:
+    # If --no-lga-features is passed against a Phase 4 CSV, error out — this is
+    # the mismatch that silently produced stale 15-feat models during recovery.
+    if no_lga_features:
         present_lga = [c for c in LGA_FEATURE_COLUMNS if c in df.columns]
         if present_lga:
-            click.echo(
-                f"WARNING: features CSV contains {len(present_lga)} LGA columns "
-                "but --include-lga-features was not passed. Training on the "
-                "15-feat Phase 3c schema; LGA columns will be ignored.",
-                err=True,
+            raise click.ClickException(
+                f"Features CSV contains {len(present_lga)} LGA columns but "
+                "--no-lga-features was passed. Remove --no-lga-features to train "
+                "the Phase 4 schema, or regenerate features.csv without LGA columns."
             )
 
-    schema_label = "Phase 4" if include_lga_features else "Phase 3c"
+    schema_label = "Phase 3c" if no_lga_features else "Phase 4"
     click.echo(f"Training on {len(feature_columns)} features ({schema_label} schema).")
     result = train_and_evaluate(df, feature_columns=feature_columns)
 
