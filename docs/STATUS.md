@@ -87,7 +87,7 @@ The #144 from-scratch DB rebuild corrected postcode→LGA boundaries (which feed
 
 Calibrate again chose raw over isotonic. Seed-banked (raw uncalibrated test logloss, seeds {1,7,42,99,2024}): **mean 0.2919, std 0.0053 (3σ=0.0158)** — vs `lgbm_council_fix` raw mean 0.3205, a leadership lift of −0.0286, beyond the 3σ band of both. See `experiments/results.csv` row `phase4_event_leadership_postfix` and the throwaway `experiments/seed_bank_phase4/run.py` (superseded once #145 lands a real `--seeds` flag).
 
-**Not re-run post-fix:** the three validation gates below were computed pre-fix. The from-scratch rebuild also left `lga_leadership` empty (0 rows), so `inspect.py`'s board and the SHAP cross-reference can't run until it's repopulated. Re-validation is a follow-up, not done in the re-lock.
+**Not re-run post-fix:** the three validation gates below were computed pre-fix. The from-scratch rebuild also left `lga_leadership` empty (0 rows), so `inspect.py`'s board and the SHAP cross-reference can't run until it's repopulated. Re-validation tracked as **#156** (depends on **#155** for `lga_leadership` repopulation).
 
 **Validation (all three gates passed — pre-#144-fix numbers):**
 
@@ -97,9 +97,8 @@ Calibrate again chose raw over isotonic. Seed-banked (raw uncalibrated test logl
 
 **Open follow-ups from validation:**
 
-- **#136 (design) — RESOLVED 2026-05-28.** SHAP vs `trough_lead_consistency` disagreement investigated (`experiments/shap_phase4/nan_analysis.py`, `dependence_grid.py`, `lga_shap_plots.py`, `lga_dependence_interaction.py`). Findings: (1) NaN-routing artefact ruled out — val window is 0% NaN on the LGA features (the 5.59% woollahra figure is full-CSV cold-start only). (2) Three empirical roles by sign of Pearson r(feature, SHAP): **leaders** (woollahra r=−0.42, randwick r=−0.91 → recent trough toward BUY), **inverted-phase** (blue_mountains r=+0.79, parramatta r=+0.67 → recent trough toward WAIT; LGA leads the rise), **inert** (the four highest-consistency LGAs — sutherland/northern_beaches/penrith/ku_ring_gai — all |SHAP|<0.013, signal already in stickiness_score + station_minus_last_min). **Decision:** model unchanged (per-LGA features, no weighting — validated); `trough_lead_consistency` demoted to a descriptive stat (information value ≠ price-space consistency); future `inspect.py /leadership` view ranks by mean|SHAP| + sign, not consistency.
-- Camden missing-data chore — outer-metro Sydney LGA with real petrol stations but 0 stations in our DB; trace upstream feed.
-- v2 peak features — `lead −8+` and `lead −7..−4` cohorts remain miscalibrated by +0.12 and +0.22 (over-confident BUY). Symmetric `days_since_peak_entry_<lga>` design worth scoping next; expect the same leader/inverted/inert split — design symmetrically, do not curate by consistency.
+- Camden missing-data chore (**#138**) — outer-metro Sydney LGA with real petrol stations but 0 stations in our DB; trace upstream feed.
+- v2 peak features (**#157**) — `lead −8+` and `lead −7..−4` cohorts remain miscalibrated by +0.12 and +0.22 (over-confident BUY). Design taxonomy: `docs/PLAN_phase4_event_leadership.md` § LGA feature roles in SHAP.
 
 ## Pending work
 
