@@ -62,6 +62,7 @@ _CSV_HEADER = [
     "train_start", "train_end", "val_start", "val_end", "test_start", "test_end",
     "holdout_logloss", "holdout_brier",
     "realised_spend_cpl", "realised_savings_vs_always_buy_pct",
+    "seed_test_logloss_vector", "seed_test_logloss_mean", "seed_test_logloss_std",
     "notes",
 ]
 
@@ -260,12 +261,17 @@ def log_experiment(
     notes: str = "",
     realised_spend_cpl: float | None = None,
     realised_savings_vs_always_buy_pct: float | None = None,
+    seed_test_logloss_vector: list[float] | None = None,
+    seed_test_logloss_mean: float | None = None,
+    seed_test_logloss_std: float | None = None,
 ) -> None:
     """Append one row to experiments/results.csv with a UTC timestamp and git sha.
 
     Creates the file with a header row if it does not exist yet.
     realised_spend_cpl and realised_savings_vs_always_buy_pct are populated
     by the backtest engine (Phase 3); leave None for probabilistic-only runs.
+    seed_test_logloss_vector / mean / std are populated by score_phase2 --seeds
+    at lock time; leave None for single-seed development runs.
     """
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
@@ -298,5 +304,8 @@ def log_experiment(
             f"{holdout_brier:.6f}",
             f"{realised_spend_cpl:.2f}" if realised_spend_cpl is not None else "",
             f"{realised_savings_vs_always_buy_pct:.2f}" if realised_savings_vs_always_buy_pct is not None else "",
+            "|".join(f"{v:.6f}" for v in seed_test_logloss_vector) if seed_test_logloss_vector is not None else "",
+            f"{seed_test_logloss_mean:.6f}" if seed_test_logloss_mean is not None else "",
+            f"{seed_test_logloss_std:.6f}" if seed_test_logloss_std is not None else "",
             notes,
         ])

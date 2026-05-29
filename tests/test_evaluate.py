@@ -280,6 +280,44 @@ def test_log_experiment_raises_on_schema_drift(tmp_path, monkeypatch):
         log_experiment("m", [], holdout_logloss=0.5, holdout_brier=0.2)
 
 
+def test_log_experiment_seed_columns_empty_by_default(tmp_path, monkeypatch):
+    """When no seed args are passed the three seed columns are written as empty strings."""
+    import csv as _csv
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    log_experiment("m", [], holdout_logloss=0.5, holdout_brier=0.2)
+
+    rows = list(_csv.reader(results_path.open(newline="")))
+    header = rows[0]
+    data = rows[1]
+    vec_idx = header.index("seed_test_logloss_vector")
+    assert data[vec_idx] == ""
+    assert data[vec_idx + 1] == ""
+    assert data[vec_idx + 2] == ""
+
+
+def test_log_experiment_writes_seed_columns(tmp_path, monkeypatch):
+    """Provided seed columns are written pipe-separated vector + mean + std."""
+    import csv as _csv
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    log_experiment(
+        "m", [],
+        holdout_logloss=0.5, holdout_brier=0.2,
+        seed_test_logloss_vector=[0.32, 0.31, 0.33],
+        seed_test_logloss_mean=0.32,
+        seed_test_logloss_std=0.008165,
+    )
+
+    rows = list(_csv.reader(results_path.open(newline="")))
+    header = rows[0]
+    data = rows[1]
+    vec_idx = header.index("seed_test_logloss_vector")
+    assert data[vec_idx] == "0.320000|0.310000|0.330000"
+    assert data[vec_idx + 1] == "0.320000"
+    assert data[vec_idx + 2] == "0.008165"
+
+
 # ---------------------------------------------------------------------------
 # walk_forward_folds — helpers
 # ---------------------------------------------------------------------------

@@ -274,6 +274,16 @@ Leading indicators (deferred — not yet built):
 - Hypothesis: some LGAs and/or macro signals (TGP, crude) precede BM price rises
 - Architecture supports this: new series → new `CycleDetector` → new signal class → register in `RecommendationManager`
 
+## Multi-seed test-logloss policy
+
+At **lock time** (phase boundaries, results you will compare future changes against), run `score_phase2.py` with `--seeds 1,7,42,99,2024`. This banks a per-seed raw (uncalibrated) LightGBM test-logloss vector in `experiments/results.csv` columns `seed_test_logloss_vector`, `seed_test_logloss_mean`, `seed_test_logloss_std`.
+
+For **development sniff-tests**, omit `--seeds`. Single-seed is sufficient for checking direction; multi-seeding every experiment defeats the 3×std comparison gate.
+
+Comparison gate: a new model's delta vs the baseline must exceed `3 × seed_test_logloss_std` of the baseline to be considered real (not seed noise).
+
+Metric is always **raw (uncalibrated)** LightGBM test logloss so that the calibration choice doesn't confound the comparison. The `holdout_logloss` column in the same row records the final (possibly calibrated) model score and is a separate quantity.
+
 ## Testing
 Tests are required alongside all implementation. Key areas:
 - Transformer cleaning logic (date format bug, postcode corrections, dedup)
