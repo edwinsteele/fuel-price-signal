@@ -169,6 +169,7 @@ def test_multi_seed_raw_logloss_mean_and_std():
     vec = np.array(result["logloss_vector"])
     assert result["logloss_mean"] == pytest.approx(vec.mean(), abs=1e-9)
     assert result["logloss_std"] == pytest.approx(vec.std(), abs=1e-9)
+    assert result["logloss_std"] > 0, "seeds must produce distinct models (check subsample/bagging params)"
 
 
 def test_multi_seed_raw_logloss_values_are_positive():

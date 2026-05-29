@@ -35,8 +35,13 @@ DEFAULT_RELIABILITY_PNG = pathlib.Path("experiments/reliability_lgbm_val.png")
 
 
 def build_pipeline(random_state: int = 42) -> LGBMClassifier:
-    """Vanilla LightGBM with deterministic seed and silenced console output."""
-    return LGBMClassifier(random_state=random_state, verbose=-1)
+    """LightGBM with bagging enabled so different random_state values produce distinct models."""
+    return LGBMClassifier(
+        random_state=random_state,
+        verbose=-1,
+        subsample=0.8,
+        subsample_freq=1,
+    )
 
 
 def train_and_evaluate(
