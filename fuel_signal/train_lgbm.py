@@ -161,10 +161,7 @@ def main(features_csv: str, model_out: str, reliability_out: str, no_lga_feature
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
-    include_lga_features = not no_lga_features
-    feature_columns = (
-        FEATURE_COLUMNS + LGA_FEATURE_COLUMNS if include_lga_features else FEATURE_COLUMNS
-    )
+    feature_columns = FEATURE_COLUMNS if no_lga_features else FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
 
     df = pd.read_csv(features_path)
     required = feature_columns + ["label", "price_date"]
@@ -177,7 +174,7 @@ def main(features_csv: str, model_out: str, reliability_out: str, no_lga_feature
 
     # If --no-lga-features is passed against a Phase 4 CSV, error out — this is
     # the mismatch that silently produced stale 15-feat models during recovery.
-    if not include_lga_features:
+    if no_lga_features:
         present_lga = [c for c in LGA_FEATURE_COLUMNS if c in df.columns]
         if present_lga:
             raise click.ClickException(
@@ -186,7 +183,7 @@ def main(features_csv: str, model_out: str, reliability_out: str, no_lga_feature
                 "the Phase 4 schema, or regenerate features.csv without LGA columns."
             )
 
-    schema_label = "Phase 4" if include_lga_features else "Phase 3c"
+    schema_label = "Phase 3c" if no_lga_features else "Phase 4"
     click.echo(f"Training on {len(feature_columns)} features ({schema_label} schema).")
     result = train_and_evaluate(df, feature_columns=feature_columns)
 

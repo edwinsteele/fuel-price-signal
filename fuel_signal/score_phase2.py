@@ -415,8 +415,7 @@ def _format_comparison(
     show_default=True,
     help=(
         "Path to a pre-trained (optionally calibrated) model joblib artifact. "
-        "Default: data/models/lgbm_calibrated.joblib (Phase 4 LGBM). "
-        "Pass None explicitly to re-train logreg from scratch (Phase 2 mode)."
+        "Default: data/models/lgbm_calibrated.joblib (Phase 4 LGBM)."
     ),
 )
 @click.option(
