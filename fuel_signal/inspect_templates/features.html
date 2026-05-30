@@ -4,12 +4,26 @@
 <h1>Feature SHAP Analysis</h1>
 <p class="meta">Per-feature mean|SHAP| ranked from <code>{{ shap_dir_str }}/summary.csv</code> &mdash; {{ now }}</p>
 
+{% if shap_stale %}
+<div class="banner banner-warn">
+  <strong>Stale SHAP artifacts:</strong> <code>{{ model_path_str }}</code> is newer than <code>{{ shap_dir_str }}/shap_values.npy</code>.
+  Re-run: <code>uv run python -m fuel_signal.shap_report --model {{ model_path_str }} --features data/features.csv --output {{ shap_dir_str }}</code>
+</div>
+{% endif %}
+
 {% if no_artifact %}
 <div class="banner banner-warn">
   No SHAP artifact found at <code>{{ shap_dir_str }}/summary.csv</code>.
   Run <code>uv run python -m fuel_signal.shap_report --model data/models/lgbm.joblib --features data/features.csv --output {{ shap_dir_str }}</code> to generate it.
 </div>
-{% else %}
+{% elif no_partner_scores %}
+<div class="banner banner-warn">
+  No partner scores found at <code>{{ shap_dir_str }}/partner_scores.csv</code>.
+  Re-run <code>uv run python -m fuel_signal.shap_report --model data/models/lgbm.joblib --features data/features.csv --output {{ shap_dir_str }}</code> to generate it.
+</div>
+{% endif %}
+
+{% if not no_artifact %}
 
 <!-- Summary stats — always computed from SHAP rank, not display order -->
 <div class="stats">
@@ -38,15 +52,15 @@
 <!-- Sort controls -->
 <div style="display:flex; gap:.75rem; align-items:center; margin:1rem 0 .5rem; font-size:.875rem">
   <span style="color:var(--text-muted); font-size:.8rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em">Sort:</span>
-  <a href="?sort=shap{% if selected_feature %}&feature={{ selected_feature }}{% endif %}"
+  <a href="?sort=shap{% if selected_feature %}&feature={{ selected_feature }}{% if selected_interaction %}&interaction={{ selected_interaction }}{% endif %}{% endif %}"
      style="{% if sort_by == 'shap' %}color:var(--accent); font-weight:600{% else %}color:var(--blue){% endif %}; text-decoration:none">
     mean|SHAP|
   </a>
-  <a href="?sort=alpha{% if selected_feature %}&feature={{ selected_feature }}{% endif %}"
+  <a href="?sort=alpha{% if selected_feature %}&feature={{ selected_feature }}{% if selected_interaction %}&interaction={{ selected_interaction }}{% endif %}{% endif %}"
      style="{% if sort_by == 'alpha' %}color:var(--accent); font-weight:600{% else %}color:var(--blue){% endif %}; text-decoration:none">
     Alphabetic
   </a>
-  <a href="?sort=sign{% if selected_feature %}&feature={{ selected_feature }}{% endif %}"
+  <a href="?sort=sign{% if selected_feature %}&feature={{ selected_feature }}{% if selected_interaction %}&interaction={{ selected_interaction }}{% endif %}{% endif %}"
      style="{% if sort_by == 'sign' %}color:var(--accent); font-weight:600{% else %}color:var(--blue){% endif %}; text-decoration:none">
     Sign of r
   </a>
@@ -63,8 +77,9 @@
         <th style="text-align:right; width:3rem">SHAP rank</th>
         <th>Feature</th>
         <th style="text-align:right">mean|SHAP|</th>
-        <th style="text-align:center; width:4rem">sign(r)</th>
+        <th style="text-align:center; width:4.5rem">r</th>
         <th style="text-align:right; width:4.5rem">NaN%</th>
+        <th style="text-align:left; width:16rem">Partners</th>
       </tr>
     </thead>
     <tbody>
@@ -79,20 +94,38 @@
           </a>
         </td>
         <td style="text-align:right; font-family:var(--font-mono)">{{ "%.4f" | format(row.mean_abs_shap) }}</td>
-        <td style="text-align:center">
-          {% if row.sign_of_r != row.sign_of_r %}{# NaN check #}
+        <td style="text-align:center; font-family:var(--font-mono)">
+          {% if row.r != row.r %}{# NaN check #}
             <span style="color:var(--text-dim)">—</span>
-          {% elif row.sign_of_r > 0 %}
-            <span style="color:var(--green); font-weight:700">+</span>
-          {% elif row.sign_of_r < 0 %}
-            <span style="color:var(--red); font-weight:700">−</span>
+          {% elif row.r > 0 %}
+            <span style="color:var(--green); font-weight:600">{{ "%+.2f" | format(row.r) }}</span>
+          {% elif row.r < 0 %}
+            <span style="color:var(--red); font-weight:600">{{ "%+.2f" | format(row.r) }}</span>
           {% else %}
-            <span style="color:var(--text-dim)">?</span>
+            <span style="color:var(--text-dim)">{{ "%+.2f" | format(row.r) }}</span>
           {% endif %}
         </td>
         <td style="text-align:right; font-family:var(--font-mono);
                    {% if row.nan_fraction > 0.5 %}color:var(--red){% elif row.nan_fraction > 0 %}color:var(--accent){% else %}color:var(--text-muted){% endif %}">
           {{ "%.0f%%" | format(row.nan_fraction * 100) }}
+        </td>
+        <td>
+          {% set partners = partner_map.get(row.feature, []) %}
+          {% if partners %}
+          <select
+            style="font-size:.75rem; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:.1rem .25rem; max-width:15rem"
+            onchange="if(this.value){window.location='?sort={{ sort_by }}&feature={{ row.feature }}&interaction='+encodeURIComponent(this.value);}else{window.location='?sort={{ sort_by }}&feature={{ row.feature }}';}">
+            <option value=""{% if row.feature == selected_feature and not selected_interaction %} selected{% endif %}>(auto-pick)</option>
+            {% for p in partners %}
+            <option value="{{ p.partner }}"
+              {% if row.feature == selected_feature and p.partner == selected_interaction %} selected{% endif %}>
+              {{ p.partner }} ({{ "%.0f%%" | format(p.pct_of_total * 100) }})
+            </option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <span style="color:var(--text-dim); font-size:.75rem">—</span>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}
@@ -114,12 +147,12 @@
         </div>
         <div>
           <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700">
-            {% if detail.sign_of_r != detail.sign_of_r %}—
-            {% elif detail.sign_of_r > 0 %}<span style="color:var(--green)">+1</span>
-            {% elif detail.sign_of_r < 0 %}<span style="color:var(--red)">−1</span>
-            {% else %}<span style="color:var(--text-dim)">0</span>{% endif %}
+            {% if detail.r != detail.r %}—
+            {% elif detail.r > 0 %}<span style="color:var(--green)">{{ "%+.2f" | format(detail.r) }}</span>
+            {% elif detail.r < 0 %}<span style="color:var(--red)">{{ "%+.2f" | format(detail.r) }}</span>
+            {% else %}<span style="color:var(--text-dim)">{{ "%+.2f" | format(detail.r) }}</span>{% endif %}
           </div>
-          <div style="font-size:.75rem; color:var(--text-muted)">sign(r)</div>
+          <div style="font-size:.75rem; color:var(--text-muted)">r</div>
         </div>
         <div>
           <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:#fff">{{ "%.1f%%" | format(detail.nan_fraction * 100) }}</div>
@@ -129,8 +162,22 @@
           <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:#fff">{{ detail.rank | int }}</div>
           <div style="font-size:.75rem; color:var(--text-muted)">SHAP rank</div>
         </div>
+        {% set budget_rank = interaction_budget_ranks.get(selected_feature) %}
+        {% if budget_rank %}
+        <div>
+          <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:#fff">{{ budget_rank[0] }} / {{ budget_rank[1] }}</div>
+          <div style="font-size:.75rem; color:var(--text-muted)">interaction-budget rank</div>
+        </div>
+        {% endif %}
       </div>
-      <img src="{{ url_for('features_plot', feature_name=selected_feature) }}"
+      {% if selected_interaction %}
+      <div style="font-size:.75rem; color:var(--text-muted); margin-bottom:.5rem">
+        Coloured by: <span style="font-family:var(--font-mono); color:var(--accent)">{{ selected_interaction }}</span>
+        &nbsp;&mdash;&nbsp;
+        <a href="?sort={{ sort_by }}&feature={{ selected_feature }}" style="color:var(--blue)">Reset to auto</a>
+      </div>
+      {% endif %}
+      <img src="{{ url_for('features_plot', feature_name=selected_feature) }}{% if selected_interaction %}?interaction={{ selected_interaction }}{% endif %}"
            alt="Dependence plot: {{ selected_feature }}"
            style="width:100%; border-radius:4px; background:#fff"
            onerror="this.parentElement.innerHTML+='<div class=\'banner banner-warn\' style=\'margin-top:.5rem\'>Dependence PNG not found — re-run shap_report.py to regenerate.</div>'; this.remove()">

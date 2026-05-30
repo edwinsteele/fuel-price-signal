@@ -3,7 +3,10 @@
 Loads a fitted joblib model bundle and features CSV, computes TreeExplainer SHAP
 values on the requested split, and emits:
   - shap_values.npy            (n_rows, n_features)
-  - summary.csv                per-feature: mean_abs_shap, rank, sign_of_r, nan_fraction
+  - X_val.npy                  (n_rows, n_features) feature matrix for the split
+  - feature_columns.json       ordered list of feature names
+  - summary.csv                per-feature: mean_abs_shap, rank, r, nan_fraction
+  - partner_scores.csv         per (feature, partner): approx interaction scores
   - dependence/<feature>.png   one scatter per feature
 
 Usage::
@@ -17,6 +20,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import pathlib
 import warnings
 from typing import Literal
@@ -70,13 +74,13 @@ def build_summary(
 ) -> pd.DataFrame:
     """Return per-feature summary DataFrame.
 
-    Columns: feature, mean_abs_shap, rank, sign_of_r, nan_fraction.
-    sign_of_r is the sign of Pearson r(feature_values, shap_values), or NaN
+    Columns: feature, mean_abs_shap, rank, r, nan_fraction.
+    r is the signed Pearson r(feature_values, shap_values), or NaN
     when the feature is all-NaN or has zero variance.
     """
     n_feat = len(feature_columns)
     mean_abs = np.mean(np.abs(shap_values), axis=0)
-    signs = []
+    r_values = []
     nan_fracs = []
     for i in range(n_feat):
         vals = X[:, i]
@@ -85,20 +89,77 @@ def build_summary(
         v = vals[~nan_mask]
         s = shap_values[~nan_mask, i]
         if len(v) < 2 or np.std(v) == 0 or np.std(s) == 0:
-            signs.append(float("nan"))
+            r_values.append(float("nan"))
         else:
-            r = float(np.corrcoef(v, s)[0, 1])
-            signs.append(float(np.sign(r)))
+            r_values.append(float(np.corrcoef(v, s)[0, 1]))
 
     df = pd.DataFrame({
         "feature": feature_columns,
         "mean_abs_shap": mean_abs,
-        "sign_of_r": signs,
+        "r": r_values,
         "nan_fraction": nan_fracs,
     })
     df = df.sort_values("mean_abs_shap", ascending=False).reset_index(drop=True)
     df.insert(2, "rank", range(1, len(df) + 1))
     return df
+
+
+def approx_interaction_scores(main_idx: int, sv: np.ndarray, X: np.ndarray) -> np.ndarray:
+    """Compute SHAP approximate interaction scores for one feature against all others.
+
+    Replicates shap.utils.approximate_interactions so we get raw scores, not just rank.
+    """
+    x_main = X[:, main_idx]
+    order = np.argsort(x_main)
+    shap_main = sv[order, main_idx]
+    inc = int(np.clip(len(x_main) / 10.0, 1, 50))
+    scores = np.zeros(X.shape[1], dtype=np.float64)
+    for j in range(X.shape[1]):
+        if j == main_idx:
+            continue
+        partner = X[order, j].astype(np.float64)
+        s = 0.0
+        for k in range(0, len(x_main), inc):
+            a = shap_main[k : k + inc]
+            b = partner[k : k + inc]
+            mask = ~np.isnan(b)
+            if mask.sum() < 3:
+                continue
+            a = a[mask]
+            b = b[mask]
+            if np.std(a) == 0 or np.std(b) == 0:
+                continue
+            s += abs(np.corrcoef(a, b)[0, 1])
+        scores[j] = s
+    return scores
+
+
+def compute_partner_scores(
+    feature_columns: list[str],
+    X: np.ndarray,
+    sv: np.ndarray,
+) -> pd.DataFrame:
+    """Compute approx interaction scores for all (feature, partner) pairs.
+
+    Returns DataFrame with columns: feature, partner, score, pct_of_top, pct_of_total.
+    Zero-score partners are omitted to keep the file compact.
+    """
+    rows = []
+    for i, feat in enumerate(feature_columns):
+        scores = approx_interaction_scores(i, sv, X)
+        total = float(scores.sum())
+        top = float(scores.max())
+        for j, partner in enumerate(feature_columns):
+            if j == i or scores[j] == 0:
+                continue
+            rows.append({
+                "feature": feat,
+                "partner": partner,
+                "score": float(scores[j]),
+                "pct_of_top": float(scores[j] / top) if top > 0 else 0.0,
+                "pct_of_total": float(scores[j] / total) if total > 0 else 0.0,
+            })
+    return pd.DataFrame(rows, columns=["feature", "partner", "score", "pct_of_top", "pct_of_total"])
 
 
 def save_dependence_plots(
@@ -180,9 +241,15 @@ def run_shap_report(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     np.save(output_dir / "shap_values.npy", sv)
+    np.save(output_dir / "X_val.npy", X)
+    with open(output_dir / "feature_columns.json", "w") as fh:
+        json.dump(feature_columns, fh)
 
     summary = build_summary(feature_columns, X, sv)
     summary.to_csv(output_dir / "summary.csv", index=False)
+
+    partner_scores = compute_partner_scores(feature_columns, X, sv)
+    partner_scores.to_csv(output_dir / "partner_scores.csv", index=False)
 
     dep_dir = output_dir / "dependence"
     save_dependence_plots(feature_columns, X, sv, dep_dir)
@@ -246,21 +313,25 @@ def main(model_path: str, features_csv: str, split: str, output_dir: str) -> Non
 
     summary = result["summary"]
     click.echo(f"\nSHAP summary — {split} split  (n={result['n_rows']:,})")
-    click.echo(f"{'rank':>4}  {'feature':<45} {'mean|SHAP|':>10}  {'sign_r':>6}  {'nan%':>5}")
+    click.echo(f"{'rank':>4}  {'feature':<45} {'mean|SHAP|':>10}  {'r':>6}  {'nan%':>5}")
     click.echo("─" * 78)
     for _, row in summary.head(25).iterrows():
-        sign_str = "+" if row["sign_of_r"] > 0 else ("-" if row["sign_of_r"] < 0 else "?")
+        r_val = row["r"]
+        r_str = f"{r_val:+.2f}" if r_val == r_val else "   ?"
         click.echo(
             f"{int(row['rank']):>4}  {row['feature']:<45} "
-            f"{row['mean_abs_shap']:>10.4f}  {sign_str:>6}  {row['nan_fraction']:>5.1%}"
+            f"{row['mean_abs_shap']:>10.4f}  {r_str:>6}  {row['nan_fraction']:>5.1%}"
         )
     if len(summary) > 25:
         click.echo(f"     … {len(summary) - 25} more features (see summary.csv)")
 
     click.echo(f"\nArtifacts written to {out}/")
-    click.echo(f"  shap_values.npy  ({result['shap_values'].shape[0]:,} × {result['shap_values'].shape[1]})")
-    click.echo(f"  summary.csv      ({len(summary)} features)")
-    click.echo(f"  dependence/      ({len(result['feature_columns'])} PNGs)")
+    click.echo(f"  shap_values.npy   ({result['shap_values'].shape[0]:,} × {result['shap_values'].shape[1]})")
+    click.echo(f"  X_val.npy         ({result['shap_values'].shape[0]:,} × {result['shap_values'].shape[1]})")
+    click.echo(f"  feature_columns.json  ({len(result['feature_columns'])} features)")
+    click.echo(f"  summary.csv       ({len(summary)} features)")
+    click.echo("  partner_scores.csv")
+    click.echo(f"  dependence/       ({len(result['feature_columns'])} PNGs)")
 
 
 if __name__ == "__main__":

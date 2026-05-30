@@ -12,7 +12,9 @@ from click.testing import CliRunner
 from lightgbm import LGBMClassifier
 
 from fuel_signal.shap_report import (
+    approx_interaction_scores,
     build_summary,
+    compute_partner_scores,
     compute_shap,
     main,
     run_shap_report,
@@ -82,6 +84,61 @@ def _make_bundle(tmp_path, df: pd.DataFrame, feature_columns: list[str]) -> tupl
 
 
 # ---------------------------------------------------------------------------
+# approx_interaction_scores
+# ---------------------------------------------------------------------------
+
+def test_approx_interaction_scores_shape():
+    rng = np.random.default_rng(0)
+    n, k = 300, 4
+    X = rng.normal(size=(n, k))
+    sv = rng.normal(size=(n, k))
+    scores = approx_interaction_scores(0, sv, X)
+    assert scores.shape == (k,)
+    assert scores[0] == 0.0  # self-score is zero
+
+
+def test_approx_interaction_scores_self_zero():
+    rng = np.random.default_rng(1)
+    n, k = 200, 5
+    X = rng.normal(size=(n, k))
+    sv = rng.normal(size=(n, k))
+    for i in range(k):
+        scores = approx_interaction_scores(i, sv, X)
+        assert scores[i] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# compute_partner_scores
+# ---------------------------------------------------------------------------
+
+def test_compute_partner_scores_columns():
+    rng = np.random.default_rng(0)
+    n, k = 200, 3
+    X = rng.normal(size=(n, k))
+    sv = rng.normal(size=(n, k))
+    df = compute_partner_scores(["a", "b", "c"], X, sv)
+    assert set(df.columns) == {"feature", "partner", "score", "pct_of_top", "pct_of_total"}
+
+
+def test_compute_partner_scores_no_self_pairs():
+    rng = np.random.default_rng(1)
+    n, k = 200, 3
+    X = rng.normal(size=(n, k))
+    sv = rng.normal(size=(n, k))
+    df = compute_partner_scores(["a", "b", "c"], X, sv)
+    assert (df["feature"] == df["partner"]).sum() == 0
+
+
+def test_compute_partner_scores_pct_of_top_le_one():
+    rng = np.random.default_rng(2)
+    n, k = 200, 4
+    X = rng.normal(size=(n, k))
+    sv = rng.normal(size=(n, k))
+    df = compute_partner_scores(["a", "b", "c", "d"], X, sv)
+    assert (df["pct_of_top"] <= 1.0 + 1e-9).all()
+
+
+# ---------------------------------------------------------------------------
 # compute_shap
 # ---------------------------------------------------------------------------
 
@@ -117,7 +174,7 @@ def test_build_summary_columns():
     X = rng.normal(size=(n, k))
     sv = rng.normal(size=(n, k))
     summary = build_summary(["a", "b", "c"], X, sv)
-    assert list(summary.columns) == ["feature", "mean_abs_shap", "rank", "sign_of_r", "nan_fraction"]
+    assert list(summary.columns) == ["feature", "mean_abs_shap", "rank", "r", "nan_fraction"]
 
 
 def test_build_summary_rank_is_1_indexed_and_consecutive():
@@ -146,17 +203,17 @@ def test_build_summary_nan_fraction_for_all_nan_feature():
     summary = build_summary(["good", "bad"], X, sv)
     bad_row = summary[summary["feature"] == "bad"].iloc[0]
     assert bad_row["nan_fraction"] == pytest.approx(1.0)
-    assert np.isnan(bad_row["sign_of_r"])
+    assert np.isnan(bad_row["r"])
 
 
-def test_build_summary_sign_of_r_matches_correlation_direction():
+def test_build_summary_r_is_signed_float():
     rng = np.random.default_rng(4)
     n = 500
     X = rng.normal(size=(n, 1))
     # SHAP strongly positively correlated with feature
     sv = X * 2.0 + rng.normal(scale=0.01, size=(n, 1))
     summary = build_summary(["f"], X, sv)
-    assert summary.iloc[0]["sign_of_r"] == pytest.approx(1.0)
+    assert summary.iloc[0]["r"] > 0.99  # should be near +1
 
 
 def test_build_summary_nan_fraction_correct():
@@ -226,8 +283,36 @@ def test_run_shap_report_summary_csv_schema(tmp_path):
     mp, fp, _, _ = _make_bundle(tmp_path, df, _FEATURES)
     run_shap_report(mp, fp, "val", tmp_path / "out")
     summary = pd.read_csv(tmp_path / "out" / "summary.csv")
-    assert set(summary.columns) == {"feature", "mean_abs_shap", "rank", "sign_of_r", "nan_fraction"}
+    assert set(summary.columns) == {"feature", "mean_abs_shap", "rank", "r", "nan_fraction"}
     assert len(summary) == len(_FEATURES)
+
+
+def test_run_shap_report_writes_xval_and_feature_columns(tmp_path):
+    import json as _json
+    df = _synthetic_df()
+    mp, fp, _, _ = _make_bundle(tmp_path, df, _FEATURES)
+    out = tmp_path / "out"
+    run_shap_report(mp, fp, "val", out)
+    assert (out / "X_val.npy").exists()
+    assert (out / "feature_columns.json").exists()
+    fc = _json.loads((out / "feature_columns.json").read_text())
+    assert fc == _FEATURES
+    xv = np.load(out / "X_val.npy")
+    assert xv.shape[1] == len(_FEATURES)
+
+
+def test_run_shap_report_writes_partner_scores(tmp_path):
+    df = _synthetic_df()
+    mp, fp, _, _ = _make_bundle(tmp_path, df, _FEATURES)
+    out = tmp_path / "out"
+    run_shap_report(mp, fp, "val", out)
+    assert (out / "partner_scores.csv").exists()
+    ps = pd.read_csv(out / "partner_scores.csv")
+    assert set(ps.columns) == {"feature", "partner", "score", "pct_of_top", "pct_of_total"}
+    # Each (feature, partner) pair should have feature != partner
+    assert (ps["feature"] == ps["partner"]).sum() == 0
+    # pct_of_top should be <= 1 for all rows
+    assert (ps["pct_of_top"] <= 1.0 + 1e-9).all()
 
 
 def test_run_shap_report_handles_nan_feature(tmp_path):

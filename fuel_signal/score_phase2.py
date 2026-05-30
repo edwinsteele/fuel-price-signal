@@ -626,6 +626,13 @@ def main(
         seed_test_logloss_std=seed_result["logloss_std"] if seed_result else None,
     )
     click.echo(f"\nAppended result to experiments/results.csv  (name={model_name})")
+    click.echo(
+        "\nNext step: update SHAP artifacts to match this model run:\n"
+        "  uv run python -m fuel_signal.shap_report \\\n"
+        "      --model data/models/lgbm.joblib \\\n"
+        "      --features data/features.csv \\\n"
+        "      --output experiments/shap_phase4"
+    )
 
 
 if __name__ == "__main__":

@@ -15,10 +15,13 @@ from fuel_signal.db import (
     upsert_stations,
 )
 from fuel_signal.inspect import (
+    _apply_hybrid_cutoff,
     _build_coverage_heatmap,
     _build_gradient_heatmap,
     _build_line_spec,
+    _compute_interaction_budget_ranks,
     _create_app,
+    _load_partner_scores,
     _load_shap_summary,
     _slice_points,
     _sort_shap_rows,
@@ -376,10 +379,10 @@ def test_load_shap_summary_returns_rows(tmp_path):
     shap_dir = tmp_path / "shap"
     shap_dir.mkdir()
     with open(shap_dir / "summary.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "sign_of_r", "nan_fraction"])
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "r", "nan_fraction"])
         writer.writeheader()
-        writer.writerow({"feature": "feat_a", "mean_abs_shap": 0.05, "rank": 1, "sign_of_r": 1.0, "nan_fraction": 0.0})
-        writer.writerow({"feature": "feat_b", "mean_abs_shap": 0.02, "rank": 2, "sign_of_r": -1.0, "nan_fraction": 0.1})
+        writer.writerow({"feature": "feat_a", "mean_abs_shap": 0.05, "rank": 1, "r": 1.0, "nan_fraction": 0.0})
+        writer.writerow({"feature": "feat_b", "mean_abs_shap": 0.02, "rank": 2, "r": -1.0, "nan_fraction": 0.1})
     rows = _load_shap_summary(shap_dir)
     assert rows is not None
     assert len(rows) == 2
@@ -391,9 +394,9 @@ def test_load_shap_summary_returns_rows(tmp_path):
 # ---------------------------------------------------------------------------
 
 _SAMPLE_ROWS = [
-    {"feature": "zeta", "mean_abs_shap": 0.01, "rank": 3, "sign_of_r": 1.0, "nan_fraction": 0.0},
-    {"feature": "alpha", "mean_abs_shap": 0.05, "rank": 1, "sign_of_r": -1.0, "nan_fraction": 0.0},
-    {"feature": "mu",    "mean_abs_shap": 0.03, "rank": 2, "sign_of_r": float("nan"), "nan_fraction": 0.5},
+    {"feature": "zeta", "mean_abs_shap": 0.01, "rank": 3, "r": 1.0, "nan_fraction": 0.0},
+    {"feature": "alpha", "mean_abs_shap": 0.05, "rank": 1, "r": -1.0, "nan_fraction": 0.0},
+    {"feature": "mu",    "mean_abs_shap": 0.03, "rank": 2, "r": float("nan"), "nan_fraction": 0.5},
 ]
 
 
@@ -412,7 +415,7 @@ def test_sort_shap_rows_alpha():
 def test_sort_shap_rows_sign_groups_by_sign():
     rows = _sort_shap_rows(_SAMPLE_ROWS, "sign")
     # Positive-sign features rank first (key = -1), then NaN (key = 0), then negative (key = 1).
-    signs = [r["sign_of_r"] for r in rows]
+    signs = [r["r"] for r in rows]
     non_nan_signs = [s for s in signs if s == s]
     assert non_nan_signs == sorted(non_nan_signs, reverse=True)
 
@@ -433,12 +436,12 @@ def flask_client_with_shap(conn, tmp_path):
 
     # Write summary.csv
     with open(shap_dir / "summary.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "sign_of_r", "nan_fraction"])
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "r", "nan_fraction"])
         writer.writeheader()
         writer.writerow({"feature": "cycle_pct_through", "mean_abs_shap": 0.08,
-                          "rank": 1, "sign_of_r": 1.0, "nan_fraction": 0.0})
+                          "rank": 1, "r": 1.0, "nan_fraction": 0.0})
         writer.writerow({"feature": "stickiness_score", "mean_abs_shap": 0.03,
-                          "rank": 2, "sign_of_r": -1.0, "nan_fraction": 0.2})
+                          "rank": 2, "r": -1.0, "nan_fraction": 0.2})
 
     # Write a dummy PNG for one feature
     (shap_dir / "dependence" / "cycle_pct_through.png").write_bytes(
@@ -529,3 +532,247 @@ def test_features_in_nav(flask_client_with_shap):
     resp = flask_client_with_shap.get("/features")
     html = resp.data.decode()
     assert 'href="/features"' in html
+
+
+# ---------------------------------------------------------------------------
+# _load_partner_scores
+# ---------------------------------------------------------------------------
+
+def test_load_partner_scores_returns_none_when_missing(tmp_path):
+    assert _load_partner_scores(tmp_path / "no_such_dir") is None
+
+
+def test_load_partner_scores_returns_none_when_csv_absent(tmp_path):
+    (tmp_path / "shap").mkdir()
+    assert _load_partner_scores(tmp_path / "shap") is None
+
+
+def test_load_partner_scores_returns_dict(tmp_path):
+    import csv
+    shap_dir = tmp_path / "shap"
+    shap_dir.mkdir()
+    with open(shap_dir / "partner_scores.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "partner", "score", "pct_of_top", "pct_of_total"])
+        writer.writeheader()
+        writer.writerow({
+            "feature": "feat_a", "partner": "feat_b", "score": 2.0, "pct_of_top": 1.0, "pct_of_total": 0.6
+        })
+        writer.writerow({
+            "feature": "feat_a", "partner": "feat_c", "score": 1.0, "pct_of_top": 0.5, "pct_of_total": 0.3
+        })
+        writer.writerow({
+            "feature": "feat_b", "partner": "feat_a", "score": 1.5, "pct_of_top": 1.0, "pct_of_total": 1.0
+        })
+    result = _load_partner_scores(shap_dir)
+    assert result is not None
+    assert "feat_a" in result
+    assert len(result["feat_a"]) == 2
+    assert result["feat_a"][0]["partner"] == "feat_b"  # sorted desc by score
+
+
+# ---------------------------------------------------------------------------
+# _apply_hybrid_cutoff
+# ---------------------------------------------------------------------------
+
+def _make_partners(scores):
+    top = max(scores)
+    total = sum(scores)
+    return [
+        {"partner": f"p{i}", "score": s, "pct_of_top": s / top, "pct_of_total": s / total}
+        for i, s in enumerate(scores)
+    ]
+
+
+def test_apply_hybrid_cutoff_returns_top_n_when_wider():
+    partners = _make_partners([10, 9, 8, 7, 6, 5, 4, 3])  # threshold (>=50%) gives 2; top-6 gives 6
+    result = _apply_hybrid_cutoff(partners, top_n=6, threshold_pct=0.5)
+    assert len(result) == 6
+
+
+def test_apply_hybrid_cutoff_returns_threshold_when_wider():
+    # All 8 scores are >= 80% of top → threshold set has 8; top-6 has 6
+    partners = _make_partners([10, 9, 9, 8, 8, 9, 9, 8])
+    result = _apply_hybrid_cutoff(partners, top_n=6, threshold_pct=0.5)
+    assert len(result) == 8
+
+
+def test_apply_hybrid_cutoff_empty_input():
+    assert _apply_hybrid_cutoff([]) == []
+
+
+# ---------------------------------------------------------------------------
+# _compute_interaction_budget_ranks
+# ---------------------------------------------------------------------------
+
+def test_compute_interaction_budget_ranks():
+    scores = {
+        "feat_a": [{"score": 3.0}, {"score": 2.0}],  # total=5
+        "feat_b": [{"score": 1.0}],                    # total=1
+        "feat_c": [{"score": 4.0}, {"score": 1.0}],  # total=5
+    }
+    ranks = _compute_interaction_budget_ranks(scores)
+    # feat_a and feat_c both total 5, feat_b totals 1
+    assert ranks["feat_b"][0] == 3  # lowest
+    assert ranks["feat_b"][1] == 3  # 3 features
+    # feat_a and feat_c should be ranks 1 and 2 (order may vary)
+    assert ranks["feat_a"][0] in (1, 2)
+    assert ranks["feat_c"][0] in (1, 2)
+
+
+# ---------------------------------------------------------------------------
+# /features route: partner dropdown and interaction
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def flask_client_with_shap_and_partners(conn, tmp_path):
+    """Flask test client with summary.csv and partner_scores.csv."""
+    import csv
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=14)
+    shap_dir = tmp_path / "shap"
+    shap_dir.mkdir()
+    dep_dir = shap_dir / "dependence"
+    dep_dir.mkdir()
+
+    with open(shap_dir / "summary.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "r", "nan_fraction"])
+        writer.writeheader()
+        writer.writerow({
+            "feature": "cycle_pct_through", "mean_abs_shap": 0.08, "rank": 1, "r": 0.83, "nan_fraction": 0.0
+        })
+        writer.writerow({
+            "feature": "stickiness_score", "mean_abs_shap": 0.03, "rank": 2, "r": -0.62, "nan_fraction": 0.2
+        })
+
+    with open(shap_dir / "partner_scores.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "partner", "score", "pct_of_top", "pct_of_total"])
+        writer.writeheader()
+        writer.writerow({"feature": "cycle_pct_through", "partner": "stickiness_score",
+                          "score": 2.0, "pct_of_top": 1.0, "pct_of_total": 0.7})
+        writer.writerow({"feature": "stickiness_score", "partner": "cycle_pct_through",
+                          "score": 1.5, "pct_of_top": 1.0, "pct_of_total": 1.0})
+
+    (dep_dir / "cycle_pct_through.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+    (dep_dir / "stickiness_score.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+
+    app = _create_app(
+        conn, cd=None, today="2024-01-14", cycle_state=None,
+        peak_data={}, summary=db_summary(conn), boundaries={}, shap_dir=shap_dir,
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        yield client
+
+
+def test_features_route_shows_partners_dropdown(flask_client_with_shap_and_partners):
+    resp = flask_client_with_shap_and_partners.get("/features")
+    html = resp.data.decode()
+    assert "<select" in html
+    assert "stickiness_score" in html
+
+
+def test_features_route_missing_partner_scores_shows_banner(conn, tmp_path):
+    import csv
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=14)
+    shap_dir = tmp_path / "shap"
+    shap_dir.mkdir()
+    with open(shap_dir / "summary.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "r", "nan_fraction"])
+        writer.writeheader()
+        writer.writerow({"feature": "feat_a", "mean_abs_shap": 0.05, "rank": 1, "r": 0.5, "nan_fraction": 0.0})
+    app = _create_app(
+        conn, cd=None, today="2024-01-14", cycle_state=None,
+        peak_data={}, summary=db_summary(conn), boundaries={}, shap_dir=shap_dir,
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/features")
+    assert resp.status_code == 200
+    assert b"partner_scores.csv" in resp.data
+
+
+def test_features_route_interaction_param_renders_interaction_url(flask_client_with_shap_and_partners):
+    resp = flask_client_with_shap_and_partners.get(
+        "/features?feature=cycle_pct_through&interaction=stickiness_score"
+    )
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    assert "interaction=stickiness_score" in html
+
+
+def test_features_route_active_interaction_shows_reset_link(flask_client_with_shap_and_partners):
+    resp = flask_client_with_shap_and_partners.get(
+        "/features?feature=cycle_pct_through&interaction=stickiness_score"
+    )
+    html = resp.data.decode()
+    assert "Reset to auto" in html
+
+
+def test_features_route_no_interaction_no_reset_link(flask_client_with_shap_and_partners):
+    resp = flask_client_with_shap_and_partners.get(
+        "/features?feature=cycle_pct_through"
+    )
+    html = resp.data.decode()
+    assert "Reset to auto" not in html
+
+
+def test_features_route_interaction_budget_rank_in_side_panel(flask_client_with_shap_and_partners):
+    resp = flask_client_with_shap_and_partners.get(
+        "/features?feature=cycle_pct_through"
+    )
+    html = resp.data.decode()
+    assert "interaction-budget rank" in html
+
+
+def test_features_route_staleness_banner(conn, tmp_path):
+    import csv
+    import time
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=14)
+    shap_dir = tmp_path / "shap"
+    shap_dir.mkdir()
+    (shap_dir / "dependence").mkdir()
+    # Write shap_values.npy first (older)
+    sv_path = shap_dir / "shap_values.npy"
+    sv_path.write_bytes(b"\x00" * 8)
+    time.sleep(0.05)
+    # Write model file after (newer)
+    model_path = tmp_path / "model.joblib"
+    model_path.write_bytes(b"\x00" * 8)
+    with open(shap_dir / "summary.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "r", "nan_fraction"])
+        writer.writeheader()
+        writer.writerow({"feature": "feat_a", "mean_abs_shap": 0.05, "rank": 1, "r": 0.5, "nan_fraction": 0.0})
+    app = _create_app(
+        conn, cd=None, today="2024-01-14", cycle_state=None,
+        peak_data={}, summary=db_summary(conn), boundaries={},
+        shap_dir=shap_dir, model_path=model_path,
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/features")
+    assert resp.status_code == 200
+    assert b"Stale SHAP" in resp.data
+
+
+def test_features_plot_interaction_missing_arrays_returns_503(conn, tmp_path):
+    import csv
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=14)
+    shap_dir = tmp_path / "shap"
+    shap_dir.mkdir()
+    (shap_dir / "dependence").mkdir()
+    # summary.csv exists but no X_val.npy / shap_values.npy / feature_columns.json
+    with open(shap_dir / "summary.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "r", "nan_fraction"])
+        writer.writeheader()
+        writer.writerow({"feature": "feat_a", "mean_abs_shap": 0.05, "rank": 1, "r": 0.5, "nan_fraction": 0.0})
+    app = _create_app(
+        conn, cd=None, today="2024-01-14", cycle_state=None,
+        peak_data={}, summary=db_summary(conn), boundaries={}, shap_dir=shap_dir,
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/features/plot/feat_a?interaction=feat_b")
+    assert resp.status_code == 503
