@@ -19,7 +19,7 @@
 {% elif no_partner_scores %}
 <div class="banner banner-warn">
   No partner scores found at <code>{{ shap_dir_str }}/partner_scores.csv</code>.
-  Re-run <code>uv run python -m fuel_signal.shap_report --model data/models/lgbm.joblib --features data/features.csv --output {{ shap_dir_str }}</code> to generate it.
+  Re-run <code>uv run python -m fuel_signal.shap_report --model {{ model_path_str }} --features data/features.csv --output {{ shap_dir_str }}</code> to generate it.
 </div>
 {% endif %}
 

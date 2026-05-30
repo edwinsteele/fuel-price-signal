@@ -13,6 +13,7 @@ import datetime
 import json
 import logging
 import pathlib
+import re
 import sqlite3
 import webbrowser
 
@@ -584,6 +585,14 @@ def _classification_health_data(conn: sqlite3.Connection) -> dict:
     }
 
 
+_SAFE_NAME_RE = re.compile(r"[^\w.\-]")
+
+
+def _sanitize_name(name: str) -> str:
+    """Replace any char that could break a filename or escape a directory."""
+    return _SAFE_NAME_RE.sub("_", name)
+
+
 # ---------------------------------------------------------------------------
 # SHAP artifact helpers
 # ---------------------------------------------------------------------------
@@ -599,10 +608,10 @@ def _load_shap_summary(shap_dir: pathlib.Path) -> list[dict] | None:
 
 def _load_partner_scores(shap_dir: pathlib.Path) -> dict[str, list[dict]] | None:
     """Return {feature: [partner dicts sorted desc by score]}, or None if absent."""
-    csv = shap_dir / "partner_scores.csv"
-    if not csv.exists():
+    csv_path = shap_dir / "partner_scores.csv"
+    if not csv_path.exists():
         return None
-    df = pd.read_csv(csv)
+    df = pd.read_csv(csv_path)
     result: dict[str, list[dict]] = {}
     for feat, grp in df.groupby("feature"):
         result[feat] = grp.sort_values("score", ascending=False).to_dict("records")
@@ -970,7 +979,7 @@ def _create_app(
     @app.route("/features/plot/<path:feature_name>")
     def features_plot(feature_name: str):
         interaction = request.args.get("interaction", "").strip()
-        safe_feat = feature_name.replace("/", "_")
+        safe_feat = _sanitize_name(feature_name)
 
         if not interaction:
             png = _resolved_shap_dir / "dependence" / f"{safe_feat}.png"
@@ -979,10 +988,16 @@ def _create_app(
             return send_file(str(png.resolve()), mimetype="image/png")
 
         # On-demand interaction plot with mtime-keyed disk cache.
-        safe_partner = interaction.replace("/", "_")
+        safe_partner = _sanitize_name(interaction)
         cache_dir = _resolved_shap_dir / "dependence_i"
         cache_dir.mkdir(exist_ok=True)
         cache_png = cache_dir / f"{safe_feat}__{safe_partner}.png"
+
+        # Guard against path traversal after sanitization.
+        try:
+            cache_png.resolve().relative_to(cache_dir.resolve())
+        except ValueError:
+            return "invalid path", 400
 
         sv_path = _resolved_shap_dir / "shap_values.npy"
         if cache_png.exists() and sv_path.exists():
