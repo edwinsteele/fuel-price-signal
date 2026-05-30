@@ -11,17 +11,17 @@
 </div>
 {% else %}
 
-<!-- Summary stats -->
+<!-- Summary stats — always computed from SHAP rank, not display order -->
 <div class="stats">
   <div class="stat">
     <div class="stat-value">{{ rows | length }}</div>
     <div class="stat-label">features</div>
   </div>
-  {% set top = rows[0] if rows else none %}
+  {% set top = rows | sort(attribute="rank") | first %}
   {% if top %}
   <div class="stat">
     <div class="stat-value" style="font-size:1.1rem">{{ top.feature.split('_')[-1][:12] }}</div>
-    <div class="stat-label">top feature (rank 1)</div>
+    <div class="stat-label">SHAP rank 1 feature</div>
   </div>
   <div class="stat">
     <div class="stat-value" style="font-family:var(--font-mono)">{{ "%.4f" | format(top.mean_abs_shap) }}</div>
@@ -57,7 +57,7 @@
 <table style="font-size:.82rem; white-space:nowrap">
   <thead>
     <tr>
-      <th style="text-align:right; width:3rem">Rank</th>
+      <th style="text-align:right; width:3rem">SHAP rank</th>
       <th>Feature</th>
       <th style="text-align:right">mean|SHAP|</th>
       <th style="text-align:center; width:4rem">sign(r)</th>
@@ -68,7 +68,7 @@
   {% for row in rows %}
     {% set is_selected = (row.feature == selected_feature) %}
     <tr style="{% if is_selected %}background:var(--surface-alt); outline:1px solid var(--accent){% endif %}">
-      <td style="text-align:right; font-family:var(--font-mono); color:var(--text-muted)">{{ loop.index }}</td>
+      <td style="text-align:right; font-family:var(--font-mono); color:var(--text-muted)">{{ row.rank | int }}</td>
       <td>
         <a href="?sort={{ sort_by }}&feature={{ row.feature }}"
            style="text-decoration:none; color:{% if is_selected %}var(--accent){% else %}var(--text){% endif %}; font-family:var(--font-mono); font-size:.78rem">
@@ -126,7 +126,7 @@
     </div>
   </div>
   <div style="margin:1rem 0; text-align:left">
-    <img src="/features/plot/{{ selected_feature }}"
+    <img src="{{ url_for('features_plot', feature_name=selected_feature) }}"
          alt="Dependence plot: {{ selected_feature }}"
          style="max-width:100%; border:1px solid var(--border); border-radius:6px; background:var(--surface)"
          onerror="this.parentElement.innerHTML='<div class=\'banner banner-warn\'>Dependence PNG not found — re-run shap_report.py to regenerate dependence plots.</div>'">

@@ -880,11 +880,10 @@ def _create_app(
     def features_plot(feature_name: str):
         _shap_dir = shap_dir or pathlib.Path("experiments/shap_phase4")
         safe_name = feature_name.replace("/", "_")
-        png = (_shap_dir / "dependence" / f"{safe_name}.png").resolve()
-        dep_root = (_shap_dir / "dependence").resolve()
-        if not str(png).startswith(str(dep_root)) or not png.exists():
+        png = _shap_dir / "dependence" / f"{safe_name}.png"
+        if not png.exists():
             return "not found", 404
-        return send_file(str(png), mimetype="image/png")
+        return send_file(str(png.resolve()), mimetype="image/png")
 
     @app.route("/healthz")
     def healthz():
