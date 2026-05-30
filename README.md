@@ -339,6 +339,33 @@ uv run python -m fuel_signal.cv_report --train-min-days 1825 --val-days 90 --ste
 
 Output is one line per fold (train/val date ranges, row counts, val logloss, baseline logloss, Δ) followed by a mean ± std summary across all folds.
 
+## SHAP analysis
+
+`fuel_signal/shap_report.py` runs TreeExplainer on a fitted joblib model and emits three artifacts:
+
+| Artifact | Contents |
+|---|---|
+| `shap_values.npy` | `(n_rows, n_features)` raw SHAP values — reused by ad-hoc notebooks and the `/features` inspect view |
+| `summary.csv` | Per-feature: `mean_abs_shap`, `rank`, `sign_of_r` (sign of Pearson r between feature and SHAP), `nan_fraction` |
+| `dependence/<feature>.png` | Scatter of feature value vs. SHAP value, one PNG per feature |
+
+```bash
+# Val split (default) — standard per-phase diagnostic
+uv run python -m fuel_signal.shap_report \
+    --model data/models/lgbm.joblib \
+    --features data/features.csv \
+    --output experiments/shap_phase4/
+
+# Test split
+uv run python -m fuel_signal.shap_report \
+    --model data/models/lgbm.joblib \
+    --features data/features.csv \
+    --split test \
+    --output experiments/shap_test/
+```
+
+Prints a ranked table (top 25 features) with `mean|SHAP|`, sign of correlation, and NaN fraction. NaN-bearing LGA features (stations below the 3-station floor) are handled without error; their SHAP contributions are computed from non-NaN rows.
+
 ## Training the LightGBM baseline (Phase 3a.1)
 
 Vanilla LightGBM on the **same 10 features** as Phase 2 — no new features, no tuning, `random_state=42`. No `StandardScaler` (trees are scale-invariant). This is the apples-to-apples model-class comparison. Does **not** write to `experiments/results.csv`.

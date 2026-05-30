@@ -51,6 +51,7 @@ uv run python -m fuel_signal.signal [--as-of DATE] [--db PATH]
 uv run python -m fuel_signal.compare SERIES_A SERIES_B [--fuel E10] [--within 0.5] [--db PATH]
 uv run python -m fuel_signal.stations [QUERY]
 uv run python -m fuel_signal.labels [--output PATH] [--horizon DAYS] [--threshold CENTS] [--db PATH]
+uv run python -m fuel_signal.shap_report --model MODEL --features CSV --split val --output DIR
 ```
 
 **Do not** add new commands to a shared CLI group or create new `[project.scripts]` entries — each module is its own entry point invoked via `python -m`.
