@@ -38,6 +38,10 @@ uv run python -m fuel_signal.features                                   # 6. ass
 uv run python -m fuel_signal.train_lgbm                                 # 7. train LightGBM (Phase 4 default)
 uv run python -m fuel_signal.calibrate --skip-results-csv              # 8. calibrate (lgbm defaults)
 uv run python -m fuel_signal.score_phase2                               # 9. final test-set eval (run once)
+uv run python -m fuel_signal.shap_report \
+    --model data/models/lgbm.joblib \
+    --features data/features.csv \
+    --output experiments/shap_phase4                                    # 10. SHAP analysis + partner scores
 ```
 
 You do **not** need to run `fuel_signal.live` first — station reference data comes from the snapshot CSVs committed in `data/snapshots/`. Run `live` only to pull today's prices manually (see below).
@@ -128,7 +132,7 @@ The workbench is a single GET-driven page — all state lives in the URL query s
 **Standalone pages:**
 - `/lead-lag` — lead/lag table showing how much earlier or later each series (LGA, brand, or station) reaches the Sydney metro trough, relative to a configurable reference series.
 - `/classification-health` — surfaces `classification_summary` per LGA: Competitive/Sticky/Discount counts, ever-zero LGAs (where no Competitive stations were found), and a 90-day competitive-count heatmap.
-- `/features` — per-feature SHAP analysis from the artifact emitted by `shap_report.py`. Ranked table (mean|SHAP|, sign-of-r, NaN%) with click-to-drill-down dependence plots. Defaults to `experiments/shap_phase4/`; use `--shap-dir` to point at another phase. Shows a setup banner if the artifact hasn't been generated yet.
+- `/features` — per-feature SHAP analysis from the artifact emitted by `shap_report.py`. Ranked table (mean|SHAP|, signed r, NaN%) with click-to-drill-down dependence plots. Each row has a **Partners** dropdown (hybrid cutoff: top-6 or all ≥50% of top-1 score) — selecting a partner navigates to `?feature=X&interaction=Y` and generates a dependence plot coloured by that partner (on-demand, disk-cached). The side panel shows the feature's interaction-budget rank and a "Reset to auto" link when a specific interaction is active. A staleness banner fires when `lgbm.joblib` is newer than `shap_values.npy`. Defaults to `experiments/shap_phase4/`; use `--shap-dir` to point at another phase.
 
 ## Station lookup
 

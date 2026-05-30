@@ -10,14 +10,21 @@ from __future__ import annotations
 
 import bisect
 import datetime
+import json
 import logging
 import pathlib
+import re
 import sqlite3
 import webbrowser
 
 import click
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np
 import pandas as pd
+import shap
 from flask import Flask, jsonify, render_template, request, send_file
 
 from fuel_signal import db as _db
@@ -578,6 +585,14 @@ def _classification_health_data(conn: sqlite3.Connection) -> dict:
     }
 
 
+_SAFE_NAME_RE = re.compile(r"[^\w.\-]")
+
+
+def _sanitize_name(name: str) -> str:
+    """Replace any char that could break a filename or escape a directory."""
+    return _SAFE_NAME_RE.sub("_", name)
+
+
 # ---------------------------------------------------------------------------
 # SHAP artifact helpers
 # ---------------------------------------------------------------------------
@@ -591,12 +606,62 @@ def _load_shap_summary(shap_dir: pathlib.Path) -> list[dict] | None:
     return df.to_dict("records")
 
 
+def _load_partner_scores(shap_dir: pathlib.Path) -> dict[str, list[dict]] | None:
+    """Return {feature: [partner dicts sorted desc by score]}, or None if absent."""
+    csv_path = shap_dir / "partner_scores.csv"
+    if not csv_path.exists():
+        return None
+    df = pd.read_csv(csv_path)
+    result: dict[str, list[dict]] = {}
+    for feat, grp in df.groupby("feature"):
+        result[feat] = grp.sort_values("score", ascending=False).to_dict("records")
+    return result
+
+
+def _apply_hybrid_cutoff(
+    partners: list[dict], top_n: int = 6, threshold_pct: float = 0.5
+) -> list[dict]:
+    """Return top_n partners OR all with score >= threshold_pct * top score, whichever is wider."""
+    if not partners:
+        return []
+    top_score = partners[0]["score"]
+    threshold_count = sum(1 for p in partners if p["score"] >= threshold_pct * top_score)
+    cutoff = max(top_n, threshold_count)
+    return partners[:cutoff]
+
+
+def _compute_interaction_budget_ranks(
+    partner_scores: dict[str, list[dict]],
+) -> dict[str, tuple[int, int]]:
+    """Return {feature: (rank, total_n)} by total interaction signal, 1=highest."""
+    totals = {feat: sum(p["score"] for p in partners) for feat, partners in partner_scores.items()}
+    sorted_feats = sorted(totals, key=lambda f: -totals[f])
+    n = len(sorted_feats)
+    return {feat: (i + 1, n) for i, feat in enumerate(sorted_feats)}
+
+
+def _load_shap_arrays(
+    shap_dir: pathlib.Path,
+) -> tuple[np.ndarray | None, np.ndarray | None, list[str] | None]:
+    """Load X_val.npy, shap_values.npy, feature_columns.json if all exist."""
+    sv_path = shap_dir / "shap_values.npy"
+    xv_path = shap_dir / "X_val.npy"
+    fc_path = shap_dir / "feature_columns.json"
+    if not (sv_path.exists() and xv_path.exists() and fc_path.exists()):
+        return None, None, None
+    sv = np.load(str(sv_path))
+    xv = np.load(str(xv_path))
+    with open(fc_path) as fh:
+        fc = json.load(fh)
+    return xv, sv, fc
+
+
 def _sort_shap_rows(rows: list[dict], sort_by: str) -> list[dict]:
     if sort_by == "alpha":
         return sorted(rows, key=lambda r: r["feature"])
     if sort_by == "sign":
         return sorted(rows, key=lambda r: (
-            0 if pd.isna(r.get("sign_of_r")) else -int(r["sign_of_r"]),
+            0 if pd.isna(r.get("r")) else -float(np.sign(r["r"])),
             -r["mean_abs_shap"],
         ))
     # Default: already sorted descending by mean_abs_shap from build_summary.
@@ -616,8 +681,13 @@ def _create_app(
     summary: dict,
     boundaries: dict,
     shap_dir: pathlib.Path | None = None,
+    model_path: pathlib.Path | None = None,
 ) -> Flask:
     app = Flask(__name__, template_folder="inspect_templates")
+
+    _resolved_shap_dir = shap_dir or pathlib.Path("experiments/shap_phase4")
+    _resolved_model_path = model_path or pathlib.Path("data/models/lgbm.joblib")
+    _xv, _sv, _fc = _load_shap_arrays(_resolved_shap_dir)
 
     app.jinja_env.filters["gradient_color"] = _gradient_color
     app.jinja_env.filters["coverage_color"] = _coverage_color
@@ -853,16 +923,40 @@ def _create_app(
     def features():
         sort_by = request.args.get("sort", "shap")
         selected_feature = request.args.get("feature", "").strip()
+        selected_interaction = request.args.get("interaction", "").strip()
 
-        _shap_dir = shap_dir or pathlib.Path("experiments/shap_phase4")
-        rows = _load_shap_summary(_shap_dir)
+        rows = _load_shap_summary(_resolved_shap_dir)
         no_artifact = rows is None
+
+        partner_scores = _load_partner_scores(_resolved_shap_dir)
+        no_partner_scores = partner_scores is None
+
+        partner_map: dict[str, list[dict]] = {}
+        interaction_budget_ranks: dict[str, tuple[int, int]] = {}
+        if partner_scores:
+            interaction_budget_ranks = _compute_interaction_budget_ranks(partner_scores)
+            for feat, partners in partner_scores.items():
+                partner_map[feat] = _apply_hybrid_cutoff(partners)
+
+        # Staleness: model newer than shap_values.npy → warn
+        shap_stale = False
+        sv_path = _resolved_shap_dir / "shap_values.npy"
+        if (
+            _resolved_model_path.exists()
+            and sv_path.exists()
+            and _resolved_model_path.stat().st_mtime > sv_path.stat().st_mtime
+        ):
+            shap_stale = True
 
         if rows:
             rows = _sort_shap_rows(rows, sort_by)
             known_features = {r["feature"] for r in rows}
             if selected_feature not in known_features:
                 selected_feature = ""
+            if selected_feature and selected_interaction:
+                valid_partners = {p["partner"] for p in partner_map.get(selected_feature, [])}
+                if selected_interaction not in valid_partners:
+                    selected_interaction = ""
 
         return render_template(
             "features.html",
@@ -871,19 +965,75 @@ def _create_app(
             today=today,
             rows=rows or [],
             no_artifact=no_artifact,
+            no_partner_scores=no_partner_scores,
+            shap_stale=shap_stale,
             sort_by=sort_by,
             selected_feature=selected_feature,
-            shap_dir_str=str(_shap_dir),
+            selected_interaction=selected_interaction,
+            shap_dir_str=str(_resolved_shap_dir),
+            model_path_str=str(_resolved_model_path),
+            partner_map=partner_map,
+            interaction_budget_ranks=interaction_budget_ranks,
         )
 
     @app.route("/features/plot/<path:feature_name>")
     def features_plot(feature_name: str):
-        _shap_dir = shap_dir or pathlib.Path("experiments/shap_phase4")
-        safe_name = feature_name.replace("/", "_")
-        png = _shap_dir / "dependence" / f"{safe_name}.png"
-        if not png.exists():
-            return "not found", 404
-        return send_file(str(png.resolve()), mimetype="image/png")
+        interaction = request.args.get("interaction", "").strip()
+        safe_feat = _sanitize_name(feature_name)
+
+        if not interaction:
+            png = _resolved_shap_dir / "dependence" / f"{safe_feat}.png"
+            if not png.exists():
+                return "not found", 404
+            return send_file(str(png.resolve()), mimetype="image/png")
+
+        # On-demand interaction plot with mtime-keyed disk cache.
+        safe_partner = _sanitize_name(interaction)
+        cache_dir = _resolved_shap_dir / "dependence_i"
+        cache_dir.mkdir(exist_ok=True)
+        cache_png = cache_dir / f"{safe_feat}__{safe_partner}.png"
+
+        # Guard against path traversal after sanitization.
+        try:
+            cache_png.resolve().relative_to(cache_dir.resolve())
+        except ValueError:
+            return "invalid path", 400
+
+        sv_path = _resolved_shap_dir / "shap_values.npy"
+        if cache_png.exists() and sv_path.exists():
+            if cache_png.stat().st_mtime >= sv_path.stat().st_mtime:
+                return send_file(str(cache_png.resolve()), mimetype="image/png")
+
+        if _xv is None or _sv is None or _fc is None:
+            return "SHAP arrays not loaded — re-run shap_report first", 503
+        if feature_name not in _fc or interaction not in _fc:
+            return "feature or partner not found", 404
+
+        feat_idx = _fc.index(feature_name)
+        partner_idx = _fc.index(interaction)
+
+        rng = np.random.default_rng(0)
+        if _xv.shape[0] > 5_000:
+            idx = rng.choice(_xv.shape[0], 5_000, replace=False)
+            xv_plot = _xv[idx]
+            sv_plot = _sv[idx]
+        else:
+            xv_plot = _xv
+            sv_plot = _sv
+
+        shap.dependence_plot(
+            feat_idx, sv_plot, xv_plot,
+            feature_names=_fc,
+            interaction_index=partner_idx,
+            show=False,
+        )
+        fig = plt.gcf()
+        fig.set_size_inches(7, 4)
+        plt.tight_layout()
+        fig.savefig(str(cache_png), dpi=100)
+        plt.close(fig)
+
+        return send_file(str(cache_png.resolve()), mimetype="image/png")
 
     @app.route("/healthz")
     def healthz():
@@ -920,7 +1070,14 @@ def _create_app(
     show_default=True,
     help="Directory containing shap_report.py artifacts (summary.csv, dependence/ PNGs).",
 )
-def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool, shap_dir: str) -> None:
+@click.option(
+    "--model",
+    "model_path",
+    default="data/models/lgbm.joblib",
+    show_default=True,
+    help="Path to fitted model bundle — used only for SHAP staleness check.",
+)
+def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool, shap_dir: str, model_path: str) -> None:
     """Start the local fuel-price analysis workbench."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     path = pathlib.Path(db_path)
@@ -952,7 +1109,8 @@ def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool, shap
     boundaries = _data_boundaries(conn)
 
     app = _create_app(conn, cd, today, cycle_state, peak_data, summary, boundaries,
-                       shap_dir=pathlib.Path(shap_dir))
+                       shap_dir=pathlib.Path(shap_dir),
+                       model_path=pathlib.Path(model_path))
 
     url = f"http://{host}:{port}/"
     if not no_browser:
