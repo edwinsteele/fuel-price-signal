@@ -18,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import pathlib
+import warnings
 from typing import Literal
 
 import click
@@ -48,7 +49,15 @@ def _load_split(df: pd.DataFrame, split: Split) -> pd.DataFrame:
 def compute_shap(model: object, X: np.ndarray) -> np.ndarray:
     """Run TreeExplainer on X; return (n_rows, n_features) array."""
     explainer = shap.TreeExplainer(model)
-    raw = explainer.shap_values(X)
+    with warnings.catch_warnings():
+        # SHAP warns that binary-classifier output changed to list[ndarray]; we
+        # already handle both forms below, so the warning is noise.
+        warnings.filterwarnings(
+            "ignore",
+            message="LightGBM binary classifier with TreeExplainer shap values output",
+            category=UserWarning,
+        )
+        raw = explainer.shap_values(X)
     if isinstance(raw, list):
         return raw[1]
     return raw
@@ -97,33 +106,51 @@ def save_dependence_plots(
     X: np.ndarray,
     shap_values: np.ndarray,
     out_dir: pathlib.Path,
-    *,
-    rng: np.random.Generator | None = None,
 ) -> None:
-    """Save one dependence scatter PNG per feature into out_dir."""
+    """Save one dependence scatter PNG per feature into out_dir.
+
+    Uses shap.dependence_plot with interaction_index="auto" so each scatter is
+    coloured by whichever other feature explains the most variance in the SHAP
+    values. The colourbar label names the interaction feature. All-NaN features
+    get a plain "all NaN" placeholder. Rows are subsampled to _MAX_SCATTER_POINTS
+    so plots remain readable and generation stays fast on large val splits.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    rng = rng or np.random.default_rng(0)
+    rng = np.random.default_rng(0)
+
+    if X.shape[0] > _MAX_SCATTER_POINTS:
+        sample_idx = rng.choice(X.shape[0], _MAX_SCATTER_POINTS, replace=False)
+        X_plot = X[sample_idx]
+        sv_plot = shap_values[sample_idx]
+    else:
+        X_plot = X
+        sv_plot = shap_values
+
     for i, feat in enumerate(feature_columns):
-        vals = X[:, i]
-        sv = shap_values[:, i]
-        nan_mask = np.isnan(vals)
-        v = vals[~nan_mask]
-        s = sv[~nan_mask]
-
-        fig, ax = plt.subplots(figsize=(6, 4))
-        if len(v) == 0:
-            ax.text(0.5, 0.5, "all NaN", ha="center", va="center", transform=ax.transAxes)
-        else:
-            n = min(_MAX_SCATTER_POINTS, len(v))
-            idx = rng.choice(len(v), size=n, replace=False) if len(v) > n else np.arange(len(v))
-            ax.scatter(v[idx], s[idx], s=3, alpha=0.25)
-            ax.axhline(0, color="k", lw=0.5, alpha=0.5)
-
-        ax.set_title(feat, fontsize=9)
-        ax.set_xlabel(feat)
-        ax.set_ylabel("SHAP value")
-        fig.tight_layout()
+        nan_mask = np.isnan(X_plot[:, i])
         safe_name = feat.replace("/", "_")
+
+        if nan_mask.all():
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.text(0.5, 0.5, "all NaN", ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(feat, fontsize=9)
+            fig.tight_layout()
+            fig.savefig(out_dir / f"{safe_name}.png", dpi=100)
+            plt.close(fig)
+            continue
+
+        # shap.dependence_plot opens its own figure; capture and close it.
+        shap.dependence_plot(
+            i,
+            sv_plot,
+            X_plot,
+            feature_names=feature_columns,
+            interaction_index="auto",
+            show=False,
+        )
+        fig = plt.gcf()
+        fig.set_size_inches(7, 4)
+        plt.tight_layout()
         fig.savefig(out_dir / f"{safe_name}.png", dpi=100)
         plt.close(fig)
 

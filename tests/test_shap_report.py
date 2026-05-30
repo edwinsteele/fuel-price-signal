@@ -178,7 +178,7 @@ def test_save_dependence_plots_creates_pngs(tmp_path):
     n, k = 100, 3
     X = rng.normal(size=(n, k))
     sv = rng.normal(size=(n, k))
-    save_dependence_plots(["a", "b", "c"], X, sv, tmp_path / "dep", rng=rng)
+    save_dependence_plots(["a", "b", "c"], X, sv, tmp_path / "dep")
     for name in ["a", "b", "c"]:
         assert (tmp_path / "dep" / f"{name}.png").exists()
 
@@ -189,7 +189,7 @@ def test_save_dependence_plots_handles_all_nan(tmp_path):
     X = rng.normal(size=(n, k))
     X[:, 1] = np.nan  # all-NaN
     sv = rng.normal(size=(n, k))
-    save_dependence_plots(["ok", "nan_feat"], X, sv, tmp_path / "dep", rng=rng)
+    save_dependence_plots(["ok", "nan_feat"], X, sv, tmp_path / "dep")
     assert (tmp_path / "dep" / "nan_feat.png").exists()
 
 
