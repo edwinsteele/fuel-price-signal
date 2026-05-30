@@ -18,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import pathlib
+import warnings
 from typing import Literal
 
 import click
@@ -48,7 +49,15 @@ def _load_split(df: pd.DataFrame, split: Split) -> pd.DataFrame:
 def compute_shap(model: object, X: np.ndarray) -> np.ndarray:
     """Run TreeExplainer on X; return (n_rows, n_features) array."""
     explainer = shap.TreeExplainer(model)
-    raw = explainer.shap_values(X)
+    with warnings.catch_warnings():
+        # SHAP warns that binary-classifier output changed to list[ndarray]; we
+        # already handle both forms below, so the warning is noise.
+        warnings.filterwarnings(
+            "ignore",
+            message="LightGBM binary classifier with TreeExplainer shap values output",
+            category=UserWarning,
+        )
+        raw = explainer.shap_values(X)
     if isinstance(raw, list):
         return raw[1]
     return raw

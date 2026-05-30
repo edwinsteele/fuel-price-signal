@@ -39,6 +39,9 @@ package = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:LightGBM binary classifier with TreeExplainer shap values output:UserWarning",
+]
 
 [tool.ruff]
 line-length = 120
