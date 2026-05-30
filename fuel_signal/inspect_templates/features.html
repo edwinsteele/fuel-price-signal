@@ -101,7 +101,7 @@
   </div>
 
   <!-- Right: sticky plot panel -->
-  <div style="width:480px; flex-shrink:0; position:sticky; top:1rem; align-self:flex-start">
+  <div style="width:min(480px, 100%); max-width:100%; flex-shrink:0; position:sticky; top:1rem; align-self:flex-start">
   {% if selected_feature %}
     {% set detail = rows | selectattr("feature", "equalto", selected_feature) | first %}
     {% if detail %}

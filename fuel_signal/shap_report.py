@@ -112,14 +112,24 @@ def save_dependence_plots(
     Uses shap.dependence_plot with interaction_index="auto" so each scatter is
     coloured by whichever other feature explains the most variance in the SHAP
     values. The colourbar label names the interaction feature. All-NaN features
-    get a plain "all NaN" placeholder.
+    get a plain "all NaN" placeholder. Rows are subsampled to _MAX_SCATTER_POINTS
+    so plots remain readable and generation stays fast on large val splits.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    for i, feat in enumerate(feature_columns):
-        vals = X[:, i]
-        nan_mask = np.isnan(vals)
+    rng = np.random.default_rng(0)
 
+    if X.shape[0] > _MAX_SCATTER_POINTS:
+        sample_idx = rng.choice(X.shape[0], _MAX_SCATTER_POINTS, replace=False)
+        X_plot = X[sample_idx]
+        sv_plot = shap_values[sample_idx]
+    else:
+        X_plot = X
+        sv_plot = shap_values
+
+    for i, feat in enumerate(feature_columns):
+        nan_mask = np.isnan(X_plot[:, i])
         safe_name = feat.replace("/", "_")
+
         if nan_mask.all():
             fig, ax = plt.subplots(figsize=(6, 4))
             ax.text(0.5, 0.5, "all NaN", ha="center", va="center", transform=ax.transAxes)
@@ -129,19 +139,20 @@ def save_dependence_plots(
             plt.close(fig)
             continue
 
-        # shap.dependence_plot opens its own figure; capture it.
+        # shap.dependence_plot opens its own figure; capture and close it.
         shap.dependence_plot(
             i,
-            shap_values,
-            X,
+            sv_plot,
+            X_plot,
             feature_names=feature_columns,
             interaction_index="auto",
             show=False,
         )
-        plt.gcf().set_size_inches(7, 4)
+        fig = plt.gcf()
+        fig.set_size_inches(7, 4)
         plt.tight_layout()
-        plt.savefig(out_dir / f"{safe_name}.png", dpi=100)
-        plt.close("all")
+        fig.savefig(out_dir / f"{safe_name}.png", dpi=100)
+        plt.close(fig)
 
 
 def run_shap_report(
