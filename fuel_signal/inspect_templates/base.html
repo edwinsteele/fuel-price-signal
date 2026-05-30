@@ -244,6 +244,7 @@ nav a.active { font-weight: 600; color: var(--accent); }
   <a href="/" {% if request.path == '/' %}class="active"{% endif %}>Workbench</a>
   <a href="/lead-lag" {% if request.path == '/lead-lag' %}class="active"{% endif %}>Lead / Lag</a>
   <a href="/classification-health" {% if request.path == '/classification-health' %}class="active"{% endif %}>Classification</a>
+  <a href="/features" {% if request.path == '/features' %}class="active"{% endif %}>Features</a>
 </nav>
 {% block content %}{% endblock %}
 </body>

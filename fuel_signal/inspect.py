@@ -17,7 +17,8 @@ import webbrowser
 
 import click
 import numpy as np
-from flask import Flask, jsonify, render_template, request
+import pandas as pd
+from flask import Flask, jsonify, render_template, request, send_file
 
 from fuel_signal import db as _db
 from fuel_signal import series as _series
@@ -578,6 +579,31 @@ def _classification_health_data(conn: sqlite3.Connection) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# SHAP artifact helpers
+# ---------------------------------------------------------------------------
+
+def _load_shap_summary(shap_dir: pathlib.Path) -> list[dict] | None:
+    """Return summary.csv rows as a list of dicts, or None if file absent."""
+    csv = shap_dir / "summary.csv"
+    if not csv.exists():
+        return None
+    df = pd.read_csv(csv)
+    return df.to_dict("records")
+
+
+def _sort_shap_rows(rows: list[dict], sort_by: str) -> list[dict]:
+    if sort_by == "alpha":
+        return sorted(rows, key=lambda r: r["feature"])
+    if sort_by == "sign":
+        return sorted(rows, key=lambda r: (
+            0 if pd.isna(r.get("sign_of_r")) else -int(r["sign_of_r"]),
+            -r["mean_abs_shap"],
+        ))
+    # Default: already sorted descending by mean_abs_shap from build_summary.
+    return sorted(rows, key=lambda r: -r["mean_abs_shap"])
+
+
+# ---------------------------------------------------------------------------
 # Flask app factory
 # ---------------------------------------------------------------------------
 
@@ -589,6 +615,7 @@ def _create_app(
     peak_data: dict,
     summary: dict,
     boundaries: dict,
+    shap_dir: pathlib.Path | None = None,
 ) -> Flask:
     app = Flask(__name__, template_folder="inspect_templates")
 
@@ -822,6 +849,42 @@ def _create_app(
             today=today,
         )
 
+    @app.route("/features")
+    def features():
+        sort_by = request.args.get("sort", "shap")
+        selected_feature = request.args.get("feature", "").strip()
+
+        _shap_dir = shap_dir or pathlib.Path("experiments/shap_phase4")
+        rows = _load_shap_summary(_shap_dir)
+        no_artifact = rows is None
+
+        if rows:
+            rows = _sort_shap_rows(rows, sort_by)
+            known_features = {r["feature"] for r in rows}
+            if selected_feature not in known_features:
+                selected_feature = ""
+
+        return render_template(
+            "features.html",
+            now=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            summary=summary,
+            today=today,
+            rows=rows or [],
+            no_artifact=no_artifact,
+            sort_by=sort_by,
+            selected_feature=selected_feature,
+            shap_dir_str=str(_shap_dir),
+        )
+
+    @app.route("/features/plot/<path:feature_name>")
+    def features_plot(feature_name: str):
+        _shap_dir = shap_dir or pathlib.Path("experiments/shap_phase4")
+        safe_name = feature_name.replace("/", "_")
+        png = _shap_dir / "dependence" / f"{safe_name}.png"
+        if not png.exists():
+            return "not found", 404
+        return send_file(str(png.resolve()), mimetype="image/png")
+
     @app.route("/healthz")
     def healthz():
         return "ok", 200
@@ -850,7 +913,14 @@ def _create_app(
     default=False,
     help="Do not open the browser automatically.",
 )
-def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool) -> None:
+@click.option(
+    "--shap-dir",
+    "shap_dir",
+    default=str(pathlib.Path("experiments/shap_phase4")),
+    show_default=True,
+    help="Directory containing shap_report.py artifacts (summary.csv, dependence/ PNGs).",
+)
+def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool, shap_dir: str) -> None:
     """Start the local fuel-price analysis workbench."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     path = pathlib.Path(db_path)
@@ -881,7 +951,8 @@ def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool) -> N
     summary = _db.db_summary(conn)
     boundaries = _data_boundaries(conn)
 
-    app = _create_app(conn, cd, today, cycle_state, peak_data, summary, boundaries)
+    app = _create_app(conn, cd, today, cycle_state, peak_data, summary, boundaries,
+                       shap_dir=pathlib.Path(shap_dir))
 
     url = f"http://{host}:{port}/"
     if not no_browser:

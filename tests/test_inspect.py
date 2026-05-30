@@ -19,7 +19,9 @@ from fuel_signal.inspect import (
     _build_gradient_heatmap,
     _build_line_spec,
     _create_app,
+    _load_shap_summary,
     _slice_points,
+    _sort_shap_rows,
 )
 
 
@@ -354,3 +356,176 @@ def test_route_coverage_heatmap_sydney_only_shows_all(flask_client_two_lgas):
     html = resp.data.decode()
     assert "Shell Springwood" in html
     assert "Ampol Parramatta" in html
+
+
+# ---------------------------------------------------------------------------
+# _load_shap_summary
+# ---------------------------------------------------------------------------
+
+def test_load_shap_summary_returns_none_when_missing(tmp_path):
+    assert _load_shap_summary(tmp_path / "no_such_dir") is None
+
+
+def test_load_shap_summary_returns_none_when_csv_absent(tmp_path):
+    (tmp_path / "shap").mkdir()
+    assert _load_shap_summary(tmp_path / "shap") is None
+
+
+def test_load_shap_summary_returns_rows(tmp_path):
+    import csv
+    shap_dir = tmp_path / "shap"
+    shap_dir.mkdir()
+    with open(shap_dir / "summary.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "sign_of_r", "nan_fraction"])
+        writer.writeheader()
+        writer.writerow({"feature": "feat_a", "mean_abs_shap": 0.05, "rank": 1, "sign_of_r": 1.0, "nan_fraction": 0.0})
+        writer.writerow({"feature": "feat_b", "mean_abs_shap": 0.02, "rank": 2, "sign_of_r": -1.0, "nan_fraction": 0.1})
+    rows = _load_shap_summary(shap_dir)
+    assert rows is not None
+    assert len(rows) == 2
+    assert rows[0]["feature"] == "feat_a"
+
+
+# ---------------------------------------------------------------------------
+# _sort_shap_rows
+# ---------------------------------------------------------------------------
+
+_SAMPLE_ROWS = [
+    {"feature": "zeta", "mean_abs_shap": 0.01, "rank": 3, "sign_of_r": 1.0, "nan_fraction": 0.0},
+    {"feature": "alpha", "mean_abs_shap": 0.05, "rank": 1, "sign_of_r": -1.0, "nan_fraction": 0.0},
+    {"feature": "mu",    "mean_abs_shap": 0.03, "rank": 2, "sign_of_r": float("nan"), "nan_fraction": 0.5},
+]
+
+
+def test_sort_shap_rows_shap_descending():
+    rows = _sort_shap_rows(_SAMPLE_ROWS, "shap")
+    vals = [r["mean_abs_shap"] for r in rows]
+    assert vals == sorted(vals, reverse=True)
+
+
+def test_sort_shap_rows_alpha():
+    rows = _sort_shap_rows(_SAMPLE_ROWS, "alpha")
+    names = [r["feature"] for r in rows]
+    assert names == sorted(names)
+
+
+def test_sort_shap_rows_sign_groups_by_sign():
+    rows = _sort_shap_rows(_SAMPLE_ROWS, "sign")
+    # Positive-sign features rank first (key = -1), then NaN (key = 0), then negative (key = 1).
+    signs = [r["sign_of_r"] for r in rows]
+    non_nan_signs = [s for s in signs if s == s]
+    assert non_nan_signs == sorted(non_nan_signs, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# /features route
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def flask_client_with_shap(conn, tmp_path):
+    """Flask test client wired to a minimal shap_dir with summary.csv."""
+    import csv
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=14)
+    shap_dir = tmp_path / "shap"
+    shap_dir.mkdir()
+    (shap_dir / "dependence").mkdir()
+
+    # Write summary.csv
+    with open(shap_dir / "summary.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["feature", "mean_abs_shap", "rank", "sign_of_r", "nan_fraction"])
+        writer.writeheader()
+        writer.writerow({"feature": "cycle_pct_through", "mean_abs_shap": 0.08,
+                          "rank": 1, "sign_of_r": 1.0, "nan_fraction": 0.0})
+        writer.writerow({"feature": "stickiness_score", "mean_abs_shap": 0.03,
+                          "rank": 2, "sign_of_r": -1.0, "nan_fraction": 0.2})
+
+    # Write a dummy PNG for one feature
+    (shap_dir / "dependence" / "cycle_pct_through.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"\x00" * 20  # minimal PNG-like header
+    )
+
+    app = _create_app(
+        conn,
+        cd=None,
+        today="2024-01-14",
+        cycle_state=None,
+        peak_data={},
+        summary=db_summary(conn),
+        boundaries={},
+        shap_dir=shap_dir,
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        yield client
+
+
+def test_features_route_returns_200(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features")
+    assert resp.status_code == 200
+
+
+def test_features_route_shows_ranked_table(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features")
+    html = resp.data.decode()
+    assert "cycle_pct_through" in html
+    assert "stickiness_score" in html
+
+
+def test_features_route_no_artifact_shows_banner(conn, tmp_path):
+    upsert_stations(conn, [_STATION_BM])
+    _insert_prices(conn, 1001, n_days=14)
+    empty_dir = tmp_path / "empty_shap"
+    empty_dir.mkdir()
+    app = _create_app(
+        conn,
+        cd=None,
+        today="2024-01-14",
+        cycle_state=None,
+        peak_data={},
+        summary=db_summary(conn),
+        boundaries={},
+        shap_dir=empty_dir,
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/features")
+    assert resp.status_code == 200
+    assert b"summary.csv" in resp.data
+
+
+def test_features_route_sort_alpha(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features?sort=alpha")
+    html = resp.data.decode()
+    # Both features should appear
+    assert "cycle_pct_through" in html
+    assert "stickiness_score" in html
+
+
+def test_features_route_drill_down_shows_plot(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features?feature=cycle_pct_through")
+    html = resp.data.decode()
+    assert "/features/plot/cycle_pct_through" in html
+
+
+def test_features_route_unknown_feature_ignored(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features?feature=nonexistent_feature")
+    assert resp.status_code == 200
+    assert b"/features/plot/nonexistent_feature" not in resp.data
+
+
+def test_features_plot_serves_png(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features/plot/cycle_pct_through")
+    assert resp.status_code == 200
+    assert resp.content_type == "image/png"
+
+
+def test_features_plot_missing_returns_404(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features/plot/stickiness_score")
+    assert resp.status_code == 404
+
+
+def test_features_in_nav(flask_client_with_shap):
+    resp = flask_client_with_shap.get("/features")
+    html = resp.data.decode()
+    assert 'href="/features"' in html

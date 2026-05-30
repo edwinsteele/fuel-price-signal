@@ -103,6 +103,8 @@ Starts a local Flask workbench and opens it in your browser:
 uv run python -m fuel_signal.inspect
 # Custom host/port, no auto-open:
 uv run python -m fuel_signal.inspect --port 5001 --no-browser
+# Point /features at a different SHAP artifact directory:
+uv run python -m fuel_signal.inspect --shap-dir experiments/shap_phase4/
 ```
 
 The workbench is a single GET-driven page — all state lives in the URL query string, so views are bookmarkable and shareable. E10 only.
@@ -126,6 +128,7 @@ The workbench is a single GET-driven page — all state lives in the URL query s
 **Standalone pages:**
 - `/lead-lag` — lead/lag table showing how much earlier or later each series (LGA, brand, or station) reaches the Sydney metro trough, relative to a configurable reference series.
 - `/classification-health` — surfaces `classification_summary` per LGA: Competitive/Sticky/Discount counts, ever-zero LGAs (where no Competitive stations were found), and a 90-day competitive-count heatmap.
+- `/features` — per-feature SHAP analysis from the artifact emitted by `shap_report.py`. Ranked table (mean|SHAP|, sign-of-r, NaN%) with click-to-drill-down dependence plots. Defaults to `experiments/shap_phase4/`; use `--shap-dir` to point at another phase. Shows a setup banner if the artifact hasn't been generated yet.
 
 ## Station lookup
 
