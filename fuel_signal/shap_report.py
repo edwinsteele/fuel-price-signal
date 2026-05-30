@@ -97,35 +97,42 @@ def save_dependence_plots(
     X: np.ndarray,
     shap_values: np.ndarray,
     out_dir: pathlib.Path,
-    *,
-    rng: np.random.Generator | None = None,
 ) -> None:
-    """Save one dependence scatter PNG per feature into out_dir."""
+    """Save one dependence scatter PNG per feature into out_dir.
+
+    Uses shap.dependence_plot with interaction_index="auto" so each scatter is
+    coloured by whichever other feature explains the most variance in the SHAP
+    values. The colourbar label names the interaction feature. All-NaN features
+    get a plain "all NaN" placeholder.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    rng = rng or np.random.default_rng(0)
     for i, feat in enumerate(feature_columns):
         vals = X[:, i]
-        sv = shap_values[:, i]
         nan_mask = np.isnan(vals)
-        v = vals[~nan_mask]
-        s = sv[~nan_mask]
 
-        fig, ax = plt.subplots(figsize=(6, 4))
-        if len(v) == 0:
-            ax.text(0.5, 0.5, "all NaN", ha="center", va="center", transform=ax.transAxes)
-        else:
-            n = min(_MAX_SCATTER_POINTS, len(v))
-            idx = rng.choice(len(v), size=n, replace=False) if len(v) > n else np.arange(len(v))
-            ax.scatter(v[idx], s[idx], s=3, alpha=0.25)
-            ax.axhline(0, color="k", lw=0.5, alpha=0.5)
-
-        ax.set_title(feat, fontsize=9)
-        ax.set_xlabel(feat)
-        ax.set_ylabel("SHAP value")
-        fig.tight_layout()
         safe_name = feat.replace("/", "_")
-        fig.savefig(out_dir / f"{safe_name}.png", dpi=100)
-        plt.close(fig)
+        if nan_mask.all():
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.text(0.5, 0.5, "all NaN", ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(feat, fontsize=9)
+            fig.tight_layout()
+            fig.savefig(out_dir / f"{safe_name}.png", dpi=100)
+            plt.close(fig)
+            continue
+
+        # shap.dependence_plot opens its own figure; capture it.
+        shap.dependence_plot(
+            i,
+            shap_values,
+            X,
+            feature_names=feature_columns,
+            interaction_index="auto",
+            show=False,
+        )
+        plt.gcf().set_size_inches(7, 4)
+        plt.tight_layout()
+        plt.savefig(out_dir / f"{safe_name}.png", dpi=100)
+        plt.close("all")
 
 
 def run_shap_report(

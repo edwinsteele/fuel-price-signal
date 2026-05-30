@@ -52,87 +52,98 @@
   </a>
 </div>
 
-<!-- Ranked table -->
-<div style="overflow-x:auto; margin:1rem 0">
-<table style="font-size:.82rem; white-space:nowrap">
-  <thead>
-    <tr>
-      <th style="text-align:right; width:3rem">SHAP rank</th>
-      <th>Feature</th>
-      <th style="text-align:right">mean|SHAP|</th>
-      <th style="text-align:center; width:4rem">sign(r)</th>
-      <th style="text-align:right; width:4.5rem">NaN%</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for row in rows %}
-    {% set is_selected = (row.feature == selected_feature) %}
-    <tr style="{% if is_selected %}background:var(--surface-alt); outline:1px solid var(--accent){% endif %}">
-      <td style="text-align:right; font-family:var(--font-mono); color:var(--text-muted)">{{ row.rank | int }}</td>
-      <td>
-        <a href="?sort={{ sort_by }}&feature={{ row.feature }}"
-           style="text-decoration:none; color:{% if is_selected %}var(--accent){% else %}var(--text){% endif %}; font-family:var(--font-mono); font-size:.78rem">
-          {{ row.feature }}
-        </a>
-      </td>
-      <td style="text-align:right; font-family:var(--font-mono)">{{ "%.4f" | format(row.mean_abs_shap) }}</td>
-      <td style="text-align:center">
-        {% if row.sign_of_r != row.sign_of_r %}{# NaN check #}
-          <span style="color:var(--text-dim)">—</span>
-        {% elif row.sign_of_r > 0 %}
-          <span style="color:var(--green); font-weight:700">+</span>
-        {% elif row.sign_of_r < 0 %}
-          <span style="color:var(--red); font-weight:700">−</span>
-        {% else %}
-          <span style="color:var(--text-dim)">?</span>
-        {% endif %}
-      </td>
-      <td style="text-align:right; font-family:var(--font-mono);
-                 {% if row.nan_fraction > 0.5 %}color:var(--red){% elif row.nan_fraction > 0 %}color:var(--accent){% else %}color:var(--text-muted){% endif %}">
-        {{ "%.0f%%" | format(row.nan_fraction * 100) }}
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
+<!-- Two-column layout: scrollable table left, sticky plot panel right -->
+<div style="display:flex; gap:1.5rem; align-items:flex-start; margin:1rem 0">
 
-<!-- Drill-down panel -->
-{% if selected_feature %}
-  {% set detail = rows | selectattr("feature", "equalto", selected_feature) | first %}
-  {% if detail %}
-  <h2>{{ selected_feature }}</h2>
-  <div class="stats" style="margin-bottom:1rem">
-    <div class="stat">
-      <div class="stat-value" style="font-family:var(--font-mono)">{{ "%.4f" | format(detail.mean_abs_shap) }}</div>
-      <div class="stat-label">mean|SHAP|</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value" style="font-family:var(--font-mono)">
-        {% if detail.sign_of_r != detail.sign_of_r %}—
-        {% elif detail.sign_of_r > 0 %}<span style="color:var(--green)">+1</span>
-        {% elif detail.sign_of_r < 0 %}<span style="color:var(--red)">−1</span>
-        {% else %}<span style="color:var(--text-dim)">0</span>{% endif %}
+  <!-- Left: feature table -->
+  <div style="flex:1; min-width:0; overflow-x:auto">
+  <table style="font-size:.82rem; white-space:nowrap; width:100%">
+    <thead>
+      <tr>
+        <th style="text-align:right; width:3rem">SHAP rank</th>
+        <th>Feature</th>
+        <th style="text-align:right">mean|SHAP|</th>
+        <th style="text-align:center; width:4rem">sign(r)</th>
+        <th style="text-align:right; width:4.5rem">NaN%</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+      {% set is_selected = (row.feature == selected_feature) %}
+      <tr style="{% if is_selected %}background:var(--surface-alt); outline:1px solid var(--accent){% endif %}">
+        <td style="text-align:right; font-family:var(--font-mono); color:var(--text-muted)">{{ row.rank | int }}</td>
+        <td>
+          <a href="?sort={{ sort_by }}&feature={{ row.feature }}"
+             style="text-decoration:none; color:{% if is_selected %}var(--accent){% else %}var(--text){% endif %}; font-family:var(--font-mono); font-size:.78rem">
+            {{ row.feature }}
+          </a>
+        </td>
+        <td style="text-align:right; font-family:var(--font-mono)">{{ "%.4f" | format(row.mean_abs_shap) }}</td>
+        <td style="text-align:center">
+          {% if row.sign_of_r != row.sign_of_r %}{# NaN check #}
+            <span style="color:var(--text-dim)">—</span>
+          {% elif row.sign_of_r > 0 %}
+            <span style="color:var(--green); font-weight:700">+</span>
+          {% elif row.sign_of_r < 0 %}
+            <span style="color:var(--red); font-weight:700">−</span>
+          {% else %}
+            <span style="color:var(--text-dim)">?</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right; font-family:var(--font-mono);
+                   {% if row.nan_fraction > 0.5 %}color:var(--red){% elif row.nan_fraction > 0 %}color:var(--accent){% else %}color:var(--text-muted){% endif %}">
+          {{ "%.0f%%" | format(row.nan_fraction * 100) }}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <!-- Right: sticky plot panel -->
+  <div style="width:480px; flex-shrink:0; position:sticky; top:1rem; align-self:flex-start">
+  {% if selected_feature %}
+    {% set detail = rows | selectattr("feature", "equalto", selected_feature) | first %}
+    {% if detail %}
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem">
+      <div style="font-family:var(--font-mono); font-size:.8rem; color:var(--accent); font-weight:700; margin-bottom:.75rem; word-break:break-all">{{ selected_feature }}</div>
+      <div style="display:flex; gap:.75rem; flex-wrap:wrap; margin-bottom:.75rem">
+        <div>
+          <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:#fff">{{ "%.4f" | format(detail.mean_abs_shap) }}</div>
+          <div style="font-size:.75rem; color:var(--text-muted)">mean|SHAP|</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700">
+            {% if detail.sign_of_r != detail.sign_of_r %}—
+            {% elif detail.sign_of_r > 0 %}<span style="color:var(--green)">+1</span>
+            {% elif detail.sign_of_r < 0 %}<span style="color:var(--red)">−1</span>
+            {% else %}<span style="color:var(--text-dim)">0</span>{% endif %}
+          </div>
+          <div style="font-size:.75rem; color:var(--text-muted)">sign(r)</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:#fff">{{ "%.1f%%" | format(detail.nan_fraction * 100) }}</div>
+          <div style="font-size:.75rem; color:var(--text-muted)">NaN rows</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:#fff">{{ detail.rank | int }}</div>
+          <div style="font-size:.75rem; color:var(--text-muted)">SHAP rank</div>
+        </div>
       </div>
-      <div class="stat-label">sign(r)</div>
+      <img src="{{ url_for('features_plot', feature_name=selected_feature) }}"
+           alt="Dependence plot: {{ selected_feature }}"
+           style="width:100%; border-radius:4px; background:#fff"
+           onerror="this.parentElement.innerHTML+='<div class=\'banner banner-warn\' style=\'margin-top:.5rem\'>Dependence PNG not found — re-run shap_report.py to regenerate.</div>'; this.remove()">
     </div>
-    <div class="stat">
-      <div class="stat-value" style="font-family:var(--font-mono)">{{ "%.1f%%" | format(detail.nan_fraction * 100) }}</div>
-      <div class="stat-label">NaN rows</div>
+    {% endif %}
+  {% else %}
+    <div style="background:var(--surface); border:1px solid var(--border-dim); border-radius:8px; padding:2rem 1rem; text-align:center; color:var(--text-dim); font-size:.875rem">
+      Click a feature in the table to see its dependence plot.
     </div>
-    <div class="stat">
-      <div class="stat-value" style="font-family:var(--font-mono)">{{ detail.rank | int }}</div>
-      <div class="stat-label">SHAP rank</div>
-    </div>
-  </div>
-  <div style="margin:1rem 0; text-align:left">
-    <img src="{{ url_for('features_plot', feature_name=selected_feature) }}"
-         alt="Dependence plot: {{ selected_feature }}"
-         style="max-width:100%; border:1px solid var(--border); border-radius:6px; background:var(--surface)"
-         onerror="this.parentElement.innerHTML='<div class=\'banner banner-warn\'>Dependence PNG not found — re-run shap_report.py to regenerate dependence plots.</div>'">
-  </div>
   {% endif %}
-{% endif %}
+  </div>
+
+</div><!-- end two-column layout -->
 
 {% endif %}
 {% endblock %}
