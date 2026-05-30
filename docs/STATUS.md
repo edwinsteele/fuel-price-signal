@@ -76,29 +76,29 @@ Phase 3a (10-feat LGBM cycle features) → Phase 3b (14-feat, +LGA/brand aggrega
 
 At τ=0.65 test: P=0.702, R=0.851, F1=0.769, BUY%=29.9%.
 
-#### Re-locked 2026-05-29 (post-#144 boundary-postcode fix)
+#### Current Phase 4 state (post-#144 boundary fix + post-#154 Central Coast removal)
 
-The #144 from-scratch DB rebuild corrected postcode→LGA boundaries (which feed every `days_since_trough_entry_<lga>` feature) but its retrain silently dropped the LGA features (`--include-lga-features` defaults off), leaving a 15-feat model on disk. Retrained 50-feat on the corrected data and re-locked. The boundary fix *improved* the model:
+On-disk model: 50-feat raw LGBM, banked as `phase4_5seed_lock_post_cc_removal` (commit 9afdd2f).
 
-| Model | Test logloss | Test brier | Test F1 |
-|-------|-------------|------------|---------|
-| Phase 4 pre-fix (buggy LGA boundaries, single seed) | 0.3012 | 0.0973 | 0.769 |
-| **Phase 4 post-fix (corrected boundaries)** | **0.2854** | **0.0914** | **0.767** |
+| Metric | Value |
+|---|--:|
+| Test logloss (seed 42) | 0.2676 |
+| Test brier | 0.0855 |
+| Test F1 | 0.768 |
+| 5-seed test logloss mean / std | 0.2666 / 0.0024 |
 
-Calibrate again chose raw over isotonic. Seed-banked (raw uncalibrated test logloss, seeds {1,7,42,99,2024}): **mean 0.2919, std 0.0053 (3σ=0.0158)** — vs `lgbm_council_fix` raw mean 0.3205, a leadership lift of −0.0286, beyond the 3σ band of both. See `experiments/results.csv` row `phase4_event_leadership_postfix` and the throwaway `experiments/seed_bank_phase4/run.py` (superseded once #145 lands a real `--seeds` flag).
+Calibrate chose raw over isotonic.
 
-**Not re-run post-fix:** the three validation gates below were computed pre-fix. The from-scratch rebuild also left `lga_leadership` empty (0 rows), so `inspect.py`'s board and the SHAP cross-reference can't run until it's repopulated. Re-validation tracked as **#156** (depends on **#155** for `lga_leadership` repopulation).
+**Validation gates re-run 2026-05-30 (issue #156):**
 
-**Validation (all three gates passed — pre-#144-fix numbers):**
-
-- `experiments/trough_weakness/` — target cohort: `lead −7..−4` 0.522 → 0.4794 (Δ −0.043), `lead −3..−1` 0.630 → 0.6096 (Δ −0.020). Acceptance ≥0.02 in either, both hit.
-- `experiments/cv_compare_phase4/` — paired walk-forward CV vs Phase 3c: 13 of 14 folds improve; median Δ −0.029, mean Δ −0.081. **Fold 5 (2022-10 → 2023-01, Ukraine spike)** — the known stickiness regime-lag tail risk — inverted from Phase 3c's +0.353 regression to a −0.486 improvement (50-feat 0.295 vs 15-feat 0.781). Event-based trough features don't carry the 45-day rolling lag that hurt Phase 3c.
-- `experiments/shap_phase4/` — 6 zero-station-floor LGAs have SHAP exactly 0 ✓. 8 of 35 LGA features make the overall top-25 (woollahra #10, randwick #11, blue_mountains #13). LGA mean|SHAP| is materially higher in trough-adjacent cohorts than mid-cycle (woollahra 0.18–0.19 in lead/trough vs 0.11 mid-cycle) — exactly the event-locked behaviour the design predicted.
+- `experiments/trough_weakness/` — overall test logloss 0.2676 (matches the seed-42 bank). Lead-cohort losses: `lead −7..−4` **0.3904** (pre-fix 0.4794), `lead −3..−1` **0.5749** (pre-fix 0.6096). Both substantially lower than the pre-fix Phase 4 figures at which the ≥0.02 acceptance bar already passed. `lead −7..−4` remains the worst-calibrated cohort (mean p 0.333 vs rate 0.175, +0.157 over-prediction) — the residual structure #157 is filed against.
+- `experiments/cv_compare_phase4/` — paired walk-forward CV vs Phase 3c, 14 folds, seed=42: **11/14 folds improve** (was 13/14 pre-fix); median Δ **−0.032**, mean Δ **−0.042**, std 0.064. **The "fold 5 Ukraine-spike rescue" story does not survive the fix** — post-fix Phase 3c handles fold 5 normally (ll_15 = 0.263) and Phase 4 regresses mildly (Δ +0.036). The pre-fix Phase 3c collapse (ll_15 = 0.781) was a buggy postcode→LGA boundary artifact feeding `lga_mean_cents` and `station_minus_lga_mean_cents`, not the stickiness-regime-lag phenomenon previously claimed. Other minor regressions: fold 6 (+0.019), fold 11 (+0.062).
+- `experiments/shap_phase4/` — 8 of 35 LGA features in overall top 25 (woollahra #10, blue_mountains #12, randwick #13, burwood #14, cumberland #15, parramatta #17, mosman #18, hawkesbury #20). Cohort taxonomy intact: woollahra mean|SHAP| 0.18 in lead/trough cohorts vs 0.11 mid-cycle. 5 of 6 historically-zero LGAs still zero; **Camden now non-zero** (mean|SHAP|=0.029) — boundary fix gave it 14 stations, retiring #138.
 
 **Open follow-ups from validation:**
 
-- Camden missing-data chore (**#138**) — outer-metro Sydney LGA with real petrol stations but 0 stations in our DB; trace upstream feed.
-- v2 peak features (**#157**) — `lead −8+` and `lead −7..−4` cohorts remain miscalibrated by +0.12 and +0.22 (over-confident BUY). Design taxonomy: `docs/PLAN_phase4_event_leadership.md` § LGA feature roles in SHAP.
+- **#157** v2 peak features — `lead −7..−4` over-prediction (+0.157) is the dominant residual miscalibration. Design taxonomy: `docs/PLAN_phase4_event_leadership.md` § LGA feature roles in SHAP.
+- **LGA mechanism — open question.** The leadership-table predicted leaders (sutherland_shire, northern_beaches, ku_ring_gai) all rank in the bottom half of LGA SHAP. Brand concentration doesn't explain the actual ranking either (Spearman ρ between SHAP rank and Herfindahl brand-mix index is −0.07, p=0.72 across 30 LGAs). The model selects on a criterion we haven't characterised. Defer until #75 (brand leading-indicator feature) lands so we can re-evaluate SHAP rankings with brand variance extracted.
 
 ## Pending work
 
