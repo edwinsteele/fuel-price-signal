@@ -69,8 +69,8 @@
 <!-- Two-column layout: scrollable table left, sticky plot panel right -->
 <div style="display:flex; gap:1.5rem; align-items:flex-start; margin:1rem 0">
 
-  <!-- Left: feature table -->
-  <div style="flex:1; min-width:0; overflow-x:auto">
+  <!-- Left: feature table (no Partners column — selection lives in the side panel) -->
+  <div style="flex:1; min-width:0">
   <table style="font-size:.82rem; white-space:nowrap; width:100%">
     <thead>
       <tr>
@@ -79,7 +79,6 @@
         <th style="text-align:right">mean|SHAP|</th>
         <th style="text-align:center; width:4.5rem">r</th>
         <th style="text-align:right; width:4.5rem">NaN%</th>
-        <th style="text-align:left; width:16rem">Partners</th>
       </tr>
     </thead>
     <tbody>
@@ -108,24 +107,6 @@
         <td style="text-align:right; font-family:var(--font-mono);
                    {% if row.nan_fraction > 0.5 %}color:var(--red){% elif row.nan_fraction > 0 %}color:var(--accent){% else %}color:var(--text-muted){% endif %}">
           {{ "%.0f%%" | format(row.nan_fraction * 100) }}
-        </td>
-        <td>
-          {% set partners = partner_map.get(row.feature, []) %}
-          {% if partners %}
-          <select
-            style="font-size:.75rem; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:.1rem .25rem; max-width:15rem"
-            onchange="if(this.value){window.location='?sort={{ sort_by }}&feature={{ row.feature }}&interaction='+encodeURIComponent(this.value);}else{window.location='?sort={{ sort_by }}&feature={{ row.feature }}';}">
-            <option value=""{% if row.feature == selected_feature and not selected_interaction %} selected{% endif %}>(auto-pick)</option>
-            {% for p in partners %}
-            <option value="{{ p.partner }}"
-              {% if row.feature == selected_feature and p.partner == selected_interaction %} selected{% endif %}>
-              {{ p.partner }} ({{ "%.0f%%" | format(p.pct_of_total * 100) }})
-            </option>
-            {% endfor %}
-          </select>
-          {% else %}
-          <span style="color:var(--text-dim); font-size:.75rem">—</span>
-          {% endif %}
         </td>
       </tr>
     {% endfor %}
@@ -170,13 +151,36 @@
         </div>
         {% endif %}
       </div>
-      {% if selected_interaction %}
+
+      <!-- Partner selector -->
+      {% set partners = partner_map.get(selected_feature, []) %}
+      {% if partners %}
+      <div style="margin-bottom:.75rem">
+        <div style="font-size:.75rem; color:var(--text-muted); margin-bottom:.3rem">Colour by interaction partner:</div>
+        <select
+          style="width:100%; font-size:.8rem; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:.25rem .4rem"
+          onchange="if(this.value){window.location='?sort={{ sort_by }}&feature={{ selected_feature }}&interaction='+encodeURIComponent(this.value);}else{window.location='?sort={{ sort_by }}&feature={{ selected_feature }}';}">
+          <option value=""{% if not selected_interaction %} selected{% endif %}>(auto-pick)</option>
+          {% for p in partners %}
+          <option value="{{ p.partner }}"{% if p.partner == selected_interaction %} selected{% endif %}>
+            {{ p.partner }} ({{ "%.0f%%" | format(p.pct_of_total * 100) }})
+          </option>
+          {% endfor %}
+        </select>
+        {% if selected_interaction %}
+        <div style="font-size:.75rem; margin-top:.3rem">
+          <a href="?sort={{ sort_by }}&feature={{ selected_feature }}" style="color:var(--blue)">Reset to auto</a>
+        </div>
+        {% endif %}
+      </div>
+      {% elif selected_interaction %}
       <div style="font-size:.75rem; color:var(--text-muted); margin-bottom:.5rem">
         Coloured by: <span style="font-family:var(--font-mono); color:var(--accent)">{{ selected_interaction }}</span>
         &nbsp;&mdash;&nbsp;
         <a href="?sort={{ sort_by }}&feature={{ selected_feature }}" style="color:var(--blue)">Reset to auto</a>
       </div>
       {% endif %}
+
       <img src="{{ url_for('features_plot', feature_name=selected_feature) }}{% if selected_interaction %}?interaction={{ selected_interaction }}{% endif %}"
            alt="Dependence plot: {{ selected_feature }}"
            style="width:100%; border-radius:4px; background:#fff"

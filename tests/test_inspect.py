@@ -665,7 +665,7 @@ def flask_client_with_shap_and_partners(conn, tmp_path):
 
 
 def test_features_route_shows_partners_dropdown(flask_client_with_shap_and_partners):
-    resp = flask_client_with_shap_and_partners.get("/features")
+    resp = flask_client_with_shap_and_partners.get("/features?feature=cycle_pct_through")
     html = resp.data.decode()
     assert "<select" in html
     assert "stickiness_score" in html
