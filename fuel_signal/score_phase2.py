@@ -64,6 +64,7 @@ Phase 3 must beat τ=0.40 (190.35 c/L) to show improvement over the locked basel
 
 from __future__ import annotations
 
+import math
 import pathlib
 from typing import Any
 
@@ -446,12 +447,22 @@ def _format_comparison(
         "Policy: use only at lock time — not for development sniff-tests."
     ),
 )
+@click.option(
+    "--db", "db_path",
+    default=None,
+    help=(
+        "Path to SQLite DB (e.g. fuel_signal.db). When provided with --model-path, "
+        "runs the backtest engine at the chosen τ on the test window and populates "
+        "realised_spend_cpl / realised_savings_vs_always_buy_pct in results.csv."
+    ),
+)
 def main(
     features_csv: str,
     model_path: str | None,
     model_name: str,
     tau_adjustment: float | None,
     seeds_str: str | None,
+    db_path: str | None,
 ) -> None:
     """Threshold sweep on val, one-time test scoring, append to results.csv.
 
@@ -601,7 +612,65 @@ def main(
             f"(3σ = {3 * seed_result['logloss_std']:.4f})"
         )
 
-    # Step 7: log to results.csv.
+    # Step 7 (optional): run backtest for realised-spend columns.
+    realised_cpl: float | None = None
+    realised_savings_pct: float | None = None
+    if db_path is not None:
+        if model_path is None:
+            click.echo("\nWARNING: --db ignored — backtest requires --model-path.")
+        else:
+            db_file = pathlib.Path(db_path)
+            if not db_file.exists():
+                click.echo(f"\nWARNING: DB not found: {db_path} — skipping backtest.")
+            else:
+                import fuel_signal.db as _db
+                from fuel_signal.backtest import (
+                    AlwaysBuyStrategy,
+                    ModelStrategy,
+                    TankParams,
+                    load_history,
+                )
+                from fuel_signal.backtest_phase2 import aggregate_backtest
+                from fuel_signal.config import PREFERRED_STATIONS
+
+                conn = _db.open_db(db_file)
+                try:
+                    _station_codes = list(PREFERRED_STATIONS.keys())
+                    _history = load_history(conn, _station_codes)
+                finally:
+                    conn.close()
+
+                _tank = TankParams()
+                _bt_start, _bt_end = _ev.TEST_START, _ev.TEST_END
+                _always_agg = aggregate_backtest(
+                    _history, AlwaysBuyStrategy(), _station_codes, _bt_start, _bt_end, _tank
+                )
+                _model_agg = aggregate_backtest(
+                    _history,
+                    ModelStrategy(model_path=pathlib.Path(model_path), threshold=chosen_tau),
+                    _station_codes, _bt_start, _bt_end, _tank,
+                )
+                _always_cpl = _always_agg["cpl"]
+                _model_cpl = _model_agg["cpl"]
+                if math.isnan(_model_cpl) or math.isnan(_always_cpl):
+                    click.echo(
+                        "\nWARNING: Backtest CPL is NaN — realised-spend columns not populated."
+                    )
+                else:
+                    realised_cpl = _model_cpl
+                    realised_savings_pct = (
+                        (_always_cpl - _model_cpl) / _always_cpl * 100
+                    ) if _always_cpl > 0 else 0.0
+                    click.echo(
+                        f"\nBacktest (τ={chosen_tau:.2f}, {_bt_start} → {_bt_end}):"
+                    )
+                    click.echo(f"  Always-buy CPL : {_always_cpl:.2f} c/L")
+                    click.echo(
+                        f"  Model      CPL : {realised_cpl:.2f} c/L"
+                        f"  ({realised_savings_pct:+.2f}% vs always-buy)"
+                    )
+
+    # Step 8: log to results.csv.
     notes = (
         f"tau={chosen_tau:.2f}; "
         f"criterion=max_expected_cents_val_adj{effective_adj:+.2f}; "
@@ -621,6 +690,8 @@ def main(
         holdout_logloss=test_result["test_logloss"],
         holdout_brier=test_result["test_brier"],
         notes=notes,
+        realised_spend_cpl=realised_cpl,
+        realised_savings_vs_always_buy_pct=realised_savings_pct,
         seed_test_logloss_vector=seed_result["logloss_vector"] if seed_result else None,
         seed_test_logloss_mean=seed_result["logloss_mean"] if seed_result else None,
         seed_test_logloss_std=seed_result["logloss_std"] if seed_result else None,

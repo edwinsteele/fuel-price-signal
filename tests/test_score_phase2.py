@@ -209,3 +209,78 @@ def test_seeds_invalid_format_errors(tmp_path):
     ])
     assert res.exit_code != 0
     assert "comma-separated list of integers" in res.output
+
+
+# ---------------------------------------------------------------------------
+# --db: backtest integration populates realised-spend columns (issue #161)
+# ---------------------------------------------------------------------------
+
+
+def test_score_phase2_with_db_populates_realised_spend(tmp_path, monkeypatch):
+    """--db runs the backtest and writes realised_spend_cpl to results.csv."""
+    import csv
+    import datetime
+
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    from fuel_signal import evaluate as ev
+    from fuel_signal.config import PREFERRED_STATIONS
+    from fuel_signal.db import create_schema, open_db, upsert_daily_prices, upsert_stations
+
+    # Features CSV spanning valid train / val / test date windows
+    df = _synthetic_df_for_seed_test()
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    # Fit a real pipeline on the train split so score_test works
+    train, _, _ = ev.split(df)
+    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    y_train = train["label"].to_numpy(dtype=int)
+    pipe = Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=200))])
+    pipe.fit(X_train, y_train)
+    artifact = {"pipeline": pipe, "feature_columns": FEATURE_COLUMNS}
+    model_path = tmp_path / "model.joblib"
+    joblib.dump(artifact, model_path)
+
+    # DB with constant E10 prices for one preferred station across the test window
+    station_code = next(iter(PREFERRED_STATIONS))
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    create_schema(conn)
+    upsert_stations(conn, [{
+        "station_code": station_code,
+        "name": "Test Station",
+        "address": "1 Test Road, Springwood",
+        "suburb": "Springwood",
+        "postcode": "2777",
+        "brand": "Test",
+    }])
+    d = datetime.date.fromisoformat(ev.TEST_START)
+    d_end = datetime.date.fromisoformat(ev.TEST_END)
+    prices = []
+    while d <= d_end:
+        prices.append((station_code, "E10", d.isoformat(), 170.0))
+        d += datetime.timedelta(days=1)
+    upsert_daily_prices(conn, prices)
+    conn.commit()
+    conn.close()
+
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--features-csv", str(features_path),
+        "--model-path", str(model_path),
+        "--db", str(db_path),
+    ], catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+
+    with results_path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["realised_spend_cpl"] != "", "realised_spend_cpl must be non-empty when --db is provided"
+    assert rows[0]["realised_savings_vs_always_buy_pct"] != "", (
+        "realised_savings_vs_always_buy_pct must be non-empty when --db is provided"
+    )
