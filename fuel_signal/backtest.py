@@ -120,8 +120,9 @@ class PriceHistory:
     def stickiness_score_at(self, station_code: int, as_of: str) -> float | None:
         return self.stickiness_by_key.get((station_code, as_of))
 
-    def lga_days_since_at(self, as_of: str, lga: str) -> int | None:
-        return self.lga_days_since_by_key.get((as_of, lga))
+    def lga_days_since_at(self, as_of: str, lga: str) -> float | None:
+        val = self.lga_days_since_by_key.get((as_of, lga))
+        return float(val) if val is not None else None
 
 
 # ---------------------------------------------------------------------------
