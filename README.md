@@ -334,17 +334,18 @@ Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output print
 
 ## Walk-forward cross-validation report
 
-Assesses whether any single validation window is an outlier by training the logreg baseline on each 90-day fold and reporting per-fold val logloss + BUY rate. Run this before committing to Optuna tuning.
+Paired comparison of two joblib model artifacts across all pre-test folds. Re-trains both on each 90-day fold and reports per-fold logloss delta (model − baseline). Use this before locking a Phase upgrade to confirm that the val improvement holds across fold windows and is not an artefact of the canonical val window.
 
 ```bash
-# Default: 5-year minimum train window, 90-day folds, reads data/features.csv
-uv run python -m fuel_signal.cv_report
-
-# Custom fold geometry
-uv run python -m fuel_signal.cv_report --train-min-days 1825 --val-days 90 --step-days 90
+uv run python -m fuel_signal.cv_report \
+  --model data/models/lgbm.joblib \
+  --baseline data/models/lgbm_phase3c.joblib \
+  --features data/features.csv \
+  --seed 42 \
+  --output experiments/cv_phase4/results.csv
 ```
 
-Output is one line per fold (train/val date ranges, row counts, val logloss, baseline logloss, Δ) followed by a mean ± std summary across all folds.
+Output: one line per fold (`val start→end`, `n_val`, `baseline=`, `model=`, `Δ=`) followed by a summary line (`folds`, `wins/n`, `median Δ`, `mean Δ`). Folds where `Δ > +0.05` are listed as named regressions. The `--output` CSV has columns: `fold_idx, train_start, train_end, val_start, val_end, n_val, baseline_logloss, model_logloss, delta`.
 
 ## SHAP analysis
 

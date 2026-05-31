@@ -1,4 +1,6 @@
-"""Paired walk-forward CV: 15-feat (Phase 3c) vs 50-feat (Phase 4) LGBM.
+"""[Superseded by fuel_signal.cv_report — see README Walk-forward CV report section]
+
+Paired walk-forward CV: 15-feat (Phase 3c) vs 50-feat (Phase 4) LGBM.
 
 For each fold yielded by evaluate.walk_forward_folds(), trains LGBM at seed=42
 on both feature sets and prints per-fold val logloss + delta. Goal: confirm

@@ -1,4 +1,6 @@
-"""Paired walk-forward CV: 14-feat vs 15-feat LGBM.
+"""[Superseded by fuel_signal.cv_report — see README Walk-forward CV report section]
+
+Paired walk-forward CV: 14-feat vs 15-feat LGBM.
 
 For each fold yielded by evaluate.walk_forward_folds(), trains LGBM at seed=42
 on both feature sets (drop stickiness_score for the 14-feat run) and prints
