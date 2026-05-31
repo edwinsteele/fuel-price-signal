@@ -37,7 +37,7 @@ uv run python -m fuel_signal.lga_leadership --start-date 2016-08-01    # 5. popu
 uv run python -m fuel_signal.features                                   # 6. assemble ML feature rows
 uv run python -m fuel_signal.train_lgbm                                 # 7. train LightGBM (Phase 4 default)
 uv run python -m fuel_signal.calibrate --skip-results-csv              # 8. calibrate (lgbm defaults)
-uv run python -m fuel_signal.score_phase2                               # 9. final test-set eval (run once)
+uv run python -m fuel_signal.score_phase2                               # 9. final test-set eval (run once; loads calibrated artifact by default)
 uv run python -m fuel_signal.shap_report \
     --model data/models/lgbm.joblib \
     --features data/features.csv \
@@ -519,11 +519,13 @@ uv run python -m fuel_signal.score_phase2 --no-backtest
 
 1. Loads the model artifact at `--model-path` (default: `data/models/lgbm_calibrated.joblib`) and scores val directly.
 2. Sweeps τ ∈ [0.05, 0.95] (step 0.05) on val — prints precision, recall, F1, BUY%, and expected-cents-saved per row.
-3. Picks τ = argmax(expected cents/row on val) + 0.05 adjustment to correct for val's elevated BUY rate.
+3. Picks τ = argmax(expected cents/row on val), then applies a model-aware adjustment for val's elevated BUY rate: **+0.05 for raw artifacts, 0.00 for isotonic-calibrated artifacts**. Override with `--tau-adjustment <float>` (e.g. `--tau-adjustment 0.00` to disable).
 4. Runs the realised-spend backtest at chosen τ over the test window using `--db` (default: `./fuel_signal.db`), populating `realised_spend_cpl` and `realised_savings_vs_always_buy_pct`. Skipped silently when the DB file or `--model-path` are absent (e.g. CI); use `--no-backtest` to skip explicitly.
 5. Scores test at chosen τ. Appends one row to `experiments/results.csv` using `--model-name`.
 
 **Cost model:** TP → +6.37c; FP → −5.80c; FN → −11.14c.
+
+**Calibration warning:** If `--model-path` points at a raw (uncalibrated) artifact and `--tau-adjustment` is not passed explicitly, the CLI prints a `WARNING:` line surfacing the implicit `+0.05` default — the artifact filename (`lgbm_calibrated.joblib`) does not distinguish raw from isotonic, so this warning is the only visible signal that a raw model was loaded.
 
 **Phase 2 result** (2026-05-09, real DB):
 
