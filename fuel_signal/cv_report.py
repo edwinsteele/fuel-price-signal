@@ -132,7 +132,10 @@ def run_paired_cv(
         y_val = val_df["label"].to_numpy(dtype=int)
 
         m = clone(model_obj["pipeline"])
-        m.set_params(random_state=seed)
+        try:
+            m.set_params(random_state=seed)
+        except ValueError:
+            pass
         m.fit(
             train_df[model_features].to_numpy(dtype=float),
             train_df["label"].to_numpy(dtype=int),
@@ -141,7 +144,10 @@ def run_paired_cv(
         model_logloss = _ev.log_loss(y_val, p_model)
 
         b = clone(baseline_obj["pipeline"])
-        b.set_params(random_state=seed)
+        try:
+            b.set_params(random_state=seed)
+        except ValueError:
+            pass
         b.fit(
             train_df[baseline_features].to_numpy(dtype=float),
             train_df["label"].to_numpy(dtype=int),
@@ -276,6 +282,12 @@ def main(
         )
 
     df = pd.read_csv(features_path)
+    missing = [c for c in ("label", "price_date") if c not in df.columns]
+    if missing:
+        raise click.ClickException(
+            f"Features CSV is missing required columns: {missing}. "
+            "Re-run 'uv run python -m fuel_signal.features' to regenerate."
+        )
     results = run_paired_cv(
         df,
         model_path,

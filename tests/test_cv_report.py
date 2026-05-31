@@ -336,3 +336,33 @@ def test_cli_paired_missing_model_errors(tmp_path):
         "--features", str(csv_path),
     ])
     assert res.exit_code != 0
+
+
+def test_cli_paired_missing_baseline_errors(tmp_path):
+    df = _synthetic_paired_df()
+    csv_path = tmp_path / "features.csv"
+    df.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--baseline", str(tmp_path / "missing.joblib"),
+        "--features", str(csv_path),
+    ])
+    assert res.exit_code != 0
+
+
+def test_cli_paired_missing_columns_errors(tmp_path):
+    bad = pd.DataFrame({"price_date": ["2020-01-01"], "fa0": [1.0]})
+    csv_path = tmp_path / "bad.csv"
+    bad.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+    baseline_path = _make_lgbm_joblib(tmp_path, "baseline", _FEATS_B)
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--baseline", str(baseline_path),
+        "--features", str(csv_path),
+    ])
+    assert res.exit_code != 0
+    assert "missing required columns" in res.output.lower()

@@ -334,7 +334,7 @@ Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output print
 
 ## Walk-forward cross-validation report
 
-Paired comparison of two joblib model artifacts across all pre-test folds. Re-trains both on each 90-day fold and reports per-fold logloss delta (model − baseline). Use this before locking a Phase upgrade to confirm that the val improvement holds across fold windows and is not an artefact of the canonical val window.
+Paired comparison of two joblib model artifacts across all pre-test folds. Re-trains both on each 90-day fold and reports per-fold logloss delta (model − baseline). Use this before locking a Phase upgrade to confirm that the val improvement holds across fold windows and is not an artifact of the canonical val window.
 
 ```bash
 uv run python -m fuel_signal.cv_report \
