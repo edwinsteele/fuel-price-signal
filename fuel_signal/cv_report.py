@@ -1,14 +1,20 @@
-"""Walk-forward cross-validation report for the ML price-movement model.
+"""Walk-forward cross-validation report.
 
-Trains the logreg baseline on each fold produced by walk_forward_folds() and
-prints per-fold val logloss + BUY rate, then a mean ± std summary. Use this
-to assess whether any single val window (e.g. the canonical Phase 2 window) is
-an outlier before running Optuna.
+**Paired mode (CLI):** loads two joblib model artifacts, re-trains both on every
+walk-forward fold, and compares per-fold val logloss.  This is the promoted form
+of the one-off ``experiments/cv_compare_*/run_cv.py`` scripts.
+
+**Library mode:** ``run_cv()`` runs a single-model logreg walk-forward CV and is
+kept for programmatic use by tests and notebooks.
 
 Usage::
 
-    uv run python -m fuel_signal.cv_report
-    uv run python -m fuel_signal.cv_report --train-min-days 1825 --val-days 90 --step-days 90
+    uv run python -m fuel_signal.cv_report \\
+      --model data/models/lgbm.joblib \\
+      --baseline data/models/lgbm_phase3c.joblib \\
+      --features data/features.csv \\
+      --seed 42 \\
+      --output experiments/cv_phase4/results.csv
 """
 
 from __future__ import annotations
@@ -16,12 +22,14 @@ from __future__ import annotations
 import pathlib
 
 import click
+import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import FEATURE_COLUMNS
-from fuel_signal.train_logreg import build_pipeline
+from fuel_signal.train_logreg import build_pipeline as _build_logreg
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 
@@ -34,10 +42,10 @@ def run_cv(
     val_days: int = 90,
     step_days: int = 90,
 ) -> list[dict]:
-    """Run walk-forward CV; return one result dict per fold with data.
+    """Single-model walk-forward CV using the logreg baseline.
 
-    Folds whose val window falls entirely in a data gap (val_df is empty)
-    are skipped silently — they carry no signal and would raise in log_loss.
+    Kept for programmatic use; the module CLI runs the paired comparison.
+    Folds whose val window falls in a data gap are skipped silently.
     """
     feature_columns = feature_columns or FEATURE_COLUMNS
     results = []
@@ -57,7 +65,7 @@ def run_cv(
         X_val = val_df[feature_columns].to_numpy(dtype=float)
         y_val = val_df["label"].to_numpy(dtype=int)
 
-        pipeline = build_pipeline()
+        pipeline = _build_logreg()
         pipeline.fit(X_train, y_train)
         p_val = pipeline.predict_proba(X_val)[:, 1]
 
@@ -83,39 +91,162 @@ def run_cv(
     return results
 
 
-def _format_fold(r: dict) -> str:
-    delta = r["val_logloss"] - r["baseline_logloss"]
+def _set_random_state(estimator: object, seed: int) -> None:
+    """Set random_state on any parameter named random_state or *__random_state.
+
+    Works for bare estimators (e.g. LGBMClassifier) and sklearn Pipelines where
+    the param is step-qualified (e.g. logreg__random_state).
+    """
+    updates = {
+        name: seed
+        for name in estimator.get_params(deep=True)  # type: ignore[union-attr]
+        if name == "random_state" or name.endswith("__random_state")
+    }
+    if updates:
+        estimator.set_params(**updates)  # type: ignore[union-attr]
+
+
+def run_paired_cv(
+    df: pd.DataFrame,
+    model_path: pathlib.Path,
+    baseline_path: pathlib.Path,
+    *,
+    seed: int = 42,
+    train_min_days: int = 1825,
+    val_days: int = 90,
+    step_days: int = 90,
+) -> list[dict]:
+    """Paired walk-forward CV: re-train both model and baseline on each fold.
+
+    Each joblib artifact must be a dict with keys ``pipeline`` (sklearn-compatible
+    estimator) and ``feature_columns`` (list[str]).  Both are cloned per fold so
+    only hyperparameters carry over — no training-set contamination across splits.
+
+    Returns one result dict per non-empty fold with keys:
+        fold_idx, train_start, train_end, val_start, val_end,
+        n_val, baseline_logloss, model_logloss, delta
+    where ``delta = model_logloss − baseline_logloss`` (negative means model wins).
+    """
+    model_obj = joblib.load(model_path)
+    baseline_obj = joblib.load(baseline_path)
+    model_features: list[str] = model_obj["feature_columns"]
+    baseline_features: list[str] = baseline_obj["feature_columns"]
+
+    results = []
+    for i, (train_df, val_df) in enumerate(
+        _ev.walk_forward_folds(
+            df,
+            train_min_days=train_min_days,
+            val_days=val_days,
+            step_days=step_days,
+        )
+    ):
+        if val_df.empty:
+            continue
+
+        y_val = val_df["label"].to_numpy(dtype=int)
+
+        m = clone(model_obj["pipeline"])
+        _set_random_state(m, seed)
+        m.fit(
+            train_df[model_features].to_numpy(dtype=float),
+            train_df["label"].to_numpy(dtype=int),
+        )
+        p_model = m.predict_proba(val_df[model_features].to_numpy(dtype=float))[:, 1]
+        model_logloss = _ev.log_loss(y_val, p_model)
+
+        b = clone(baseline_obj["pipeline"])
+        _set_random_state(b, seed)
+        b.fit(
+            train_df[baseline_features].to_numpy(dtype=float),
+            train_df["label"].to_numpy(dtype=int),
+        )
+        p_baseline = b.predict_proba(val_df[baseline_features].to_numpy(dtype=float))[:, 1]
+        baseline_logloss = _ev.log_loss(y_val, p_baseline)
+
+        val_dates = pd.to_datetime(val_df["price_date"])
+        train_dates = pd.to_datetime(train_df["price_date"])
+        results.append({
+            "fold_idx": i + 1,
+            "train_start": train_dates.min().strftime("%Y-%m-%d"),
+            "train_end": train_dates.max().strftime("%Y-%m-%d"),
+            "val_start": val_dates.min().strftime("%Y-%m-%d"),
+            "val_end": val_dates.max().strftime("%Y-%m-%d"),
+            "n_val": len(val_df),
+            "baseline_logloss": baseline_logloss,
+            "model_logloss": model_logloss,
+            "delta": model_logloss - baseline_logloss,
+        })
+
+    return results
+
+
+def _format_paired_fold(r: dict) -> str:
     return (
-        f"fold {r['fold']:>3}  "
-        f"train {r['train_start']}→{r['train_end']}  "
+        f"fold {r['fold_idx']:>3}  "
         f"val {r['val_start']}→{r['val_end']}  "
-        f"train={r['train_rows']:>7,}  "
-        f"val={r['val_rows']:>5,}  "
-        f"buy_rate={r['val_buy_rate']:.3f}  "
-        f"logloss={r['val_logloss']:.4f}  "
+        f"n={r['n_val']:>5,}  "
         f"baseline={r['baseline_logloss']:.4f}  "
-        f"Δ={delta:+.4f}"
+        f"model={r['model_logloss']:.4f}  "
+        f"Δ={r['delta']:+.4f}"
     )
 
 
-def _format_summary(results: list[dict]) -> str:
-    losses = np.array([r["val_logloss"] for r in results])
-    baselines = np.array([r["baseline_logloss"] for r in results])
-    return (
-        f"{'─' * 72}\n"
-        f"folds: {len(results)}  "
-        f"logloss {losses.mean():.4f} ± {losses.std():.4f}  "
-        f"(baseline {baselines.mean():.4f} ± {baselines.std():.4f})"
-    )
+def _format_paired_summary(results: list[dict]) -> str:
+    deltas = np.array([r["delta"] for r in results])
+    n_wins = int((deltas < 0).sum())
+    n_folds = len(results)
+    regressions = [r for r in results if r["delta"] > 0.05]
+    lines = [
+        "─" * 72,
+        (
+            f"folds: {n_folds}  wins: {n_wins}/{n_folds}  "
+            f"median Δ={np.median(deltas):+.4f}  mean Δ={deltas.mean():+.4f}"
+        ),
+    ]
+    if regressions:
+        names = ", ".join(
+            f"fold {r['fold_idx']} ({r['val_start']}→{r['val_end']}, Δ={r['delta']:+.4f})"
+            for r in regressions
+        )
+        lines.append(f"regressions (Δ>+0.05): {names}")
+    return "\n".join(lines)
 
 
 @click.command("cv_report")
 @click.option(
-    "--features-csv",
+    "--model",
+    "model_path",
+    required=True,
+    type=click.Path(exists=True, path_type=pathlib.Path),
+    help="Joblib artifact for the model to evaluate.",
+)
+@click.option(
+    "--baseline",
+    "baseline_path",
+    required=True,
+    type=click.Path(exists=True, path_type=pathlib.Path),
+    help="Joblib artifact for the baseline to compare against.",
+)
+@click.option(
+    "--features",
     "features_csv",
     default=str(DEFAULT_FEATURES_CSV),
     show_default=True,
-    help="Path to feature rows CSV produced by `python -m fuel_signal.features`.",
+    help="Feature rows CSV from `python -m fuel_signal.features`.",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=42,
+    show_default=True,
+    help="Random seed applied when re-training each fold.",
+)
+@click.option(
+    "--output",
+    "output_csv",
+    default=None,
+    help="Path to write per-fold results CSV (optional).",
 )
 @click.option(
     "--train-min-days",
@@ -123,7 +254,7 @@ def _format_summary(results: list[dict]) -> str:
     type=click.IntRange(min=1),
     default=1825,
     show_default=True,
-    help="Minimum training window size in days (default: 5 years).",
+    help="Minimum training window size in days.",
 )
 @click.option(
     "--val-days",
@@ -141,8 +272,17 @@ def _format_summary(results: list[dict]) -> str:
     show_default=True,
     help="Step size in days between consecutive folds.",
 )
-def main(features_csv: str, train_min_days: int, val_days: int, step_days: int) -> None:
-    """Walk-forward CV report: per-fold logloss + BUY rate over the pre-test window."""
+def main(
+    model_path: pathlib.Path,
+    baseline_path: pathlib.Path,
+    features_csv: str,
+    seed: int,
+    output_csv: str | None,
+    train_min_days: int,
+    val_days: int,
+    step_days: int,
+) -> None:
+    """Paired walk-forward CV: compare --model vs --baseline across pre-test folds."""
     features_path = pathlib.Path(features_csv)
     if not features_path.exists():
         raise click.ClickException(
@@ -151,15 +291,17 @@ def main(features_csv: str, train_min_days: int, val_days: int, step_days: int) 
         )
 
     df = pd.read_csv(features_path)
-    missing = [c for c in FEATURE_COLUMNS + ["label", "price_date"] if c not in df.columns]
+    missing = [c for c in ("label", "price_date") if c not in df.columns]
     if missing:
         raise click.ClickException(
             f"Features CSV is missing required columns: {missing}. "
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
-
-    results = run_cv(
+    results = run_paired_cv(
         df,
+        model_path,
+        baseline_path,
+        seed=seed,
         train_min_days=train_min_days,
         val_days=val_days,
         step_days=step_days,
@@ -171,9 +313,14 @@ def main(features_csv: str, train_min_days: int, val_days: int, step_days: int) 
         )
 
     for r in results:
-        click.echo(_format_fold(r))
+        click.echo(_format_paired_fold(r))
+    click.echo(_format_paired_summary(results))
 
-    click.echo(_format_summary(results))
+    if output_csv:
+        out = pathlib.Path(output_csv)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(results).to_csv(out, index=False)
+        click.echo(f"\nSaved {out}")
 
 
 if __name__ == "__main__":
