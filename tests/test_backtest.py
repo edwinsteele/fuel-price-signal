@@ -14,12 +14,14 @@ import math
 from fuel_signal.backtest import (
     AlwaysBuyStrategy,
     BacktestResult,
+    ModelStrategy,
     PriceHistory,
     RuleBasedSignalStrategy,
     TankParams,
     _evaluation_dates,
     run_backtest,
 )
+from fuel_signal.features import FEATURE_COLUMNS
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -376,3 +378,49 @@ def test_rule_based_produces_valid_result():
     assert result.fill_events >= 0
     assert not math.isnan(result.realised_cpl)
     assert result.total_litres > 0
+
+
+# ---------------------------------------------------------------------------
+# ModelStrategy — regression: decide must not raise with Phase 4 feature caches
+# ---------------------------------------------------------------------------
+
+def test_model_strategy_decide_with_phase4_features(tmp_path):
+    """ModelStrategy.decide runs without TypeError when PriceHistory carries Phase 4 caches.
+
+    Regression for #174: _build_feature_dict requires 6 args but decide was passing 3.
+    """
+    import math as _math
+
+    import joblib
+    import numpy as np
+    from sklearn.dummy import DummyClassifier
+
+    # Minimal in-memory model that returns fixed probabilities regardless of input.
+    clf = DummyClassifier(strategy="most_frequent")
+    clf.fit(np.zeros((2, len(FEATURE_COLUMNS))), [0, 1])
+    model_path = tmp_path / "dummy_model.joblib"
+    joblib.dump(clf, model_path)
+
+    # Sinusoidal series long enough for CycleDetector to find ≥2 peaks.
+    n = 270
+    period = 45
+    start = "2018-01-01"
+    dates = _dates_from(start, n)
+    prices = [
+        (d, 180.0 + 20.0 * _math.sin(2 * _math.pi * i / period))
+        for i, d in enumerate(dates)
+    ]
+    station_code = 999
+
+    history = PriceHistory(
+        avg_series=prices,
+        station_prices={station_code: prices},
+        station_lga_brand={station_code: ("Penrith", "BP")},
+        lga_mean_by_key={(d, "Penrith"): 175.0 for d, _ in prices},
+        brand_mean_by_key={(d, "BP"): 178.0 for d, _ in prices},
+        stickiness_by_key={(station_code, d): 5.0 for d, _ in prices},
+    )
+
+    strategy = ModelStrategy(model_path=model_path, threshold=0.40)
+    result = strategy.decide("2018-09-01", station_code, history)
+    assert isinstance(result, bool)
