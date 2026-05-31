@@ -209,3 +209,141 @@ def test_seeds_invalid_format_errors(tmp_path):
     ])
     assert res.exit_code != 0
     assert "comma-separated list of integers" in res.output
+
+
+# ---------------------------------------------------------------------------
+# --db: backtest integration populates realised-spend columns (issue #161)
+# ---------------------------------------------------------------------------
+
+
+def _write_features_and_model(tmp_path):
+    """Return (features_csv_path, model_joblib_path) for the canonical splits."""
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    from fuel_signal import evaluate as ev
+
+    df = _synthetic_df_for_seed_test()
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    train, _, _ = ev.split(df)
+    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    y_train = train["label"].to_numpy(dtype=int)
+    pipe = Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=200))])
+    pipe.fit(X_train, y_train)
+    artifact = {"pipeline": pipe, "feature_columns": FEATURE_COLUMNS}
+    model_path = tmp_path / "model.joblib"
+    joblib.dump(artifact, model_path)
+    return features_path, model_path
+
+
+def _write_test_window_db(db_path):
+    """Create a SQLite DB with one preferred station priced at 170 c/L across the test window."""
+    from fuel_signal import evaluate as ev
+    from fuel_signal.config import PREFERRED_STATIONS
+    from fuel_signal.db import create_schema, open_db, upsert_daily_prices, upsert_stations
+
+    station_code = next(iter(PREFERRED_STATIONS))
+    conn = open_db(db_path)
+    try:
+        create_schema(conn)
+        upsert_stations(conn, [{
+            "station_code": station_code,
+            "name": "Test Station",
+            "address": "1 Test Road, Springwood",
+            "suburb": "Springwood",
+            "postcode": "2777",
+            "brand": "Test",
+        }])
+        d = datetime.date.fromisoformat(ev.TEST_START)
+        d_end = datetime.date.fromisoformat(ev.TEST_END)
+        prices = [(station_code, "E10", (d + datetime.timedelta(days=i)).isoformat(), 170.0)
+                  for i in range((d_end - d).days + 1)]
+        upsert_daily_prices(conn, prices)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_score_phase2_with_db_populates_realised_spend(tmp_path, monkeypatch):
+    """--db runs the backtest and writes realised_spend_cpl to results.csv."""
+    import csv
+
+    from fuel_signal import evaluate as ev
+
+    features_path, model_path = _write_features_and_model(tmp_path)
+    db_path = tmp_path / "test.db"
+    _write_test_window_db(db_path)
+
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--features-csv", str(features_path),
+        "--model-path", str(model_path),
+        "--db", str(db_path),
+    ], catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+
+    with results_path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["realised_spend_cpl"] != "", "realised_spend_cpl must be non-empty when --db is provided"
+    assert rows[0]["realised_savings_vs_always_buy_pct"] != "", (
+        "realised_savings_vs_always_buy_pct must be non-empty when --db is provided"
+    )
+
+
+def test_score_phase2_backtest_runs_by_default(tmp_path, monkeypatch):
+    """No --db: backtest still runs against the canonical ./fuel_signal.db."""
+    import csv
+
+    from fuel_signal import evaluate as ev
+
+    features_path, model_path = _write_features_and_model(tmp_path)
+    # Place DB at the default location relative to a tmp cwd so --db is unnecessary.
+    _write_test_window_db(tmp_path / "fuel_signal.db")
+
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--features-csv", str(features_path),
+        "--model-path", str(model_path),
+    ], catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+
+    with results_path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["realised_spend_cpl"] != "", (
+        "default --db (./fuel_signal.db) should trigger the backtest and populate the column"
+    )
+
+
+def test_score_phase2_no_backtest_flag_skips_backtest(tmp_path, monkeypatch):
+    """--no-backtest leaves realised-spend columns empty even when DB + model are present."""
+    import csv
+
+    from fuel_signal import evaluate as ev
+
+    features_path, model_path = _write_features_and_model(tmp_path)
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--features-csv", str(features_path),
+        "--model-path", str(model_path),
+        "--no-backtest",
+    ], catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    assert "Skipping realised-spend backtest (--no-backtest)" in res.output
+
+    with results_path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["realised_spend_cpl"] == ""

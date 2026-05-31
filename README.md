@@ -499,13 +499,20 @@ Threshold sweep on val → pick τ → **score test once** → append to `experi
 Also used for Phase 3+ models via `--model-path` and `--model-name`.
 
 ```bash
-# Default: loads data/models/lgbm_calibrated.joblib, writes lgbm_cycle_features to results.csv
+# Default: loads data/models/lgbm_calibrated.joblib, runs realised-spend backtest
+# against ./fuel_signal.db, writes lgbm_cycle_features to results.csv
 uv run python -m fuel_signal.score_phase2
 
 # Custom artifact or name
 uv run python -m fuel_signal.score_phase2 \
     --model-path data/models/lgbm_calibrated.joblib \
     --model-name lgbm_cycle_features
+
+# Point the backtest at a non-default DB
+uv run python -m fuel_signal.score_phase2 --db /path/to/fuel_signal.db
+
+# Skip the backtest (e.g. quick CSV-only sniff-test)
+uv run python -m fuel_signal.score_phase2 --no-backtest
 ```
 
 **What it does:**
@@ -513,7 +520,8 @@ uv run python -m fuel_signal.score_phase2 \
 1. Loads the model artifact at `--model-path` (default: `data/models/lgbm_calibrated.joblib`) and scores val directly.
 2. Sweeps τ ∈ [0.05, 0.95] (step 0.05) on val — prints precision, recall, F1, BUY%, and expected-cents-saved per row.
 3. Picks τ = argmax(expected cents/row on val) + 0.05 adjustment to correct for val's elevated BUY rate.
-4. Scores test at chosen τ. Appends one row to `experiments/results.csv` using `--model-name`.
+4. Runs the realised-spend backtest at chosen τ over the test window using `--db` (default: `./fuel_signal.db`), populating `realised_spend_cpl` and `realised_savings_vs_always_buy_pct`. Skipped silently when the DB file or `--model-path` are absent (e.g. CI); use `--no-backtest` to skip explicitly.
+5. Scores test at chosen τ. Appends one row to `experiments/results.csv` using `--model-name`.
 
 **Cost model:** TP → +6.37c; FP → −5.80c; FN → −11.14c.
 
