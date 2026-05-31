@@ -433,20 +433,22 @@ def run_realised_spend_backtest(
         AlwaysBuyStrategy,
         ModelStrategy,
         TankParams,
+        _evaluation_dates,
         load_history,
     )
     from fuel_signal.backtest_phase2 import aggregate_backtest
     from fuel_signal.config import PREFERRED_STATIONS
 
+    tank = TankParams()
+    bt_start, bt_end = _ev.TEST_START, _ev.TEST_END
+    eval_dates = _evaluation_dates(bt_start, bt_end, tank.evaluation_interval_days)
+
     conn = _db.open_db(db_file)
     try:
         station_codes = list(PREFERRED_STATIONS.keys())
-        history = load_history(conn, station_codes)
+        history = load_history(conn, station_codes, eval_dates=eval_dates)
     finally:
         conn.close()
-
-    tank = TankParams()
-    bt_start, bt_end = _ev.TEST_START, _ev.TEST_END
     always_agg = aggregate_backtest(
         history, AlwaysBuyStrategy(), station_codes, bt_start, bt_end, tank
     )

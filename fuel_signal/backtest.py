@@ -33,6 +33,11 @@ from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.dates import date_from_int as _date_from_int
 from fuel_signal.features import FEATURE_COLUMNS, _build_feature_dict
+from fuel_signal.lga_leadership import (
+    LGA_FEATURE_COUNCILS,
+    compute_pit_strict_days_since_trough,
+    lga_slug,
+)
 from fuel_signal.signal import combine_signals, evaluate_all_signals
 
 # ---------------------------------------------------------------------------
@@ -59,6 +64,7 @@ class PriceHistory:
     lga_mean_by_key: dict[tuple[str, str], float] = field(default_factory=dict)
     brand_mean_by_key: dict[tuple[str, str], float] = field(default_factory=dict)
     stickiness_by_key: dict[tuple[int, str], float] = field(default_factory=dict)
+    lga_days_since_by_key: dict[tuple[str, str], int | None] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._avg_by_date: dict[str, float] = dict(self.avg_series)
@@ -113,6 +119,10 @@ class PriceHistory:
 
     def stickiness_score_at(self, station_code: int, as_of: str) -> float | None:
         return self.stickiness_by_key.get((station_code, as_of))
+
+    def lga_days_since_at(self, as_of: str, lga: str) -> float | None:
+        val = self.lga_days_since_by_key.get((as_of, lga))
+        return float(val) if val is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -176,10 +186,15 @@ class ModelStrategy:
             self._pipeline = _CalibratedPipeline(
                 loaded["base_pipeline"], loaded["calibrator"], loaded["calibration_method"]
             )
+            self._feature_columns: list[str] = list(
+                loaded.get("feature_columns", FEATURE_COLUMNS)
+            )
         elif isinstance(loaded, dict):
             self._pipeline = loaded["pipeline"]
+            self._feature_columns = list(loaded.get("feature_columns", FEATURE_COLUMNS))
         else:
             self._pipeline = loaded
+            self._feature_columns = list(FEATURE_COLUMNS)
 
     def decide(self, as_of: str, station_code: int, history: PriceHistory) -> bool:
         state = history.cycle_state(as_of)
@@ -194,8 +209,14 @@ class ModelStrategy:
         lga_mean = history.lga_mean_at(station_code, as_of)
         brand_mean = history.brand_mean_at(station_code, as_of)
         stickiness = history.stickiness_score_at(station_code, as_of)
-        features = _build_feature_dict(state, station_price, avg_price, lga_mean, brand_mean, stickiness)
-        X = np.array([[features[col] for col in FEATURE_COLUMNS]], dtype=float)
+        features: dict[str, float | None] = _build_feature_dict(
+            state, station_price, avg_price, lga_mean, brand_mean, stickiness
+        )
+        for lga in LGA_FEATURE_COUNCILS:
+            features[f"days_since_trough_entry_{lga_slug(lga)}"] = (
+                history.lga_days_since_at(as_of, lga)
+            )
+        X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
         prob = float(self._pipeline.predict_proba(X)[0][1])
         return prob >= self.threshold
 
@@ -346,11 +367,17 @@ def run_backtest(
 def load_history(
     conn: sqlite3.Connection,
     station_codes: list[int],
+    eval_dates: list[str] | None = None,
 ) -> PriceHistory:
     """Load avg series, per-station prices, and Phase 4 feature caches from DB once.
 
     Pass the returned PriceHistory to run_backtest; strategies access it
     in-memory without further DB queries.
+
+    eval_dates: if provided, PIT-strict days_since_trough_entry_<lga> features are
+    pre-computed for exactly those dates (one detect_trough_events call per date×LGA).
+    When None or empty, lga_days_since_by_key is empty and those features default to
+    NaN during ModelStrategy.decide (acceptable for Phase 2 models; degrades Phase 4).
     """
     avg_series = db.average_price_series(conn)
     station_prices: dict[int, list[tuple[str, float]]] = {}
@@ -417,6 +444,12 @@ def load_history(
         )
     }
 
+    lga_days_since_by_key: dict[tuple[str, str], int | None] = (
+        compute_pit_strict_days_since_trough(conn, eval_dates)
+        if eval_dates
+        else {}
+    )
+
     return PriceHistory(
         avg_series=avg_series,
         station_prices=station_prices,
@@ -424,6 +457,7 @@ def load_history(
         lga_mean_by_key=lga_mean_by_key,
         brand_mean_by_key=brand_mean_by_key,
         stickiness_by_key=stickiness_by_key,
+        lga_days_since_by_key=lga_days_since_by_key,
     )
 
 
@@ -518,9 +552,10 @@ def main(  # noqa: PLR0913
             f"Database not found: {db_path}. Run 'uv run python -m fuel_signal.db' first."
         )
 
+    eval_dates = _evaluation_dates(start_date, end_date, eval_interval)
     conn = db.open_db(path)
     try:
-        history = load_history(conn, codes)
+        history = load_history(conn, codes, eval_dates=eval_dates)
     finally:
         conn.close()
 
