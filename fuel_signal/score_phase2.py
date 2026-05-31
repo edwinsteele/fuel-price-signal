@@ -398,6 +398,84 @@ def _format_comparison(
 
 
 # ---------------------------------------------------------------------------
+# Realised-spend backtest (Phase 2 logreg + Phase 4 LGBM share this path)
+# ---------------------------------------------------------------------------
+
+
+def run_realised_spend_backtest(
+    *,
+    db_path: str,
+    model_path: str | None,
+    chosen_tau: float,
+    no_backtest: bool,
+) -> tuple[float | None, float | None]:
+    """Return (realised_cpl, realised_savings_pct) for the chosen τ, or (None, None).
+
+    Backtest is skipped — without raising — when:
+      - --no-backtest is set
+      - --model-path is absent (Phase 2 retraining-from-CSV path)
+      - the DB file does not exist (CI, dev sniff-tests)
+      - either CPL aggregate comes back NaN (no price data in the test window)
+    """
+    if no_backtest:
+        click.echo("\nSkipping realised-spend backtest (--no-backtest).")
+        return None, None
+    if model_path is None:
+        click.echo("\nSkipping realised-spend backtest (no --model-path).")
+        return None, None
+    db_file = pathlib.Path(db_path)
+    if not db_file.exists():
+        click.echo(f"\nSkipping realised-spend backtest (DB not found: {db_path}).")
+        return None, None
+
+    import fuel_signal.db as _db
+    from fuel_signal.backtest import (
+        AlwaysBuyStrategy,
+        ModelStrategy,
+        TankParams,
+        load_history,
+    )
+    from fuel_signal.backtest_phase2 import aggregate_backtest
+    from fuel_signal.config import PREFERRED_STATIONS
+
+    conn = _db.open_db(db_file)
+    try:
+        station_codes = list(PREFERRED_STATIONS.keys())
+        history = load_history(conn, station_codes)
+    finally:
+        conn.close()
+
+    tank = TankParams()
+    bt_start, bt_end = _ev.TEST_START, _ev.TEST_END
+    always_agg = aggregate_backtest(
+        history, AlwaysBuyStrategy(), station_codes, bt_start, bt_end, tank
+    )
+    model_agg = aggregate_backtest(
+        history,
+        ModelStrategy(model_path=pathlib.Path(model_path), threshold=chosen_tau),
+        station_codes, bt_start, bt_end, tank,
+    )
+    always_cpl = always_agg["cpl"]
+    model_cpl = model_agg["cpl"]
+    if math.isnan(model_cpl) or math.isnan(always_cpl):
+        click.echo(
+            "\nWARNING: Backtest CPL is NaN — realised-spend columns not populated."
+        )
+        return None, None
+
+    savings_pct = (
+        (always_cpl - model_cpl) / always_cpl * 100
+    ) if always_cpl > 0 else 0.0
+    click.echo(f"\nBacktest (τ={chosen_tau:.2f}, {bt_start} → {bt_end}):")
+    click.echo(f"  Always-buy CPL : {always_cpl:.2f} c/L")
+    click.echo(
+        f"  Model      CPL : {model_cpl:.2f} c/L"
+        f"  ({savings_pct:+.2f}% vs always-buy)"
+    )
+    return model_cpl, savings_pct
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -622,63 +700,12 @@ def main(
         )
 
     # Step 7: run backtest for realised-spend columns (default on; gated by DB + model presence).
-    realised_cpl: float | None = None
-    realised_savings_pct: float | None = None
-    db_file = pathlib.Path(db_path)
-    if no_backtest:
-        click.echo("\nSkipping realised-spend backtest (--no-backtest).")
-    elif model_path is None:
-        # Phase 2 retraining path — no saved artifact to score against.
-        click.echo("\nSkipping realised-spend backtest (no --model-path).")
-    elif not db_file.exists():
-        click.echo(f"\nSkipping realised-spend backtest (DB not found: {db_path}).")
-    else:
-        import fuel_signal.db as _db
-        from fuel_signal.backtest import (
-            AlwaysBuyStrategy,
-            ModelStrategy,
-            TankParams,
-            load_history,
-        )
-        from fuel_signal.backtest_phase2 import aggregate_backtest
-        from fuel_signal.config import PREFERRED_STATIONS
-
-        conn = _db.open_db(db_file)
-        try:
-            _station_codes = list(PREFERRED_STATIONS.keys())
-            _history = load_history(conn, _station_codes)
-        finally:
-            conn.close()
-
-        _tank = TankParams()
-        _bt_start, _bt_end = _ev.TEST_START, _ev.TEST_END
-        _always_agg = aggregate_backtest(
-            _history, AlwaysBuyStrategy(), _station_codes, _bt_start, _bt_end, _tank
-        )
-        _model_agg = aggregate_backtest(
-            _history,
-            ModelStrategy(model_path=pathlib.Path(model_path), threshold=chosen_tau),
-            _station_codes, _bt_start, _bt_end, _tank,
-        )
-        _always_cpl = _always_agg["cpl"]
-        _model_cpl = _model_agg["cpl"]
-        if math.isnan(_model_cpl) or math.isnan(_always_cpl):
-            click.echo(
-                "\nWARNING: Backtest CPL is NaN — realised-spend columns not populated."
-            )
-        else:
-            realised_cpl = _model_cpl
-            realised_savings_pct = (
-                (_always_cpl - _model_cpl) / _always_cpl * 100
-            ) if _always_cpl > 0 else 0.0
-            click.echo(
-                f"\nBacktest (τ={chosen_tau:.2f}, {_bt_start} → {_bt_end}):"
-            )
-            click.echo(f"  Always-buy CPL : {_always_cpl:.2f} c/L")
-            click.echo(
-                f"  Model      CPL : {realised_cpl:.2f} c/L"
-                f"  ({realised_savings_pct:+.2f}% vs always-buy)"
-            )
+    realised_cpl, realised_savings_pct = run_realised_spend_backtest(
+        db_path=db_path,
+        model_path=model_path,
+        chosen_tau=chosen_tau,
+        no_backtest=no_backtest,
+    )
 
     # Step 8: log to results.csv.
     notes = (
