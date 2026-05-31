@@ -91,6 +91,21 @@ def run_cv(
     return results
 
 
+def _set_random_state(estimator: object, seed: int) -> None:
+    """Set random_state on any parameter named random_state or *__random_state.
+
+    Works for bare estimators (e.g. LGBMClassifier) and sklearn Pipelines where
+    the param is step-qualified (e.g. logreg__random_state).
+    """
+    updates = {
+        name: seed
+        for name in estimator.get_params(deep=True)  # type: ignore[union-attr]
+        if name == "random_state" or name.endswith("__random_state")
+    }
+    if updates:
+        estimator.set_params(**updates)  # type: ignore[union-attr]
+
+
 def run_paired_cv(
     df: pd.DataFrame,
     model_path: pathlib.Path,
@@ -132,10 +147,7 @@ def run_paired_cv(
         y_val = val_df["label"].to_numpy(dtype=int)
 
         m = clone(model_obj["pipeline"])
-        try:
-            m.set_params(random_state=seed)
-        except ValueError:
-            pass
+        _set_random_state(m, seed)
         m.fit(
             train_df[model_features].to_numpy(dtype=float),
             train_df["label"].to_numpy(dtype=int),
@@ -144,10 +156,7 @@ def run_paired_cv(
         model_logloss = _ev.log_loss(y_val, p_model)
 
         b = clone(baseline_obj["pipeline"])
-        try:
-            b.set_params(random_state=seed)
-        except ValueError:
-            pass
+        _set_random_state(b, seed)
         b.fit(
             train_df[baseline_features].to_numpy(dtype=float),
             train_df["label"].to_numpy(dtype=int),
