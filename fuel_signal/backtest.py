@@ -22,7 +22,7 @@ import datetime
 import math
 import pathlib
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 import click
@@ -31,6 +31,7 @@ import numpy as np
 import fuel_signal.db as db
 from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.cycle import CycleDetector, CycleState
+from fuel_signal.dates import date_from_int as _date_from_int
 from fuel_signal.features import FEATURE_COLUMNS, _build_feature_dict
 from fuel_signal.signal import combine_signals, evaluate_all_signals
 
@@ -45,10 +46,19 @@ class PriceHistory:
     The CycleDetector is built once in __post_init__ from the full avg_series.
     detect(as_of) slices in-memory, so PIT-safety is preserved across the
     entire backtest run without rebuilding the detector per evaluation date.
+
+    The four optional dicts (station_lga_brand, lga_mean_by_key, brand_mean_by_key,
+    stickiness_by_key) are populated by load_history and consumed by
+    ModelStrategy.decide to supply Phase 4 features. Tests that construct
+    PriceHistory directly without a DB can leave them empty (default).
     """
 
     avg_series: list[tuple[str, float]]                 # [(date_str, cents), ...] sorted
     station_prices: dict[int, list[tuple[str, float]]]  # station_code → [(date_str, cents), ...]
+    station_lga_brand: dict[int, tuple[str | None, str | None]] = field(default_factory=dict)
+    lga_mean_by_key: dict[tuple[str, str], float] = field(default_factory=dict)
+    brand_mean_by_key: dict[tuple[str, str], float] = field(default_factory=dict)
+    stickiness_by_key: dict[tuple[int, str], float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._avg_by_date: dict[str, float] = dict(self.avg_series)
@@ -88,6 +98,21 @@ class PriceHistory:
             return None
         vals = np.array([p for _, p in recent], dtype=float)
         return float(np.gradient(vals)[-1])
+
+    def lga_mean_at(self, station_code: int, as_of: str) -> float | None:
+        lga, _ = self.station_lga_brand.get(station_code, (None, None))
+        if lga is None:
+            return None
+        return self.lga_mean_by_key.get((as_of, lga))
+
+    def brand_mean_at(self, station_code: int, as_of: str) -> float | None:
+        _, brand = self.station_lga_brand.get(station_code, (None, None))
+        if brand is None:
+            return None
+        return self.brand_mean_by_key.get((as_of, brand))
+
+    def stickiness_score_at(self, station_code: int, as_of: str) -> float | None:
+        return self.stickiness_by_key.get((station_code, as_of))
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +191,11 @@ class ModelStrategy:
         avg_price = history.avg_price_at(as_of)
         if avg_price is None:
             return True
-        features = _build_feature_dict(state, station_price, avg_price)
-        X = np.array([[features[col] for col in FEATURE_COLUMNS]])
+        lga_mean = history.lga_mean_at(station_code, as_of)
+        brand_mean = history.brand_mean_at(station_code, as_of)
+        stickiness = history.stickiness_score_at(station_code, as_of)
+        features = _build_feature_dict(state, station_price, avg_price, lga_mean, brand_mean, stickiness)
+        X = np.array([[features[col] for col in FEATURE_COLUMNS]], dtype=float)
         prob = float(self._pipeline.predict_proba(X)[0][1])
         return prob >= self.threshold
 
@@ -319,7 +347,7 @@ def load_history(
     conn: sqlite3.Connection,
     station_codes: list[int],
 ) -> PriceHistory:
-    """Load avg series and per-station prices from DB once.
+    """Load avg series, per-station prices, and Phase 4 feature caches from DB once.
 
     Pass the returned PriceHistory to run_backtest; strategies access it
     in-memory without further DB queries.
@@ -330,7 +358,73 @@ def load_history(
         prices = db.get_daily_prices(conn, code)
         if prices:
             station_prices[code] = prices
-    return PriceHistory(avg_series=avg_series, station_prices=station_prices)
+
+    if not station_codes:
+        return PriceHistory(avg_series=avg_series, station_prices=station_prices)
+
+    fid = db.fuel_type_id(conn, "E10")
+    _sc_ph = ", ".join(["?"] * len(station_codes))
+
+    station_lga_brand: dict[int, tuple[str | None, str | None]] = {
+        sc: (council, brand)
+        for sc, council, brand in conn.execute(
+            f"SELECT station_code, council, brand FROM stations"
+            f" WHERE station_code IN ({_sc_ph})",
+            station_codes,
+        )
+    }
+
+    lga_mean_by_key: dict[tuple[str, str], float] = {
+        (_date_from_int(date_int), lga): avg_decicents / 10
+        for date_int, lga, avg_decicents in conn.execute(
+            "SELECT dp.price_date, s.council, AVG(dp.price_decicents)"
+            " FROM daily_prices dp"
+            " JOIN stations s ON dp.station_code = s.station_code"
+            " JOIN station_class sc ON dp.station_code = sc.station_code"
+            "   AND dp.price_date = sc.snapshot_date"
+            " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
+            "   AND s.council IS NOT NULL"
+            " GROUP BY dp.price_date, s.council"
+            " HAVING COUNT(*) >= 3",
+            (fid,),
+        )
+    }
+
+    brand_mean_by_key: dict[tuple[str, str], float] = {
+        (_date_from_int(date_int), brand): avg_decicents / 10
+        for date_int, brand, avg_decicents in conn.execute(
+            "SELECT dp.price_date, s.brand, AVG(dp.price_decicents)"
+            " FROM daily_prices dp"
+            " JOIN stations s ON dp.station_code = s.station_code"
+            " JOIN station_class sc ON dp.station_code = sc.station_code"
+            "   AND dp.price_date = sc.snapshot_date"
+            " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
+            "   AND s.brand IS NOT NULL"
+            " GROUP BY dp.price_date, s.brand"
+            " HAVING COUNT(*) >= 3",
+            (fid,),
+        )
+    }
+
+    stickiness_by_key: dict[tuple[int, str], float] = {
+        (sc, _date_from_int(date_int)): decicents / 10
+        for sc, date_int, decicents in conn.execute(
+            "SELECT station_code, snapshot_date, median_premium_decicents"
+            " FROM station_class"
+            f" WHERE station_code IN ({_sc_ph})"
+            "   AND median_premium_decicents IS NOT NULL",
+            station_codes,
+        )
+    }
+
+    return PriceHistory(
+        avg_series=avg_series,
+        station_prices=station_prices,
+        station_lga_brand=station_lga_brand,
+        lga_mean_by_key=lga_mean_by_key,
+        brand_mean_by_key=brand_mean_by_key,
+        stickiness_by_key=stickiness_by_key,
+    )
 
 
 # ---------------------------------------------------------------------------
