@@ -224,7 +224,9 @@ def test_warn_emitted_when_raw_model_no_explicit_tau(tmp_path):
         res = runner.invoke(main, [
             "--features-csv", str(features_path),
             "--model-path", str(model_path),
+            "--no-backtest",
         ])
+    assert res.exit_code == 0, res.output
     assert "WARNING" in res.output
     assert "calibrated=False" in res.output
     assert f"+{_TAU_STEP:.2f}" in res.output
@@ -245,20 +247,38 @@ def test_warn_suppressed_when_tau_adjustment_explicit(tmp_path):
             "--features-csv", str(features_path),
             "--model-path", str(model_path),
             "--tau-adjustment", "0.0",
+            "--no-backtest",
         ])
-    assert "calibrated=False" not in res.output
+    assert res.exit_code == 0, res.output
+    assert "is raw (calibrated=False)" not in res.output
 
 
 def test_warn_suppressed_when_model_isotonic_calibrated(tmp_path):
     """No WARNING when the loaded artifact is isotonic-calibrated."""
-    from sklearn.isotonic import IsotonicRegression
+    from unittest.mock import patch
 
-    clf = _minimal_logreg()
-    raw_p = clf.predict_proba(np.array([[0.0], [1.0]]))[:, 1]
+    from sklearn.isotonic import IsotonicRegression
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    from fuel_signal import evaluate as _ev
+
+    df = _synthetic_df_for_seed_test()
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    train, _, _ = _ev.split(df)
+    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    y_train = train["label"].to_numpy(dtype=int)
+    base_pipeline = Pipeline(
+        [("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=50))]
+    )
+    base_pipeline.fit(X_train, y_train)
+    raw_p_train = base_pipeline.predict_proba(X_train)[:, 1]
     calibrator = IsotonicRegression(out_of_bounds="clip")
-    calibrator.fit(raw_p, np.array([0, 1]))
+    calibrator.fit(raw_p_train, y_train)
     artifact = {
-        "base_pipeline": clf,
+        "base_pipeline": base_pipeline,
         "calibrator": calibrator,
         "calibration_method": "isotonic",
         "feature_columns": FEATURE_COLUMNS,
@@ -267,16 +287,15 @@ def test_warn_suppressed_when_model_isotonic_calibrated(tmp_path):
     model_path = tmp_path / "iso_model.joblib"
     joblib.dump(artifact, model_path)
 
-    df = _synthetic_df_for_seed_test()
-    features_path = tmp_path / "features.csv"
-    df.to_csv(features_path, index=False)
-
     runner = CliRunner()
-    res = runner.invoke(main, [
-        "--features-csv", str(features_path),
-        "--model-path", str(model_path),
-    ])
-    assert "calibrated=False" not in res.output
+    with patch("fuel_signal.score_phase2._ev.log_experiment"):
+        res = runner.invoke(main, [
+            "--features-csv", str(features_path),
+            "--model-path", str(model_path),
+            "--no-backtest",
+        ])
+    assert res.exit_code == 0, res.output
+    assert "is raw (calibrated=False)" not in res.output
 
 
 def test_seeds_invalid_format_errors(tmp_path):
