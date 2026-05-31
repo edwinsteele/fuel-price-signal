@@ -449,12 +449,20 @@ def _format_comparison(
 )
 @click.option(
     "--db", "db_path",
-    default=None,
+    default="fuel_signal.db",
+    show_default=True,
     help=(
-        "Path to SQLite DB (e.g. fuel_signal.db). When provided with --model-path, "
-        "runs the backtest engine at the chosen τ on the test window and populates "
-        "realised_spend_cpl / realised_savings_vs_always_buy_pct in results.csv."
+        "Path to SQLite DB used by the realised-spend backtest. Combined with --model-path, "
+        "runs the backtest at the chosen τ over the test window and populates "
+        "realised_spend_cpl / realised_savings_vs_always_buy_pct in results.csv. "
+        "Skipped silently when the DB file or --model-path are absent (e.g. CI, dev sniff-tests)."
     ),
+)
+@click.option(
+    "--no-backtest",
+    is_flag=True,
+    default=False,
+    help="Skip the realised-spend backtest even when the DB and model are available.",
 )
 def main(
     features_csv: str,
@@ -462,7 +470,8 @@ def main(
     model_name: str,
     tau_adjustment: float | None,
     seeds_str: str | None,
-    db_path: str | None,
+    db_path: str,
+    no_backtest: bool,
 ) -> None:
     """Threshold sweep on val, one-time test scoring, append to results.csv.
 
@@ -612,63 +621,64 @@ def main(
             f"(3σ = {3 * seed_result['logloss_std']:.4f})"
         )
 
-    # Step 7 (optional): run backtest for realised-spend columns.
+    # Step 7: run backtest for realised-spend columns (default on; gated by DB + model presence).
     realised_cpl: float | None = None
     realised_savings_pct: float | None = None
-    if db_path is not None:
-        if model_path is None:
-            click.echo("\nWARNING: --db ignored — backtest requires --model-path.")
+    db_file = pathlib.Path(db_path)
+    if no_backtest:
+        click.echo("\nSkipping realised-spend backtest (--no-backtest).")
+    elif model_path is None:
+        # Phase 2 retraining path — no saved artifact to score against.
+        click.echo("\nSkipping realised-spend backtest (no --model-path).")
+    elif not db_file.exists():
+        click.echo(f"\nSkipping realised-spend backtest (DB not found: {db_path}).")
+    else:
+        import fuel_signal.db as _db
+        from fuel_signal.backtest import (
+            AlwaysBuyStrategy,
+            ModelStrategy,
+            TankParams,
+            load_history,
+        )
+        from fuel_signal.backtest_phase2 import aggregate_backtest
+        from fuel_signal.config import PREFERRED_STATIONS
+
+        conn = _db.open_db(db_file)
+        try:
+            _station_codes = list(PREFERRED_STATIONS.keys())
+            _history = load_history(conn, _station_codes)
+        finally:
+            conn.close()
+
+        _tank = TankParams()
+        _bt_start, _bt_end = _ev.TEST_START, _ev.TEST_END
+        _always_agg = aggregate_backtest(
+            _history, AlwaysBuyStrategy(), _station_codes, _bt_start, _bt_end, _tank
+        )
+        _model_agg = aggregate_backtest(
+            _history,
+            ModelStrategy(model_path=pathlib.Path(model_path), threshold=chosen_tau),
+            _station_codes, _bt_start, _bt_end, _tank,
+        )
+        _always_cpl = _always_agg["cpl"]
+        _model_cpl = _model_agg["cpl"]
+        if math.isnan(_model_cpl) or math.isnan(_always_cpl):
+            click.echo(
+                "\nWARNING: Backtest CPL is NaN — realised-spend columns not populated."
+            )
         else:
-            db_file = pathlib.Path(db_path)
-            if not db_file.exists():
-                click.echo(f"\nWARNING: DB not found: {db_path} — skipping backtest.")
-            else:
-                import fuel_signal.db as _db
-                from fuel_signal.backtest import (
-                    AlwaysBuyStrategy,
-                    ModelStrategy,
-                    TankParams,
-                    load_history,
-                )
-                from fuel_signal.backtest_phase2 import aggregate_backtest
-                from fuel_signal.config import PREFERRED_STATIONS
-
-                conn = _db.open_db(db_file)
-                try:
-                    _station_codes = list(PREFERRED_STATIONS.keys())
-                    _history = load_history(conn, _station_codes)
-                finally:
-                    conn.close()
-
-                _tank = TankParams()
-                _bt_start, _bt_end = _ev.TEST_START, _ev.TEST_END
-                _always_agg = aggregate_backtest(
-                    _history, AlwaysBuyStrategy(), _station_codes, _bt_start, _bt_end, _tank
-                )
-                _model_agg = aggregate_backtest(
-                    _history,
-                    ModelStrategy(model_path=pathlib.Path(model_path), threshold=chosen_tau),
-                    _station_codes, _bt_start, _bt_end, _tank,
-                )
-                _always_cpl = _always_agg["cpl"]
-                _model_cpl = _model_agg["cpl"]
-                if math.isnan(_model_cpl) or math.isnan(_always_cpl):
-                    click.echo(
-                        "\nWARNING: Backtest CPL is NaN — realised-spend columns not populated."
-                    )
-                else:
-                    realised_cpl = _model_cpl
-                    realised_savings_pct = (
-                        (_always_cpl - _model_cpl) / _always_cpl * 100
-                    ) if _always_cpl > 0 else 0.0
-                    click.echo(
-                        f"\nBacktest (τ={chosen_tau:.2f}, {_bt_start} → {_bt_end}):"
-                    )
-                    click.echo(f"  Always-buy CPL : {_always_cpl:.2f} c/L")
-                    click.echo(
-                        f"  Model      CPL : {realised_cpl:.2f} c/L"
-                        f"  ({realised_savings_pct:+.2f}% vs always-buy)"
-                    )
+            realised_cpl = _model_cpl
+            realised_savings_pct = (
+                (_always_cpl - _model_cpl) / _always_cpl * 100
+            ) if _always_cpl > 0 else 0.0
+            click.echo(
+                f"\nBacktest (τ={chosen_tau:.2f}, {_bt_start} → {_bt_end}):"
+            )
+            click.echo(f"  Always-buy CPL : {_always_cpl:.2f} c/L")
+            click.echo(
+                f"  Model      CPL : {realised_cpl:.2f} c/L"
+                f"  ({realised_savings_pct:+.2f}% vs always-buy)"
+            )
 
     # Step 8: log to results.csv.
     notes = (
