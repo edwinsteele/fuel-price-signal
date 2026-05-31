@@ -597,6 +597,12 @@ def main(
             )
         click.echo(f"Loading pre-trained model from {model_path} …")
         pipeline, feature_columns, calibration_method = load_model_artifact(artifact_path)
+        if calibration_method is None and tau_adjustment is None:
+            click.echo(
+                f"WARNING: model at {model_path!r} is raw (calibrated=False); "
+                f"applying default tau-adjustment +{_TAU_STEP:.2f}\n"
+                f"         (pass --tau-adjustment 0.00 to override)"
+            )
 
         missing_cols = [c for c in feature_columns if c not in df.columns]
         if missing_cols:

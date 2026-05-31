@@ -9,6 +9,7 @@ vector/stats, and --seeds CLI validation.
 from __future__ import annotations
 
 import datetime
+import pathlib
 
 import joblib
 import numpy as np
@@ -183,6 +184,99 @@ def test_multi_seed_raw_logloss_values_are_positive():
 # ---------------------------------------------------------------------------
 # --seeds CLI validation (issue #145)
 # ---------------------------------------------------------------------------
+
+
+def _make_raw_artifact_from_df(df: pd.DataFrame, tmp_path: pathlib.Path) -> pathlib.Path:
+    """Fit a raw sklearn Pipeline on df's train split; return path to saved artifact."""
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    from fuel_signal import evaluate as _ev
+
+    train, _, _ = _ev.split(df)
+    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    y_train = train["label"].to_numpy(dtype=int)
+    clf = LogisticRegression(max_iter=50)
+    pipe = Pipeline([("scaler", StandardScaler()), ("clf", clf)])
+    pipe.fit(X_train, y_train)
+    artifact = {"pipeline": pipe, "feature_columns": FEATURE_COLUMNS}
+    path = tmp_path / "raw_model.joblib"
+    joblib.dump(artifact, path)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Uncalibrated-model warning (issue #139)
+# ---------------------------------------------------------------------------
+
+
+def test_warn_emitted_when_raw_model_no_explicit_tau(tmp_path):
+    """CLI emits WARNING when a raw artifact is loaded without explicit --tau-adjustment."""
+    from unittest.mock import patch
+
+    df = _synthetic_df_for_seed_test()
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+    model_path = _make_raw_artifact_from_df(df, tmp_path)
+
+    runner = CliRunner()
+    with patch("fuel_signal.score_phase2._ev.log_experiment"):
+        res = runner.invoke(main, [
+            "--features-csv", str(features_path),
+            "--model-path", str(model_path),
+        ])
+    assert "WARNING" in res.output
+    assert "calibrated=False" in res.output
+    assert f"+{_TAU_STEP:.2f}" in res.output
+
+
+def test_warn_suppressed_when_tau_adjustment_explicit(tmp_path):
+    """No WARNING when raw artifact is loaded but --tau-adjustment is given explicitly."""
+    from unittest.mock import patch
+
+    df = _synthetic_df_for_seed_test()
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+    model_path = _make_raw_artifact_from_df(df, tmp_path)
+
+    runner = CliRunner()
+    with patch("fuel_signal.score_phase2._ev.log_experiment"):
+        res = runner.invoke(main, [
+            "--features-csv", str(features_path),
+            "--model-path", str(model_path),
+            "--tau-adjustment", "0.0",
+        ])
+    assert "calibrated=False" not in res.output
+
+
+def test_warn_suppressed_when_model_isotonic_calibrated(tmp_path):
+    """No WARNING when the loaded artifact is isotonic-calibrated."""
+    from sklearn.isotonic import IsotonicRegression
+
+    clf = _minimal_logreg()
+    raw_p = clf.predict_proba(np.array([[0.0], [1.0]]))[:, 1]
+    calibrator = IsotonicRegression(out_of_bounds="clip")
+    calibrator.fit(raw_p, np.array([0, 1]))
+    artifact = {
+        "base_pipeline": clf,
+        "calibrator": calibrator,
+        "calibration_method": "isotonic",
+        "feature_columns": FEATURE_COLUMNS,
+        "calibrated": True,
+    }
+    model_path = tmp_path / "iso_model.joblib"
+    joblib.dump(artifact, model_path)
+
+    df = _synthetic_df_for_seed_test()
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--features-csv", str(features_path),
+        "--model-path", str(model_path),
+    ])
+    assert "calibrated=False" not in res.output
 
 
 def test_seeds_invalid_format_errors(tmp_path):
