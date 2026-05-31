@@ -465,7 +465,7 @@ def run_realised_spend_backtest(
 
     savings_pct = (
         (always_cpl - model_cpl) / always_cpl * 100
-    ) if always_cpl > 0 else 0.0
+    ) if always_cpl > 0 else float("nan")
     click.echo(f"\nBacktest (τ={chosen_tau:.2f}, {bt_start} → {bt_end}):")
     click.echo(f"  Always-buy CPL : {always_cpl:.2f} c/L")
     click.echo(
