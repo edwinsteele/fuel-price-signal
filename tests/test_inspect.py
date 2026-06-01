@@ -420,6 +420,25 @@ def test_sort_shap_rows_sign_groups_by_sign():
     assert non_nan_signs == sorted(non_nan_signs, reverse=True)
 
 
+def test_sort_shap_rows_ibrank_ascending():
+    rows_with_ibrank = [
+        {**r, "ibrank": rank}
+        for r, rank in zip(_SAMPLE_ROWS, [3, 1, 2])
+    ]
+    result = _sort_shap_rows(rows_with_ibrank, "ibrank")
+    assert [r["ibrank"] for r in result] == [1, 2, 3]
+
+
+def test_sort_shap_rows_ibrank_none_last():
+    rows_with_ibrank = [
+        {**_SAMPLE_ROWS[0], "ibrank": None},
+        {**_SAMPLE_ROWS[1], "ibrank": 1},
+        {**_SAMPLE_ROWS[2], "ibrank": 2},
+    ]
+    result = _sort_shap_rows(rows_with_ibrank, "ibrank")
+    assert result[-1]["ibrank"] is None
+
+
 # ---------------------------------------------------------------------------
 # /features route
 # ---------------------------------------------------------------------------
@@ -723,6 +742,23 @@ def test_features_route_interaction_budget_rank_in_side_panel(flask_client_with_
     )
     html = resp.data.decode()
     assert "interaction-budget rank" in html
+
+
+def test_features_route_ibrank_column_in_table(flask_client_with_shap_and_partners):
+    resp = flask_client_with_shap_and_partners.get("/features")
+    html = resp.data.decode()
+    # Column header present as a <th> element
+    assert "IBRank</th>" in html
+    # At least one numeric rank cell rendered (fixture has two features ranked 1 and 2)
+    assert ">1<" in html or ">2<" in html
+
+
+def test_features_route_sort_ibrank(flask_client_with_shap_and_partners):
+    resp = flask_client_with_shap_and_partners.get("/features?sort=ibrank")
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    assert "IBRank</th>" in html
+    assert ">1<" in html or ">2<" in html
 
 
 def test_features_route_staleness_banner(conn, tmp_path):

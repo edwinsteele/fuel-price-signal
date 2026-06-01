@@ -64,6 +64,10 @@
      style="{% if sort_by == 'sign' %}color:var(--accent); font-weight:600{% else %}color:var(--blue){% endif %}; text-decoration:none">
     Sign of r
   </a>
+  <a href="?sort=ibrank{% if selected_feature %}&feature={{ selected_feature }}{% if selected_interaction %}&interaction={{ selected_interaction }}{% endif %}{% endif %}"
+     style="{% if sort_by == 'ibrank' %}color:var(--accent); font-weight:600{% else %}color:var(--blue){% endif %}; text-decoration:none">
+    IBRank
+  </a>
 </div>
 
 <!-- Two-column layout: scrollable table left, sticky plot panel right -->
@@ -78,6 +82,7 @@
         <th>Feature</th>
         <th style="text-align:right">mean|SHAP|</th>
         <th style="text-align:center; width:4.5rem">r</th>
+        <th style="text-align:right; width:4.5rem">IBRank</th>
         <th style="text-align:right; width:4.5rem">NaN%</th>
       </tr>
     </thead>
@@ -103,6 +108,9 @@
           {% else %}
             <span style="color:var(--text-dim)">{{ "%+.2f" | format(row.r) }}</span>
           {% endif %}
+        </td>
+        <td style="text-align:right; font-family:var(--font-mono); color:var(--text-muted)">
+          {% if row.ibrank is not none %}{{ row.ibrank }}{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}
         </td>
         <td style="text-align:right; font-family:var(--font-mono);
                    {% if row.nan_fraction > 0.5 %}color:var(--red){% elif row.nan_fraction > 0 %}color:var(--accent){% else %}color:var(--text-muted){% endif %}">
