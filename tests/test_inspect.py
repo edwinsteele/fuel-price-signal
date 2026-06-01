@@ -757,7 +757,8 @@ def test_features_route_sort_ibrank(flask_client_with_shap_and_partners):
     resp = flask_client_with_shap_and_partners.get("/features?sort=ibrank")
     assert resp.status_code == 200
     html = resp.data.decode()
-    assert "IBRank" in html
+    assert "IBRank</th>" in html
+    assert ">1<" in html or ">2<" in html
 
 
 def test_features_route_staleness_banner(conn, tmp_path):

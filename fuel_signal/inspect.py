@@ -665,7 +665,7 @@ def _sort_shap_rows(rows: list[dict], sort_by: str) -> list[dict]:
             -r["mean_abs_shap"],
         ))
     if sort_by == "ibrank":
-        return sorted(rows, key=lambda r: (r.get("ibrank") is None, r.get("ibrank") or 0))
+        return sorted(rows, key=lambda r: (r.get("ibrank") is None, r.get("ibrank") or 0, -r["mean_abs_shap"]))
     # Default: already sorted descending by mean_abs_shap from build_summary.
     return sorted(rows, key=lambda r: -r["mean_abs_shap"])
 
@@ -951,9 +951,9 @@ def _create_app(
             shap_stale = True
 
         if rows:
+            rank_int = {feat: v[0] for feat, v in interaction_budget_ranks.items()}
             for row in rows:
-                rank_tuple = interaction_budget_ranks.get(row["feature"])
-                row["ibrank"] = rank_tuple[0] if rank_tuple else None
+                row["ibrank"] = rank_int.get(row["feature"])
             rows = _sort_shap_rows(rows, sort_by)
             known_features = {r["feature"] for r in rows}
             if selected_feature not in known_features:
