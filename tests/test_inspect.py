@@ -747,7 +747,10 @@ def test_features_route_interaction_budget_rank_in_side_panel(flask_client_with_
 def test_features_route_ibrank_column_in_table(flask_client_with_shap_and_partners):
     resp = flask_client_with_shap_and_partners.get("/features")
     html = resp.data.decode()
-    assert "IBRank" in html
+    # Column header present as a <th> element
+    assert "IBRank</th>" in html
+    # At least one numeric rank cell rendered (fixture has two features ranked 1 and 2)
+    assert ">1<" in html or ">2<" in html
 
 
 def test_features_route_sort_ibrank(flask_client_with_shap_and_partners):
