@@ -217,10 +217,12 @@ def decomposition_scores(
             nz = p[p > 0]
             entropy = float(-(nz * np.log(nz)).sum())
             entropy_norm = float(entropy / log_denom) if log_denom > 0 else 0.0
-            order = np.argsort(-partners)
-            top_idx = [int(order[k]) if k < F - 1 else -1 for k in range(3)]
+            # Exclude self before ranking so top-N never reports feature i,
+            # even in degenerate cases with very few non-zero partners.
+            order = [int(o) for o in np.argsort(-partners) if int(o) != i]
+            top_idx = [order[k] if k < len(order) else -1 for k in range(3)]
             top_share = [
-                float(partners[order[k]] / total_partner) if k < F - 1 else 0.0
+                float(partners[order[k]] / total_partner) if k < len(order) else 0.0
                 for k in range(3)
             ]
             n_ge_5 = int((p >= 0.05).sum())
@@ -361,7 +363,7 @@ def run_redundancy_report(
 )
 @click.option(
     "--interaction-sample",
-    type=int,
+    type=click.IntRange(min=1),
     default=3000,
     show_default=True,
     help="Rows to subsample for shap_interaction_values (cost scales linearly).",
