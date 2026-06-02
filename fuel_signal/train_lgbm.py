@@ -1,10 +1,12 @@
 """LightGBM classifier — numeric-only.
 
-Default feature set is Phase 4: FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
-(days_since_trough_entry_<lga>, 50 features). Pass --no-lga-features to train
-on the 15-feat Phase 3c schema instead. random_state=42, no hyperparameter
-tuning. Test split is intentionally left untouched — reserved for
-score_phase2.py once calibration + threshold is locked.
+Default feature set is everything present in the features CSV:
+FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + any days_since_trough_entry_<brand>
+columns discovered in the CSV header. Pass --no-brand-features to reproduce
+Phase 4 (50 features), or --no-lga-features for Phase 3c (15 features).
+random_state=42, no hyperparameter tuning. Test split is intentionally left
+untouched — reserved for score_phase2.py once calibration + threshold is
+locked.
 
 ## Reliability plot
 
@@ -26,7 +28,11 @@ import pandas as pd  # noqa: E402
 from lightgbm import LGBMClassifier  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
-from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS  # noqa: E402
+from fuel_signal.features import (  # noqa: E402
+    FEATURE_COLUMNS,
+    LGA_FEATURE_COLUMNS,
+    discover_brand_feature_columns,
+)
 from fuel_signal.train_logreg import save_reliability_plot  # noqa: E402
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
@@ -144,15 +150,30 @@ def _format_results(result: dict) -> str:
     "no_lga_features",
     is_flag=True,
     default=False,
-    help="Train on the 15-feat Phase 3c schema only; ignore LGA_FEATURE_COLUMNS.",
+    help="Train on the 15-feat Phase 3c schema only; ignore LGA + brand trough columns.",
 )
-def main(features_csv: str, model_out: str, reliability_out: str, no_lga_features: bool) -> None:
+@click.option(
+    "--no-brand-features",
+    "no_brand_features",
+    is_flag=True,
+    default=False,
+    help="Ignore brand trough columns even when present (reproduces Phase 4 50-feat schema).",
+)
+def main(
+    features_csv: str,
+    model_out: str,
+    reliability_out: str,
+    no_lga_features: bool,
+    no_brand_features: bool,
+) -> None:
     """Train LightGBM on numeric features.
 
-    Default: Phase 4 schema (FEATURE_COLUMNS + LGA_FEATURE_COLUMNS, 50 features).
-    Pass --no-lga-features to use the 15-feat Phase 3c schema instead.
-    No hyperparameter tuning, random_state=42. Test is intentionally left
-    untouched. This command does not append to experiments/results.csv.
+    Default: every feature present in the CSV — FEATURE_COLUMNS +
+    LGA_FEATURE_COLUMNS + any brand trough columns discovered in the header
+    (Phase 4b once brand cols are present, Phase 4 if only LGA, Phase 3c if
+    neither). Pass --no-brand-features for Phase 4 or --no-lga-features for
+    Phase 3c. No hyperparameter tuning, random_state=42. Test is intentionally
+    left untouched. This command does not append to experiments/results.csv.
     """
     features_path = pathlib.Path(features_csv)
     if not features_path.exists():
@@ -161,9 +182,17 @@ def main(features_csv: str, model_out: str, reliability_out: str, no_lga_feature
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
-    feature_columns = FEATURE_COLUMNS if no_lga_features else FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
-
     df = pd.read_csv(features_path)
+
+    brand_columns = (
+        [] if no_brand_features or no_lga_features
+        else discover_brand_feature_columns(df)
+    )
+    feature_columns = (
+        FEATURE_COLUMNS if no_lga_features
+        else FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + brand_columns
+    )
+
     required = feature_columns + ["label", "price_date"]
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -172,19 +201,32 @@ def main(features_csv: str, model_out: str, reliability_out: str, no_lga_feature
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
 
-    # If --no-lga-features is passed against a Phase 4 CSV, error out — this is
-    # the mismatch that silently produced stale 15-feat models during recovery.
+    # If --no-lga-features is passed against a Phase 4(+) CSV, error out — this
+    # is the mismatch that silently produced stale 15-feat models during recovery.
+    # The check covers LGA *and* brand trough columns: silently dropping either
+    # axis is the same kind of trap.
     if no_lga_features:
         present_lga = [c for c in LGA_FEATURE_COLUMNS if c in df.columns]
-        if present_lga:
+        present_brand = discover_brand_feature_columns(df)
+        if present_lga or present_brand:
             raise click.ClickException(
-                f"Features CSV contains {len(present_lga)} LGA columns but "
-                "--no-lga-features was passed. Remove --no-lga-features to train "
-                "the Phase 4 schema, or regenerate features.csv without LGA columns."
+                f"Features CSV contains {len(present_lga)} LGA + "
+                f"{len(present_brand)} brand trough columns but --no-lga-features "
+                "was passed. Remove --no-lga-features to train on the available "
+                "schema, or regenerate features.csv without those columns."
             )
 
-    schema_label = "Phase 3c" if no_lga_features else "Phase 4"
-    click.echo(f"Training on {len(feature_columns)} features ({schema_label} schema).")
+    if no_lga_features:
+        schema_label = "Phase 3c"
+    elif brand_columns:
+        schema_label = "Phase 4b"
+    else:
+        schema_label = "Phase 4"
+    click.echo(
+        f"Training on {len(feature_columns)} features ({schema_label} schema"
+        + (f"; {len(brand_columns)} brand cols" if brand_columns else "")
+        + ")."
+    )
     result = train_and_evaluate(df, feature_columns=feature_columns)
 
     click.echo(_format_results(result))

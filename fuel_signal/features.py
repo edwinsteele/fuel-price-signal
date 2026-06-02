@@ -86,7 +86,25 @@ LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
 
 # Brand trough feature columns are DB-derived (qualifying brands depend on
 # station counts) so they cannot be a module-level constant.  Call
-# brand_feature_columns(conn) within assemble_feature_rows to get the list.
+# brand_feature_columns(conn) within assemble_feature_rows to get the list,
+# or discover_brand_feature_columns() against a features-CSV DataFrame at
+# train/score time.
+
+_TROUGH_PREFIX = "days_since_trough_entry_"
+
+
+def discover_brand_feature_columns(df: pd.DataFrame) -> list[str]:
+    """Brand trough columns present in df (excludes LGA trough columns).
+
+    The features CSV header is the source of truth for which brands qualified
+    at generation time. Returns alphabetical order so the column list is
+    deterministic across runs against the same CSV.
+    """
+    lga = set(LGA_FEATURE_COLUMNS)
+    return sorted(
+        c for c in df.columns
+        if c.startswith(_TROUGH_PREFIX) and c not in lga
+    )
 
 
 

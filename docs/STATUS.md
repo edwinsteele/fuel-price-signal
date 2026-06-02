@@ -95,6 +95,13 @@ Calibrate chose raw over isotonic.
 - `experiments/cv_compare_phase4/` — paired walk-forward CV vs Phase 3c, 14 folds, seed=42: **11/14 folds improve** (was 13/14 pre-fix); median Δ **−0.032**, mean Δ **−0.042**, std 0.064. **The "fold 5 Ukraine-spike rescue" story does not survive the fix** — post-fix Phase 3c handles fold 5 normally (ll_15 = 0.263) and Phase 4 regresses mildly (Δ +0.036). The pre-fix Phase 3c collapse (ll_15 = 0.781) was a buggy postcode→LGA boundary artifact feeding `lga_mean_cents` and `station_minus_lga_mean_cents`, not the stickiness-regime-lag phenomenon previously claimed. Other minor regressions: fold 6 (+0.019), fold 11 (+0.062).
 - `experiments/shap_phase4/` — 8 of 35 LGA features in overall top 25 (woollahra #10, blue_mountains #12, randwick #13, burwood #14, cumberland #15, parramatta #17, mosman #18, hawkesbury #20). Cohort taxonomy intact: woollahra mean|SHAP| 0.18 in lead/trough cohorts vs 0.11 mid-cycle. 5 of 6 historically-zero LGAs still zero; **Camden now non-zero** (mean|SHAP|=0.029) — boundary fix gave it 14 stations, retiring #138.
 
+**Phase 4b scaffolding landed (eval pending).** PR #183 added per-brand
+`days_since_trough_entry_<brand>` columns to `features.py`. The follow-up
+scaffolding PR wired them through `train_lgbm.py` (default-on when present
+in the features CSV; `--no-brand-features` reproduces Phase 4). Phase 4b
+holdout/CV results to be appended to `experiments/results.csv` in a separate
+run on `main`.
+
 **Open follow-ups from validation:**
 
 - **#157** v2 peak features — `lead −7..−4` over-prediction (+0.157) is the dominant residual miscalibration. Design taxonomy: `docs/PLAN_phase4_event_leadership.md` § LGA feature roles in SHAP.
@@ -124,6 +131,7 @@ To verify what's currently on disk before scoring:
 import joblib
 m = joblib.load("data/models/lgbm_calibrated.joblib")
 print(len(m["feature_columns"]), m["feature_columns"][-1])
+# ~60 + ending in a 'days_since_trough_entry_<brand_slug>' (e.g. 'speedway') → Phase 4b
 # 50 + ending in 'days_since_trough_entry_woollahra' → Phase 4
 # 15 + ending in 'stickiness_score' → Phase 3c
 # 14 + ending in 'station_minus_brand_mean_cents' → Phase 3b

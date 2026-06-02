@@ -379,9 +379,14 @@ Prints a ranked table (top 25 features) with `mean|SHAP|`, sign of correlation, 
 Vanilla LightGBM on the **same 10 features** as Phase 2 — no new features, no tuning, `random_state=42`. No `StandardScaler` (trees are scale-invariant). This is the apples-to-apples model-class comparison. Does **not** write to `experiments/results.csv`.
 
 ```bash
-# Default: Phase 4 schema (FEATURE_COLUMNS + LGA_FEATURE_COLUMNS, 50 features)
-# Reads data/features.csv, writes data/models/lgbm.joblib
+# Default: every feature in the CSV — FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
+# + any brand trough columns discovered in the header. Phase 4b when brand
+# cols are present, Phase 4 otherwise. Reads data/features.csv, writes
+# data/models/lgbm.joblib.
 uv run python -m fuel_signal.train_lgbm
+
+# Opt-out: Phase 4 (ignore brand trough columns even when present)
+uv run python -m fuel_signal.train_lgbm --no-brand-features
 
 # Opt-out: Phase 3c schema (15 features only)
 uv run python -m fuel_signal.train_lgbm --no-lga-features
