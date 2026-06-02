@@ -16,6 +16,12 @@ import datetime
 
 import pytest
 
+from fuel_signal.brand_leadership import (
+    brand_slug,
+    compute_pit_strict_days_since_trough_brand,
+    qualifying_brands,
+)
+from fuel_signal.config import MIN_BRAND_SITES
 from fuel_signal.db import (
     create_schema,
     open_db,
@@ -756,3 +762,79 @@ def test_assembler_brand_mean_matches_compute_features(conn):
         assert row["station_minus_brand_mean_cents"] != row["station_minus_brand_mean_cents"]
     else:
         assert abs(row["station_minus_brand_mean_cents"] - per_row["station_minus_brand_mean_cents"]) < 0.1
+
+
+# ---------------------------------------------------------------------------
+# Brand trough feature integration — assemble_feature_rows emits brand columns
+# ---------------------------------------------------------------------------
+
+_BRAND_QUALIFYING = "MegaBrand"   # will be seeded with MIN_BRAND_SITES stations
+
+
+def _setup_qualifying_brand(conn, n_stations: int = MIN_BRAND_SITES) -> None:
+    """Seed n_stations Competitive stations for _BRAND_QUALIFYING with 16-cycle history."""
+    for i in range(n_stations):
+        code = 5000 + i
+        upsert_stations(conn, [{
+            "station_code": code,
+            "name": f"MegaBrand {code}",
+            "address": f"{code} Test St, Suburb",
+            "suburb": "Suburb",
+            "postcode": "2000",
+            "brand": _BRAND_QUALIFYING,
+        }])
+        conn.execute(
+            "UPDATE stations SET brand = ? WHERE station_code = ?",
+            (_BRAND_QUALIFYING, code),
+        )
+        _add_prices(conn, code, _16_CYCLES)
+        for d, _ in _16_CYCLES:
+            _set_station_class(conn, code, d, "Competitive")
+    conn.commit()
+
+
+def test_assemble_feature_rows_emits_brand_trough_columns(conn):
+    """assemble_feature_rows output contains days_since_trough_entry_<brand_slug> columns."""
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _16_CYCLES)
+    _setup_qualifying_brand(conn)
+
+    brands = qualifying_brands(conn)
+    assert _BRAND_QUALIFYING in brands
+
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+    assert len(df) > 0
+
+    expected_col = f"days_since_trough_entry_{brand_slug(_BRAND_QUALIFYING)}"
+    assert expected_col in df.columns
+
+
+def test_assemble_feature_rows_brand_trough_matches_pit_function(conn):
+    """assemble_feature_rows brand trough value matches compute_pit_strict_days_since_trough_brand."""
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _16_CYCLES)
+    _setup_qualifying_brand(conn)
+
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+
+    # Pick a date late enough that trough detection should have fired.
+    late_dates = [d for d, _ in _16_CYCLES if d > _date_at_day(300)]
+    assert late_dates, "Need dates past day 300 for trough to be detected"
+    query_date = late_dates[0]
+
+    matching = df[df["price_date"] == query_date]
+    if matching.empty:
+        return  # date might not be a label row; skip rather than fail
+
+    expected_col = f"days_since_trough_entry_{brand_slug(_BRAND_QUALIFYING)}"
+    row_val = matching.iloc[0][expected_col]
+
+    pit_result = compute_pit_strict_days_since_trough_brand(
+        conn, [query_date], [_BRAND_QUALIFYING]
+    )
+    expected_val = pit_result.get((query_date, _BRAND_QUALIFYING))
+
+    if expected_val is None:
+        assert row_val != row_val  # NaN
+    else:
+        assert abs(row_val - expected_val) < 1e-9

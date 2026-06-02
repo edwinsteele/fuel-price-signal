@@ -150,6 +150,18 @@ def test_brand_feature_columns_prefix(conn):
     cols = brand_feature_columns(conn)
     assert all(c.startswith("days_since_trough_entry_") for c in cols)
     assert len(cols) == 2
+    # Columns are ordered by brand slug (alphabetically)
+    slugs = [c.replace("days_since_trough_entry_", "") for c in cols]
+    assert slugs == sorted(slugs)
+
+
+def test_brand_feature_columns_empty_when_no_qualifying_brands(conn):
+    """When no brand meets the threshold, brand_feature_columns returns []."""
+    for i in range(MIN_BRAND_SITES - 1):
+        code = 9000 + i
+        upsert_stations(conn, [_station(code, BRAND_TINY)])
+        _seed_daily_prices(conn, code, date(2020, 1, 1), [150.0] * 100)
+    assert brand_feature_columns(conn) == []
 
 
 def test_brand_feature_columns_sorted(conn):
