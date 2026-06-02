@@ -30,6 +30,11 @@ import click
 import pandas as pd
 
 from fuel_signal import db as _db
+from fuel_signal.brand_leadership import (
+    brand_slug,
+    compute_pit_strict_days_since_trough_brand,
+    qualifying_brands,
+)
 from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.dates import date_from_int as _date_from_int
 from fuel_signal.dates import date_to_int as _date_to_int
@@ -79,6 +84,9 @@ FEATURE_COLUMNS: list[str] = [
 # Compose with FEATURE_COLUMNS when training / evaluating the Phase 4 model.
 LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
 
+# Brand trough feature columns are DB-derived (qualifying brands depend on
+# station counts) so they cannot be a module-level constant.  Call
+# brand_feature_columns(conn) within assemble_feature_rows to get the list.
 
 
 
@@ -300,7 +308,9 @@ def assemble_feature_rows(
         percentile_pct=percentile_pct,
         station_codes=station_codes,
     )
-    all_cols = list(label_df.columns) + FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
+    qualifying_brand_list = qualifying_brands(conn)
+    brand_cols = [f"days_since_trough_entry_{brand_slug(b)}" for b in qualifying_brand_list]
+    all_cols = list(label_df.columns) + FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + brand_cols
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
 
@@ -421,6 +431,12 @@ def assemble_feature_rows(
     label_date_strs: list[str] = list(label_df["price_date"].unique())
     lga_days_since_by_key = compute_pit_strict_days_since_trough(conn, label_date_strs)
 
+    # Cache 9: per-brand days_since_trough_entry, PIT-strict.
+    # Same contract as Cache 8 but uses brand median (non-Sticky stations).
+    brand_days_since_by_key = compute_pit_strict_days_since_trough_brand(
+        conn, label_date_strs, qualifying_brand_list
+    )
+
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
     # on station_price / sydney_avg are upstream bugs, not data conditions.
@@ -444,6 +460,10 @@ def assemble_feature_rows(
         for _lga in LGA_FEATURE_COUNCILS:
             feature_dict[f"days_since_trough_entry_{lga_slug(_lga)}"] = (
                 lga_days_since_by_key.get((date_d, _lga))
+            )
+        for _brand in qualifying_brand_list:
+            feature_dict[f"days_since_trough_entry_{brand_slug(_brand)}"] = (
+                brand_days_since_by_key.get((date_d, _brand))
             )
         records.append({**row_dict, **feature_dict})
 
