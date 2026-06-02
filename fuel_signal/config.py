@@ -28,3 +28,8 @@ PREFERRED_STATIONS: dict[int, str] = {
 # lose the INSERT OR IGNORE race. Suppresses the duplicate-address WARNING for
 # these specific codes; any new collision not listed here will still warn.
 KNOWN_DUPLICATE_STATION_CODES: frozenset[int] = frozenset()
+
+# Minimum distinct stations a brand must have across all history to qualify for
+# a days_since_trough_entry_<brand> feature column.  Small brands produce noisy
+# trough series; brands below this threshold get no column.
+MIN_BRAND_SITES: int = 15
