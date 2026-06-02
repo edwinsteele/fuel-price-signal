@@ -95,17 +95,12 @@ Calibrate chose raw over isotonic.
 - `experiments/cv_compare_phase4/` — paired walk-forward CV vs Phase 3c, 14 folds, seed=42: **11/14 folds improve** (was 13/14 pre-fix); median Δ **−0.032**, mean Δ **−0.042**, std 0.064. **The "fold 5 Ukraine-spike rescue" story does not survive the fix** — post-fix Phase 3c handles fold 5 normally (ll_15 = 0.263) and Phase 4 regresses mildly (Δ +0.036). The pre-fix Phase 3c collapse (ll_15 = 0.781) was a buggy postcode→LGA boundary artifact feeding `lga_mean_cents` and `station_minus_lga_mean_cents`, not the stickiness-regime-lag phenomenon previously claimed. Other minor regressions: fold 6 (+0.019), fold 11 (+0.062).
 - `experiments/shap_phase4/` — 8 of 35 LGA features in overall top 25 (woollahra #10, blue_mountains #12, randwick #13, burwood #14, cumberland #15, parramatta #17, mosman #18, hawkesbury #20). Cohort taxonomy intact: woollahra mean|SHAP| 0.18 in lead/trough cohorts vs 0.11 mid-cycle. 5 of 6 historically-zero LGAs still zero; **Camden now non-zero** (mean|SHAP|=0.029) — boundary fix gave it 14 stations, retiring #138.
 
-**Phase 4b scaffolding landed (eval pending).** PR #183 added per-brand
-`days_since_trough_entry_<brand>` columns to `features.py`. The follow-up
-scaffolding PR wired them through `train_lgbm.py` (default-on when present
-in the features CSV; `--no-brand-features` reproduces Phase 4). Phase 4b
-holdout/CV results to be appended to `experiments/results.csv` in a separate
-run on `main`.
+**Phase 4b evaluated and walked away (2026-06-02).** 60-feat schema (Phase 4 + 10 `days_since_trough_entry_<brand>`) hit 5-seed bank Δ −0.0062 (borderline) but lost 9/14 folds in paired walk-forward CV with a non-shock regression at fold 11 (+0.0297). Brand-trough feature code (PRs #183, #184) stays merged; columns continue to be computed in `features.csv` but are not used at the model level. Phase 4 (`phase4_5seed_lock_post_cc_removal`) remains operational baseline. Ledger: `phase4b_cv_negative` row in `experiments/results.csv`; per-fold artifacts at `experiments/cv_compare_phase4b/results.csv` (PR #187, close-not-merge). Compute-features per-row brand-col gap (#185) closed as moot.
 
 **Open follow-ups from validation:**
 
 - **#157** v2 peak features — `lead −7..−4` over-prediction (+0.157) is the dominant residual miscalibration. Design taxonomy: `docs/PLAN_phase4_event_leadership.md` § LGA feature roles in SHAP.
-- **LGA mechanism — open question.** The leadership-table predicted leaders (sutherland_shire, northern_beaches, ku_ring_gai) all rank in the bottom half of LGA SHAP. Brand concentration doesn't explain the actual ranking either (Spearman ρ between SHAP rank and Herfindahl brand-mix index is −0.07, p=0.72 across 30 LGAs). The model selects on a criterion we haven't characterised. Defer until #75 (brand leading-indicator feature) lands so we can re-evaluate SHAP rankings with brand variance extracted.
+- **LGA mechanism — open question (updated 2026-06-02).** The leadership-table predicted leaders (sutherland_shire, northern_beaches, ku_ring_gai) all rank in the bottom half of LGA SHAP. The 2026-05-30 hypothesis that brand variance was confounding the ranking was tested by Phase 4b — adding 10 brand-axis trough features didn't displace LGA cols at the model level (CV worse 9/14). Brand variance is not the missing axis. The model selects on a criterion we haven't characterised; the deferral anchor #75 no longer applies. Re-frame needed before next investigation.
 
 ## Pending work
 
