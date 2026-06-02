@@ -29,9 +29,18 @@ def _date_range(start: str, n_days: int) -> list[str]:
 
 
 _ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
+_SYNTHETIC_BRAND_COLUMNS = [
+    "days_since_trough_entry_7_eleven",
+    "days_since_trough_entry_bp",
+    "days_since_trough_entry_shell",
+]
 
 
-def _synthetic_features_df(seed: int = 0, include_lga: bool = True) -> pd.DataFrame:
+def _synthetic_features_df(
+    seed: int = 0,
+    include_lga: bool = True,
+    brand_columns: list[str] | None = None,
+) -> pd.DataFrame:
     """Build a feature frame with rows in train + val + test windows."""
     rng = np.random.default_rng(seed)
 
@@ -40,7 +49,9 @@ def _synthetic_features_df(seed: int = 0, include_lga: bool = True) -> pd.DataFr
     test_dates = _date_range("2025-08-01", 60)
     all_dates = train_dates + val_dates + test_dates
 
-    feature_cols = _ALL_FEATURE_COLUMNS if include_lga else FEATURE_COLUMNS
+    feature_cols = _ALL_FEATURE_COLUMNS if include_lga else list(FEATURE_COLUMNS)
+    if brand_columns:
+        feature_cols = feature_cols + list(brand_columns)
     n = len(all_dates)
     X = rng.normal(size=(n, len(feature_cols)))
 
@@ -204,3 +215,76 @@ def test_cli_missing_columns_errors(tmp_path):
     res = runner.invoke(main, ["--features-csv", str(bad_path)])
     assert res.exit_code != 0
     assert "missing required columns" in res.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b — brand trough column wiring
+# ---------------------------------------------------------------------------
+
+def test_cli_default_picks_up_brand_columns(tmp_path):
+    """Default schema picks up brand trough columns when present (Phase 4b)."""
+    df = _synthetic_features_df(include_lga=True, brand_columns=_SYNTHETIC_BRAND_COLUMNS)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+    model_path = tmp_path / "models" / "lgbm.joblib"
+    reliability_path = tmp_path / "reliability_lgbm.png"
+
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--model-out", str(model_path),
+            "--reliability-out", str(reliability_path),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Phase 4b" in res.output
+
+    saved = joblib.load(model_path)
+    expected = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + sorted(_SYNTHETIC_BRAND_COLUMNS)
+    assert saved["feature_columns"] == expected
+
+
+def test_cli_no_brand_features_flag_trains_phase4(tmp_path):
+    """--no-brand-features ignores brand cols even when present (reproduces Phase 4)."""
+    df = _synthetic_features_df(include_lga=True, brand_columns=_SYNTHETIC_BRAND_COLUMNS)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+    model_path = tmp_path / "models" / "lgbm_phase4.joblib"
+    reliability_path = tmp_path / "reliability_lgbm_phase4.png"
+
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--model-out", str(model_path),
+            "--reliability-out", str(reliability_path),
+            "--no-brand-features",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Phase 4" in res.output
+    assert "Phase 4b" not in res.output
+
+    saved = joblib.load(model_path)
+    assert saved["feature_columns"] == _ALL_FEATURE_COLUMNS
+
+
+def test_cli_no_lga_features_with_brand_csv_errors(tmp_path):
+    """--no-lga-features against a CSV with brand cols is also a hard error."""
+    df = _synthetic_features_df(include_lga=True, brand_columns=_SYNTHETIC_BRAND_COLUMNS)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--no-lga-features",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "brand" in res.output.lower()
