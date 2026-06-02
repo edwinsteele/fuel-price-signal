@@ -59,8 +59,9 @@ Split = Literal["train", "val", "test"]
 def shap_correlation_matrix(sv: np.ndarray) -> np.ndarray:
     """Return F×F Pearson r between SHAP value columns.
 
-    Zero-variance columns yield NaN; downstream callers replace with 0 distance
-    via |r| → 1 so the column collapses into whatever it most resembles.
+    Zero-variance columns yield NaN. `cluster_features` then maps NaN → r = 0
+    → distance d = 1 (the maximum), so such columns form singleton clusters
+    rather than collapsing into a neighbour.
     """
     n_feat = sv.shape[1]
     corr = np.full((n_feat, n_feat), np.nan, dtype=np.float64)
