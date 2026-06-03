@@ -553,6 +553,12 @@ def test_features_in_nav(flask_client_with_shap):
     assert 'href="/features"' in html
 
 
+def test_features_table_container_has_overflow_scroll(flask_client_with_shap):
+    # Table column must not be obscured by the sticky SHAP panel (#186)
+    resp = flask_client_with_shap.get("/features")
+    assert b"overflow-x:auto" in resp.data
+
+
 # ---------------------------------------------------------------------------
 # _load_partner_scores
 # ---------------------------------------------------------------------------
