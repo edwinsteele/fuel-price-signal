@@ -54,6 +54,19 @@ experiments/**/*.parquet
 experiments/**/*.h5
 experiments/**/*.html
 
+# Legacy experiment dirs (pre-lab-book; frozen). One-time hide list — do not
+# extend. New experiments live in dated dirs and rely on the type-based rules
+# above. Tracked files in these dirs stay tracked; new files inside don't.
+experiments/brand_leadlag_regime/
+experiments/lga_lead_lag/
+experiments/shap/
+experiments/trough_weakness/
+experiments/shap_phase4/feature_columns.json
+experiments/shap_phase4/partner_scores.csv
+experiments/shap_phase4/partner_scores_stickiness_score.csv
+experiments/shap_phase4/summary.csv
+experiments/shap_phase4/rank_partners 2.py
+
 # Scratch planning docs — kept in the tree for stable paths, not committed
 PLAN_*.md
 
