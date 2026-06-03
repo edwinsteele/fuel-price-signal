@@ -46,7 +46,11 @@ Minimum evidence, cited in the PR body or commit message:
 - Per-fold CSV path under `experiments/<date>_<slug>/`
 - Median Δ logloss, worst-fold Δ, fold-win count, fold count
 
-Default decision rule: if any single fold regresses by more than the median improvement, keep the feature. The rule is asymmetric on purpose — a wide-mean, narrow-tail improvement is the win pattern; a regime that inverts the sign is the loss pattern.
+Sign convention throughout: `Δ = proposed − baseline`. Negative is better (logloss is minimised).
+
+Multi-feature changes — a cluster drop, or a composite-to-decomposition swap — are evaluated as a single joint CV run when the changes are conceptually one unit (e.g. dropping all members of a SHAP-redundancy cluster, or replacing one feature with two derived from it). Independent feature changes ride in separate CV runs and separate PRs.
+
+Default decision rule: if any single fold regresses by more than the median improvement, keep the feature (or feature group). The rule is asymmetric on purpose — a wide-mean, narrow-tail improvement is the win pattern; a regime that inverts the sign is the loss pattern.
 
 Override is allowed when the regressing fold is known to be anomalous (a price-shock period, a labelling artefact, a regime explicitly out of scope). State the override reason in the PR body — a considered exception is fine; silently ignoring the rule is not.
 
