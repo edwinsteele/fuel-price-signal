@@ -4,17 +4,31 @@
 walk-forward fold, and compares per-fold val logloss.  This is the promoted form
 of the one-off ``experiments/cv_compare_*/run_cv.py`` scripts.
 
+**Drop-feature mode (CLI):** pass ``--drop-feature <col>`` (repeatable) instead
+of ``--baseline``.  The baseline becomes ``--model`` itself; the "model" becomes
+a clone of ``--model``'s pipeline with the named column(s) removed before fitting
+each fold.  No separate baseline artifact is needed.
+
 **Library mode:** ``run_cv()`` runs a single-model logreg walk-forward CV and is
 kept for programmatic use by tests and notebooks.
 
 Usage::
 
+    # Two-artifact mode
     uv run python -m fuel_signal.cv_report \\
       --model data/models/lgbm.joblib \\
       --baseline data/models/lgbm_phase3c.joblib \\
       --features data/features.csv \\
       --seed 42 \\
       --output experiments/cv_phase4/results.csv
+
+    # Drop-feature mode
+    uv run python -m fuel_signal.cv_report \\
+      --model data/models/lgbm.joblib \\
+      --drop-feature station_minus_last_max_cents \\
+      --features data/features.csv \\
+      --seed 42 \\
+      --output experiments/<dir>/results.csv
 """
 
 from __future__ import annotations
@@ -109,8 +123,9 @@ def _set_random_state(estimator: object, seed: int) -> None:
 def run_paired_cv(
     df: pd.DataFrame,
     model_path: pathlib.Path,
-    baseline_path: pathlib.Path,
+    baseline_path: pathlib.Path | None = None,
     *,
+    drop_features: list[str] | None = None,
     seed: int = 42,
     train_min_days: int = 1825,
     val_days: int = 90,
@@ -118,19 +133,42 @@ def run_paired_cv(
 ) -> list[dict]:
     """Paired walk-forward CV: re-train both model and baseline on each fold.
 
+    Two modes:
+
+    *Two-artifact mode* (``baseline_path`` supplied, ``drop_features`` omitted):
     Each joblib artifact must be a dict with keys ``pipeline`` (sklearn-compatible
-    estimator) and ``feature_columns`` (list[str]).  Both are cloned per fold so
-    only hyperparameters carry over — no training-set contamination across splits.
+    estimator) and ``feature_columns`` (list[str]).
+
+    *Drop-feature mode* (``drop_features`` supplied, ``baseline_path`` omitted):
+    The baseline is ``model_path`` with its full feature set; the "model" is a
+    clone of the same pipeline with ``drop_features`` removed from its
+    ``feature_columns`` before fitting each fold.
+
+    Both are cloned per fold so only hyperparameters carry over — no
+    training-set contamination across splits.
 
     Returns one result dict per non-empty fold with keys:
         fold_idx, train_start, train_end, val_start, val_end,
         n_val, baseline_logloss, model_logloss, delta
     where ``delta = model_logloss − baseline_logloss`` (negative means model wins).
     """
+    if baseline_path is not None and drop_features is not None:
+        raise ValueError("Provide baseline_path or drop_features, not both.")
+
     model_obj = joblib.load(model_path)
-    baseline_obj = joblib.load(baseline_path)
-    model_features: list[str] = model_obj["feature_columns"]
-    baseline_features: list[str] = baseline_obj["feature_columns"]
+
+    if drop_features is not None:
+        drop_set = set(drop_features)
+        baseline_features: list[str] = model_obj["feature_columns"]
+        model_features: list[str] = [f for f in baseline_features if f not in drop_set]
+        baseline_pipeline = model_obj["pipeline"]
+        model_pipeline = model_obj["pipeline"]
+    else:
+        baseline_obj = joblib.load(baseline_path)  # type: ignore[arg-type]
+        model_features = model_obj["feature_columns"]
+        baseline_features = baseline_obj["feature_columns"]
+        baseline_pipeline = baseline_obj["pipeline"]
+        model_pipeline = model_obj["pipeline"]
 
     results = []
     for i, (train_df, val_df) in enumerate(
@@ -146,7 +184,7 @@ def run_paired_cv(
 
         y_val = val_df["label"].to_numpy(dtype=int)
 
-        m = clone(model_obj["pipeline"])
+        m = clone(model_pipeline)
         _set_random_state(m, seed)
         m.fit(
             train_df[model_features].to_numpy(dtype=float),
@@ -155,7 +193,7 @@ def run_paired_cv(
         p_model = m.predict_proba(val_df[model_features].to_numpy(dtype=float))[:, 1]
         model_logloss = _ev.log_loss(y_val, p_model)
 
-        b = clone(baseline_obj["pipeline"])
+        b = clone(baseline_pipeline)
         _set_random_state(b, seed)
         b.fit(
             train_df[baseline_features].to_numpy(dtype=float),
@@ -224,9 +262,19 @@ def _format_paired_summary(results: list[dict]) -> str:
 @click.option(
     "--baseline",
     "baseline_path",
-    required=True,
+    default=None,
     type=click.Path(exists=True, path_type=pathlib.Path),
-    help="Joblib artifact for the baseline to compare against.",
+    help="Joblib artifact for the baseline. Mutually exclusive with --drop-feature.",
+)
+@click.option(
+    "--drop-feature",
+    "drop_features",
+    multiple=True,
+    metavar="COL",
+    help=(
+        "Drop this feature column from --model before each fold fit. "
+        "Repeatable. Mutually exclusive with --baseline."
+    ),
 )
 @click.option(
     "--features",
@@ -274,7 +322,8 @@ def _format_paired_summary(results: list[dict]) -> str:
 )
 def main(
     model_path: pathlib.Path,
-    baseline_path: pathlib.Path,
+    baseline_path: pathlib.Path | None,
+    drop_features: tuple[str, ...],
     features_csv: str,
     seed: int,
     output_csv: str | None,
@@ -282,7 +331,12 @@ def main(
     val_days: int,
     step_days: int,
 ) -> None:
-    """Paired walk-forward CV: compare --model vs --baseline across pre-test folds."""
+    """Paired walk-forward CV: compare --model vs --baseline (or --drop-feature) across pre-test folds."""
+    if baseline_path is not None and drop_features:
+        raise click.UsageError("--baseline and --drop-feature are mutually exclusive.")
+    if baseline_path is None and not drop_features:
+        raise click.UsageError("Provide either --baseline or at least one --drop-feature.")
+
     features_path = pathlib.Path(features_csv)
     if not features_path.exists():
         raise click.ClickException(
@@ -297,15 +351,35 @@ def main(
             f"Features CSV is missing required columns: {missing}. "
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
-    results = run_paired_cv(
-        df,
-        model_path,
-        baseline_path,
-        seed=seed,
-        train_min_days=train_min_days,
-        val_days=val_days,
-        step_days=step_days,
-    )
+
+    if drop_features:
+        model_obj = joblib.load(model_path)
+        valid = set(model_obj["feature_columns"])
+        unknown = [f for f in drop_features if f not in valid]
+        if unknown:
+            raise click.ClickException(
+                f"Unknown --drop-feature column(s): {unknown}. "
+                f"Valid columns: {sorted(valid)}"
+            )
+        results = run_paired_cv(
+            df,
+            model_path,
+            drop_features=list(drop_features),
+            seed=seed,
+            train_min_days=train_min_days,
+            val_days=val_days,
+            step_days=step_days,
+        )
+    else:
+        results = run_paired_cv(
+            df,
+            model_path,
+            baseline_path,
+            seed=seed,
+            train_min_days=train_min_days,
+            val_days=val_days,
+            step_days=step_days,
+        )
 
     if not results:
         raise click.ClickException(

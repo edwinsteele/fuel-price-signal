@@ -366,3 +366,125 @@ def test_cli_paired_missing_columns_errors(tmp_path):
     ])
     assert res.exit_code != 0
     assert "missing required columns" in res.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# CLI — drop-feature mode
+# ---------------------------------------------------------------------------
+
+def test_cli_drop_feature_runs_end_to_end(tmp_path):
+    df = _synthetic_paired_df()
+    csv_path = tmp_path / "features.csv"
+    df.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--drop-feature", "fa2",
+        "--features", str(csv_path),
+        "--train-min-days", "200",
+        "--val-days", "30",
+        "--step-days", "90",
+    ])
+    assert res.exit_code == 0, res.output
+    assert "fold" in res.output
+    assert "folds:" in res.output
+    assert "wins:" in res.output
+
+
+def test_cli_drop_feature_two_columns(tmp_path):
+    df = _synthetic_paired_df()
+    csv_path = tmp_path / "features.csv"
+    df.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--drop-feature", "fa1",
+        "--drop-feature", "fa2",
+        "--features", str(csv_path),
+        "--train-min-days", "200",
+        "--val-days", "30",
+        "--step-days", "90",
+    ])
+    assert res.exit_code == 0, res.output
+    assert "folds:" in res.output
+
+
+def test_cli_drop_feature_output_csv_schema(tmp_path):
+    df = _synthetic_paired_df()
+    csv_path = tmp_path / "features.csv"
+    df.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+    out_csv = tmp_path / "results.csv"
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--drop-feature", "fa2",
+        "--features", str(csv_path),
+        "--output", str(out_csv),
+        "--train-min-days", "200",
+        "--val-days", "30",
+        "--step-days", "90",
+    ])
+    assert res.exit_code == 0, res.output
+    assert out_csv.exists()
+    result_df = pd.read_csv(out_csv)
+    assert set(result_df.columns) == {
+        "fold_idx", "train_start", "train_end", "val_start", "val_end",
+        "n_val", "baseline_logloss", "model_logloss", "delta",
+    }
+
+
+def test_cli_conflicting_flags_rejected(tmp_path):
+    df = _synthetic_paired_df()
+    csv_path = tmp_path / "features.csv"
+    df.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+    baseline_path = _make_lgbm_joblib(tmp_path, "baseline", _FEATS_B)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--baseline", str(baseline_path),
+        "--drop-feature", "fa2",
+        "--features", str(csv_path),
+    ])
+    assert res.exit_code != 0
+    assert "mutually exclusive" in res.output.lower()
+
+
+def test_cli_neither_flag_rejected(tmp_path):
+    df = _synthetic_paired_df()
+    csv_path = tmp_path / "features.csv"
+    df.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--features", str(csv_path),
+    ])
+    assert res.exit_code != 0
+    assert "--baseline" in res.output and "--drop-feature" in res.output
+
+
+def test_cli_unknown_drop_feature_rejected(tmp_path):
+    df = _synthetic_paired_df()
+    csv_path = tmp_path / "features.csv"
+    df.to_csv(csv_path, index=False)
+    model_path = _make_lgbm_joblib(tmp_path, "model", _FEATS_A)
+
+    runner = CliRunner()
+    res = runner.invoke(main, [
+        "--model", str(model_path),
+        "--drop-feature", "not_a_real_column",
+        "--features", str(csv_path),
+    ])
+    assert res.exit_code != 0
+    assert "not_a_real_column" in res.output
+    # Should list valid column names
+    assert "fa0" in res.output
