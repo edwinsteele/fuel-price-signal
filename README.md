@@ -391,6 +391,25 @@ uv run python -m fuel_signal.shap_report \
 
 Prints a ranked table (top 25 features) with `mean|SHAP|`, sign of correlation, and NaN fraction. NaN-bearing LGA features (stations below the 3-station floor) are handled without error; their SHAP contributions are computed from non-NaN rows.
 
+## Feature redundancy + decomposition (SHAP)
+
+`fuel_signal/feature_redundancy.py` answers two questions in one pass over a fitted model:
+
+1. **Which features are redundant?** Hierarchical clustering on row-wise correlation of SHAP-value columns. Features in the same cluster contribute the same signal to the model, even when their raw values are not linearly correlated.
+2. **Which features are carrying multiple signals?** SHAP interaction matrix → per-feature normalised entropy of partner mass. A diffuse interaction distribution flags a feature as a candidate to decompose into separate engineered features.
+
+```bash
+uv run python -m fuel_signal.feature_redundancy \
+    --model data/models/lgbm.joblib \
+    --features data/features.csv \
+    --split val \
+    --output experiments/redundancy_phase4/ \
+    --cluster-threshold 0.5 \
+    --interaction-sample 3000
+```
+
+Artifacts: `shap_corr.csv`, `clusters.csv`, `dendrogram.png`, `interaction_matrix.csv`, `decomposition_candidates.csv` (ranked by `entropy_norm` desc), plus `feature_columns.json` and `params.json`. `--interaction-sample` caps the row count used for `shap_interaction_values`, which is O(rows × trees × depth²) — much slower than plain SHAP.
+
 ## Training the LightGBM baseline (Phase 3a.1)
 
 Vanilla LightGBM on the **same 10 features** as Phase 2 — no new features, no tuning, `random_state=42`. No `StandardScaler` (trees are scale-invariant). This is the apples-to-apples model-class comparison. Does **not** write to `experiments/results.csv`.
