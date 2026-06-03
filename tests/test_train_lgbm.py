@@ -272,6 +272,116 @@ def test_cli_no_brand_features_flag_trains_phase4(tmp_path):
     assert saved["feature_columns"] == _ALL_FEATURE_COLUMNS
 
 
+def test_cli_drop_feature_single(tmp_path):
+    """--drop-feature COL removes that column from the resolved feature set."""
+    df = _synthetic_features_df(include_lga=True)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+    model_path = tmp_path / "models" / "lgbm_drop.joblib"
+    reliability_path = tmp_path / "reliability_drop.png"
+
+    drop = FEATURE_COLUMNS[0]
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--model-out", str(model_path),
+            "--reliability-out", str(reliability_path),
+            "--drop-feature", drop,
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert drop in res.output
+
+    saved = joblib.load(model_path)
+    assert drop not in saved["feature_columns"]
+    assert len(saved["feature_columns"]) == len(_ALL_FEATURE_COLUMNS) - 1
+
+
+def test_cli_drop_feature_multiple(tmp_path):
+    """--drop-feature is repeatable; multiple columns are removed."""
+    df = _synthetic_features_df(include_lga=True)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+    model_path = tmp_path / "models" / "lgbm_drop_multi.joblib"
+    reliability_path = tmp_path / "reliability_drop_multi.png"
+
+    drop_a = FEATURE_COLUMNS[0]
+    drop_b = LGA_FEATURE_COLUMNS[0]
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--model-out", str(model_path),
+            "--reliability-out", str(reliability_path),
+            "--drop-feature", drop_a,
+            "--drop-feature", drop_b,
+        ],
+    )
+    assert res.exit_code == 0, res.output
+
+    saved = joblib.load(model_path)
+    assert drop_a not in saved["feature_columns"]
+    assert drop_b not in saved["feature_columns"]
+    assert len(saved["feature_columns"]) == len(_ALL_FEATURE_COLUMNS) - 2
+
+
+def test_cli_drop_feature_unknown_errors(tmp_path):
+    """--drop-feature with a column not in the resolved set is a hard error."""
+    df = _synthetic_features_df(include_lga=True)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--features-csv", str(features_path),
+            "--drop-feature", "not_a_real_feature_xyz",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "not_a_real_feature_xyz" in res.output
+
+
+def test_cli_seed_reproducible(tmp_path):
+    """Same --seed → byte-identical model artifact; different --seed → different model."""
+    df = _synthetic_features_df(include_lga=True)
+    features_path = tmp_path / "features.csv"
+    df.to_csv(features_path, index=False)
+
+    def _run(seed: int, tag: str) -> np.ndarray:
+        model_path = tmp_path / f"lgbm_{tag}.joblib"
+        reliability_path = tmp_path / f"reliability_{tag}.png"
+        runner = CliRunner()
+        res = runner.invoke(
+            main,
+            [
+                "--features-csv", str(features_path),
+                "--model-out", str(model_path),
+                "--reliability-out", str(reliability_path),
+                "--seed", str(seed),
+            ],
+        )
+        assert res.exit_code == 0, res.output
+        saved = joblib.load(model_path)
+        X = df[saved["feature_columns"]].to_numpy(dtype=float)
+        return saved["pipeline"].predict_proba(X)[:, 1]
+
+    proba_a = _run(7, "seed7a")
+    proba_b = _run(7, "seed7b")
+    proba_c = _run(13, "seed13")
+    # Same seed → bit-exact predictions.
+    np.testing.assert_array_equal(proba_a, proba_b)
+    # Different seeds → bagging sees different rows; predictions must differ
+    # somewhere. Compare full arrays, not rounded display strings.
+    assert not np.array_equal(proba_a, proba_c), (
+        "Different seeds produced identical predictions — --seed is not plumbed through."
+    )
+
+
 def test_cli_no_lga_features_with_brand_csv_errors(tmp_path):
     """--no-lga-features against a CSV with brand cols is also a hard error."""
     df = _synthetic_features_df(include_lga=True, brand_columns=_SYNTHETIC_BRAND_COLUMNS)
