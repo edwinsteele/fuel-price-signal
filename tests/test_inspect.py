@@ -4,6 +4,7 @@ import datetime
 import re
 
 import pytest
+from bs4 import BeautifulSoup
 
 from fuel_signal import series as _series
 from fuel_signal.db import (
@@ -551,6 +552,17 @@ def test_features_in_nav(flask_client_with_shap):
     resp = flask_client_with_shap.get("/features")
     html = resp.data.decode()
     assert 'href="/features"' in html
+
+
+def test_features_table_container_has_overflow_scroll(flask_client_with_shap):
+    # Table column must not be obscured by the sticky SHAP panel (#186)
+    resp = flask_client_with_shap.get("/features")
+    soup = BeautifulSoup(resp.data, "html.parser")
+    container = soup.select_one(".features-table-container")
+    assert container is not None, "features-table-container div not found in /features HTML"
+    assert "overflow-x:auto" in container.get("style", "").replace(" ", ""), (
+        "features-table-container must have overflow-x:auto to prevent SHAP panel from obscuring columns"
+    )
 
 
 # ---------------------------------------------------------------------------
