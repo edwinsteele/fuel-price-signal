@@ -152,6 +152,9 @@ def run_paired_cv(
         n_val, baseline_logloss, model_logloss, delta
     where ``delta = model_logloss − baseline_logloss`` (negative means model wins).
     """
+    if baseline_path is not None and drop_features is not None:
+        raise ValueError("Provide baseline_path or drop_features, not both.")
+
     model_obj = joblib.load(model_path)
 
     if drop_features is not None:
