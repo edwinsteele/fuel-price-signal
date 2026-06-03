@@ -159,12 +159,32 @@ def _format_results(result: dict) -> str:
     default=False,
     help="Ignore brand trough columns even when present (reproduces Phase 4 50-feat schema).",
 )
+@click.option(
+    "--drop-feature",
+    "drop_features",
+    multiple=True,
+    metavar="COL",
+    help=(
+        "Drop a named feature column from the resolved feature set before fitting. "
+        "Repeatable. Errors out if a requested column is not in the resolved set."
+    ),
+)
+@click.option(
+    "--seed",
+    "seed",
+    type=int,
+    default=42,
+    show_default=True,
+    help="random_state passed to LightGBM (build_pipeline + train_and_evaluate).",
+)
 def main(
     features_csv: str,
     model_out: str,
     reliability_out: str,
     no_lga_features: bool,
     no_brand_features: bool,
+    drop_features: tuple[str, ...],
+    seed: int,
 ) -> None:
     """Train LightGBM on numeric features.
 
@@ -216,6 +236,17 @@ def main(
                 "schema, or regenerate features.csv without those columns."
             )
 
+    if drop_features:
+        unknown = [c for c in drop_features if c not in feature_columns]
+        if unknown:
+            raise click.ClickException(
+                f"--drop-feature requested column(s) not in resolved feature set: {unknown}. "
+                f"Resolved set has {len(feature_columns)} columns."
+            )
+        dropped = list(dict.fromkeys(drop_features))
+        feature_columns = [c for c in feature_columns if c not in set(dropped)]
+        click.echo(f"Dropping {len(dropped)} feature(s) via --drop-feature: {dropped}")
+
     if no_lga_features:
         schema_label = "Phase 3c"
     elif brand_columns:
@@ -225,9 +256,9 @@ def main(
     click.echo(
         f"Training on {len(feature_columns)} features ({schema_label} schema"
         + (f"; {len(brand_columns)} brand cols" if brand_columns else "")
-        + ")."
+        + f"; seed={seed})."
     )
-    result = train_and_evaluate(df, feature_columns=feature_columns)
+    result = train_and_evaluate(df, feature_columns=feature_columns, random_state=seed)
 
     click.echo(_format_results(result))
 

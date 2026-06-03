@@ -396,6 +396,17 @@ uv run python -m fuel_signal.train_lgbm \
     --features-csv /tmp/features.csv \
     --model-out /tmp/lgbm.joblib \
     --reliability-out /tmp/reliability_lgbm.png
+
+# Ablation: drop one or more features + sweep seeds (one-liner).
+# --drop-feature is repeatable; errors out if the column is not in the
+# resolved feature set. --seed is honoured end-to-end (build_pipeline +
+# train_and_evaluate), so identical seeds reproduce val log-loss exactly.
+for seed in 0 1 2 3 42; do
+  uv run python -m fuel_signal.train_lgbm \
+      --drop-feature station_minus_last_max_cents \
+      --seed $seed \
+      --model-out /tmp/lgbm_drop_minus_max_seed$seed.joblib
+done
 ```
 
 **Phase 3a.1 val result** (2026-05-14, real DB): val logloss 0.3926 (baseline 0.6428, Δ −0.2501) vs logreg val logloss 0.4112. LGBM captures non-linearities logreg cannot.
