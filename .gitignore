@@ -44,6 +44,9 @@ experiments/shap_phase4/
 experiments/trough_weakness/
 experiments/lga_lead_lag/
 experiments/brand_leadlag_regime/
+experiments/redundancy_phase4b/
+experiments/redundancy_phase4b_p2/
+experiments/redundancy_phase4b_tight/
 
 # Scratch planning docs — kept in the tree for stable paths, not committed
 PLAN_*.md
