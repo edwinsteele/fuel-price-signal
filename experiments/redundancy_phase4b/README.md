@@ -5,6 +5,20 @@
 - **SHA:** 4b57c18 (most recent fix; earlier runs used 189449d)
 - **Status:** open
 
+> ⚠ **How to use this output.** The candidate list in `clusters.csv` /
+> `decomposition_candidates.csv` is a list of **hypotheses to test**, not a
+> list of features to drop. SHAP correlation here was measured on a single
+> training run + val window; redundancy on one window does not imply
+> redundancy across regimes.
+>
+> Before proposing any drop motivated by this list, run a paired walk-forward
+> CV (`fuel_signal.cv_report`) and reject if any fold regresses by > +0.05
+> logloss. See `experiments/2026-06-03_drop_redundant_pair/` for a worked
+> example where a high-SHAP-correlation pair looked great on one window
+> (Δ −0.018) but failed walk-forward CV (fold 9: **+0.103**, abandoned).
+>
+> Tracked: design issue [#195](../../../../issues/195).
+
 ## Hypothesis
 The 50-feature Phase 4b set has redundant SHAP-correlated features. At the **default cluster threshold (0.5)**, surface the loosest grouping to motivate either removing dupes or decomposing combined features into independent components.
 

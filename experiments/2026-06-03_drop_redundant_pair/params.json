@@ -1,0 +1,15 @@
+{
+  "features_csv": "data/features.csv",
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    42
+  ],
+  "n_features_full": 50,
+  "drop_candidates": [
+    "station_price_cents",
+    "station_minus_last_max_cents"
+  ]
+}
