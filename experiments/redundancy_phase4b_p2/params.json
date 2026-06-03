@@ -1,0 +1,11 @@
+{
+  "model": "data/models/lgbm.joblib",
+  "features": "data/features.csv",
+  "split": "val",
+  "cluster_threshold": 0.2,
+  "interaction_sample": 3000,
+  "interaction_rows_used": 3000,
+  "seed": 0,
+  "n_features": 50,
+  "n_rows_split": 59811
+}
