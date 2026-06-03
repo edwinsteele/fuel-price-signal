@@ -347,12 +347,12 @@ def test_cli_drop_feature_unknown_errors(tmp_path):
 
 
 def test_cli_seed_reproducible(tmp_path):
-    """Same --seed → identical val_logloss; different --seed → different val_logloss."""
+    """Same --seed → byte-identical model artifact; different --seed → different model."""
     df = _synthetic_features_df(include_lga=True)
     features_path = tmp_path / "features.csv"
     df.to_csv(features_path, index=False)
 
-    def _run(seed: int, tag: str) -> str:
+    def _run(seed: int, tag: str) -> np.ndarray:
         model_path = tmp_path / f"lgbm_{tag}.joblib"
         reliability_path = tmp_path / f"reliability_{tag}.png"
         runner = CliRunner()
@@ -366,17 +366,20 @@ def test_cli_seed_reproducible(tmp_path):
             ],
         )
         assert res.exit_code == 0, res.output
-        # Extract the val log-loss line.
-        for line in res.output.splitlines():
-            if "val log-loss" in line:
-                return line
-        raise AssertionError(f"val log-loss line missing from output:\n{res.output}")
+        saved = joblib.load(model_path)
+        X = df[saved["feature_columns"]].to_numpy(dtype=float)
+        return saved["pipeline"].predict_proba(X)[:, 1]
 
-    a = _run(7, "seed7a")
-    b = _run(7, "seed7b")
-    c = _run(13, "seed13")
-    assert a == b, f"Same seed produced different val_logloss:\n  {a}\n  {b}"
-    assert a != c, f"Different seeds produced identical val_logloss:\n  {a}\n  {c}"
+    proba_a = _run(7, "seed7a")
+    proba_b = _run(7, "seed7b")
+    proba_c = _run(13, "seed13")
+    # Same seed → bit-exact predictions.
+    np.testing.assert_array_equal(proba_a, proba_b)
+    # Different seeds → bagging sees different rows; predictions must differ
+    # somewhere. Compare full arrays, not rounded display strings.
+    assert not np.array_equal(proba_a, proba_c), (
+        "Different seeds produced identical predictions — --seed is not plumbed through."
+    )
 
 
 def test_cli_no_lga_features_with_brand_csv_errors(tmp_path):

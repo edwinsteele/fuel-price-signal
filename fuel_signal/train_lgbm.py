@@ -245,6 +245,11 @@ def main(
             )
         dropped = list(dict.fromkeys(drop_features))
         feature_columns = [c for c in feature_columns if c not in set(dropped)]
+        if not feature_columns:
+            raise click.ClickException(
+                "--drop-feature removed all resolved features. "
+                "Keep at least one feature column."
+            )
         click.echo(f"Dropping {len(dropped)} feature(s) via --drop-feature: {dropped}")
 
     if no_lga_features:

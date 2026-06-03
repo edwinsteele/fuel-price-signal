@@ -400,7 +400,7 @@ uv run python -m fuel_signal.train_lgbm \
 # Ablation: drop one or more features + sweep seeds (one-liner).
 # --drop-feature is repeatable; errors out if the column is not in the
 # resolved feature set. --seed is honoured end-to-end (build_pipeline +
-# train_and_evaluate), so identical seeds reproduce val log-loss exactly.
+# train_and_evaluate), so identical seeds reproduce val logloss exactly.
 for seed in 0 1 2 3 42; do
   uv run python -m fuel_signal.train_lgbm \
       --drop-feature station_minus_last_max_cents \
