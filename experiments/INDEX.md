@@ -8,6 +8,7 @@ Reverse-chronological index of experiment dirs under `experiments/`. One row per
 
 | Date | Name | Hypothesis | Result | Status |
 |---|---|---|---|---|
+| 2026-06-03 | 2026-06-03_drop_redundant_pair | Drop `station_price_cents` vs `station_minus_last_max_cents` — pair is SHAP-redundant, so removing either should be neutral | Step 1 (5 seeds): drop_price out (sign flips); drop_minus_max real (paired Δ −0.011 ± 0.004). Step 2 (14-fold CV): **abandoned** — 7/14 wins, mean Δ +0.010, two folds regress by >+0.05 (fold 4 +0.066, fold 9 +0.103). Regime-sensitive, not safe to drop. | done |
 | 2026-06-03 | redundancy_phase4b_tight | Tighter SHAP redundancy threshold drops fewer real features | — | open |
 | 2026-06-03 | redundancy_phase4b_p2 | Second pass on SHAP-based redundancy at relaxed threshold | — | open |
 | 2026-06-03 | redundancy_phase4b | Initial SHAP-based feature redundancy sweep | — | open |
