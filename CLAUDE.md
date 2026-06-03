@@ -72,6 +72,7 @@ Handle conflicts first, then review threads, in a single pass per PR.
 - Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
 - After each commit + push, open a PR immediately without asking.
 - After submitting a PR, wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, push, repeat until no actionable comments remain.
+- **`experiments/**` is exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs) and `experiments/INDEX.md` may be committed directly to `main` without a PR. This is the only path that bypasses review; all other paths still require one.
 
 ## spawn_task → gh issue create redirect
 

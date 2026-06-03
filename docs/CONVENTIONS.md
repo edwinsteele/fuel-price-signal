@@ -68,6 +68,7 @@ Notes about completed work are fine briefly, then purge unless they inform futur
 - **Fresh branch per PR.** Branch off `main` for each PR; do not continue committing to a previously merged branch even though GitHub diffs against `main` would still work.
 - **Open the PR immediately** after the first commit+push — no need to ask first.
 - Branch naming, PR title format, and PR body shape: see [AGENTS.md § Branch and PR conventions](../AGENTS.md#branch-and-pr-conventions).
+- **Experiments lab book is exempt.** Changes confined to `experiments/**` may be committed directly to `main` without a PR. Each experiment dir is a self-contained lab book entry; iterate freely. `experiments/results.csv` (the formal graduated-experiment log) and `experiments/INDEX.md` (the lab book index) are also direct-to-`main`. Anything touching `fuel_signal/`, `tests/`, `docs/`, or top-level config still goes through a PR even if an experiment motivated it.
 
 ## PR feedback loop
 

@@ -45,6 +45,7 @@ filterwarnings = [
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["experiments"]  # scratch scripts; lab book entries are not held to library lint
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]  # pycodestyle E/W, pyflakes, isort
