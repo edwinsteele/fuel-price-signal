@@ -34,7 +34,15 @@ These local repos contain the source code that was ported. Check them if you nee
 You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `polish` issues and open PRs.
 
 **Pickup rules:**
-1. Check for open `claude-authored` PRs that need maintenance: merge conflicts (`gh pr view N --json mergeable` returns `CONFLICTING`) or unresolved review threads with no `[worker]` reply. If any exist, perform maintenance (see **PR maintenance** below), then exit.
+1. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers:
+   ```bash
+   gh pr list --label claude-authored --state open --json number | jq -r '.[].number'
+   ```
+   For each number N, a PR qualifies if either:
+   - `gh pr view N --json mergeable | jq -r '.mergeable'` returns `CONFLICTING`, **or**
+   - `gh pr view N --json reviews | jq '[.reviews[] | select(.body | length > 20)] | length'` is >0 **and** `gh pr view N --json comments | jq '[.comments[] | select(.body | startswith("[worker]"))] | length'` is 0 (reviews exist but worker hasn't replied yet).
+
+   If any PR qualifies, perform maintenance (see **PR maintenance** below), then exit.
 2. Check for open `claude-authored` PRs (any). If any exist, **exit immediately** — one at a time.
 3. Query `gh issue list --label "chore,polish" --state open --no-assignee --json number,title,labels,createdAt` ordered by label (`chore` before `polish`), then by age (oldest first). Take 1.
 4. Create a branch `worker/issue-<N>-<slug>` for the issue.
@@ -43,7 +51,7 @@ You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `pol
 1. Implement the minimal change — do not scope-creep.
 2. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
 3. Open PR titled `fix: <issue title> (closes #N)` targeting `main` (`--base main`) with labels `claude-authored` + the issue's original label. PR body must include a 3–5 bullet plan (what changed, what didn't, what test was added).
-4. Wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
+4. After opening the PR, do other useful sequenced work (update memory, file any follow-up issues). Once ≈270s of real elapsed time has passed, run `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` to check for reviews. If there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available in `/loop` mode — do not attempt it here.) Act on any actionable comments found in `reviews[].body`. If CodeRabbit is rate-limited or absent, skip and move on — do not reschedule. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
 
 **PR maintenance:**
 When pickup rule 1 triggers, for each qualifying PR:
@@ -55,7 +63,7 @@ When pickup rule 1 triggers, for each qualifying PR:
 4. `git push --force-with-lease`.
 
 *Unresolved review threads:*
-1. Run `gh pr view N --json comments,reviews` and inspect each review body for actionable inline comments not yet addressed (i.e. no reply starting with `[worker]`).
+1. Run `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` and inspect each review body for actionable inline comments not yet addressed (i.e. no `[worker]` reply in `comments`).
 2. Read all such threads together to understand the full set of requested changes.
 3. For any thread that is ambiguous or requires a design decision: reply `[worker] Needs owner input — <question>` and skip it. Do not make changes for that thread.
 4. Make the minimal changes to address the remaining threads.
