@@ -36,6 +36,22 @@ Any test that feeds data into a function with a rolling window filter (e.g. `cov
 
 **Why:** `test_coverage_matrix_returns_station_month_counts` originally inserted `"2024-01-10"` data; once the 24-month window passed that date, the test silently asserted on empty results instead of failing loudly. Hardcoded dates rot.
 
+## Changing the production feature set
+
+Adding, dropping, decomposing, or replacing a feature in the production model's resolved feature set requires paired walk-forward CV evidence before merge. Single-window comparisons — even multi-seed — do not generalise across regimes.
+
+Minimum evidence, cited in the PR body or commit message:
+
+- `uv run python -m fuel_signal.cv_report --drop-feature COL` (drop), or `--baseline OLD.joblib NEW.joblib` (add / swap / decompose)
+- Per-fold CSV path under `experiments/<date>_<slug>/`
+- Median Δ logloss, worst-fold Δ, fold-win count, fold count
+
+Default decision rule: if any single fold regresses by more than the median improvement, keep the feature. The rule is asymmetric on purpose — a wide-mean, narrow-tail improvement is the win pattern; a regime that inverts the sign is the loss pattern.
+
+Override is allowed when the regressing fold is known to be anomalous (a price-shock period, a labelling artefact, a regime explicitly out of scope). State the override reason in the PR body — a considered exception is fine; silently ignoring the rule is not.
+
+**Why:** on 2026-06-03, `station_minus_last_max_cents` looked like a clean drop on one val window (5-seed Δ −0.0112 ± 0.0043), but a 14-fold paired walk-forward CV showed 7/14 fold-wins, mean Δ +0.0104, with fold 9 (2023-10→2024-01) regressing by +0.103. See `experiments/2026-06-03_drop_redundant_pair/`.
+
 ## Definition of done
 
 Before considering a change complete, in this order:
