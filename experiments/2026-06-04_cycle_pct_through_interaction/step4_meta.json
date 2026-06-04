@@ -1,0 +1,46 @@
+{
+  "seed": 42,
+  "n_folds": 14,
+  "baseline_n_features": 50,
+  "additive_n_features": 51,
+  "ablationA_n_features": 49,
+  "engineered_col": "station_minus_expected_phase_price",
+  "dropped_for_ablation_A": [
+    "station_minus_last_min_cents",
+    "station_minus_last_max_cents"
+  ],
+  "regression_threshold": 0.005,
+  "agg_additive_vs_baseline": {
+    "name": "\u0394 additive \u2212 baseline",
+    "mean": -0.0028402497834422746,
+    "median": -0.00031748745203979967,
+    "std": 0.012338493809220684,
+    "min": -0.022632633649031453,
+    "max": 0.013866855756560159,
+    "n_help": 7,
+    "n_hurt": 7,
+    "n_folds": 14
+  },
+  "agg_ablationA_vs_baseline": {
+    "name": "\u0394 ablationA \u2212 baseline",
+    "mean": 0.01751747993931805,
+    "median": 0.009762762355159799,
+    "std": 0.044709042924125704,
+    "min": -0.07765345660290224,
+    "max": 0.1011351571396833,
+    "n_help": 4,
+    "n_hurt": 10,
+    "n_folds": 14
+  },
+  "agg_ablationA_vs_additive": {
+    "name": "\u0394 ablationA \u2212 additive",
+    "mean": 0.020357729722760322,
+    "median": 0.0077527854126188955,
+    "std": 0.047989825797195254,
+    "min": -0.08695888443541688,
+    "max": 0.11404776340452977,
+    "n_help": 3,
+    "n_hurt": 11,
+    "n_folds": 14
+  }
+}

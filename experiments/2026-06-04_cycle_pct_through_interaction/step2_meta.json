@@ -1,0 +1,11 @@
+{
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "baseline_n_features": 50,
+  "engineered_n_features": 51,
+  "engineered_col": "station_minus_expected_phase_price",
+  "formula": "station_price - (last_min + pct_through * (last_max - last_min))"
+}

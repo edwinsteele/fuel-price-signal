@@ -1,0 +1,22 @@
+{
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "baseline_n_features": 50,
+  "additive_n_features": 51,
+  "ablationA_n_features": 49,
+  "engineered_col": "station_minus_expected_phase_price",
+  "dropped_for_ablation_A": [
+    "station_minus_last_min_cents",
+    "station_minus_last_max_cents"
+  ],
+  "formula": "station_price - (last_min + pct_through * (last_max - last_min))",
+  "additive_delta_mean": -0.0065670750884703755,
+  "additive_delta_seed_std": 0.010967191267289537,
+  "ablationA_delta_mean": -0.009684211845052896,
+  "ablationA_delta_seed_std": 0.012239516431524535,
+  "ablationA_vs_additive_mean": -0.0031171367565825205,
+  "ablationA_vs_additive_seed_std": 0.003479443203414199
+}

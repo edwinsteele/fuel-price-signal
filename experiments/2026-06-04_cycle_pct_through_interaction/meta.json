@@ -1,0 +1,20 @@
+{
+  "model_path": "data/models/lgbm_phase4.joblib",
+  "n_sample": 10000,
+  "seed": 0,
+  "main": "cycle_pct_through",
+  "targets": [
+    "station_minus_last_max_cents",
+    "station_minus_last_min_cents",
+    "station_price_cents",
+    "station_minus_sydney_avg_cents",
+    "station_minus_lga_mean_cents",
+    "stickiness_score",
+    "cycle_peak_count"
+  ],
+  "iv_shape": [
+    10000,
+    50,
+    50
+  ]
+}
