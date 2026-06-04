@@ -42,10 +42,8 @@ import pandas as pd
 from sklearn.base import clone
 
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import FEATURE_COLUMNS, load_features
+from fuel_signal.features import DEFAULT_FEATURES_CSV, FEATURE_COLUMNS, load_features
 from fuel_signal.train_logreg import build_pipeline as _build_logreg
-
-DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 
 
 def run_cv(

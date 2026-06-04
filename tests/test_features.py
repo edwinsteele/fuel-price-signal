@@ -441,6 +441,7 @@ def _make_parquet(path, data):
 
 def test_load_features_cache_hit(tmp_path):
     """Returns parquet when parquet exists and is at least as new as CSV."""
+    import os
     import time
 
     from fuel_signal.features import load_features
@@ -448,9 +449,11 @@ def test_load_features_cache_hit(tmp_path):
     csv_path = tmp_path / "features.csv"
     parquet_path = tmp_path / "features.parquet"
 
+    now = time.time()
     _make_csv(csv_path, {"a": [1, 2], "b": [3, 4]})
-    time.sleep(0.01)
+    os.utime(csv_path, (now, now))
     _make_parquet(parquet_path, {"a": [10, 20], "b": [30, 40]})
+    os.utime(parquet_path, (now + 10, now + 10))
 
     df = load_features(csv_path)
     # Parquet has different values — confirms parquet was read
@@ -459,6 +462,7 @@ def test_load_features_cache_hit(tmp_path):
 
 def test_load_features_cache_stale(tmp_path):
     """Returns CSV when CSV is newer than parquet."""
+    import os
     import time
 
     from fuel_signal.features import load_features
@@ -466,9 +470,11 @@ def test_load_features_cache_stale(tmp_path):
     csv_path = tmp_path / "features.csv"
     parquet_path = tmp_path / "features.parquet"
 
+    now = time.time()
     _make_parquet(parquet_path, {"a": [10, 20], "b": [30, 40]})
-    time.sleep(0.01)
+    os.utime(parquet_path, (now, now))
     _make_csv(csv_path, {"a": [1, 2], "b": [3, 4]})
+    os.utime(csv_path, (now + 10, now + 10))
 
     df = load_features(csv_path)
     assert list(df["a"]) == [1, 2]

@@ -29,6 +29,7 @@ from lightgbm import LGBMClassifier  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
 from fuel_signal.features import (  # noqa: E402
+    DEFAULT_FEATURES_CSV,
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
     discover_brand_feature_columns,
@@ -36,7 +37,6 @@ from fuel_signal.features import (  # noqa: E402
 )
 from fuel_signal.train_logreg import save_reliability_plot  # noqa: E402
 
-DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 DEFAULT_MODEL_OUT = pathlib.Path("data/models/lgbm.joblib")
 DEFAULT_RELIABILITY_PNG = pathlib.Path("experiments/reliability_lgbm_val.png")
 

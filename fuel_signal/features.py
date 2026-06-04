@@ -496,10 +496,9 @@ def load_features(path: pathlib.Path | str = DEFAULT_FEATURES_CSV) -> pd.DataFra
     """Load features from parquet cache when fresher than CSV, else from CSV."""
     csv_path = pathlib.Path(path)
     parquet_path = csv_path.with_suffix(".parquet")
-    if (
-        parquet_path.exists()
-        and csv_path.exists()
-        and parquet_path.stat().st_mtime >= csv_path.stat().st_mtime
+    if parquet_path.exists() and (
+        not csv_path.exists()
+        or parquet_path.stat().st_mtime >= csv_path.stat().st_mtime
     ):
         return pd.read_parquet(parquet_path)
     return pd.read_csv(csv_path)

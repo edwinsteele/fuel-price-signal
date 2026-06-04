@@ -43,9 +43,8 @@ from sklearn.pipeline import Pipeline  # noqa: E402
 from sklearn.preprocessing import StandardScaler  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
-from fuel_signal.features import FEATURE_COLUMNS, load_features  # noqa: E402
+from fuel_signal.features import DEFAULT_FEATURES_CSV, FEATURE_COLUMNS, load_features  # noqa: E402
 
-DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 DEFAULT_MODEL_OUT = pathlib.Path("data/models/logreg.joblib")
 DEFAULT_RELIABILITY_PNG = pathlib.Path("experiments/reliability_logreg_val.png")
 
