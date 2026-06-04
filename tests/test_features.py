@@ -406,6 +406,85 @@ def test_cli_writes_csv(conn, tmp_path):
         assert col in df.columns
 
 
+def test_cli_writes_parquet_alongside_csv(conn, tmp_path):
+    """CLI writes features.parquet alongside features.csv."""
+    from click.testing import CliRunner
+
+    from fuel_signal.features import main
+
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+
+    out_csv = tmp_path / "features.csv"
+    result = CliRunner().invoke(main, [
+        "--db", str(tmp_path / "test.db"),
+        "--output", str(out_csv),
+        "--min-rows", "0",
+    ])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "features.parquet").exists()
+
+
+# ---------------------------------------------------------------------------
+# load_features helper
+# ---------------------------------------------------------------------------
+
+def _make_csv(path, data):
+    import pandas as pd
+    pd.DataFrame(data).to_csv(path, index=False)
+
+
+def _make_parquet(path, data):
+    import pandas as pd
+    pd.DataFrame(data).to_parquet(path, index=False)
+
+
+def test_load_features_cache_hit(tmp_path):
+    """Returns parquet when parquet exists and is at least as new as CSV."""
+    import time
+
+    from fuel_signal.features import load_features
+
+    csv_path = tmp_path / "features.csv"
+    parquet_path = tmp_path / "features.parquet"
+
+    _make_csv(csv_path, {"a": [1, 2], "b": [3, 4]})
+    time.sleep(0.01)
+    _make_parquet(parquet_path, {"a": [10, 20], "b": [30, 40]})
+
+    df = load_features(csv_path)
+    # Parquet has different values — confirms parquet was read
+    assert list(df["a"]) == [10, 20]
+
+
+def test_load_features_cache_stale(tmp_path):
+    """Returns CSV when CSV is newer than parquet."""
+    import time
+
+    from fuel_signal.features import load_features
+
+    csv_path = tmp_path / "features.csv"
+    parquet_path = tmp_path / "features.parquet"
+
+    _make_parquet(parquet_path, {"a": [10, 20], "b": [30, 40]})
+    time.sleep(0.01)
+    _make_csv(csv_path, {"a": [1, 2], "b": [3, 4]})
+
+    df = load_features(csv_path)
+    assert list(df["a"]) == [1, 2]
+
+
+def test_load_features_cache_missing(tmp_path):
+    """Returns CSV when no parquet exists."""
+    from fuel_signal.features import load_features
+
+    csv_path = tmp_path / "features.csv"
+    _make_csv(csv_path, {"a": [1, 2], "b": [3, 4]})
+
+    df = load_features(csv_path)
+    assert list(df["a"]) == [1, 2]
+
+
 # ---------------------------------------------------------------------------
 # LGA mean and brand mean features
 # ---------------------------------------------------------------------------

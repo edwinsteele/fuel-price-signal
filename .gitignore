@@ -37,6 +37,7 @@ inspect.html
 # Generated locally — charts, labels, features, models
 data/**/*.png
 data/*.csv
+data/*.parquet
 data/models/
 
 # Experiment artifacts — type-based, so new experiment dirs auto-inherit.

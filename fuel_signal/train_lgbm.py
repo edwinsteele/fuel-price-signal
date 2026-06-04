@@ -32,6 +32,7 @@ from fuel_signal.features import (  # noqa: E402
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
     discover_brand_feature_columns,
+    load_features,
 )
 from fuel_signal.train_logreg import save_reliability_plot  # noqa: E402
 
@@ -202,7 +203,7 @@ def main(
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
-    df = pd.read_csv(features_path)
+    df = load_features(features_path)
 
     brand_columns = (
         [] if no_brand_features or no_lga_features

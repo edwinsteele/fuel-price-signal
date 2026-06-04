@@ -49,6 +49,8 @@ from fuel_signal.lga_leadership import (
 # Minimum label rows a station must have to be included in the training dataset.
 # Roughly one year of daily observations. Stations below this threshold are
 # too new to have survived a full price cycle and produce uninformative label patterns.
+DEFAULT_FEATURES_CSV: pathlib.Path = pathlib.Path("data/features.csv")
+
 MIN_TRAINING_ROWS_PER_STATION: int = 365
 
 # Stations excluded from training due to confirmed data-gap distortion.
@@ -490,6 +492,19 @@ def assemble_feature_rows(
     return pd.DataFrame(records, columns=all_cols)
 
 
+def load_features(path: pathlib.Path | str = DEFAULT_FEATURES_CSV) -> pd.DataFrame:
+    """Load features from parquet cache when fresher than CSV, else from CSV."""
+    csv_path = pathlib.Path(path)
+    parquet_path = csv_path.with_suffix(".parquet")
+    if (
+        parquet_path.exists()
+        and csv_path.exists()
+        and parquet_path.stat().st_mtime >= csv_path.stat().st_mtime
+    ):
+        return pd.read_parquet(parquet_path)
+    return pd.read_csv(csv_path)
+
+
 @click.command("features")
 @click.option(
     "--output",
@@ -547,6 +562,7 @@ def main(  # noqa: PLR0913
     out_path = pathlib.Path(output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
+    df.to_parquet(out_path.with_suffix(".parquet"), index=False)
     click.echo(f"Wrote {len(df):,} rows ({int(df['label'].sum()):,} positive) to {out_path}")
 
 

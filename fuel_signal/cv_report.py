@@ -42,7 +42,7 @@ import pandas as pd
 from sklearn.base import clone
 
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import FEATURE_COLUMNS
+from fuel_signal.features import FEATURE_COLUMNS, load_features
 from fuel_signal.train_logreg import build_pipeline as _build_logreg
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
@@ -344,7 +344,7 @@ def main(
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
-    df = pd.read_csv(features_path)
+    df = load_features(features_path)
     missing = [c for c in ("label", "price_date") if c not in df.columns]
     if missing:
         raise click.ClickException(
