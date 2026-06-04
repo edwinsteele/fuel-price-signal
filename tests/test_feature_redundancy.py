@@ -186,6 +186,14 @@ def test_compute_interaction_matrix_shape_and_symmetry(tmp_path):
 # run_redundancy_report — integration
 # ---------------------------------------------------------------------------
 
+_PAIRED_CV_COLS = {
+    "paired_cv_median_delta",
+    "paired_cv_worst_fold_delta",
+    "paired_cv_fold_wins",
+    "paired_cv_csv",
+}
+
+
 def test_run_redundancy_report_writes_all_artifacts(tmp_path):
     df = _synthetic_df()
     mp, fp, _ = _make_bundle(tmp_path, df, _FEATURES)
@@ -195,6 +203,7 @@ def test_run_redundancy_report_writes_all_artifacts(tmp_path):
         cluster_threshold=0.5,
         interaction_sample=1_000,
         seed=0,
+        skip_paired_cv=True,
     )
 
     for name in [
@@ -217,11 +226,59 @@ def test_run_redundancy_report_writes_all_artifacts(tmp_path):
         "feature", "main_effect", "total_partner_mass", "main_effect_share",
         "entropy_norm", "n_partners_ge_5pct", "top1_partner", "top1_share",
     }.issubset(decomp.columns)
+    assert _PAIRED_CV_COLS.issubset(decomp.columns)
     # entropy_norm is sorted descending
     assert decomp["entropy_norm"].is_monotonic_decreasing
 
     clusters = pd.read_csv(out / "clusters.csv")
     assert result["n_clusters"] == clusters["cluster_id"].nunique()
+    assert _PAIRED_CV_COLS.issubset(clusters.columns)
+    # skip_paired_cv=True → paired_cv_median_delta is NaN throughout
+    assert clusters["paired_cv_median_delta"].isna().all()
+    assert decomp["paired_cv_median_delta"].isna().all()
+
+
+def test_run_redundancy_report_paired_cv_populates_columns(tmp_path):
+    """Paired CV path: columns are non-NaN and per-fold CSVs are written.
+
+    Uses reduced cv_train_min_days/val_days/step_days so the synthetic data
+    (400 continuous days in 2018) produces non-empty folds without needing a
+    full ~5-year training window.
+    """
+    df = _synthetic_df()
+    mp, fp, _ = _make_bundle(tmp_path, df, _FEATURES)
+    out = tmp_path / "cv_out"
+    run_redundancy_report(
+        mp, fp, "val", out,
+        cluster_threshold=0.5,
+        interaction_sample=500,
+        seed=0,
+        skip_paired_cv=False,
+        cv_seed=0,
+        cv_train_min_days=50,
+        cv_val_days=20,
+        cv_step_days=20,
+    )
+
+    clusters = pd.read_csv(out / "clusters.csv")
+    decomp = pd.read_csv(out / "decomposition_candidates.csv")
+
+    assert _PAIRED_CV_COLS.issubset(clusters.columns)
+    assert _PAIRED_CV_COLS.issubset(decomp.columns)
+
+    # At least some clusters/features have CV results (non-NaN median delta)
+    assert clusters["paired_cv_median_delta"].notna().any()
+    assert decomp["paired_cv_median_delta"].notna().any()
+
+    # fold_wins is N/M format for rows that ran
+    wins_nonempty = clusters["paired_cv_fold_wins"].dropna()
+    wins_nonempty = wins_nonempty[wins_nonempty != ""]
+    assert wins_nonempty.str.match(r"^\d+/\d+$").all()
+
+    # per-fold CSVs exist for non-empty entries
+    first_csv = clusters["paired_cv_csv"].dropna().iloc[0]
+    assert first_csv != ""
+    assert (out / first_csv).exists()
 
 
 def test_cli_smoke(tmp_path):
@@ -237,6 +294,7 @@ def test_cli_smoke(tmp_path):
             "--split", "val",
             "--output", str(out),
             "--interaction-sample", "500",
+            "--skip-paired-cv",
         ],
     )
     assert res.exit_code == 0, res.output

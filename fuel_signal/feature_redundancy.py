@@ -44,6 +44,7 @@ from scipy.cluster.hierarchy import dendrogram, fcluster, linkage  # noqa: E402
 from scipy.spatial.distance import squareform  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
+from fuel_signal.cv_report import run_paired_cv as _run_paired_cv  # noqa: E402
 from fuel_signal.shap_report import compute_shap  # noqa: E402
 
 DEFAULT_MODEL = pathlib.Path("data/models/lgbm.joblib")
@@ -251,6 +252,127 @@ def decomposition_scores(
 
 
 # ---------------------------------------------------------------------------
+# Paired walk-forward CV per candidate
+# ---------------------------------------------------------------------------
+
+_CV_COLS = [
+    "paired_cv_median_delta",
+    "paired_cv_worst_fold_delta",
+    "paired_cv_fold_wins",
+    "paired_cv_csv",
+]
+
+
+def _cv_nan_row() -> dict:
+    return {
+        "paired_cv_median_delta": float("nan"),
+        "paired_cv_worst_fold_delta": float("nan"),
+        "paired_cv_fold_wins": "",
+        "paired_cv_csv": "",
+    }
+
+
+def _cv_summary(results: list[dict], csv_rel_path: str) -> dict:
+    if not results:
+        return _cv_nan_row()
+    deltas = np.array([r["delta"] for r in results])
+    n_wins = int((deltas < 0).sum())
+    return {
+        "paired_cv_median_delta": float(np.median(deltas)),
+        "paired_cv_worst_fold_delta": float(np.max(deltas)),
+        "paired_cv_fold_wins": f"{n_wins}/{len(results)}",
+        "paired_cv_csv": csv_rel_path,
+    }
+
+
+def _add_nan_cv_cols(df: pd.DataFrame) -> pd.DataFrame:
+    nan_row = _cv_nan_row()
+    for col in _CV_COLS:
+        df[col] = nan_row[col]
+    return df
+
+
+def _run_cluster_cv(
+    cluster_table: pd.DataFrame,
+    df: pd.DataFrame,
+    model_path: pathlib.Path,
+    output_dir: pathlib.Path,
+    *,
+    cv_seed: int,
+    cv_train_min_days: int,
+    cv_val_days: int,
+    cv_step_days: int,
+) -> pd.DataFrame:
+    """Add paired_cv_* columns to cluster_table — one CV run per unique cluster."""
+    cv_dir = output_dir / "cv_clusters"
+    cv_dir.mkdir(parents=True, exist_ok=True)
+
+    cluster_cv: dict[int, dict] = {}
+    for cid in sorted(cluster_table["cluster_id"].unique()):
+        mask = cluster_table["cluster_id"] == cid
+        rep = (
+            cluster_table[mask]
+            .sort_values("mean_abs_shap", ascending=False)
+            .iloc[0]["feature"]
+        )
+        csv_rel = f"cv_clusters/cluster_{cid}.csv"
+        fold_results = _run_paired_cv(
+            df,
+            model_path,
+            drop_features=[rep],
+            seed=cv_seed,
+            train_min_days=cv_train_min_days,
+            val_days=cv_val_days,
+            step_days=cv_step_days,
+        )
+        pd.DataFrame(fold_results).to_csv(output_dir / csv_rel, index=False)
+        cluster_cv[cid] = _cv_summary(fold_results, csv_rel)
+
+    for col in _CV_COLS:
+        cluster_table[col] = cluster_table["cluster_id"].map(
+            lambda cid, c=col: cluster_cv[cid][c]
+        )
+    return cluster_table
+
+
+def _run_decomp_cv(
+    decomp: pd.DataFrame,
+    df: pd.DataFrame,
+    model_path: pathlib.Path,
+    output_dir: pathlib.Path,
+    *,
+    cv_seed: int,
+    cv_train_min_days: int,
+    cv_val_days: int,
+    cv_step_days: int,
+) -> pd.DataFrame:
+    """Add paired_cv_* columns to decomp — one CV run per feature."""
+    cv_dir = output_dir / "cv_decomp"
+    cv_dir.mkdir(parents=True, exist_ok=True)
+
+    cv_rows: list[dict] = []
+    for pos, (_, row) in enumerate(decomp.iterrows()):
+        feat = row["feature"]
+        csv_rel = f"cv_decomp/{pos}.csv"
+        fold_results = _run_paired_cv(
+            df,
+            model_path,
+            drop_features=[feat],
+            seed=cv_seed,
+            train_min_days=cv_train_min_days,
+            val_days=cv_val_days,
+            step_days=cv_step_days,
+        )
+        pd.DataFrame(fold_results).to_csv(output_dir / csv_rel, index=False)
+        cv_rows.append({"feature": feat, **_cv_summary(fold_results, csv_rel)})
+
+    cv_df = pd.DataFrame(cv_rows).set_index("feature")
+    for col in _CV_COLS:
+        decomp[col] = decomp["feature"].map(cv_df[col])
+    return decomp
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -267,6 +389,12 @@ def run_redundancy_report(
     cluster_threshold: float,
     interaction_sample: int,
     seed: int,
+    *,
+    skip_paired_cv: bool = False,
+    cv_seed: int = 42,
+    cv_train_min_days: int = 1825,
+    cv_val_days: int = 90,
+    cv_step_days: int = 90,
 ) -> dict:
     bundle = joblib.load(model_path)
     model = bundle["pipeline"]
@@ -292,6 +420,24 @@ def run_redundancy_report(
     decomp = decomposition_scores(feature_columns, interaction_matrix)
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    cv_kwargs = dict(
+        cv_seed=cv_seed,
+        cv_train_min_days=cv_train_min_days,
+        cv_val_days=cv_val_days,
+        cv_step_days=cv_step_days,
+    )
+    if skip_paired_cv:
+        cluster_table = _add_nan_cv_cols(cluster_table)
+        decomp = _add_nan_cv_cols(decomp)
+    else:
+        cluster_table = _run_cluster_cv(
+            cluster_table, df, model_path, output_dir, **cv_kwargs
+        )
+        decomp = _run_decomp_cv(
+            decomp, df, model_path, output_dir, **cv_kwargs
+        )
+
     pd.DataFrame(corr, index=feature_columns, columns=feature_columns).to_csv(
         output_dir / "shap_corr.csv"
     )
@@ -312,6 +458,8 @@ def run_redundancy_report(
             "interaction_sample": interaction_sample,
             "interaction_rows_used": n_used,
             "seed": seed,
+            "skip_paired_cv": skip_paired_cv,
+            "cv_seed": cv_seed,
             "n_features": len(feature_columns),
             "n_rows_split": int(split_df.shape[0]),
         }, fh, indent=2)
@@ -375,6 +523,22 @@ def run_redundancy_report(
     show_default=True,
     help="RNG seed for interaction subsampling.",
 )
+@click.option(
+    "--skip-paired-cv",
+    is_flag=True,
+    default=False,
+    help=(
+        "Skip paired walk-forward CV per candidate. Leaves paired_cv_* columns as NaN. "
+        "Use for a fast SHAP-only screening pass when wall time is a concern."
+    ),
+)
+@click.option(
+    "--cv-seed",
+    type=int,
+    default=42,
+    show_default=True,
+    help="RNG seed used when re-training each fold during paired CV.",
+)
 def main(
     model_path: str,
     features_csv: str,
@@ -383,6 +547,8 @@ def main(
     cluster_threshold: float,
     interaction_sample: int,
     seed: int,
+    skip_paired_cv: bool,
+    cv_seed: int,
 ) -> None:
     """Compute SHAP redundancy clusters + decomposition candidates."""
     mp = pathlib.Path(model_path)
@@ -399,12 +565,18 @@ def main(
     click.echo(f"Loading model from {mp}")
     click.echo(f"Loading features from {fp}")
     click.echo(f"Split: {split}")
+    if skip_paired_cv:
+        click.echo("Paired CV: skipped (--skip-paired-cv)")
+    else:
+        click.echo(f"Paired CV: enabled (cv_seed={cv_seed}) — may take several minutes")
 
     result = run_redundancy_report(
         mp, fp, split, out,  # type: ignore[arg-type]
         cluster_threshold=cluster_threshold,
         interaction_sample=interaction_sample,
         seed=seed,
+        skip_paired_cv=skip_paired_cv,
+        cv_seed=cv_seed,
     )
 
     clusters = result["clusters"]
@@ -444,6 +616,9 @@ def main(
     click.echo("  decomposition_candidates.csv")
     click.echo("  feature_columns.json")
     click.echo("  params.json")
+    if not skip_paired_cv:
+        click.echo("  cv_clusters/  (per-fold CSVs, one per cluster)")
+        click.echo("  cv_decomp/    (per-fold CSVs, one per feature)")
 
 
 if __name__ == "__main__":
