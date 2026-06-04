@@ -1,13 +1,17 @@
 name: Auto-merge chore PRs
 
-# Fires when auto-merge-ok is applied, and again when any CI workflow finishes
-# on a PR that already has the label (catches the race where CI finishes after labelling).
+# Fires when auto-merge-ok is applied, when CI finishes, and on a schedule.
+# The schedule is needed because the min-age gate below typically rejects the
+# label-time and CI-completion invocations (both happen too early), so we need
+# a periodic sweep to re-evaluate once the review window has closed.
 on:
   pull_request:
     types: [labeled]
   workflow_run:
     workflows: [CI]
     types: [completed]
+  schedule:
+    - cron: "*/10 * * * *"
 
 jobs:
   auto-merge:
@@ -35,8 +39,24 @@ jobs:
             exit 0
           fi
 
+          # Minimum PR age before auto-merge fires. Gives external reviewers
+          # (Sourcery, CodeRabbit) time to post comments and the worker time to
+          # address them — otherwise the merge races the review loop and any
+          # follow-up fixes end up stranded on the deleted branch (see PR #201).
+          MIN_AGE_SECONDS=900
+
           for pr in $prs; do
             echo "=== Checking PR #$pr ==="
+
+            created_at=$(gh pr view "$pr" --json createdAt --jq .createdAt)
+            created_epoch=$(date -u -d "$created_at" +%s)
+            now_epoch=$(date -u +%s)
+            age=$((now_epoch - created_epoch))
+
+            if [ "$age" -lt "$MIN_AGE_SECONDS" ]; then
+              echo "PR #$pr: age ${age}s < ${MIN_AGE_SECONDS}s — skipping to leave a review window."
+              continue
+            fi
 
             # Count checks that are not yet successful or skipped.
             failing=$(gh pr checks "$pr" 2>/dev/null \
