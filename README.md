@@ -406,9 +406,24 @@ uv run python -m fuel_signal.feature_redundancy \
     --output experiments/redundancy_phase4/ \
     --cluster-threshold 0.5 \
     --interaction-sample 3000
+# Fast SHAP-only pass (CV skipped; paired_cv_* columns emitted as NaN/empty):
+uv run python -m fuel_signal.feature_redundancy ... --skip-paired-cv
 ```
 
-Artifacts: `shap_corr.csv`, `clusters.csv`, `dendrogram.png`, `interaction_matrix.csv`, `decomposition_candidates.csv` (ranked by `entropy_norm` desc), plus `feature_columns.json` and `params.json`. `--interaction-sample` caps the row count used for `shap_interaction_values`, which is O(rows × trees × depth²) — much slower than plain SHAP.
+Artifacts: `shap_corr.csv`, `clusters.csv`, `dendrogram.png`, `interaction_matrix.csv`, `decomposition_candidates.csv` (ranked by `entropy_norm` desc), plus `feature_columns.json` and `params.json`. When paired CV is enabled (default), `cv_clusters/` and `cv_decomp/` subdirectories hold per-fold CSVs.
+
+`--interaction-sample` caps the row count used for `shap_interaction_values`, which is O(rows × trees × depth²) — much slower than plain SHAP.
+
+**Regime-stability columns** (added to both `clusters.csv` and `decomposition_candidates.csv`):
+
+| column | description |
+|---|---|
+| `paired_cv_median_delta` | Median Δ logloss across folds (dropped vs full-feature baseline). Negative = drop wins. |
+| `paired_cv_worst_fold_delta` | Worst (most adverse) single fold Δ. A large positive value flags regime sensitivity. |
+| `paired_cv_fold_wins` | `n_folds_won/n_folds` — how often the drop beats baseline. |
+| `paired_cv_csv` | Relative path to the per-fold CSV under `--output`. |
+
+**CV strategy:** One CV run per unique cluster (dropping the cluster representative — highest `mean_abs_shap` member) for `clusters.csv`; one CV run per feature for `decomposition_candidates.csv`. All available walk-forward folds are used (default: 14 folds × 90-day windows over the pre-test span). With ~50 features this takes 10–30 minutes depending on model size. Use `--skip-paired-cv` for a fast SHAP-only screening pass.
 
 ## Training the LightGBM baseline (Phase 3a.1)
 
