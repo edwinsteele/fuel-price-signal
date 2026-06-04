@@ -406,7 +406,7 @@ uv run python -m fuel_signal.feature_redundancy \
     --output experiments/redundancy_phase4/ \
     --cluster-threshold 0.5 \
     --interaction-sample 3000
-# Fast SHAP-only pass (no CV, skips regime-stability columns):
+# Fast SHAP-only pass (CV skipped; paired_cv_* columns emitted as NaN/empty):
 uv run python -m fuel_signal.feature_redundancy ... --skip-paired-cv
 ```
 

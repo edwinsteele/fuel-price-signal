@@ -315,7 +315,8 @@ def _run_cluster_cv(
             .sort_values("mean_abs_shap", ascending=False)
             .iloc[0]["feature"]
         )
-        csv_rel = f"cv_clusters/cluster_{cid}.csv"
+        csv_name = f"cluster_{cid}.csv"
+        csv_rel = f"cv_clusters/{csv_name}"
         fold_results = _run_paired_cv(
             df,
             model_path,
@@ -325,7 +326,7 @@ def _run_cluster_cv(
             val_days=cv_val_days,
             step_days=cv_step_days,
         )
-        pd.DataFrame(fold_results).to_csv(output_dir / csv_rel, index=False)
+        pd.DataFrame(fold_results).to_csv(cv_dir / csv_name, index=False)
         cluster_cv[cid] = _cv_summary(fold_results, csv_rel)
 
     for col in _CV_COLS:
@@ -347,13 +348,17 @@ def _run_decomp_cv(
     cv_step_days: int,
 ) -> pd.DataFrame:
     """Add paired_cv_* columns to decomp — one CV run per feature."""
+    if decomp.empty:
+        return _add_nan_cv_cols(decomp)
+
     cv_dir = output_dir / "cv_decomp"
     cv_dir.mkdir(parents=True, exist_ok=True)
 
     cv_rows: list[dict] = []
     for pos, (_, row) in enumerate(decomp.iterrows()):
         feat = row["feature"]
-        csv_rel = f"cv_decomp/{pos}.csv"
+        csv_name = f"{pos}.csv"
+        csv_rel = f"cv_decomp/{csv_name}"
         fold_results = _run_paired_cv(
             df,
             model_path,
@@ -363,7 +368,7 @@ def _run_decomp_cv(
             val_days=cv_val_days,
             step_days=cv_step_days,
         )
-        pd.DataFrame(fold_results).to_csv(output_dir / csv_rel, index=False)
+        pd.DataFrame(fold_results).to_csv(cv_dir / csv_name, index=False)
         cv_rows.append({"feature": feat, **_cv_summary(fold_results, csv_rel)})
 
     cv_df = pd.DataFrame(cv_rows).set_index("feature")
@@ -460,6 +465,9 @@ def run_redundancy_report(
             "seed": seed,
             "skip_paired_cv": skip_paired_cv,
             "cv_seed": cv_seed,
+            "cv_train_min_days": cv_train_min_days,
+            "cv_val_days": cv_val_days,
+            "cv_step_days": cv_step_days,
             "n_features": len(feature_columns),
             "n_rows_split": int(split_df.shape[0]),
         }, fh, indent=2)
