@@ -43,7 +43,7 @@ from sklearn.pipeline import Pipeline  # noqa: E402
 from sklearn.preprocessing import StandardScaler  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
-from fuel_signal.features import FEATURE_COLUMNS  # noqa: E402
+from fuel_signal.features import FEATURE_COLUMNS, load_features  # noqa: E402
 
 DEFAULT_FEATURES_CSV = pathlib.Path("data/features.csv")
 DEFAULT_MODEL_OUT = pathlib.Path("data/models/logreg.joblib")
@@ -263,7 +263,7 @@ def main(features_csv: str, model_out: str, reliability_out: str) -> None:
             "Run 'uv run python -m fuel_signal.features' first."
         )
 
-    df = pd.read_csv(features_path)
+    df = load_features(features_path)
     missing = [c for c in FEATURE_COLUMNS + ["label", "price_date"] if c not in df.columns]
     if missing:
         raise click.ClickException(
