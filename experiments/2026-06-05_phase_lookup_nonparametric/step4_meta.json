@@ -1,0 +1,133 @@
+{
+  "seed": 42,
+  "n_folds": 14,
+  "baseline_n_features": 50,
+  "additive_n_features": 51,
+  "ablationA_n_features": 49,
+  "engineered_col": "station_minus_expected_phase_lookup",
+  "dropped_for_ablation_A": [
+    "station_minus_last_min_cents",
+    "station_minus_last_max_cents"
+  ],
+  "regression_threshold": 0.005,
+  "lookup": {
+    "n_bins": 30,
+    "pct_clip": 1.5,
+    "bin_edges": [
+      0.0,
+      0.05,
+      0.1,
+      0.15000000000000002,
+      0.2,
+      0.25,
+      0.30000000000000004,
+      0.35000000000000003,
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6000000000000001,
+      0.65,
+      0.7000000000000001,
+      0.75,
+      0.8,
+      0.8500000000000001,
+      0.9,
+      0.9500000000000001,
+      1.0,
+      1.05,
+      1.1,
+      1.1500000000000001,
+      1.2000000000000002,
+      1.25,
+      1.3,
+      1.35,
+      1.4000000000000001,
+      1.4500000000000002,
+      1.5
+    ]
+  },
+  "shock_folds": [
+    1,
+    4,
+    9,
+    13
+  ],
+  "agg_additive_vs_baseline_all": {
+    "name": "\u0394 additive \u2212 baseline   [all]",
+    "mean": -0.0012316649002976335,
+    "median": -0.0004488410158940137,
+    "std": 0.011187804102538411,
+    "min": -0.023442156106938228,
+    "max": 0.015152320215049586,
+    "n_help": 7,
+    "n_hurt": 7,
+    "n_folds": 14
+  },
+  "agg_ablationA_vs_baseline_all": {
+    "name": "\u0394 ablationA \u2212 baseline  [all]",
+    "mean": 0.007169452978125502,
+    "median": 0.0045636511147367775,
+    "std": 0.025167567394658006,
+    "min": -0.025355335823709024,
+    "max": 0.06643213025127892,
+    "n_help": 5,
+    "n_hurt": 9,
+    "n_folds": 14
+  },
+  "agg_ablationA_vs_additive_all": {
+    "name": "\u0394 ablationA \u2212 additive [all]",
+    "mean": 0.008401117878423136,
+    "median": 0.0044075440215339545,
+    "std": 0.02987032953106724,
+    "min": -0.025609634175483287,
+    "max": 0.06621094760431079,
+    "n_help": 6,
+    "n_hurt": 8,
+    "n_folds": 14
+  },
+  "agg_additive_vs_baseline_normal": {
+    "name": "\u0394 additive \u2212 baseline   [normal]",
+    "mean": 0.0010980443977020166,
+    "median": 0.0003502321894970767,
+    "std": 0.011682727716708278,
+    "min": -0.023442156106938228,
+    "max": 0.015152320215049586,
+    "n_help": 5,
+    "n_hurt": 5,
+    "n_folds": 10
+  },
+  "agg_ablationA_vs_baseline_normal": {
+    "name": "\u0394 ablationA \u2212 baseline  [normal]",
+    "mean": 0.0011668631482074643,
+    "median": 0.004520042506793498,
+    "std": 0.014776247259286867,
+    "min": -0.01845121651893844,
+    "max": 0.02949352699824076,
+    "n_help": 4,
+    "n_hurt": 6,
+    "n_folds": 10
+  },
+  "agg_additive_vs_baseline_shock": {
+    "name": "\u0394 additive \u2212 baseline   [shock]",
+    "mean": -0.0070559381452967584,
+    "median": -0.006629263068620245,
+    "std": 0.008343285857340104,
+    "min": -0.015186409090914677,
+    "max": 0.00022118264696813217,
+    "n_help": 2,
+    "n_hurt": 2,
+    "n_folds": 4
+  },
+  "agg_ablationA_vs_baseline_shock": {
+    "name": "\u0394 ablationA \u2212 baseline  [shock]",
+    "mean": 0.022175927552920596,
+    "median": 0.023813457892056245,
+    "std": 0.04085812249077696,
+    "min": -0.025355335823709024,
+    "max": 0.06643213025127892,
+    "n_help": 1,
+    "n_hurt": 3,
+    "n_folds": 4
+  }
+}

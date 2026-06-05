@@ -1,10 +1,10 @@
 # Non-parametric phase model — retest of phase-residual diagnosis
 
-- **Date:** 2026-06-05 (PARKED mid-design)
+- **Date:** 2026-06-05 (parked mid-design), resumed and completed 2026-06-06
 - **Branch:** main
-- **SHA at park:** 3da7f38
-- **Status:** open
+- **Status:** **complete — phase-residual concept retired**
 - **Predecessor:** `experiments/2026-06-04_cycle_pct_through_interaction/` (step 4 abandoned ablationA with worst-fold +0.101)
+- **Verdict:** additive (51-feature) is neutral; ablationA (49-feature, drop siblings, add lookup) regresses mildly on stable folds and catastrophically on fold 9 (+0.066). The non-parametric shape correction improved fold 9 from +0.101 → +0.066 vs the predecessor's linear-interp formula — the shape *was* mis-specified — but the diagonal-projection issue is real and independent of shape. **The phase-residual concept is dead.** See § Outcome for the mechanism-level story (it's not generic "shock fragility" — it's a specific late-descent × cycle-elongation × lookup-tail-noise triple-stack).
 
 ## Hypothesis
 
@@ -46,11 +46,11 @@ This finding is captured cross-session as `project_cycle_pct_through_semantics`.
 | sub-decision | state | choice |
 |---|---|---|
 | Phase variable | done | `cycle_pct_through` raw |
-| Bin axis extent | done | extend bins to **pct = 2.0**, clip beyond |
-| Bin method | **pending** | quantile vs equal-width — not chosen |
-| Bin count | **pending** | not chosen |
+| Bin axis extent | done | extend bins to **pct = 1.5**, clip beyond. Revised from 2.0 after inspecting `phase_shape_empirical.csv`: bins past 1.5 have 3k–13k rows and means swing 0.03 → 0.77 → −0.13 in adjacent bins, larger than the signal we're modelling. Selection-bias-in-tail makes those bins shock-conditional; an extended lookup would inject noise > signal. ~3% of rows clip to bin 1.475 (≈ 0.33), which sits inside the [1.0, 1.5] plateau and acts as a sensible "well into late cycle" shrinkage value. |
+| Bin method | done | **equal-width**. Quantile breaks on the 15.4% pct=0 spike (multiple quantile bins collapse onto pct=0). Equal-width keeps the phase axis interpretable and leaves selection-bias-in-tail visible in diagnostics. |
+| Bin count | done | **30 bins of width 0.05 over [0, 1.5]**. Resolves the early-peak hump and trough cleanly; per-fold train (~1.4M rows) gives ~30k–60k rows in normal-range bins. |
 | pct = 0 spike (15.4% of rows) | done | benign: fresh-peak days. Treat honestly as bin 0. Not a data artefact (only 3/312,319 have station_price == last_min; no degenerate denominators). |
-| Tail handling past pct = 2.0 | done | clip to 2.0 |
+| Tail handling past pct = 1.5 | done | clip to 1.5 |
 
 Distribution facts (full dataset, 2,023,658 rows):
 
@@ -59,40 +59,32 @@ Distribution facts (full dataset, 2,023,658 rows):
 - pct > 1: ~17% of rows
 - per-bin sample counts (20 equal-width bins over [0,1]): ~44k–92k except the 0-spike bin at 328k
 
-### Step 2 — define "expected price" (NOT STARTED)
+### Step 2 — define "expected price" (DONE 2026-06-06)
 
-The most important design choice. Open question: what does the lookup learn? Candidates:
+**Choice: (A) `E[norm_price | phase]` where `norm_price = (station − last_min) / (last_max − last_min)`.** Lookup returns the empirical curve as percentages of (last_max − last_min). Per-row un-normalisation: `expected = last_min + lookup(phase) × (last_max − last_min)`.
 
-- **(A) `E[norm_price | phase]` where `norm_price = (station − last_min) / (last_max − last_min)`.** Lookup returns the empirical curve in the table above; we un-normalise per row as `expected = last_min + lookup(phase) × (last_max − last_min)`. Cleanly compatible with the step-4 protocol — same un-normalisation algebra, replacing the diagonal with a learned curve.
-- **(B) `E[station − last_min | phase]` in cents.** Avoids the assumption that amplitude scales the curve linearly. But then we conflate cycle amplitude with phase shape in the lookup.
-- **(C) Per-station / per-LGA / per-amplitude conditioning.** Adds complexity. Skip for v1.
-- **Selection-bias-in-tail risk** (see below) applies to all of these.
+Why over (B) `E[station − last_min | phase]` in cents:
 
-Leaning (A) for v1 — most direct apples-to-apples test against the step-4 formula. Confirm before implementing.
+1. **Cross-station amplitude bias.** Big-cycle stations contribute proportionally more cents to each bin; the bin mean is pulled toward them. Applied to a small-cycle station, the cents value can exceed its own (last_max − last_min), giving expected_price > last_max — nonsensical.
+2. **Fold-to-fold instability.** Cycle amplitudes drifted across 2021–2025. (B)'s bin means are amplitude-mix dependent, so the lookup encodes regime drift as phase shape. (A) is amplitude-invariant by construction.
+3. **Experiment attribution.** Step-4 formula already implicitly assumed linear amplitude scaling. (A) keeps that assumption and changes only the shape; (B) changes both, confounding any observed result.
 
-### Step 3 — per-fold leakage-safe fit (NOT STARTED)
+(C) Per-station / per-LGA / per-amplitude conditioning — skip for v1.
 
-Lookup must be refit per fold on that fold's train, applied to val. Sketch:
+### Step 3 — per-fold leakage-safe fit (DONE 2026-06-06)
 
-```python
-def fit_lookup(train_df, bin_edges):
-    train_df = train_df.assign(_norm = (train_df.station_price_cents - train_df.cycle_last_min_cents)
-                                       / (train_df.cycle_last_max_cents - train_df.cycle_last_min_cents),
-                               _bin  = pd.cut(train_df.cycle_pct_through.clip(upper=2.0), bins=bin_edges))
-    return train_df.groupby('_bin', observed=True)['_norm'].mean()
+Lookup is refit per fold on that fold's train data, then applied to val. Decisions:
 
-def apply_lookup(df, lookup, bin_edges):
-    bins = pd.cut(df.cycle_pct_through.clip(upper=2.0), bins=bin_edges)
-    expected_norm = bins.map(lookup)
-    expected = df.cycle_last_min_cents + expected_norm * (df.cycle_last_max_cents - df.cycle_last_min_cents)
-    return df.station_price_cents - expected  # the new feature
-```
+- **Empty val bins → NaN propagation.** LightGBM handles missing values natively (learns a default split direction). On 30 equal-width bins of width 0.05 over 5 years of train data, empty bins should essentially never fire (sparsest tail bin has ~8k+ rows). Picked over nearest-non-empty (small risk of misleading near the noisy tail) and formula fallback (would reintroduce the broken linear-interp shape we're trying to replace).
+- **Zero-amplitude rows (last_max == last_min) → filter at fit, NaN at apply.** ~3 rows per 312k spike-subset; vanishingly rare elsewhere. They can't inform the curve and have no swing to project onto.
 
-Pending: handle val bins with no train support (NaN propagation? fall back to formula? carry the nearest non-empty bin's mean?).
+Implementation in `step4_paired_wfcv.py` (this dir). Uses numpy bincount/digitize for speed.
 
-### Step 4 — paired walk-forward CV (NOT STARTED)
+### Step 4 — paired walk-forward CV (DONE 2026-06-06)
 
-Mirror `step4_paired_wfcv.py` from the predecessor dir: 14 folds (train_min_days=1825, val_days=90, step_days=90), seed=42, three configs (baseline 50 / additive 51 / ablationA 49), regression threshold 0.005, ~2 min compute budget. The only change is per-fold refitting of the lookup before computing the feature in train and val.
+Mirrored `step4_paired_wfcv.py` from the predecessor dir: 14 folds (train_min_days=1825, val_days=90, step_days=90), seed=42, three configs (baseline 50 / additive 51 / ablationA 49), per-fold refit of the lookup before feature compute, ~2 min compute budget. Total wall: 118s.
+
+Per-fold deltas saved to `step4_folds.csv`; aggregates and per-fold lookup means to `step4_meta.json` and `step4_fold_lookups.csv`. Re-aggregation under alternative labelling schemes in `reaggregate_by_label.py` (see Outcome).
 
 ## Pre-committed shock-fold taxonomy (BEFORE seeing results)
 
@@ -111,10 +103,90 @@ Per the in-session methodology discussion: report per-fold deltas separately for
 1. Per-fold delta table (same as step 4).
 2. Aggregate: median Δ, mean Δ, helps/hurts ratio.
 3. Separated aggregates: median across normal folds, median across shock folds, reported *both* before any judgement.
-4. The pre-commit gate (decided in-session):
-   - **Lookup is neutral in shocks (|Δ| ≤ 0.005) and helps normals.** → Methodological win; phase-residual concept viable. Document, but don't graduate without a deeper pass.
-   - **Lookup regresses materially in shocks (Δ > +0.005 in any shock fold) and helps normals.** → Same outcome as step 4; do not ship without a paired shock-detector feature that absorbs the regime signal. Either abandon the phase-residual track or sequence the shock-detector first and re-test.
-   - **Lookup regresses across the board.** → Confirms diagonal-projection diagnosis. Abandon all phase-residual variants permanently.
+4. The pre-commit gate (revised mid-session 2026-06-06: shocks are *not* the primary focus of this experiment, so a neutral-to-mild shock regression is tolerable as long as normal folds improve. We have not yet built any systematic shock-period machinery; gating on shock-fold performance would over-penalise a feature whose job is normal-regime modelling):
+   - **Helps normals (normal-fold median Δ ≤ −0.005) and shocks neutral-to-mild (no shock fold Δ > +0.02, shock median Δ ≤ +0.01).** → Methodological win; phase-residual concept viable as a normal-regime feature. Document the shock behaviour but don't block on it. Phase-shape correction was the missing piece.
+   - **Helps normals but material shock regression (any shock fold Δ > +0.02 or shock median Δ > +0.01).** → Still informative: shape correction helps normal regime but doesn't carry shocks. Tag as "needs paired shock-detector partner before shipping" and feed into the independent shock-feature track in the Followups section.
+   - **Regresses across the board (normal-fold median Δ ≥ 0).** → Confirms diagonal-projection diagnosis. Abandon all phase-residual variants permanently.
+
+## Outcome (2026-06-06)
+
+### Headline
+
+The phase-residual concept is dead. **Additive (51 features) is neutral** — the lookup adds essentially nothing on top of the 50 baseline features. **AblationA (49 features, drop siblings + add lookup) regresses mildly on stable folds and catastrophically on fold 9.** The non-parametric shape correction was a real improvement over the predecessor's linear-interp formula (fold 9 went +0.101 → +0.066) but it did not flip the verdict.
+
+### Per-fold result (paired walk-forward CV, seed=42, 14 folds)
+
+| fold | regime (pre-committed) | val_start → val_end | ll_baseline | Δ additive | Δ ablationA |
+|---|---|---|---|---|---|
+| 1 | shock | 2021-11 → 2022-02 | 0.402 | −0.015 | **+0.044** |
+| 2 | normal | 2022-02 → 2022-05 | 0.269 | −0.010 | −0.012 |
+| 3 | normal | 2022-05 → 2022-08 | 0.377 | +0.015 | −0.010 |
+| 4 | shock | 2022-08 → 2022-10 | 0.421 | −0.013 | −0.025 |
+| 5 | normal | 2022-10 → 2023-01 | 0.294 | +0.014 | +0.008 |
+| 6 | normal | 2023-01 → 2023-04 | 0.218 | +0.002 | +0.008 |
+| 7 | normal | 2023-04 → 2023-07 | 0.251 | +0.006 | +0.012 |
+| 8 | normal | 2023-07 → 2023-10 | 0.306 | −0.023 | +0.029 |
+| 9 | shock | 2023-10 → 2024-01 | 0.331 | +0.000 | **+0.066** |
+| 10 | normal | 2024-01 → 2024-04 | 0.254 | −0.001 | +0.004 |
+| 11 | normal | 2024-04 → 2024-07 | 0.344 | +0.011 | −0.014 |
+| 12 | normal | 2024-07 → 2024-10 | 0.305 | −0.001 | −0.018 |
+| 13 | shock | 2024-10 → 2025-01 | 0.300 | +0.000 | +0.004 |
+| 14 | normal | 2025-01 → 2025-04 | 0.362 | −0.002 | +0.005 |
+
+### Aggregates under three labelling schemes
+
+The pre-committed shock taxonomy (`{1, 4, 9, 13}`, macro-event-named) suggested ablationA fails the gate on shock-fold regression. Re-aggregation by empirical fold difficulty (ll_baseline) showed the verdict shifts.
+
+| scheme | shock folds | additive median (normal / shock) | ablationA median (normal / shock) |
+|---|---|---|---|
+| **1. Pre-committed (macro events)** | {1, 4, 9, 13} | +0.0004 / −0.0066 | **+0.0045 / +0.0238** |
+| **2. Top-quartile ll_baseline** | {1, 3, 4, 14} | +0.0001 / −0.0075 | +0.0059 / **−0.0027** |
+| **3. Top-third ll_baseline** | {1, 3, 4, 11, 14} | +0.0001 / −0.0018 | +0.0078 / **−0.0105** |
+
+The "shock median" cell is where the schemes diverge: scheme 1 says shocks regress (+0.024 median); schemes 2 & 3 say the hardest folds by baseline difficulty actually *help* (−0.003, −0.011 median). The pre-committed methodology was carrying fold 9 specifically — and fold 9 is mid-pack by ll_baseline (0.331, neither hard nor easy). It's not a "shock fold" in any data-driven sense; the macro-event label (Israel-Gaza onset) is coincident, not causal.
+
+**Use schemes 2/3 as the authoritative read.** Scheme 1 stays in the record as the pre-committed control, methodology weakness acknowledged.
+
+### Why fold 9 is the outlier (see `fold9_inspection.png`, `fold9_summary.csv`)
+
+Fold 9 isn't generically hard — it has a structural anomaly. The first ~5 weeks of the window are a single sustained downtick (peak ~215c → trough ~175c) before recovery. Cycles in the window ran ~50 days vs the dataset-typical ~33, and amplitudes are ~30% larger than surrounding windows (37c vs 27–30c). Concretely:
+
+| metric | full dataset | pre (Jul–Oct '23) | **fold 9** | post (Jan–Apr '24) |
+|---|---|---|---|---|
+| pct_through p99 | 1.86 | 1.21 | **1.57** | 1.37 |
+| frac rows with pct > 1.5 | 3.8% | 0% | **2.2%** | 0% |
+| amplitude mean | 30.6c | 27.7c | **37.2c** | 30.3c |
+
+### Mechanism: the triple-stack
+
+The phase-residual failure mode is the intersection of three properties that compound only in fold-9-like windows:
+
+1. **Late descent is the model's hardest prediction zone.** The objective P(min over next H days < today − X) lives at trough-proximity (pct ≈ 0.3–0.6 in typical cycles). Trough timing has ±1–2 day jitter even in stable structure; the model has the least signal exactly where the buy decision matters most.
+2. **The lookup is structurally noisy in the pct > 1 tail.** Per `phase_shape_empirical.csv`, bins past 1.5 had 3k–13k rows vs ~80k in the bulk, with mean swings 0.03 → 0.77 → −0.13 between adjacent bins. We clip at 1.5, but the [1.0, 1.5] range still has ~half the bulk's row density and proportionally noisier means. Worse, the tail is selection-bias-conditional on *prior* shock-like episodes — the bins are dominated by training-period anomalies and don't generalise to *new* anomalies.
+3. **Cycle elongation pushes trough-proximity into the lookup's tail.** In a typical 33-day cycle, the trough sits at pct ≈ 0.5–0.7 (well-supported). In fold 9's ~50-day cycles, the trough drifts to pct ≈ 1.0–1.5 (selection-biased and noisy).
+
+In any typical fold, (1) and (2) don't intersect — trough-proximity stays in the well-supported lookup region. Additive ≈ neutral, ablationA ≈ flat or mild regression (siblings carry signal the lookup can't reproduce, but the lookup at least isn't actively wrong in the rows that matter).
+
+In fold 9 all three align: more calendar days in the late-descent zone *and* those days carry pct values that overshoot into the noisy tail *and* the model needs maximum quality on exactly those rows *and* ablationA has removed the only stable anchor (the cents-above/below-last_min/max siblings) that doesn't depend on pct. Result: +0.066 ablationA regression, the largest single-fold regression in the run.
+
+The sibling features handle this gracefully because they're pct-invariant — `station_minus_last_min` reads "n cents above the recent trough" whether the cycle ran 25 days or 50. AblationA throws them out; fold 9 makes that throw-out catastrophic.
+
+### Why the additive (51) result is more interesting than it looks
+
+Additive's normal-fold median is +0.0004 — *exactly zero*. Even the shock-fold median is only −0.007. The lookup feature **adds essentially no information on top of the 50 baseline features**. Trees were already constructing phase-residual-like splits from the siblings (e.g. `station_minus_last_max > -k`) and an explicit pre-computed residual gives them no leverage they didn't already have.
+
+This is a bigger finding than "diagonal projection is fragile". It says **the phase-residual concept is redundant with the existing feature set** — the encoding question (linear-interp vs non-parametric vs whatever else) is downstream of the conceptual question of whether projecting onto a single scalar residual carries any signal the siblings don't already carry. Answer: no.
+
+### Pre-commit gate verdict (applied to schemes 2/3 as authoritative)
+
+- **Additive** fails on "helps normals" (normal median ≈ 0, not ≤ −0.005). Drops into gate 3 (regresses across the board) — except it's not really regressing, it's just neutral. **Outcome: neutral additive → not worth shipping; the feature is dominated by what already exists.**
+- **AblationA** fails on "helps normals" (normal median +0.006 to +0.008) under all three schemes. Material single-fold regression (fold 9 +0.066) under all three schemes regardless of which bucket fold 9 falls into. **Outcome: drop, do not ship.**
+
+### What this means for the phase-residual concept
+
+Retired. The non-parametric shape correction worked at the level it could (predecessor's fold 9 was +0.101; we got it to +0.066) — confirming the linear-interp formula was structurally mis-specified per [[project-cycle-pct-through-semantics]]. But the deeper diagnosis from [[project-phase-residual-fragile]] survives the retest and gains a more precise mechanism: it's not "shock-fragile", it's **"loses absolute-anchor information exactly when the rest of the model's input is also least reliable (late descent in elongated cycles)"**.
+
+No phase-residual variant — shape-corrected, station-conditioned, or otherwise — should be pursued without an architecture that preserves the absolute anchors. The siblings are non-negotiable for this prediction objective.
 
 ## Selection-bias-in-tail finding (important for interpretation)
 
@@ -124,28 +196,9 @@ Implication: the lookup is **most unreliable exactly where we most need it to be
 
 This sharpens the prediction: even with the correct shape, the shock-fold regression may survive. The diagnostic is still cleanly informative — just less likely to flip than the "shape correction will fix it" intuition would suggest.
 
-## Where the conversation left off
-
-Done in this session:
-
-- Confirmed pct=0 spike is fresh-peak days (15.4%, not an artefact).
-- Discovered pct_through semantic correction (the big finding).
-- Settled tail extension to pct = 2.0.
-- Pre-committed the shock-fold taxonomy and reporting gate.
-- Discussed and aligned on the portfolio-of-features methodology (shock-regressing features need paired shock-detector before they can ship).
-
-Not done:
-
-- Choose bin method (quantile vs equal-width) and bin count.
-- Pick normalisation for the lookup (A vs B in step 2 — leaning A).
-- Implement the lookup + paired CV.
-- Run + interpret.
-
 ## Followups
 
-- Once this completes (either outcome): if the diagnosis confirms, retire all phase-residual ideas; if it flips, design v2 with explicit shock-feature partner before shipping.
-- Independent track: build a shock-regime indicator feature (oil-price shock proxy, news-driven cycle-distortion signal, or just `days_since_last_peak > 2 × mean_cycle_length` style flags) that could pair with phase-residual or be useful on its own.
+- **Phase-residual track:** closed. No further v2 / v3 attempts (station-conditioned lookup, etc.) on the diagonal-projection idea; the diagnosis stands. Clip-point sensitivity (v1 used clip = 1.5; revisit 2.0 was on the table) is also closed — not worth investigating a dead concept.
+- **Next investigation — late-descent feature class.** Filed as design issue #206. The model's hardest prediction zone is trough-proximity (pct ≈ 0.3–0.6 typical, drifts into pct ≈ 1.0–1.5 when cycles elongate). Find features that help in *general* late-descent, not shock-specific. Anything that improves trough-proximity prediction will help every fold; shock folds (which are essentially elongated-cycle folds at higher amplitude) become a free win on top. This is strictly better than starting with a shock-regime indicator because shock-specific work is a special case of late-descent work, not the other way around.
+- **Methodology lesson:** macro-event-based shock taxonomy was a soft methodology. Empirical labelling (e.g. top-quartile ll_baseline) gave a sharper view in this case. Consider standardising on empirical labels for future paired CV reports unless a specific macro hypothesis is being tested.
 
-## Restart instructions
-
-See `next_session_prompt.md` for the paste-in restart message.
