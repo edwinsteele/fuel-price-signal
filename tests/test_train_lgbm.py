@@ -152,7 +152,7 @@ def test_cli_runs_end_to_end(tmp_path):
     assert "pipeline" in saved
     assert saved["feature_columns"] == _ALL_FEATURE_COLUMNS
 
-    X = df[_ALL_FEATURE_COLUMNS].head(5).to_numpy(dtype=float)
+    X = df[_ALL_FEATURE_COLUMNS].head(5)
     proba = saved["pipeline"].predict_proba(X)
     assert proba.shape == (5, 2)
 
@@ -367,7 +367,7 @@ def test_cli_seed_reproducible(tmp_path):
         )
         assert res.exit_code == 0, res.output
         saved = joblib.load(model_path)
-        X = df[saved["feature_columns"]].to_numpy(dtype=float)
+        X = df[saved["feature_columns"]]
         return saved["pipeline"].predict_proba(X)[:, 1]
 
     proba_a = _run(7, "seed7a")
