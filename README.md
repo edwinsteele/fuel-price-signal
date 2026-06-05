@@ -336,7 +336,7 @@ Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`. Output print
 
 Paired comparison across all pre-test folds. Re-trains both models on each 90-day fold and reports per-fold logloss delta (model − baseline). Use this before locking a Phase upgrade to confirm that the val improvement holds across fold windows and is not an artifact of the canonical val window.
 
-Two modes:
+Three modes:
 
 **Two-artifact mode** — compare two saved joblib models:
 
@@ -360,7 +360,15 @@ uv run python -m fuel_signal.cv_report \
   --output experiments/<dir>/results.csv
 ```
 
-`--drop-feature` is repeatable (`--drop-feature fa1 --drop-feature fa2`). `--baseline` and `--drop-feature` are mutually exclusive. Passing neither raises an error.
+**Single-window mode** — cheap logreg walk-forward sanity check; no model artifact required:
+
+```bash
+uv run python -m fuel_signal.cv_report \
+  --single-window \
+  --features data/features.csv
+```
+
+`--drop-feature` is repeatable (`--drop-feature fa1 --drop-feature fa2`). `--baseline` and `--drop-feature` are mutually exclusive. Use `--single-window` for a quick logreg baseline check without a saved model. Providing neither `--baseline`, `--drop-feature`, nor `--single-window` raises an error.
 
 Output: one line per fold (`val start→end`, `n_val`, `baseline=`, `model=`, `Δ=`) followed by a summary line (`folds`, `wins/n`, `median Δ`, `mean Δ`). Folds where `Δ > +0.05` are listed as named regressions. The `--output` CSV has columns: `fold_idx, train_start, train_end, val_start, val_end, n_val, baseline_logloss, model_logloss, delta`.
 
