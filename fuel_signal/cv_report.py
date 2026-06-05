@@ -9,6 +9,10 @@ of ``--baseline``.  The baseline becomes ``--model`` itself; the "model" becomes
 a clone of ``--model``'s pipeline with the named column(s) removed before fitting
 each fold.  No separate baseline artifact is needed.
 
+**Single-window mode (CLI):** pass ``--single-window`` for a cheap logreg
+walk-forward sanity check.  No ``--model`` artifact is required; the built-in
+logreg pipeline runs against the features CSV directly.
+
 **Library mode:** ``run_cv()`` runs a single-model logreg walk-forward CV and is
 kept for programmatic use by tests and notebooks.
 
@@ -29,6 +33,11 @@ Usage::
       --features data/features.csv \\
       --seed 42 \\
       --output experiments/<dir>/results.csv
+
+    # Single-window (cheap logreg sanity check — no model artifact needed)
+    uv run python -m fuel_signal.cv_report \\
+      --single-window \\
+      --features data/features.csv
 """
 
 from __future__ import annotations
@@ -217,6 +226,32 @@ def run_paired_cv(
     return results
 
 
+def _format_single_fold(r: dict) -> str:
+    return (
+        f"fold {r['fold']:>3}  "
+        f"val {r['val_start']}→{r['val_end']}  "
+        f"n={r['val_rows']:>5,}  "
+        f"val_logloss={r['val_logloss']:.4f}  "
+        f"baseline={r['baseline_logloss']:.4f}"
+    )
+
+
+def _format_single_summary(results: list[dict]) -> str:
+    val_losses = np.array([r["val_logloss"] for r in results])
+    base_losses = np.array([r["baseline_logloss"] for r in results])
+    n_wins = int((val_losses < base_losses).sum())
+    n_folds = len(results)
+    lines = [
+        "─" * 72,
+        (
+            f"folds: {n_folds}  wins: {n_wins}/{n_folds}  "
+            f"mean val_logloss={val_losses.mean():.4f}  "
+            f"mean baseline={base_losses.mean():.4f}"
+        ),
+    ]
+    return "\n".join(lines)
+
+
 def _format_paired_fold(r: dict) -> str:
     return (
         f"fold {r['fold_idx']:>3}  "
@@ -249,13 +284,34 @@ def _format_paired_summary(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _emit_results(results: list[dict], format_fold, format_summary) -> None:
+    if not results:
+        raise click.ClickException(
+            "No folds produced. Try reducing --train-min-days or extending the date range."
+        )
+    for r in results:
+        click.echo(format_fold(r))
+    click.echo(format_summary(results))
+
+
 @click.command("cv_report")
 @click.option(
     "--model",
     "model_path",
-    required=True,
+    required=False,
+    default=None,
     type=click.Path(exists=True, path_type=pathlib.Path),
-    help="Joblib artifact for the model to evaluate.",
+    help="Joblib artifact for the model to evaluate. Required unless --single-window is used.",
+)
+@click.option(
+    "--single-window",
+    "single_window",
+    is_flag=True,
+    default=False,
+    help=(
+        "Run a cheap single-model logreg walk-forward CV without a paired baseline. "
+        "No --model artifact required. Mutually exclusive with --baseline and --drop-feature."
+    ),
 )
 @click.option(
     "--baseline",
@@ -319,7 +375,8 @@ def _format_paired_summary(results: list[dict]) -> str:
     help="Step size in days between consecutive folds.",
 )
 def main(
-    model_path: pathlib.Path,
+    model_path: pathlib.Path | None,
+    single_window: bool,
     baseline_path: pathlib.Path | None,
     drop_features: tuple[str, ...],
     features_csv: str,
@@ -329,11 +386,22 @@ def main(
     val_days: int,
     step_days: int,
 ) -> None:
-    """Paired walk-forward CV: compare --model vs --baseline (or --drop-feature) across pre-test folds."""
-    if baseline_path is not None and drop_features:
-        raise click.UsageError("--baseline and --drop-feature are mutually exclusive.")
-    if baseline_path is None and not drop_features:
-        raise click.UsageError("Provide either --baseline or at least one --drop-feature.")
+    """Walk-forward CV: paired comparison (--baseline/--drop-feature) or logreg sanity check (--single-window)."""
+    if single_window and (model_path is not None or baseline_path is not None or drop_features):
+        raise click.UsageError(
+            "--single-window is mutually exclusive with --model, --baseline, and --drop-feature."
+        )
+    if not single_window:
+        if model_path is None:
+            raise click.UsageError(
+                "--model is required unless --single-window is used."
+            )
+        if baseline_path is not None and drop_features:
+            raise click.UsageError("--baseline and --drop-feature are mutually exclusive.")
+        if baseline_path is None and not drop_features:
+            raise click.UsageError(
+                "Provide --baseline, at least one --drop-feature, or --single-window."
+            )
 
     features_path = pathlib.Path(features_csv)
     if not features_path.exists():
@@ -350,7 +418,15 @@ def main(
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
 
-    if drop_features:
+    if single_window:
+        results = run_cv(
+            df,
+            train_min_days=train_min_days,
+            val_days=val_days,
+            step_days=step_days,
+        )
+        _emit_results(results, _format_single_fold, _format_single_summary)
+    elif drop_features:
         model_obj = joblib.load(model_path)
         valid = set(model_obj["feature_columns"])
         unknown = [f for f in drop_features if f not in valid]
@@ -368,6 +444,7 @@ def main(
             val_days=val_days,
             step_days=step_days,
         )
+        _emit_results(results, _format_paired_fold, _format_paired_summary)
     else:
         results = run_paired_cv(
             df,
@@ -378,15 +455,7 @@ def main(
             val_days=val_days,
             step_days=step_days,
         )
-
-    if not results:
-        raise click.ClickException(
-            "No folds produced. Try reducing --train-min-days or extending the date range."
-        )
-
-    for r in results:
-        click.echo(_format_paired_fold(r))
-    click.echo(_format_paired_summary(results))
+        _emit_results(results, _format_paired_fold, _format_paired_summary)
 
     if output_csv:
         out = pathlib.Path(output_csv)
