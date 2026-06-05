@@ -284,6 +284,16 @@ def _format_paired_summary(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _emit_results(results: list[dict], format_fold, format_summary) -> None:
+    if not results:
+        raise click.ClickException(
+            "No folds produced. Try reducing --train-min-days or extending the date range."
+        )
+    for r in results:
+        click.echo(format_fold(r))
+    click.echo(format_summary(results))
+
+
 @click.command("cv_report")
 @click.option(
     "--model",
@@ -415,13 +425,7 @@ def main(
             val_days=val_days,
             step_days=step_days,
         )
-        if not results:
-            raise click.ClickException(
-                "No folds produced. Try reducing --train-min-days or extending the date range."
-            )
-        for r in results:
-            click.echo(_format_single_fold(r))
-        click.echo(_format_single_summary(results))
+        _emit_results(results, _format_single_fold, _format_single_summary)
     elif drop_features:
         model_obj = joblib.load(model_path)
         valid = set(model_obj["feature_columns"])
@@ -440,13 +444,7 @@ def main(
             val_days=val_days,
             step_days=step_days,
         )
-        if not results:
-            raise click.ClickException(
-                "No folds produced. Try reducing --train-min-days or extending the date range."
-            )
-        for r in results:
-            click.echo(_format_paired_fold(r))
-        click.echo(_format_paired_summary(results))
+        _emit_results(results, _format_paired_fold, _format_paired_summary)
     else:
         results = run_paired_cv(
             df,
@@ -457,13 +455,7 @@ def main(
             val_days=val_days,
             step_days=step_days,
         )
-        if not results:
-            raise click.ClickException(
-                "No folds produced. Try reducing --train-min-days or extending the date range."
-            )
-        for r in results:
-            click.echo(_format_paired_fold(r))
-        click.echo(_format_paired_summary(results))
+        _emit_results(results, _format_paired_fold, _format_paired_summary)
 
     if output_csv:
         out = pathlib.Path(output_csv)
