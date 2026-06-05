@@ -70,9 +70,9 @@ def train_and_evaluate(
     if val.empty:
         raise ValueError("train_and_evaluate(): val split is empty.")
 
-    X_train = train[feature_columns].to_numpy(dtype=float)
+    X_train = train[feature_columns]
     y_train = train["label"].to_numpy(dtype=int)
-    X_val = val[feature_columns].to_numpy(dtype=float)
+    X_val = val[feature_columns]
     y_val = val["label"].to_numpy(dtype=int)
 
     model = build_pipeline(random_state=random_state)

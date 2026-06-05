@@ -81,9 +81,9 @@ def run_cv(
         if val_df.empty:
             continue
 
-        X_train = train_df[feature_columns].to_numpy(dtype=float)
+        X_train = train_df[feature_columns]
         y_train = train_df["label"].to_numpy(dtype=int)
-        X_val = val_df[feature_columns].to_numpy(dtype=float)
+        X_val = val_df[feature_columns]
         y_val = val_df["label"].to_numpy(dtype=int)
 
         pipeline = _build_logreg()
@@ -193,20 +193,14 @@ def run_paired_cv(
 
         m = clone(model_pipeline)
         _set_random_state(m, seed)
-        m.fit(
-            train_df[model_features].to_numpy(dtype=float),
-            train_df["label"].to_numpy(dtype=int),
-        )
-        p_model = m.predict_proba(val_df[model_features].to_numpy(dtype=float))[:, 1]
+        m.fit(train_df[model_features], train_df["label"].to_numpy(dtype=int))
+        p_model = m.predict_proba(val_df[model_features])[:, 1]
         model_logloss = _ev.log_loss(y_val, p_model)
 
         b = clone(baseline_pipeline)
         _set_random_state(b, seed)
-        b.fit(
-            train_df[baseline_features].to_numpy(dtype=float),
-            train_df["label"].to_numpy(dtype=int),
-        )
-        p_baseline = b.predict_proba(val_df[baseline_features].to_numpy(dtype=float))[:, 1]
+        b.fit(train_df[baseline_features], train_df["label"].to_numpy(dtype=int))
+        p_baseline = b.predict_proba(val_df[baseline_features])[:, 1]
         baseline_logloss = _ev.log_loss(y_val, p_baseline)
 
         val_dates = pd.to_datetime(val_df["price_date"])

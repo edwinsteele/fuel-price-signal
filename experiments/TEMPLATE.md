@@ -8,6 +8,14 @@
 ## Hypothesis
 One or two sentences: what you expected and why.
 
+## How to invoke this script
+
+```bash
+PYTHONPATH=. uv run python experiments/<experiment-dir>/run.py
+```
+
+`PYTHONPATH=.` is required so `fuel_signal` is importable from the repo root.
+
 ## Setup
 Features, model, CV protocol, seeds, anything non-default. Link to the run script in this dir if there is one.
 
