@@ -66,7 +66,7 @@ def _save_logreg(df: pd.DataFrame, path: pathlib.Path) -> Pipeline:
     """Train a logreg on the train split and save to joblib; returns the pipeline."""
     train, _, _ = _ev.split(df)
     pipe = build_pipeline()
-    pipe.fit(train[FEATURE_COLUMNS].to_numpy(dtype=float), train["label"].to_numpy(dtype=int))
+    pipe.fit(train[FEATURE_COLUMNS], train["label"].to_numpy(dtype=int))
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"pipeline": pipe, "feature_columns": FEATURE_COLUMNS}, path)
     return pipe
@@ -281,7 +281,7 @@ class TestCalibrateCLI:
 
         # Reconstruct the pipeline and verify predict_proba works.
         # Calibrated artifacts store sklearn primitives; raw artifacts store "pipeline" directly.
-        X = df[FEATURE_COLUMNS].to_numpy(dtype=float)[:5]
+        X = df[FEATURE_COLUMNS].iloc[:5]
         if saved.get("calibrated"):
             from fuel_signal.calibrate import _CalibratedPipeline
             assert "base_pipeline" in saved

@@ -55,7 +55,7 @@ def _load_artifact(model_path: pathlib.Path) -> dict:
     return artifact
 
 
-def _predict_proba(artifact: dict, X: np.ndarray) -> np.ndarray:
+def _predict_proba(artifact: dict, X: pd.DataFrame) -> np.ndarray:
     """Return calibrated probabilities for the positive class."""
     raw_p = artifact["base_pipeline"].predict_proba(X)[:, 1]
     method = artifact["calibration_method"]
@@ -176,7 +176,7 @@ def run_diagnostics(
     if val.empty:
         raise click.ClickException("Val split is empty — check features CSV date range.")
 
-    X_val = val[feature_columns].to_numpy(dtype=float)
+    X_val = val[feature_columns]
     cal_p = _predict_proba(artifact, X_val)
     pred = (cal_p >= threshold).astype(int)
 

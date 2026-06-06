@@ -284,7 +284,7 @@ def score_test(
     if test.empty:
         raise ValueError("score_test(): test split is empty.")
 
-    X_test = test[feature_columns].to_numpy(dtype=float)
+    X_test = test[feature_columns]
     y_test = test["label"].to_numpy(dtype=int)
     p_test = pipeline.predict_proba(X_test)[:, 1]
 
@@ -331,7 +331,7 @@ def multi_seed_raw_logloss(
     if test.empty:
         raise ValueError("multi_seed_raw_logloss(): test split is empty.")
 
-    X_test = test[feature_columns].to_numpy(dtype=float)
+    X_test = test[feature_columns]
     y_test = test["label"].to_numpy(dtype=int)
 
     logloss_vector: list[float] = []
@@ -614,7 +614,7 @@ def main(
             )
 
         train, val, _ = _ev.split(df)
-        X_val = val[feature_columns].to_numpy(dtype=float)
+        X_val = val[feature_columns]
         y_val = val["label"].to_numpy(dtype=int)
         p_val = pipeline.predict_proba(X_val)[:, 1]
 

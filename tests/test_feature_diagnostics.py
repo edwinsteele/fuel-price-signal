@@ -54,7 +54,7 @@ def _synthetic_df(seed: int = 0) -> pd.DataFrame:
 def _build_artifact(df: pd.DataFrame) -> dict:
     """Train a minimal LGBMClassifier and isotonic calibrator; return artifact dict."""
     train, _val, _test = _ev.split(df)
-    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X_train = train[FEATURE_COLUMNS]
     y_train = train["label"].to_numpy(dtype=int)
 
     model = LGBMClassifier(random_state=42, verbose=-1, n_estimators=20)

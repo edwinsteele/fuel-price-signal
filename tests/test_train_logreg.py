@@ -210,7 +210,7 @@ def test_cli_runs_end_to_end(tmp_path):
     assert saved["feature_columns"] == FEATURE_COLUMNS
 
     # Saved pipeline can score new data of the right shape.
-    X = df[FEATURE_COLUMNS].to_numpy(dtype=float)[:5]
+    X = df[FEATURE_COLUMNS].iloc[:5]
     proba = saved["pipeline"].predict_proba(X)
     assert proba.shape == (5, 2)
 

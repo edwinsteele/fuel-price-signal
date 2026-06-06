@@ -194,7 +194,7 @@ def _make_raw_artifact_from_df(df: pd.DataFrame, tmp_path: pathlib.Path) -> path
     from fuel_signal import evaluate as _ev
 
     train, _, _ = _ev.split(df)
-    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X_train = train[FEATURE_COLUMNS]
     y_train = train["label"].to_numpy(dtype=int)
     clf = LogisticRegression(max_iter=50)
     pipe = Pipeline([("scaler", StandardScaler()), ("clf", clf)])
@@ -268,7 +268,7 @@ def test_warn_suppressed_when_model_isotonic_calibrated(tmp_path):
     df.to_csv(features_path, index=False)
 
     train, _, _ = _ev.split(df)
-    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X_train = train[FEATURE_COLUMNS]
     y_train = train["label"].to_numpy(dtype=int)
     base_pipeline = Pipeline(
         [("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=50))]
@@ -341,7 +341,7 @@ def _write_features_and_model(tmp_path):
     df.to_csv(features_path, index=False)
 
     train, _, _ = ev.split(df)
-    X_train = train[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X_train = train[FEATURE_COLUMNS]
     y_train = train["label"].to_numpy(dtype=int)
     pipe = Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=200))])
     pipe.fit(X_train, y_train)
