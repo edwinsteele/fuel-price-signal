@@ -1,0 +1,213 @@
+{
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "shock_folds": [
+    1,
+    4,
+    9,
+    13
+  ],
+  "comp_band_cents": 5.0,
+  "delta_lag_days": 3,
+  "elongation_baseline_window_days": 730,
+  "n_baseline_features": 50,
+  "new_feature_columns": [
+    "network_px_std",
+    "network_px_std_delta_3d",
+    "lga_phase_std",
+    "lga_phase_std_delta_3d"
+  ],
+  "run_grid": {
+    "R0": [],
+    "RA_level": [
+      "network_px_std"
+    ],
+    "RA_delta": [
+      "network_px_std_delta_3d"
+    ],
+    "RA_both": [
+      "network_px_std",
+      "network_px_std_delta_3d"
+    ],
+    "RAC_full": [
+      "network_px_std",
+      "network_px_std_delta_3d",
+      "lga_phase_std",
+      "lga_phase_std_delta_3d"
+    ]
+  },
+  "cohort_definitions": {
+    "all": "full val set",
+    "hard25": "top quartile baseline per-row log-loss per fold",
+    "hard10": "top decile baseline per-row log-loss per fold",
+    "lated": "cycle_pct_through \u2265 0.9 AND _px_5d_change \u2264 -2.0c"
+  },
+  "aggregation_convention": "Headline = median across 5 seeds per (fold, run); summary then averages those medians across 14 folds. Mean shown alongside for #212's mean+median requirement.",
+  "seed_variance_gate": {
+    "rule": "ratio = seed_std / median(seed_std across cohort cells); flag > 5x",
+    "per_cohort": {
+      "all": {
+        "cohort_median_seed_std": 0.007487833448614147,
+        "n_cells": 70,
+        "n_flagged_gt_5x": 4
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.029086613649902053,
+        "n_cells": 70,
+        "n_flagged_gt_5x": 0
+      },
+      "hard10": {
+        "cohort_median_seed_std": 0.04972156686501532,
+        "n_cells": 70,
+        "n_flagged_gt_5x": 0
+      },
+      "lated": {
+        "cohort_median_seed_std": 0.015744577054902405,
+        "n_cells": 70,
+        "n_flagged_gt_5x": 4
+      }
+    },
+    "flagged_cells": [
+      {
+        "cohort": "all",
+        "fold": 2,
+        "run": "RA_both",
+        "seed_std": 0.039249360877682396,
+        "ratio_vs_cohort_median": 5.24175132193234
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "RAC_full",
+        "seed_std": 0.06973532787922852,
+        "ratio_vs_cohort_median": 9.313151575524852
+      },
+      {
+        "cohort": "all",
+        "fold": 5,
+        "run": "RA_delta",
+        "seed_std": 0.05305348686077255,
+        "ratio_vs_cohort_median": 7.085292057423062
+      },
+      {
+        "cohort": "all",
+        "fold": 11,
+        "run": "RAC_full",
+        "seed_std": 0.03913084719036046,
+        "ratio_vs_cohort_median": 5.2259238214764006
+      },
+      {
+        "cohort": "lated",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.11726112137758014,
+        "ratio_vs_cohort_median": 7.447714915979177
+      },
+      {
+        "cohort": "lated",
+        "fold": 3,
+        "run": "RAC_full",
+        "seed_std": 0.10429314478433506,
+        "ratio_vs_cohort_median": 6.624067729520952
+      },
+      {
+        "cohort": "lated",
+        "fold": 3,
+        "run": "RA_both",
+        "seed_std": 0.10256497342958347,
+        "ratio_vs_cohort_median": 6.5143047712194795
+      },
+      {
+        "cohort": "lated",
+        "fold": 3,
+        "run": "RA_delta",
+        "seed_std": 0.09182809531652315,
+        "ratio_vs_cohort_median": 5.83236342242236
+      }
+    ]
+  },
+  "elongation_corr_per_run": {
+    "RA_level": -0.2689915332806639,
+    "RA_delta": -0.2607258572770476,
+    "RA_both": -0.20502548170538723,
+    "RAC_full": -0.3151703136086915
+  },
+  "summary": [
+    {
+      "run": "R0",
+      "n_folds": 14,
+      "delta_all_median_mean": 0.0,
+      "delta_hard25_median_mean": 0.0,
+      "delta_hard25_mean_mean": 0.0,
+      "delta_hard10_median_mean": 0.0,
+      "delta_lated_median_mean": 0.0,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 0,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": 0.0,
+      "delta_hard25_shock_median_mean": 0.0
+    },
+    {
+      "run": "RA_level",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.006108661466791462,
+      "delta_hard25_median_mean": -0.03170259290696011,
+      "delta_hard25_mean_mean": -0.03823215835614556,
+      "delta_hard10_median_mean": -0.07736772906856235,
+      "delta_lated_median_mean": -0.015904867119338303,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 9,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": -0.03175540577198828,
+      "delta_hard25_shock_median_mean": -0.031570560744389714
+    },
+    {
+      "run": "RA_delta",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.001662188322900047,
+      "delta_hard25_median_mean": -0.0058892012714565345,
+      "delta_hard25_mean_mean": -0.008972865107759591,
+      "delta_hard10_median_mean": -0.01948908943255886,
+      "delta_lated_median_mean": -0.007158066102254527,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 6,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": -0.00888135928741347,
+      "delta_hard25_shock_median_mean": 0.0015911937684358057
+    },
+    {
+      "run": "RA_both",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.005229616459228754,
+      "delta_hard25_median_mean": -0.02985068484946426,
+      "delta_hard25_mean_mean": -0.026822893333437688,
+      "delta_hard10_median_mean": -0.06809171082258618,
+      "delta_lated_median_mean": -0.016873749816717857,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 8,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": -0.03599471847852513,
+      "delta_hard25_shock_median_mean": -0.01449060077681208
+    },
+    {
+      "run": "RAC_full",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.008329755318127404,
+      "delta_hard25_median_mean": -0.04476704347482073,
+      "delta_hard25_mean_mean": -0.046532032935542846,
+      "delta_hard10_median_mean": -0.09921264570100133,
+      "delta_lated_median_mean": -0.029625260598548052,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 10,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": -0.061643797344965626,
+      "delta_hard25_shock_median_mean": -0.0025751587994584935
+    }
+  ],
+  "total_wall_seconds": 1227.4575858340104
+}
