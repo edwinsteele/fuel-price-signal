@@ -20,7 +20,7 @@ In `db.py`, SQL is built with plain string literals (not f-strings, not `str % a
 
 **Why:** `coverage_matrix` originally had `%%100` in a plain string, which passed two literal `%` characters to SQLite and caused `OperationalError: near "%": syntax error`. Only escape to `%%` inside f-strings or `str % (args,)` formatting calls.
 
-### LightGBM fit + predict with DataFrame slices, not numpy
+### LightGBM fit + predict with DataFrame slices, not NumPy
 
 Pass `df[feature_columns]` (a DataFrame) to `.fit()` and `.predict_proba()` at the model boundary — avoids sklearn's feature-name mismatch warning (`X does not have valid feature names, but LGBMClassifier was fitted with feature names`).
 
