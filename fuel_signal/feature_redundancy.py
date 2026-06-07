@@ -152,7 +152,7 @@ def save_dendrogram(
 
 def compute_interaction_matrix(
     model: object,
-    X: np.ndarray,
+    X: pd.DataFrame | np.ndarray,
     sample_size: int,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, int]:
@@ -163,7 +163,7 @@ def compute_interaction_matrix(
     """
     if X.shape[0] > sample_size:
         idx = rng.choice(X.shape[0], sample_size, replace=False)
-        Xs = X[idx]
+        Xs = X.iloc[idx] if isinstance(X, pd.DataFrame) else X[idx]
     else:
         Xs = X
 
@@ -410,8 +410,8 @@ def run_redundancy_report(
     if split_df.empty:
         raise ValueError(f"Split '{split}' is empty after canonical date boundaries.")
 
-    X = split_df[feature_columns].to_numpy(dtype=float)
-    sv = compute_shap(model, X)
+    X_df = split_df[feature_columns]
+    sv = compute_shap(model, X_df)
     mean_abs = np.mean(np.abs(sv), axis=0)
 
     corr = shap_correlation_matrix(sv)
@@ -420,7 +420,7 @@ def run_redundancy_report(
 
     rng = np.random.default_rng(seed)
     interaction_matrix, n_used = compute_interaction_matrix(
-        model, X, interaction_sample, rng
+        model, X_df, interaction_sample, rng
     )
     decomp = decomposition_scores(feature_columns, interaction_matrix)
 

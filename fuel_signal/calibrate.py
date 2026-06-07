@@ -126,7 +126,7 @@ def compare_calibrations(
     # --- raw model predictions on val ---
     loaded = joblib.load(raw_pipeline_path)
     raw_pipe = loaded["pipeline"]
-    X_val = val[feature_columns].to_numpy(dtype=float)
+    X_val = val[feature_columns]
     y_val = val["label"].to_numpy(dtype=int)
     p_raw = raw_pipe.predict_proba(X_val)[:, 1]
 
@@ -142,9 +142,9 @@ def compare_calibrations(
             "train split is too small for calibration."
         )
 
-    X_fit = df_fit[feature_columns].to_numpy(dtype=float)
+    X_fit = df_fit[feature_columns]
     y_fit = df_fit["label"].to_numpy(dtype=int)
-    X_calib = df_calib[feature_columns].to_numpy(dtype=float)
+    X_calib = df_calib[feature_columns]
     y_calib = df_calib["label"].to_numpy(dtype=int)
 
     if len(np.unique(y_fit)) < 2:
@@ -368,7 +368,7 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
     loaded = joblib.load(model_path)
     raw_pipe = loaded["pipeline"]
     feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
-    X_val = val[feature_columns].to_numpy(dtype=float)
+    X_val = val[feature_columns]
     y_val = val["label"].to_numpy(dtype=int)
     p_raw = raw_pipe.predict_proba(X_val)[:, 1]
 

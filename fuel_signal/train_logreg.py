@@ -168,9 +168,9 @@ def train_and_evaluate(
             f"(dropped {n_val_dropped:,}/{n_val_before:,})."
         )
 
-    X_train = train[feature_columns].to_numpy(dtype=float)
+    X_train = train[feature_columns]
     y_train = train["label"].to_numpy(dtype=int)
-    X_val = val[feature_columns].to_numpy(dtype=float)
+    X_val = val[feature_columns]
     y_val = val["label"].to_numpy(dtype=int)
 
     pipeline = build_pipeline()

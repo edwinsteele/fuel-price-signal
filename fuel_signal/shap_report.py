@@ -50,7 +50,7 @@ def _load_split(df: pd.DataFrame, split: Split) -> pd.DataFrame:
     return {"train": train, "val": val, "test": test}[split]
 
 
-def compute_shap(model: object, X: np.ndarray) -> np.ndarray:
+def compute_shap(model: object, X: pd.DataFrame | np.ndarray) -> np.ndarray:
     """Run TreeExplainer on X; return (n_rows, n_features) array."""
     explainer = shap.TreeExplainer(model)
     with warnings.catch_warnings():
@@ -236,8 +236,9 @@ def run_shap_report(
     if split_df.empty:
         raise ValueError(f"Split '{split}' is empty after applying canonical date boundaries.")
 
-    X = split_df[feature_columns].to_numpy(dtype=float)
-    sv = compute_shap(model, X)
+    X_df = split_df[feature_columns]
+    sv = compute_shap(model, X_df)
+    X = X_df.to_numpy(dtype=float)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     np.save(output_dir / "shap_values.npy", sv)

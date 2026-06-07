@@ -31,10 +31,10 @@ def _fit_and_score(df: pd.DataFrame, feature_columns: list[str], seed: int) -> f
     train, val, _test = _ev.split(df)
     model = LGBMClassifier(random_state=seed, verbose=-1)
     model.fit(
-        train[feature_columns].to_numpy(dtype=float),
+        train[feature_columns],
         train["label"].to_numpy(dtype=int),
     )
-    p_val = model.predict_proba(val[feature_columns].to_numpy(dtype=float))[:, 1]
+    p_val = model.predict_proba(val[feature_columns])[:, 1]
     return float(_ev.log_loss(val["label"].to_numpy(dtype=int), p_val))
 
 
