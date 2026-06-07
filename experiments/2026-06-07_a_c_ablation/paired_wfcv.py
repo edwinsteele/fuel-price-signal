@@ -85,7 +85,7 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     # --- Signal C: std of days_since_trough across 35 LGAs ---
     lga_cols = [c for c in df.columns
                 if c.startswith("days_since_trough_entry_")
-                and c.replace("days_since_trough_entry_", "") not in _BRANDS]
+                and c.removeprefix("days_since_trough_entry_") not in _BRANDS]
     if len(lga_cols) != 35:
         raise ValueError(
             f"Expected 35 LGA columns for Signal C; found {len(lga_cols)}. "
@@ -277,7 +277,18 @@ def main() -> None:
             .agg(seed_std=(col, lambda s: float(np.nanstd(s, ddof=1))))
         )
         cohort_med = float(np.nanmedian(agg["seed_std"])) if len(agg) else float("nan")
-        agg["seed_std_ratio"] = agg["seed_std"] / cohort_med if cohort_med > 0 else float("nan")
+        # Guard the degenerate denominator: a NaN/0 cohort median would
+        # silently broadcast NaN across the whole ratio column and mask any
+        # real outlier (the gate would then report n_flagged_gt_5x = 0).
+        # Raise instead so the operator sees the problem.
+        if not np.isfinite(cohort_med) or cohort_med <= 0:
+            raise ValueError(
+                f"Seed-variance gate: cohort {cohort!r} median seed_std is "
+                f"{cohort_med!r} (n_cells={len(agg)}). The gate cannot run on "
+                "a zero or NaN denominator; investigate the seeds tuple or "
+                "the cohort definition before quoting any aggregate."
+            )
+        agg["seed_std_ratio"] = agg["seed_std"] / cohort_med
         flagged = agg[agg["seed_std_ratio"] > 5.0]
         seed_var_summary[cohort] = {
             "cohort_median_seed_std": cohort_med,
