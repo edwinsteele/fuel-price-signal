@@ -1,0 +1,7 @@
+# Heavy lab-book artefacts — regenerate from the per-step scripts above.
+# step1_signals_sample.csv:    18 MB, sampled features for the info probe
+# step5_rowpreds.parquet:      32 MB, per-(fold, run, seed, row) predictions
+# step5_rowdelta.parquet:      10 MB, per-row delta_ll + cohort flags
+step1_signals_sample.csv
+step5_rowpreds.parquet
+step5_rowdelta.parquet

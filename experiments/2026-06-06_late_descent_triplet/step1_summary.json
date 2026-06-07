@@ -1,0 +1,170 @@
+{
+  "experiment": "2026-06-06_late_descent_triplet/step1_information_probe",
+  "phase_partition": {
+    "normal_late_descent": {
+      "cycle_pct_through": [
+        0.3,
+        0.5
+      ],
+      "n_rows": 322646
+    },
+    "extended_descent": {
+      "cycle_pct_through": [
+        0.9,
+        null
+      ],
+      "n_rows": 433787
+    }
+  },
+  "sticky_threshold_cents": 1.6,
+  "probe_results": [
+    {
+      "signal": "A1: network px_std (competitive)",
+      "n_normal": 322646,
+      "n_extended": 433787,
+      "mean_normal": 7.495567703246142,
+      "mean_extended": 10.592807003329295,
+      "std_normal": 2.338025985518524,
+      "std_extended": 5.539037744375563,
+      "smd_extended_minus_normal": 0.6938482660379238,
+      "expected_direction": "positive (extended > normal)",
+      "verdict": "SEPARATES"
+    },
+    {
+      "signal": "A2: network px_iqr (competitive)",
+      "n_normal": 322646,
+      "n_extended": 433787,
+      "mean_normal": 10.388680938241913,
+      "mean_extended": 13.97581555002801,
+      "std_normal": 4.437113023479883,
+      "std_extended": 12.035803336104633,
+      "smd_extended_minus_normal": 0.3750666435363512,
+      "expected_direction": "positive (extended > normal)",
+      "verdict": "SEPARATES"
+    },
+    {
+      "signal": "B: sticky_floor_gap (comp_p05 \u2212 sticky_med)",
+      "n_normal": 322646,
+      "n_extended": 433787,
+      "mean_normal": -17.347191689963616,
+      "mean_extended": -22.0188285264427,
+      "std_normal": 6.440342210677825,
+      "std_extended": 14.996616779682064,
+      "smd_extended_minus_normal": -0.38575243502593354,
+      "expected_direction": "negative (extended gap more negative, comp floor further below stickies)",
+      "verdict": "SEPARATES"
+    },
+    {
+      "signal": "C1: lga_phase_std (days_since_trough)",
+      "n_normal": 322646,
+      "n_extended": 433787,
+      "mean_normal": 4.881022060285751,
+      "mean_extended": 9.655529076005982,
+      "std_normal": 3.856332979343641,
+      "std_extended": 7.9388679866311245,
+      "smd_extended_minus_normal": 0.7324959377000227,
+      "expected_direction": "positive (extended > normal)",
+      "verdict": "SEPARATES"
+    },
+    {
+      "signal": "C2: lga_phase_iqr (days_since_trough)",
+      "n_normal": 322646,
+      "n_extended": 433787,
+      "mean_normal": 3.38120804225064,
+      "mean_extended": 8.97034835068824,
+      "std_normal": 3.1723576376906526,
+      "std_extended": 13.789763517482081,
+      "smd_extended_minus_normal": 0.5249902483089807,
+      "expected_direction": "positive (extended > normal)",
+      "verdict": "SEPARATES"
+    }
+  ],
+  "side_probe_cycle_persistence": {
+    "n_stations_sampled": 50,
+    "n_stations_with_acorr": 50,
+    "pooled_cycle_len_n": 3828,
+    "pooled_cycle_len_mean": 41.179728317659354,
+    "pooled_cycle_len_median": 35.0,
+    "pooled_cycle_len_p25": 28.0,
+    "pooled_cycle_len_p75": 44.0,
+    "pooled_cycle_len_p90": 57.0,
+    "lag1_acorr_mean": 0.03280524840383495,
+    "lag1_acorr_median": -0.00635074344938338,
+    "lag1_pct_positive": 0.48,
+    "lag1_pct_strong": 0.02,
+    "lag2_acorr_mean": 0.0062462438206928915,
+    "lag2_acorr_median": -0.0043309717251748606
+  },
+  "side_probe_trough_dow": {
+    "Monday": 481,
+    "Tuesday": 552,
+    "Wednesday": 576,
+    "Thursday": 535,
+    "Friday": 613,
+    "Saturday": 575,
+    "Sunday": 546
+  },
+  "side_probe_drop_separability": {
+    "n_drop_days": 42486,
+    "quantiles": {
+      "p10": 1.0,
+      "p25": 1.0999999999999943,
+      "p50": 2.0,
+      "p75": 4.0,
+      "p90": 6.0,
+      "p95": 9.0,
+      "p99": 18.0
+    },
+    "mean": 3.3102763263192587,
+    "std": 3.852578200871651,
+    "histogram_1c_bins": [
+      2615,
+      9611,
+      12206,
+      5112,
+      4924,
+      2242,
+      1951,
+      740,
+      828,
+      341,
+      696,
+      159,
+      194,
+      100,
+      126,
+      52,
+      63,
+      46,
+      60,
+      82
+    ],
+    "histogram_edges": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ]
+  },
+  "wall_times_sec": {
+    "total": 5.968149459000415,
+    "load_features": 3.6210473339997407
+  }
+}
