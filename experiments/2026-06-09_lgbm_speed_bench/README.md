@@ -2,8 +2,8 @@
 
 - **Date:** 2026-06-09
 - **Branch:** main (committed directly — `experiments/**` exemption)
-- **SHA:** _fill in after run_
-- **Status:** open
+- **SHA:** 4caeaa2
+- **Status:** done
 
 ## Hypothesis
 
