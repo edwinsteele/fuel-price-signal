@@ -30,8 +30,14 @@ from fuel_signal.db import (
     upsert_stations,
 )
 from fuel_signal.features import (
+    COMP_BAND_CENTS,
+    DELTA_LAG_DAYS,
     FEATURE_COLUMNS,
     MIN_TRAINING_ROWS_PER_STATION,
+    NETWORK_FEATURE_COLUMNS,
+    _calendar_delta,
+    _lga_phase_std_per_date,
+    _network_px_std_per_date,
     assemble_feature_rows,
     compute_features,
 )
@@ -923,3 +929,212 @@ def test_assemble_feature_rows_brand_trough_matches_pit_function(conn):
         assert row_val != row_val  # NaN
     else:
         assert abs(row_val - expected_val) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Network features (issue #216): network_px_std, lga_phase_std, deltas
+# ---------------------------------------------------------------------------
+
+def _add_priced_station(
+    conn, station_code: int, lga: str, dates_and_prices: list[tuple[str, float]],
+    premium_decicents: int = 0,
+) -> None:
+    """Station + prices + per-date station_class row with given premium.
+
+    Default premium_decicents=0 → stickiness_score=0c, well inside the
+    ±COMP_BAND_CENTS competitive cohort.
+    """
+    _add_station_in_lga(conn, station_code, lga)
+    _add_prices(conn, station_code, dates_and_prices)
+    for d, _ in dates_and_prices:
+        _set_station_class(conn, station_code, d, "Competitive", premium_decicents)
+
+
+def test_network_px_std_matches_numpy(tmp_path):
+    """Per-date sample std over comp-band cohort matches np.std(ddof=1)."""
+    import numpy as np
+
+    from fuel_signal.db import fuel_type_id
+
+    conn = open_db(tmp_path / "net.db")
+    create_schema(conn)
+    dates = [f"2024-01-{day:02d}" for day in range(1, 6)]
+    # Two comp-band stations on each date; one out-of-band Sticky station that
+    # must be excluded from the cohort.
+    prices_a = [(d, 150.0 + i) for i, d in enumerate(dates)]
+    prices_b = [(d, 160.0 + i) for i, d in enumerate(dates)]
+    _add_priced_station(conn, 1001, "Penrith", prices_a)
+    _add_priced_station(conn, 1002, "Penrith", prices_b)
+    # Sticky station at premium 80 decicents (8c) — outside the ±5c band.
+    _add_priced_station(conn, 1003, "Penrith", [(d, 200.0) for d in dates],
+                        premium_decicents=80)
+
+    fid = fuel_type_id(conn, "E10")
+    result = _network_px_std_per_date(conn, fid)
+
+    for i, d in enumerate(dates):
+        expected = float(np.asarray([150.0 + i, 160.0 + i]).std(ddof=1))
+        assert d in result, f"missing date {d}"
+        assert abs(result[d] - expected) < 1e-9
+    conn.close()
+
+
+def test_network_px_std_excludes_sticky_only(tmp_path):
+    """A single in-band station produces no std (n=1 < 2)."""
+    from fuel_signal.db import fuel_type_id
+
+    conn = open_db(tmp_path / "net.db")
+    create_schema(conn)
+    dates = ["2024-01-01", "2024-01-02"]
+    _add_priced_station(conn, 1001, "Penrith", [(d, 150.0) for d in dates])
+    # Out-of-band station at 6c premium (60 decicents) — excluded from cohort.
+    _add_priced_station(conn, 1002, "Penrith", [(d, 170.0) for d in dates],
+                        premium_decicents=60)
+
+    fid = fuel_type_id(conn, "E10")
+    result = _network_px_std_per_date(conn, fid)
+    # Cohort has only one station per date → no std emitted.
+    assert "2024-01-01" not in result
+    assert "2024-01-02" not in result
+    conn.close()
+
+
+def test_network_px_std_pit_safety(tmp_path):
+    """Per-date std at D is bit-identical when future prices are absent."""
+    from fuel_signal.db import fuel_type_id
+
+    full_dates = [f"2024-01-{d:02d}" for d in range(1, 11)]
+    cutoff = "2024-01-05"
+
+    def _build(db_path, dates):
+        c = open_db(db_path)
+        create_schema(c)
+        prices_a = [(d, 150.0 + i) for i, d in enumerate(dates)]
+        prices_b = [(d, 162.0 + i * 0.5) for i, d in enumerate(dates)]
+        _add_priced_station(c, 1001, "Penrith", prices_a)
+        _add_priced_station(c, 1002, "Penrith", prices_b)
+        return c
+
+    conn_full = _build(tmp_path / "full.db", full_dates)
+    conn_trunc = _build(tmp_path / "trunc.db", [d for d in full_dates if d <= cutoff])
+
+    fid_full = fuel_type_id(conn_full, "E10")
+    fid_trunc = fuel_type_id(conn_trunc, "E10")
+    full = _network_px_std_per_date(conn_full, fid_full)
+    trunc = _network_px_std_per_date(conn_trunc, fid_trunc)
+
+    for d in [x for x in full_dates if x <= cutoff]:
+        assert abs(full[d] - trunc[d]) < 1e-9, f"PIT drift at {d}: {full[d]} vs {trunc[d]}"
+    conn_full.close()
+    conn_trunc.close()
+
+
+def test_calendar_delta_basic():
+    """level(d) − level(d − lag) when both present; absent otherwise."""
+    level = {
+        "2024-01-01": 1.0,
+        "2024-01-02": 2.0,
+        "2024-01-03": 3.0,
+        "2024-01-04": 5.0,
+    }
+    dates = ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"]
+    out = _calendar_delta(level, dates, lag_days=2)
+    assert "2024-01-01" not in out  # no prior
+    assert "2024-01-02" not in out  # no prior
+    assert abs(out["2024-01-03"] - (3.0 - 1.0)) < 1e-9
+    assert abs(out["2024-01-04"] - (5.0 - 2.0)) < 1e-9
+
+
+def test_calendar_delta_gap_in_level():
+    """Delta absent when the prior date is missing from the level dict."""
+    level = {"2024-01-01": 1.0, "2024-01-04": 4.0}  # gap on 01-02, 01-03
+    out = _calendar_delta(level, ["2024-01-04"], lag_days=3)
+    assert abs(out["2024-01-04"] - (4.0 - 1.0)) < 1e-9
+    # Same dict but lag=2 → 01-02 absent → no delta emitted.
+    out2 = _calendar_delta(level, ["2024-01-04"], lag_days=2)
+    assert "2024-01-04" not in out2
+
+
+def test_lga_phase_std_matches_numpy():
+    """sample std over LGA_FEATURE_COUNCILS, skipping None values."""
+    import numpy as np
+
+    from fuel_signal.lga_leadership import LGA_FEATURE_COUNCILS
+
+    # One date × every LGA, with one None to confirm it's skipped.
+    lookup: dict[tuple[str, str], int | None] = {
+        ("2024-01-01", lga): i for i, lga in enumerate(LGA_FEATURE_COUNCILS)
+    }
+    lookup[("2024-01-01", LGA_FEATURE_COUNCILS[0])] = None  # drop one
+    out = _lga_phase_std_per_date(lookup, ["2024-01-01", "2024-01-02"])
+    expected = float(np.asarray(list(range(1, len(LGA_FEATURE_COUNCILS)))).std(ddof=1))
+    assert abs(out["2024-01-01"] - expected) < 1e-9
+    # 2024-01-02 has no entries → absent.
+    assert "2024-01-02" not in out
+
+
+def test_assembler_includes_network_columns(conn):
+    """assemble_feature_rows output contains all NETWORK_FEATURE_COLUMNS and
+    at least one row has a non-null value for each."""
+    # Two stations in the same LGA so the comp cohort has ≥2 members on each date.
+    _add_station_in_lga(conn, STATION_A, "Penrith")
+    _add_station_in_lga(conn, STATION_B, "Penrith")
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    # Shift STATION_B prices by +1c so std is non-zero.
+    _add_prices(conn, STATION_B, [(d, p + 1.0) for d, p in _3_CYCLES])
+    for d, _ in _3_CYCLES:
+        _set_station_class(conn, STATION_A, d, "Competitive", 0)
+        _set_station_class(conn, STATION_B, d, "Competitive", 0)
+
+    df = assemble_feature_rows(
+        conn, station_codes=[STATION_A, STATION_B], min_rows_per_station=0
+    )
+    assert len(df) > 0
+    for col in NETWORK_FEATURE_COLUMNS:
+        assert col in df.columns, f"Missing network column: {col}"
+
+    # network_px_std should be ~sqrt(0.5) for a 2-station cohort with 1c spread
+    # (sample std of [p, p+1] = sqrt(0.5)).
+    import math
+    non_null = df["network_px_std"].dropna()
+    assert len(non_null) > 0
+    assert abs(non_null.iloc[0] - math.sqrt(0.5)) < 1e-6
+
+
+def test_assembler_network_delta_uses_calendar_lag(conn):
+    """network_px_std_delta_3d matches level(d) − level(d-3)."""
+    _add_station_in_lga(conn, STATION_A, "Penrith")
+    _add_station_in_lga(conn, STATION_B, "Penrith")
+    # Increasing spread over time: B's offset grows day by day so std grows.
+    series_a = _3_CYCLES
+    series_b = [(d, p + (i * 0.1)) for i, (d, p) in enumerate(_3_CYCLES)]
+    _add_prices(conn, STATION_A, series_a)
+    _add_prices(conn, STATION_B, series_b)
+    for d, _ in _3_CYCLES:
+        _set_station_class(conn, STATION_A, d, "Competitive", 0)
+        _set_station_class(conn, STATION_B, d, "Competitive", 0)
+
+    df = assemble_feature_rows(
+        conn, station_codes=[STATION_A, STATION_B], min_rows_per_station=0
+    )
+    # Reconstruct level dict from the (price_date, network_px_std) pairs.
+    level_by_date = dict(
+        df.drop_duplicates("price_date").set_index("price_date")["network_px_std"]
+    )
+    # Pick any date whose d-3 is also in the level dict.
+    for d in sorted(level_by_date):
+        prior = (
+            datetime.date.fromisoformat(d) - datetime.timedelta(days=DELTA_LAG_DAYS)
+        ).isoformat()
+        if prior in level_by_date and not (level_by_date[d] != level_by_date[d]):
+            row = df[df["price_date"] == d].iloc[0]
+            expected = level_by_date[d] - level_by_date[prior]
+            assert abs(row["network_px_std_delta_3d"] - expected) < 1e-9
+            return
+    raise AssertionError("No (d, d-3) pair with valid network_px_std found")
+
+
+def test_comp_band_constant_is_five_cents():
+    """Pin COMP_BAND_CENTS so future drift surfaces in tests."""
+    assert COMP_BAND_CENTS == 5.0
+    assert DELTA_LAG_DAYS == 3

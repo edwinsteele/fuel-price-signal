@@ -25,8 +25,11 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
+from datetime import date as _date
+from datetime import timedelta as _timedelta
 
 import click
+import numpy as np
 import pandas as pd
 
 from fuel_signal import db as _db
@@ -85,6 +88,19 @@ FEATURE_COLUMNS: list[str] = [
 # trained model contract is not broken until a Phase 4 retrain is complete.
 # Compose with FEATURE_COLUMNS when training / evaluating the Phase 4 model.
 LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
+
+# RAC_full network-aggregate features (issue #216, graduated from #212).
+# Per-date cross-station aggregates over the competitive cohort
+# (|stickiness_score| <= COMP_BAND_CENTS) and per-date LGA-phase dispersion.
+# Compose alongside LGA_FEATURE_COLUMNS for the 54-feat baseline.
+COMP_BAND_CENTS: float = 5.0
+DELTA_LAG_DAYS: int = 3
+NETWORK_FEATURE_COLUMNS: list[str] = [
+    "network_px_std",
+    "network_px_std_delta_3d",
+    "lga_phase_std",
+    "lga_phase_std_delta_3d",
+]
 
 # Brand trough feature columns are DB-derived (qualifying brands depend on
 # station counts) so they cannot be a module-level constant.  Call
@@ -213,6 +229,87 @@ def _brand_mean_on_date(
     return row[0] / 10
 
 
+def _network_px_std_per_date(
+    conn: sqlite3.Connection,
+    fuel_type_id: int,
+    comp_band_cents: float = COMP_BAND_CENTS,
+) -> dict[str, float]:
+    """Per-date sample std of E10 prices (cents) over the competitive cohort.
+
+    Cohort at date D: stations whose station_class.median_premium_decicents/10
+    is within ±comp_band_cents on snapshot_date = D. PIT-safe — station_class
+    rows are looked up by (station_code, snapshot_date=price_date), so the
+    cohort at date D depends only on data available on or before D.
+
+    Returns {date_iso: std_cents}. Dates with fewer than 2 contributing
+    stations are absent (sample std undefined). One pass over daily_prices
+    joined to station_class; aggregation is in Python because SQLite lacks a
+    native STDDEV.
+    """
+    band_decicents = comp_band_cents * 10
+    cur = conn.execute(
+        "SELECT dp.price_date, dp.price_decicents"
+        " FROM daily_prices dp"
+        " JOIN station_class sc ON dp.station_code = sc.station_code"
+        "   AND dp.price_date = sc.snapshot_date"
+        " WHERE dp.fuel_type_id = ?"
+        "   AND ABS(sc.median_premium_decicents) <= ?",
+        (fuel_type_id, band_decicents),
+    )
+    by_date: dict[int, list[float]] = {}
+    for date_int, decicents in cur:
+        by_date.setdefault(date_int, []).append(decicents / 10.0)
+
+    result: dict[str, float] = {}
+    for date_int, values in by_date.items():
+        if len(values) >= 2:
+            arr = np.asarray(values, dtype=float)
+            result[_date_from_int(date_int)] = float(arr.std(ddof=1))
+    return result
+
+
+def _lga_phase_std_per_date(
+    lga_days_since_by_key: dict[tuple[str, str], int | None],
+    date_strs: list[str],
+) -> dict[str, float]:
+    """Per-date sample std of days_since_trough_entry across LGA_FEATURE_COUNCILS.
+
+    Reads from the (date, lga) → days_since lookup already produced by
+    compute_pit_strict_days_since_trough. Dates with fewer than 2 non-null
+    LGA values are absent.
+    """
+    result: dict[str, float] = {}
+    for d_str in date_strs:
+        values = [
+            lga_days_since_by_key.get((d_str, lga))
+            for lga in LGA_FEATURE_COUNCILS
+        ]
+        non_null = [float(v) for v in values if v is not None]
+        if len(non_null) >= 2:
+            result[d_str] = float(np.asarray(non_null).std(ddof=1))
+    return result
+
+
+def _calendar_delta(
+    level_by_date: dict[str, float],
+    date_strs: list[str],
+    lag_days: int = DELTA_LAG_DAYS,
+) -> dict[str, float]:
+    """Per-date level(d) − level(d − lag_days), calendar-aware.
+
+    Absent for any date whose prior date is missing from level_by_date
+    (e.g. start of the data window, or a gap day with <2 contributors).
+    """
+    result: dict[str, float] = {}
+    for d_str in date_strs:
+        prior = (_date.fromisoformat(d_str) - _timedelta(days=lag_days)).isoformat()
+        level_d = level_by_date.get(d_str)
+        level_prior = level_by_date.get(prior)
+        if level_d is not None and level_prior is not None:
+            result[d_str] = level_d - level_prior
+    return result
+
+
 def _build_feature_dict(
     state: CycleState,
     station_price: float,
@@ -330,7 +427,13 @@ def assemble_feature_rows(
     )
     qualifying_brand_list = qualifying_brands(conn)
     brand_cols = [f"days_since_trough_entry_{brand_slug(b)}" for b in qualifying_brand_list]
-    all_cols = list(label_df.columns) + FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + brand_cols
+    all_cols = (
+        list(label_df.columns)
+        + FEATURE_COLUMNS
+        + LGA_FEATURE_COLUMNS
+        + NETWORK_FEATURE_COLUMNS
+        + brand_cols
+    )
     if label_df.empty:
         return pd.DataFrame(columns=all_cols)
 
@@ -449,12 +552,44 @@ def assemble_feature_rows(
     # See compute_pit_strict_days_since_trough docstring for why the naive
     # full-history detect (build_lga_trough_lookups) leaks future data.
     label_date_strs: list[str] = list(label_df["price_date"].unique())
-    lga_days_since_by_key = compute_pit_strict_days_since_trough(conn, label_date_strs)
+    # Extend with (d - DELTA_LAG_DAYS) dates so lga_phase_std_delta_3d has a
+    # valid prior at the start of the label window. Extra dates only populate
+    # the trough lookup; the row-construction loop never reads them.
+    lga_lookup_dates = sorted(
+        set(label_date_strs)
+        | {
+            (_date.fromisoformat(d) - _timedelta(days=DELTA_LAG_DAYS)).isoformat()
+            for d in label_date_strs
+        }
+    )
+    lga_days_since_by_key = compute_pit_strict_days_since_trough(conn, lga_lookup_dates)
 
     # Cache 9: per-brand days_since_trough_entry, PIT-strict.
     # Same contract as Cache 8 but uses brand median (non-Sticky stations).
     brand_days_since_by_key = compute_pit_strict_days_since_trough_brand(
         conn, label_date_strs, qualifying_brand_list
+    )
+
+    # Cache 10: network_px_std per date — sample std of E10 prices over the
+    # competitive cohort (|stickiness_score| <= COMP_BAND_CENTS). Computed once
+    # over the full daily_prices history; .get() returns None for sparse dates.
+    network_px_std_by_date = _network_px_std_per_date(conn, fid)
+
+    # Cache 11: network_px_std_delta_3d — calendar-aware level(d) − level(d-3).
+    network_px_std_delta_by_date = _calendar_delta(
+        network_px_std_by_date, label_date_strs
+    )
+
+    # Cache 12: lga_phase_std per date — sample std of the 35 LGA
+    # days_since_trough_entry values from Cache 8. Computed over the same
+    # extended date set so Cache 13 has its prior.
+    lga_phase_std_by_date = _lga_phase_std_per_date(
+        lga_days_since_by_key, lga_lookup_dates
+    )
+
+    # Cache 13: lga_phase_std_delta_3d — calendar-aware level(d) − level(d-3).
+    lga_phase_std_delta_by_date = _calendar_delta(
+        lga_phase_std_by_date, label_date_strs
     )
 
     # Every (station_code, price_date) in label_df came from daily_prices, and
@@ -481,6 +616,10 @@ def assemble_feature_rows(
             feature_dict[f"days_since_trough_entry_{lga_slug(_lga)}"] = (
                 lga_days_since_by_key.get((date_d, _lga))
             )
+        feature_dict["network_px_std"] = network_px_std_by_date.get(date_d)
+        feature_dict["network_px_std_delta_3d"] = network_px_std_delta_by_date.get(date_d)
+        feature_dict["lga_phase_std"] = lga_phase_std_by_date.get(date_d)
+        feature_dict["lga_phase_std_delta_3d"] = lga_phase_std_delta_by_date.get(date_d)
         for _brand in qualifying_brand_list:
             feature_dict[f"days_since_trough_entry_{brand_slug(_brand)}"] = (
                 brand_days_since_by_key.get((date_d, _brand))

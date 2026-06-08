@@ -16,7 +16,11 @@ import pytest
 from click.testing import CliRunner
 
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS
+from fuel_signal.features import (
+    FEATURE_COLUMNS,
+    LGA_FEATURE_COLUMNS,
+    NETWORK_FEATURE_COLUMNS,
+)
 from fuel_signal.train_lgbm import (
     main,
     train_and_evaluate,
@@ -28,7 +32,7 @@ def _date_range(start: str, n_days: int) -> list[str]:
     return [(d0 + datetime.timedelta(days=i)).isoformat() for i in range(n_days)]
 
 
-_ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
+_ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
 _SYNTHETIC_BRAND_COLUMNS = [
     "days_since_trough_entry_7_eleven",
     "days_since_trough_entry_bp",
@@ -242,7 +246,12 @@ def test_cli_default_picks_up_brand_columns(tmp_path):
     assert "Phase 4b" in res.output
 
     saved = joblib.load(model_path)
-    expected = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + sorted(_SYNTHETIC_BRAND_COLUMNS)
+    expected = (
+        FEATURE_COLUMNS
+        + LGA_FEATURE_COLUMNS
+        + NETWORK_FEATURE_COLUMNS
+        + sorted(_SYNTHETIC_BRAND_COLUMNS)
+    )
     assert saved["feature_columns"] == expected
 
 
