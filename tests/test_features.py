@@ -30,7 +30,6 @@ from fuel_signal.db import (
     upsert_stations,
 )
 from fuel_signal.features import (
-    COMP_BAND_CENTS,
     DELTA_LAG_DAYS,
     FEATURE_COLUMNS,
     MIN_TRAINING_ROWS_PER_STATION,
@@ -938,16 +937,13 @@ def test_assemble_feature_rows_brand_trough_matches_pit_function(conn):
 def _add_priced_station(
     conn, station_code: int, lga: str, dates_and_prices: list[tuple[str, float]],
     premium_decicents: int = 0,
+    cls: str = "Competitive",
 ) -> None:
-    """Station + prices + per-date station_class row with given premium.
-
-    Default premium_decicents=0 → stickiness_score=0c, well inside the
-    ±COMP_BAND_CENTS competitive cohort.
-    """
+    """Station + prices + per-date station_class row with given class and premium."""
     _add_station_in_lga(conn, station_code, lga)
     _add_prices(conn, station_code, dates_and_prices)
     for d, _ in dates_and_prices:
-        _set_station_class(conn, station_code, d, "Competitive", premium_decicents)
+        _set_station_class(conn, station_code, d, cls, premium_decicents)
 
 
 def test_network_px_std_matches_numpy(tmp_path):
@@ -965,9 +961,9 @@ def test_network_px_std_matches_numpy(tmp_path):
     prices_b = [(d, 160.0 + i) for i, d in enumerate(dates)]
     _add_priced_station(conn, 1001, "Penrith", prices_a)
     _add_priced_station(conn, 1002, "Penrith", prices_b)
-    # Sticky station at premium 80 decicents (8c) — outside the ±5c band.
+    # Sticky-class station — excluded from the Competitive cohort regardless of premium.
     _add_priced_station(conn, 1003, "Penrith", [(d, 200.0) for d in dates],
-                        premium_decicents=80)
+                        premium_decicents=80, cls="Sticky")
 
     fid = fuel_type_id(conn, "E10")
     result = _network_px_std_per_date(conn, fid)
@@ -987,9 +983,9 @@ def test_network_px_std_excludes_sticky_only(tmp_path):
     create_schema(conn)
     dates = ["2024-01-01", "2024-01-02"]
     _add_priced_station(conn, 1001, "Penrith", [(d, 150.0) for d in dates])
-    # Out-of-band station at 6c premium (60 decicents) — excluded from cohort.
+    # Sticky-class station — excluded from the Competitive cohort.
     _add_priced_station(conn, 1002, "Penrith", [(d, 170.0) for d in dates],
-                        premium_decicents=60)
+                        premium_decicents=60, cls="Sticky")
 
     fid = fuel_type_id(conn, "E10")
     result = _network_px_std_per_date(conn, fid)
@@ -1134,7 +1130,38 @@ def test_assembler_network_delta_uses_calendar_lag(conn):
     raise AssertionError("No (d, d-3) pair with valid network_px_std found")
 
 
-def test_comp_band_constant_is_five_cents():
-    """Pin COMP_BAND_CENTS so future drift surfaces in tests."""
-    assert COMP_BAND_CENTS == 5.0
+def test_delta_lag_days_constant():
+    """Pin DELTA_LAG_DAYS so future drift surfaces in tests."""
     assert DELTA_LAG_DAYS == 3
+
+
+def test_network_px_std_excludes_sticky_below_premium_band(tmp_path):
+    """A Sticky-class station with |median_premium| < 10c is excluded from the cohort.
+
+    The filter is class-based (sc.class = 'Competitive'), not threshold-based.
+    The iter-2 reclassification in classify.py can place borderline stations into
+    either class regardless of their raw premium value.
+    """
+    from fuel_signal.db import fuel_type_id
+
+    conn = open_db(tmp_path / "net.db")
+    create_schema(conn)
+    dates = ["2024-02-01", "2024-02-02"]
+    # Two normal Competitive stations provide the cohort.
+    _add_priced_station(conn, 2001, "Penrith", [(d, 150.0) for d in dates])
+    _add_priced_station(conn, 2002, "Penrith", [(d, 160.0) for d in dates])
+    # Sticky station with only 3c premium — inside the old ±5c band but wrong class.
+    _add_priced_station(conn, 2003, "Penrith", [(d, 153.0) for d in dates],
+                        premium_decicents=30, cls="Sticky")
+
+    fid = fuel_type_id(conn, "E10")
+    result = _network_px_std_per_date(conn, fid)
+
+    import numpy as np
+    for d in dates:
+        expected = float(np.asarray([150.0, 160.0]).std(ddof=1))
+        assert d in result
+        assert abs(result[d] - expected) < 1e-9, (
+            f"Sticky station (30 decicent premium) leaked into cohort at {d}"
+        )
+    conn.close()
