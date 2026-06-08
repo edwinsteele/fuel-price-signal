@@ -93,6 +93,11 @@ LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
 # Per-date cross-station aggregates over the competitive cohort
 # (|stickiness_score| <= COMP_BAND_CENTS) and per-date LGA-phase dispersion.
 # Compose alongside LGA_FEATURE_COLUMNS for the 54-feat baseline.
+#
+# COMP_BAND_CENTS is the dispersion-cohort inner band — a strict subset of the
+# canonical "Competitive" classification (classify.PREMIUM_BAND_CENTS = 10.0).
+# Set to 5.0 by the #212 ablation; widening it to match station_class.class is
+# tracked in #219.
 COMP_BAND_CENTS: float = 5.0
 DELTA_LAG_DAYS: int = 3
 NETWORK_FEATURE_COLUMNS: list[str] = [
