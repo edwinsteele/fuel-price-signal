@@ -1,0 +1,141 @@
+{
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "shock_folds": [
+    1,
+    4,
+    9,
+    13
+  ],
+  "tight_band_cents": 5.0,
+  "canonical_band_cents": 10.0,
+  "delta_lag_days": 3,
+  "n_baseline_features": 50,
+  "new_feature_columns": [
+    "network_px_std_5c",
+    "network_px_std_delta_3d_5c",
+    "network_px_std_10c",
+    "network_px_std_delta_3d_10c"
+  ],
+  "run_grid": {
+    "R0": [],
+    "R1_5c": [
+      "network_px_std_5c",
+      "network_px_std_delta_3d_5c"
+    ],
+    "R2_10c": [
+      "network_px_std_10c",
+      "network_px_std_delta_3d_10c"
+    ]
+  },
+  "cohort_definitions": {
+    "all": "full val set",
+    "hard25": "top quartile baseline per-row log-loss per fold",
+    "hard10": "top decile baseline per-row log-loss per fold",
+    "lated": "cycle_pct_through >= 0.9 AND _px_5d_change <= -2.0c"
+  },
+  "aggregation_convention": "Headline = median across 5 seeds per (fold, run); summary then averages those medians across 14 folds. Mean alongside.",
+  "seed_variance_gate": {
+    "rule": "ratio = seed_std / median(seed_std across cohort cells); flag > 5x",
+    "per_cohort": {
+      "all": {
+        "cohort_median_seed_std": 0.008949153231278519,
+        "n_cells": 42,
+        "n_flagged_gt_5x": 0
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.031110465932525116,
+        "n_cells": 42,
+        "n_flagged_gt_5x": 0
+      },
+      "hard10": {
+        "cohort_median_seed_std": 0.05060804799067749,
+        "n_cells": 42,
+        "n_flagged_gt_5x": 0
+      },
+      "lated": {
+        "cohort_median_seed_std": 0.018247472592581658,
+        "n_cells": 42,
+        "n_flagged_gt_5x": 3
+      }
+    },
+    "flagged_cells": [
+      {
+        "cohort": "lated",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.11726112137758014,
+        "ratio_vs_cohort_median": 6.426156870911075
+      },
+      {
+        "cohort": "lated",
+        "fold": 3,
+        "run": "R1_5c",
+        "seed_std": 0.10256497342958347,
+        "ratio_vs_cohort_median": 5.620776954682498
+      },
+      {
+        "cohort": "lated",
+        "fold": 8,
+        "run": "R2_10c",
+        "seed_std": 0.09330752329138421,
+        "ratio_vs_cohort_median": 5.113449154011472
+      }
+    ]
+  },
+  "summary": [
+    {
+      "run": "R0",
+      "n_folds": 14,
+      "delta_all_median_mean": 0.0,
+      "delta_hard25_median_mean": 0.0,
+      "delta_hard25_mean_mean": 0.0,
+      "delta_hard10_median_mean": 0.0,
+      "delta_lated_median_mean": 0.0,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 0,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": 0.0,
+      "delta_hard25_shock_median_mean": 0.0
+    },
+    {
+      "run": "R1_5c",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.005229616459228754,
+      "delta_hard25_median_mean": -0.02985068484946426,
+      "delta_hard25_mean_mean": -0.026822893333437688,
+      "delta_hard10_median_mean": -0.06809171082258618,
+      "delta_lated_median_mean": -0.016873749816717857,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 8,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": -0.03599471847852513,
+      "delta_hard25_shock_median_mean": -0.01449060077681208
+    },
+    {
+      "run": "R2_10c",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.007273465867381889,
+      "delta_hard25_median_mean": -0.038625299292340494,
+      "delta_hard25_mean_mean": -0.03720363138350437,
+      "delta_hard10_median_mean": -0.086436733059535,
+      "delta_lated_median_mean": -0.022087339736282,
+      "delta_lated_n_folds_valid": 14,
+      "helps_hard25_n": 10,
+      "helps_hard25_n_folds": 14,
+      "delta_hard25_normal_median_mean": -0.050633290984287885,
+      "delta_hard25_shock_median_mean": -0.008605320062472027
+    }
+  ],
+  "decision": {
+    "verdict": "SWITCH_TO_10C",
+    "reasoning": "R2 (\u00b110c) \u0394h25=-0.0386 <= R1 (\u00b15c) \u0394h25=-0.0299 + 0.005 (margin=-0.0088). Parsimony favours canonical cohort.",
+    "margin_r2_minus_r1": -0.008774614442876232
+  },
+  "total_wall_seconds": 585.1528070000059
+}
