@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import math
+import sqlite3
 
 from fuel_signal.backtest import (
     AlwaysBuyStrategy,
@@ -430,13 +431,11 @@ def test_model_strategy_decide_with_phase4_features(tmp_path):
 # PriceHistory — network_px_std_at PIT safety
 # ---------------------------------------------------------------------------
 
-def _make_db_with_prices(tmp_path, suffix: str, prices_by_date: dict[str, float]) -> object:
+def _make_db_with_prices(tmp_path, suffix: str, prices_by_date: dict[str, float]) -> sqlite3.Connection:
     """Return an open sqlite3 connection with stations + daily_prices + station_class rows.
 
     Two competitive stations (|median_premium| = 0) contribute equal prices on each date.
     """
-    import sqlite3
-
     from fuel_signal.db import create_schema, upsert_daily_prices, upsert_station_class_rows, upsert_stations
 
     db_path = tmp_path / f"test_{suffix}.db"
@@ -473,7 +472,7 @@ def test_network_px_std_at_pit_safe(tmp_path):
     snapshot_date = price_date, so future station_class rows don't affect D.
     """
     from fuel_signal.db import fuel_type_id
-    from fuel_signal.features import _network_px_std_per_date
+    from fuel_signal.features import COMP_BAND_CENTS, _network_px_std_per_date
 
     date_d = "2021-03-01"
     prices_short = {date_d: 150.0}
@@ -485,12 +484,13 @@ def test_network_px_std_at_pit_safe(tmp_path):
     fid_short = fuel_type_id(conn_short, "E10")
     fid_long = fuel_type_id(conn_long, "E10")
 
-    std_short = _network_px_std_per_date(conn_short, fid_short).get(date_d)
-    std_long = _network_px_std_per_date(conn_long, fid_long).get(date_d)
+    std_short = _network_px_std_per_date(conn_short, fid_short, COMP_BAND_CENTS).get(date_d)
+    std_long = _network_px_std_per_date(conn_long, fid_long, COMP_BAND_CENTS).get(date_d)
 
-    # Both stations report the same price, so std is 0 — but the key point is
-    # the value is identical regardless of how many future dates the DB has.
-    assert std_short == std_long
+    # Both stations report the same price so std == 0.0. Asserting the concrete
+    # value as well as equality between the two DBs guards against regressions
+    # in _network_px_std_per_date, not just PIT-safety violations.
+    assert std_short == std_long == 0.0
 
     conn_short.close()
     conn_long.close()
