@@ -33,7 +33,6 @@ from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.dates import date_from_int as _date_from_int
 from fuel_signal.features import (
-    COMP_BAND_CENTS,
     DELTA_LAG_DAYS,
     FEATURE_COLUMNS,
     _build_feature_dict,
@@ -481,7 +480,7 @@ def load_history(
     )
 
     avg_date_strs: list[str] = [d for d, _ in avg_series]
-    network_px_std_by_date = _network_px_std_per_date(conn, fid, COMP_BAND_CENTS)
+    network_px_std_by_date = _network_px_std_per_date(conn, fid)
     network_px_std_delta_3d_by_date = _calendar_delta(
         network_px_std_by_date, avg_date_strs, DELTA_LAG_DAYS
     )

@@ -90,15 +90,9 @@ FEATURE_COLUMNS: list[str] = [
 LGA_FEATURE_COLUMNS: list[str] = lga_feature_columns()
 
 # RAC_full network-aggregate features (issue #216, graduated from #212).
-# Per-date cross-station aggregates over the competitive cohort
-# (|stickiness_score| <= COMP_BAND_CENTS) and per-date LGA-phase dispersion.
+# Per-date cross-station aggregates over the canonical Competitive cohort
+# (sc.class = 'Competitive') and per-date LGA-phase dispersion.
 # Compose alongside LGA_FEATURE_COLUMNS for the 54-feat baseline.
-#
-# COMP_BAND_CENTS is the dispersion-cohort inner band — a strict subset of the
-# canonical "Competitive" classification (classify.PREMIUM_BAND_CENTS = 10.0).
-# Set to 5.0 by the #212 ablation; widening it to match station_class.class is
-# tracked in #219.
-COMP_BAND_CENTS: float = 5.0
 DELTA_LAG_DAYS: int = 3
 NETWORK_FEATURE_COLUMNS: list[str] = [
     "network_px_std",
@@ -237,29 +231,27 @@ def _brand_mean_on_date(
 def _network_px_std_per_date(
     conn: sqlite3.Connection,
     fuel_type_id: int,
-    comp_band_cents: float = COMP_BAND_CENTS,
 ) -> dict[str, float]:
-    """Per-date sample std of E10 prices (cents) over the competitive cohort.
+    """Per-date sample std of E10 prices (cents) over the canonical Competitive cohort.
 
-    Cohort at date D: stations whose station_class.median_premium_decicents/10
-    is within ±comp_band_cents on snapshot_date = D. PIT-safe — station_class
-    rows are looked up by (station_code, snapshot_date=price_date), so the
-    cohort at date D depends only on data available on or before D.
+    Cohort at date D: stations whose station_class.class = 'Competitive' on
+    snapshot_date = D. PIT-safe — station_class rows are looked up by
+    (station_code, snapshot_date=price_date), so the cohort at date D depends
+    only on data available on or before D.
 
     Returns {date_iso: std_cents}. Dates with fewer than 2 contributing
     stations are absent (sample std undefined). One pass over daily_prices
     joined to station_class; aggregation is in Python because SQLite lacks a
     native STDDEV.
     """
-    band_decicents = comp_band_cents * 10
     cur = conn.execute(
         "SELECT dp.price_date, dp.price_decicents"
         " FROM daily_prices dp"
         " JOIN station_class sc ON dp.station_code = sc.station_code"
         "   AND dp.price_date = sc.snapshot_date"
         " WHERE dp.fuel_type_id = ?"
-        "   AND ABS(sc.median_premium_decicents) <= ?",
-        (fuel_type_id, band_decicents),
+        "   AND sc.class = 'Competitive'",
+        (fuel_type_id,),
     )
     by_date: dict[int, list[float]] = {}
     for date_int, decicents in cur:
@@ -576,7 +568,7 @@ def assemble_feature_rows(
     )
 
     # Cache 10: network_px_std per date — sample std of E10 prices over the
-    # competitive cohort (|stickiness_score| <= COMP_BAND_CENTS). Computed once
+    # canonical Competitive cohort (sc.class = 'Competitive'). Computed once
     # over the full daily_prices history; .get() returns None for sparse dates.
     network_px_std_by_date = _network_px_std_per_date(conn, fid)
 

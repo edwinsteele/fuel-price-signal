@@ -472,7 +472,7 @@ def test_network_px_std_at_pit_safe(tmp_path):
     snapshot_date = price_date, so future station_class rows don't affect D.
     """
     from fuel_signal.db import fuel_type_id
-    from fuel_signal.features import COMP_BAND_CENTS, _network_px_std_per_date
+    from fuel_signal.features import _network_px_std_per_date
 
     date_d = "2021-03-01"
     prices_short = {date_d: 150.0}
@@ -484,8 +484,8 @@ def test_network_px_std_at_pit_safe(tmp_path):
     fid_short = fuel_type_id(conn_short, "E10")
     fid_long = fuel_type_id(conn_long, "E10")
 
-    std_short = _network_px_std_per_date(conn_short, fid_short, COMP_BAND_CENTS).get(date_d)
-    std_long = _network_px_std_per_date(conn_long, fid_long, COMP_BAND_CENTS).get(date_d)
+    std_short = _network_px_std_per_date(conn_short, fid_short).get(date_d)
+    std_long = _network_px_std_per_date(conn_long, fid_long).get(date_d)
 
     # Both stations report the same price so std == 0.0. Asserting the concrete
     # value as well as equality between the two DBs guards against regressions
