@@ -424,3 +424,138 @@ def test_model_strategy_decide_with_phase4_features(tmp_path):
     strategy = ModelStrategy(model_path=model_path, threshold=0.40)
     result = strategy.decide("2018-09-01", station_code, history)
     assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# PriceHistory — network_px_std_at PIT safety
+# ---------------------------------------------------------------------------
+
+def _make_db_with_prices(tmp_path, suffix: str, prices_by_date: dict[str, float]) -> object:
+    """Return an open sqlite3 connection with stations + daily_prices + station_class rows.
+
+    Two competitive stations (|median_premium| = 0) contribute equal prices on each date.
+    """
+    import sqlite3
+
+    from fuel_signal.db import create_schema, upsert_daily_prices, upsert_station_class_rows, upsert_stations
+
+    db_path = tmp_path / f"test_{suffix}.db"
+    conn = sqlite3.connect(str(db_path))
+    create_schema(conn)
+
+    for sc in (1001, 1002):
+        upsert_stations(conn, [{
+            "station_code": sc,
+            "name": f"Station {sc}",
+            "address": "1 Test St",
+            "suburb": "Testville",
+            "postcode": "2000",
+            "brand": "TestBrand",
+        }])
+
+    rows_prices = []
+    rows_class = []
+    for date_str, price in prices_by_date.items():
+        for sc in (1001, 1002):
+            rows_prices.append((sc, "E10", date_str, price))
+            rows_class.append((sc, date_str, "Competitive", 0))
+
+    upsert_daily_prices(conn, rows_prices)
+    upsert_station_class_rows(conn, rows_class)
+    conn.commit()
+    return conn
+
+
+def test_network_px_std_at_pit_safe(tmp_path):
+    """network_px_std_at(D) is identical whether DB ends at D or extends beyond D.
+
+    PIT safety comes from _network_px_std_per_date joining station_class on
+    snapshot_date = price_date, so future station_class rows don't affect D.
+    """
+    from fuel_signal.db import fuel_type_id
+    from fuel_signal.features import _network_px_std_per_date
+
+    date_d = "2021-03-01"
+    prices_short = {date_d: 150.0}
+    prices_long = {date_d: 150.0, "2021-03-02": 160.0, "2021-03-03": 170.0}
+
+    conn_short = _make_db_with_prices(tmp_path, "short", prices_short)
+    conn_long = _make_db_with_prices(tmp_path, "long", prices_long)
+
+    fid_short = fuel_type_id(conn_short, "E10")
+    fid_long = fuel_type_id(conn_long, "E10")
+
+    std_short = _network_px_std_per_date(conn_short, fid_short).get(date_d)
+    std_long = _network_px_std_per_date(conn_long, fid_long).get(date_d)
+
+    # Both stations report the same price, so std is 0 — but the key point is
+    # the value is identical regardless of how many future dates the DB has.
+    assert std_short == std_long
+
+    conn_short.close()
+    conn_long.close()
+
+
+# ---------------------------------------------------------------------------
+# ModelStrategy — decide with 54-feat calibrated artifact
+# ---------------------------------------------------------------------------
+
+def test_model_strategy_decide_with_54feat_calibrated_artifact(tmp_path):
+    """ModelStrategy.decide works end-to-end with a calibrated artifact carrying all 54 features.
+
+    Regression for #218: the 4 new network-dispersion columns must be present in
+    the feature dict before np.array indexing by self._feature_columns.
+    """
+    import math as _math
+
+    import joblib
+    import numpy as np
+    from sklearn.dummy import DummyClassifier
+    from sklearn.isotonic import IsotonicRegression
+
+    n_feat = len(FEATURE_COLUMNS)
+    X_dummy = np.zeros((2, n_feat))
+    base_clf = DummyClassifier(strategy="most_frequent")
+    base_clf.fit(X_dummy, [0, 1])
+
+    # Isotonic calibrator needs to be fitted on 1-D probabilities.
+    raw_probs = base_clf.predict_proba(X_dummy)[:, 1]
+    iso = IsotonicRegression(out_of_bounds="clip")
+    iso.fit(raw_probs, [0, 1])
+
+    calibrated_artifact = {
+        "calibrated": True,
+        "base_pipeline": base_clf,
+        "calibrator": iso,
+        "calibration_method": "isotonic",
+        "feature_columns": list(FEATURE_COLUMNS),
+    }
+    model_path = tmp_path / "calibrated_54feat.joblib"
+    joblib.dump(calibrated_artifact, model_path)
+
+    n = 270
+    period = 45
+    start = "2018-01-01"
+    dates = _dates_from(start, n)
+    prices = [
+        (d, 180.0 + 20.0 * _math.sin(2 * _math.pi * i / period))
+        for i, d in enumerate(dates)
+    ]
+    station_code = 888
+
+    history = PriceHistory(
+        avg_series=prices,
+        station_prices={station_code: prices},
+        station_lga_brand={station_code: ("Penrith", "BP")},
+        lga_mean_by_key={(d, "Penrith"): 175.0 for d, _ in prices},
+        brand_mean_by_key={(d, "BP"): 178.0 for d, _ in prices},
+        stickiness_by_key={(station_code, d): 3.0 for d, _ in prices},
+        network_px_std_by_date={d: 4.5 for d, _ in prices},
+        network_px_std_delta_3d_by_date={d: 0.2 for d, _ in prices},
+        lga_phase_std_by_date={d: 6.0 for d, _ in prices},
+        lga_phase_std_delta_3d_by_date={d: -0.1 for d, _ in prices},
+    )
+
+    strategy = ModelStrategy(model_path=model_path, threshold=0.40)
+    result = strategy.decide("2018-09-01", station_code, history)
+    assert isinstance(result, bool)
