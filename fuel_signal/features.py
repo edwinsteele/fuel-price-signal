@@ -625,7 +625,23 @@ def assemble_feature_rows(
 
     if not records:
         return pd.DataFrame(columns=all_cols)
-    return pd.DataFrame(records, columns=all_cols)
+    df = pd.DataFrame(records, columns=all_cols)
+    # LGA/brand trough values are int|None in records; pandas assigns object dtype
+    # to any column with mixed int+None or all-None values.  LightGBM rejects
+    # object columns — cast to float so None → NaN and dtype becomes float64.
+    _cast_trough_columns(df)
+    return df
+
+
+def _cast_trough_columns(df: pd.DataFrame) -> None:
+    """In-place: cast days_since_trough_entry_* columns to float64.
+
+    Raises on unexpected non-numeric values so upstream data bugs surface
+    immediately rather than being silently converted to NaN.
+    """
+    for c in df.columns:
+        if c.startswith(_TROUGH_PREFIX):
+            df[c] = pd.to_numeric(df[c], errors="raise")
 
 
 def load_features(path: pathlib.Path | str = DEFAULT_FEATURES_CSV) -> pd.DataFrame:
@@ -636,8 +652,13 @@ def load_features(path: pathlib.Path | str = DEFAULT_FEATURES_CSV) -> pd.DataFra
         not csv_path.exists()
         or parquet_path.stat().st_mtime >= csv_path.stat().st_mtime
     ):
-        return pd.read_parquet(parquet_path)
-    return pd.read_csv(csv_path)
+        df = pd.read_parquet(parquet_path)
+    else:
+        df = pd.read_csv(csv_path)
+    # Normalise trough columns on both paths: parquet preserves object dtype,
+    # and CSV behaviour may change in future pandas versions.
+    _cast_trough_columns(df)
+    return df
 
 
 @click.command("features")
