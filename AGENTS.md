@@ -275,6 +275,21 @@ Leading indicators (deferred — not yet built):
 - Hypothesis: some LGAs and/or macro signals (TGP, crude) precede BM price rises
 - Architecture supports this: new series → new `CycleDetector` → new signal class → register in `RecommendationManager`
 
+## Canonical feature set (54-feat baseline, locked issue #216)
+
+The production model (`data/models/lgbm.joblib`, `lgbm_calibrated.joblib`) is trained on:
+
+| Group | Count | Source constant |
+|-------|-------|-----------------|
+| Core cycle + station features | 15 | `FEATURE_COLUMNS` |
+| LGA trough features | 35 | `LGA_FEATURE_COLUMNS` (one per `SYDNEY_METRO_COUNCILS` LGA) |
+| RAC_full network features | 4 | `NETWORK_FEATURE_COLUMNS` |
+| **Total** | **54** | |
+
+**RAC_full group** (`network_px_std`, `network_px_std_delta_3d`, `lga_phase_std`, `lga_phase_std_delta_3d`): graduated via within-family ablation in #212; adds −0.045 Δh25 over the 50-feat LGA-only baseline.
+
+To reproduce the locked 54-feat model: `uv run python -m fuel_signal.features` (regenerates `data/features.csv`), then `uv run python -m fuel_signal.train_lgbm --no-brand-features`. Brand trough columns are excluded from the locked baseline until a separate ablation graduates them.
+
 ## Multi-seed test-logloss policy
 
 At **lock time** (phase boundaries, results you will compare future changes against), run `score_phase2.py` with `--seeds 1,7,42,99,2024`. This banks a per-seed raw (uncalibrated) LightGBM test-logloss vector in `experiments/results.csv` columns `seed_test_logloss_vector`, `seed_test_logloss_mean`, `seed_test_logloss_std`.

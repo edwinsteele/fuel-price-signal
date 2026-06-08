@@ -1165,3 +1165,61 @@ def test_network_px_std_excludes_sticky_below_premium_band(tmp_path):
             f"Sticky station (30 decicent premium) leaked into cohort at {d}"
         )
     conn.close()
+
+
+def test_lga_phase_std_pit_safety(tmp_path):
+    """lga_phase_std at D is bit-identical whether the DB ends at D or extends past D.
+
+    PIT safety is inherited from compute_pit_strict_days_since_trough; this test
+    verifies the std aggregation does not re-introduce drift.
+    """
+    import numpy as np
+
+    from fuel_signal.lga_leadership import LGA_FEATURE_COUNCILS, compute_pit_strict_days_since_trough
+
+    start = datetime.date(2020, 1, 1)
+    n_full = 800
+    n_trunc = 400
+    query_date = (start + datetime.timedelta(days=350)).isoformat()
+
+    t = np.arange(n_full, dtype=float)
+    prices = 150.0 + 10.0 * np.cos(2 * np.pi * t / 45)
+
+    # Two LGAs from LGA_FEATURE_COUNCILS so lga_phase_std has >= 2 non-null values.
+    # Three stations per LGA to satisfy the MIN_STATION_FLOOR >= 3 filter in _load_lga_sums.
+    lga_a, lga_b = LGA_FEATURE_COUNCILS[0], LGA_FEATURE_COUNCILS[1]
+
+    def _build(db_path, n_days):
+        c = open_db(db_path)
+        create_schema(c)
+        series = [
+            ((start + datetime.timedelta(days=i)).isoformat(), float(prices[i]))
+            for i in range(n_days)
+        ]
+        for sc, lga in [
+            (4001, lga_a), (4002, lga_a), (4003, lga_a),
+            (4004, lga_b), (4005, lga_b), (4006, lga_b),
+        ]:
+            _add_station_in_lga(c, sc, lga)
+            _add_prices(c, sc, series)
+            for d, _ in series:
+                _set_station_class(c, sc, d, "Competitive", 0)
+        return c
+
+    conn_full = _build(tmp_path / "full.db", n_full)
+    conn_trunc = _build(tmp_path / "trunc.db", n_trunc)
+
+    lookup_full = compute_pit_strict_days_since_trough(conn_full, [query_date])
+    lookup_trunc = compute_pit_strict_days_since_trough(conn_trunc, [query_date])
+
+    conn_full.close()
+    conn_trunc.close()
+
+    std_full = _lga_phase_std_per_date(lookup_full, [query_date]).get(query_date)
+    std_trunc = _lga_phase_std_per_date(lookup_trunc, [query_date]).get(query_date)
+
+    assert std_full is not None, "lga_phase_std absent in full DB — check cycle setup"
+    assert std_trunc is not None, "lga_phase_std absent in truncated DB — check cycle setup"
+    assert std_full == std_trunc, (
+        f"lga_phase_std PIT drift: full={std_full}, truncated={std_trunc}"
+    )

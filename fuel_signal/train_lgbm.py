@@ -1,9 +1,10 @@
 """LightGBM classifier — numeric-only.
 
 Default feature set is everything present in the features CSV:
-FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + any days_since_trough_entry_<brand>
-columns discovered in the CSV header. Pass --no-brand-features to reproduce
-Phase 4 (50 features), or --no-lga-features for Phase 3c (15 features).
+FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS + any
+days_since_trough_entry_<brand> columns discovered in the CSV header.
+Pass --no-brand-features to reproduce the RAC_full 54-feat baseline (issue #216),
+or --no-lga-features for Phase 3c (15 features).
 random_state=42, no hyperparameter tuning. Test split is intentionally left
 untouched — reserved for score_phase2.py once calibration + threshold is
 locked.
@@ -159,7 +160,7 @@ def _format_results(result: dict) -> str:
     "no_brand_features",
     is_flag=True,
     default=False,
-    help="Ignore brand trough columns even when present (reproduces Phase 4 50-feat schema).",
+    help="Ignore brand trough columns even when present (reproduces RAC_full 54-feat schema).",
 )
 @click.option(
     "--drop-feature",
@@ -191,11 +192,11 @@ def main(
     """Train LightGBM on numeric features.
 
     Default: every feature present in the CSV — FEATURE_COLUMNS +
-    LGA_FEATURE_COLUMNS + any brand trough columns discovered in the header
-    (Phase 4b once brand cols are present, Phase 4 if only LGA, Phase 3c if
-    neither). Pass --no-brand-features for Phase 4 or --no-lga-features for
-    Phase 3c. No hyperparameter tuning, random_state=42. Test is intentionally
-    left untouched. This command does not append to experiments/results.csv.
+    LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS + any brand trough columns
+    discovered in the header. Pass --no-brand-features for the RAC_full 54-feat
+    baseline or --no-lga-features for Phase 3c (15 features). No hyperparameter
+    tuning, random_state=42. Test is intentionally left untouched. This command
+    does not append to experiments/results.csv.
     """
     features_path = pathlib.Path(features_csv)
     if not features_path.exists():
