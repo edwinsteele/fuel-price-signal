@@ -634,10 +634,14 @@ def assemble_feature_rows(
 
 
 def _cast_trough_columns(df: pd.DataFrame) -> None:
-    """In-place: cast days_since_trough_entry_* columns from object to float64."""
+    """In-place: cast days_since_trough_entry_* columns to float64.
+
+    Raises on unexpected non-numeric values so upstream data bugs surface
+    immediately rather than being silently converted to NaN.
+    """
     for c in df.columns:
-        if c.startswith(_TROUGH_PREFIX) and df[c].dtype == object:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+        if c.startswith(_TROUGH_PREFIX):
+            df[c] = pd.to_numeric(df[c], errors="raise")
 
 
 def load_features(path: pathlib.Path | str = DEFAULT_FEATURES_CSV) -> pd.DataFrame:
@@ -649,11 +653,12 @@ def load_features(path: pathlib.Path | str = DEFAULT_FEATURES_CSV) -> pd.DataFra
         or parquet_path.stat().st_mtime >= csv_path.stat().st_mtime
     ):
         df = pd.read_parquet(parquet_path)
-        # Parquet preserves object dtype for int|None trough columns written before
-        # _cast_trough_columns was introduced.  Re-apply the cast on load.
-        _cast_trough_columns(df)
-        return df
-    return pd.read_csv(csv_path)
+    else:
+        df = pd.read_csv(csv_path)
+    # Normalise trough columns on both paths: parquet preserves object dtype,
+    # and CSV behaviour may change in future pandas versions.
+    _cast_trough_columns(df)
+    return df
 
 
 @click.command("features")
