@@ -21,7 +21,7 @@ from fuel_signal.backtest import (
     _evaluation_dates,
     run_backtest,
 )
-from fuel_signal.features import FEATURE_COLUMNS
+from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, NETWORK_FEATURE_COLUMNS
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -423,4 +423,118 @@ def test_model_strategy_decide_with_phase4_features(tmp_path):
 
     strategy = ModelStrategy(model_path=model_path, threshold=0.40)
     result = strategy.decide("2018-09-01", station_code, history)
+    assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# PriceHistory — network/lga-phase-std accessor methods (issue #218)
+# ---------------------------------------------------------------------------
+
+def test_network_px_std_at_returns_value_from_cache():
+    """network_px_std_at returns the preloaded value for a known date, None otherwise."""
+    h = PriceHistory(
+        avg_series=[("2020-01-01", 160.0)],
+        station_prices={},
+        network_px_std_by_date={"2020-01-01": 3.5},
+    )
+    assert h.network_px_std_at("2020-01-01") == 3.5
+    assert h.network_px_std_at("2020-01-02") is None
+
+
+def test_network_px_std_at_pit_safe_absent_dates_return_none():
+    """Dates not explicitly preloaded return None — future data cannot bleed in."""
+    h = PriceHistory(
+        avg_series=[],
+        station_prices={},
+        network_px_std_by_date={"2020-01-05": 4.2},
+    )
+    assert h.network_px_std_at("2020-01-05") == 4.2
+    assert h.network_px_std_at("2020-01-06") is None  # absent → None, not a look-forward
+
+
+def test_network_px_std_delta_3d_at_returns_value_from_cache():
+    h = PriceHistory(
+        avg_series=[],
+        station_prices={},
+        network_px_std_delta_by_date={"2020-01-04": 0.7},
+    )
+    assert h.network_px_std_delta_3d_at("2020-01-04") == 0.7
+    assert h.network_px_std_delta_3d_at("2020-01-05") is None
+
+
+def test_lga_phase_std_at_returns_value_from_cache():
+    h = PriceHistory(
+        avg_series=[("2020-01-01", 160.0)],
+        station_prices={},
+        lga_phase_std_by_date={"2020-01-01": 2.1},
+    )
+    assert h.lga_phase_std_at("2020-01-01") == 2.1
+    assert h.lga_phase_std_at("2020-02-01") is None
+
+
+def test_lga_phase_std_delta_3d_at_returns_value_from_cache():
+    h = PriceHistory(
+        avg_series=[],
+        station_prices={},
+        lga_phase_std_delta_by_date={"2020-01-04": -1.2},
+    )
+    assert h.lga_phase_std_delta_3d_at("2020-01-04") == -1.2
+    assert h.lga_phase_std_delta_3d_at("2020-01-05") is None
+
+
+# ---------------------------------------------------------------------------
+# ModelStrategy — 54-feat artifact end-to-end (issue #218)
+# ---------------------------------------------------------------------------
+
+def test_model_strategy_decide_with_54feat_network_features(tmp_path):
+    """ModelStrategy.decide does not raise KeyError when artifact includes NETWORK_FEATURE_COLUMNS.
+
+    Loads a synthetic calibrated dict artifact whose feature_columns are the
+    full 54-feat set (FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS),
+    then calls decide() on a PriceHistory populated with all required caches.
+    """
+    import math as _math
+
+    import joblib
+    import numpy as np
+    from sklearn.dummy import DummyClassifier
+
+    from fuel_signal.lga_leadership import LGA_FEATURE_COUNCILS
+
+    feature_cols = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
+    n_features = len(feature_cols)
+
+    clf = DummyClassifier(strategy="most_frequent")
+    clf.fit(np.zeros((2, n_features)), [0, 1])
+    artifact = {"pipeline": clf, "feature_columns": feature_cols}
+    model_path = tmp_path / "model_54feat.joblib"
+    joblib.dump(artifact, model_path)
+
+    n = 270
+    period = 45
+    start = "2018-01-01"
+    dates = _dates_from(start, n)
+    prices = [
+        (d, 180.0 + 20.0 * _math.sin(2 * _math.pi * i / period))
+        for i, d in enumerate(dates)
+    ]
+    station_code = 998
+    eval_date = "2018-09-01"
+
+    history = PriceHistory(
+        avg_series=prices,
+        station_prices={station_code: prices},
+        station_lga_brand={station_code: ("Penrith", "BP")},
+        lga_mean_by_key={(d, "Penrith"): 175.0 for d, _ in prices},
+        brand_mean_by_key={(d, "BP"): 178.0 for d, _ in prices},
+        stickiness_by_key={(station_code, d): 5.0 for d, _ in prices},
+        lga_days_since_by_key={(d, lga): 5 for d, _ in prices for lga in LGA_FEATURE_COUNCILS},
+        network_px_std_by_date={d: 3.0 for d, _ in prices},
+        network_px_std_delta_by_date={d: 0.5 for d, _ in prices},
+        lga_phase_std_by_date={d: 2.0 for d, _ in prices},
+        lga_phase_std_delta_by_date={d: -0.3 for d, _ in prices},
+    )
+
+    strategy = ModelStrategy(model_path=model_path, threshold=0.40)
+    result = strategy.decide(eval_date, station_code, history)
     assert isinstance(result, bool)

@@ -32,7 +32,14 @@ import fuel_signal.db as db
 from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.dates import date_from_int as _date_from_int
-from fuel_signal.features import FEATURE_COLUMNS, _build_feature_dict
+from fuel_signal.features import (
+    DELTA_LAG_DAYS,
+    FEATURE_COLUMNS,
+    _build_feature_dict,
+    _calendar_delta,
+    _lga_phase_std_per_date,
+    _network_px_std_per_date,
+)
 from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
     compute_pit_strict_days_since_trough,
@@ -52,10 +59,13 @@ class PriceHistory:
     detect(as_of) slices in-memory, so PIT-safety is preserved across the
     entire backtest run without rebuilding the detector per evaluation date.
 
-    The four optional dicts (station_lga_brand, lga_mean_by_key, brand_mean_by_key,
-    stickiness_by_key) are populated by load_history and consumed by
-    ModelStrategy.decide to supply Phase 4 features. Tests that construct
-    PriceHistory directly without a DB can leave them empty (default).
+    The optional dicts (station_lga_brand, lga_mean_by_key, brand_mean_by_key,
+    stickiness_by_key, lga_days_since_by_key) are populated by load_history and
+    consumed by ModelStrategy.decide to supply Phase 4 features. The four
+    network-aggregate dicts (network_px_std_by_date, network_px_std_delta_by_date,
+    lga_phase_std_by_date, lga_phase_std_delta_by_date) supply the RAC_full
+    54-feat columns. Tests that construct PriceHistory directly without a DB
+    can leave all of these empty (default).
     """
 
     avg_series: list[tuple[str, float]]                 # [(date_str, cents), ...] sorted
@@ -65,6 +75,10 @@ class PriceHistory:
     brand_mean_by_key: dict[tuple[str, str], float] = field(default_factory=dict)
     stickiness_by_key: dict[tuple[int, str], float] = field(default_factory=dict)
     lga_days_since_by_key: dict[tuple[str, str], int | None] = field(default_factory=dict)
+    network_px_std_by_date: dict[str, float] = field(default_factory=dict)
+    network_px_std_delta_by_date: dict[str, float] = field(default_factory=dict)
+    lga_phase_std_by_date: dict[str, float] = field(default_factory=dict)
+    lga_phase_std_delta_by_date: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._avg_by_date: dict[str, float] = dict(self.avg_series)
@@ -123,6 +137,18 @@ class PriceHistory:
     def lga_days_since_at(self, as_of: str, lga: str) -> float | None:
         val = self.lga_days_since_by_key.get((as_of, lga))
         return float(val) if val is not None else None
+
+    def network_px_std_at(self, as_of: str) -> float | None:
+        return self.network_px_std_by_date.get(as_of)
+
+    def network_px_std_delta_3d_at(self, as_of: str) -> float | None:
+        return self.network_px_std_delta_by_date.get(as_of)
+
+    def lga_phase_std_at(self, as_of: str) -> float | None:
+        return self.lga_phase_std_by_date.get(as_of)
+
+    def lga_phase_std_delta_3d_at(self, as_of: str) -> float | None:
+        return self.lga_phase_std_delta_by_date.get(as_of)
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +242,10 @@ class ModelStrategy:
             features[f"days_since_trough_entry_{lga_slug(lga)}"] = (
                 history.lga_days_since_at(as_of, lga)
             )
+        features["network_px_std"] = history.network_px_std_at(as_of)
+        features["network_px_std_delta_3d"] = history.network_px_std_delta_3d_at(as_of)
+        features["lga_phase_std"] = history.lga_phase_std_at(as_of)
+        features["lga_phase_std_delta_3d"] = history.lga_phase_std_delta_3d_at(as_of)
         X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
         prob = float(self._pipeline.predict_proba(X)[0][1])
         return prob >= self.threshold
@@ -444,11 +474,27 @@ def load_history(
         )
     }
 
-    lga_days_since_by_key: dict[tuple[str, str], int | None] = (
-        compute_pit_strict_days_since_trough(conn, eval_dates)
-        if eval_dates
-        else {}
-    )
+    if eval_dates:
+        # Extend with (d − DELTA_LAG_DAYS) dates so lga_phase_std_delta_by_date
+        # has a valid prior at the start of the eval window.
+        _lga_lookup = sorted(
+            set(eval_dates)
+            | {
+                (datetime.date.fromisoformat(d) - datetime.timedelta(days=DELTA_LAG_DAYS)).isoformat()
+                for d in eval_dates
+            }
+        )
+        lga_days_since_by_key = compute_pit_strict_days_since_trough(conn, _lga_lookup)
+        network_px_std_by_date = _network_px_std_per_date(conn, fid)
+        network_px_std_delta_by_date = _calendar_delta(network_px_std_by_date, eval_dates)
+        lga_phase_std_by_date = _lga_phase_std_per_date(lga_days_since_by_key, _lga_lookup)
+        lga_phase_std_delta_by_date = _calendar_delta(lga_phase_std_by_date, eval_dates)
+    else:
+        lga_days_since_by_key = {}
+        network_px_std_by_date = {}
+        network_px_std_delta_by_date = {}
+        lga_phase_std_by_date = {}
+        lga_phase_std_delta_by_date = {}
 
     return PriceHistory(
         avg_series=avg_series,
@@ -458,6 +504,10 @@ def load_history(
         brand_mean_by_key=brand_mean_by_key,
         stickiness_by_key=stickiness_by_key,
         lga_days_since_by_key=lga_days_since_by_key,
+        network_px_std_by_date=network_px_std_by_date,
+        network_px_std_delta_by_date=network_px_std_delta_by_date,
+        lga_phase_std_by_date=lga_phase_std_by_date,
+        lga_phase_std_delta_by_date=lga_phase_std_delta_by_date,
     )
 
 
