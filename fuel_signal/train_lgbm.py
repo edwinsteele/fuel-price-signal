@@ -32,6 +32,7 @@ from fuel_signal.features import (  # noqa: E402
     DEFAULT_FEATURES_CSV,
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
+    NETWORK_FEATURE_COLUMNS,
     discover_brand_feature_columns,
     load_features,
 )
@@ -211,7 +212,7 @@ def main(
     )
     feature_columns = (
         FEATURE_COLUMNS if no_lga_features
-        else FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + brand_columns
+        else FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS + brand_columns
     )
 
     required = feature_columns + ["label", "price_date"]
@@ -229,10 +230,12 @@ def main(
     if no_lga_features:
         present_lga = [c for c in LGA_FEATURE_COLUMNS if c in df.columns]
         present_brand = discover_brand_feature_columns(df)
-        if present_lga or present_brand:
+        present_network = [c for c in NETWORK_FEATURE_COLUMNS if c in df.columns]
+        if present_lga or present_brand or present_network:
             raise click.ClickException(
                 f"Features CSV contains {len(present_lga)} LGA + "
-                f"{len(present_brand)} brand trough columns but --no-lga-features "
+                f"{len(present_brand)} brand trough + "
+                f"{len(present_network)} network columns but --no-lga-features "
                 "was passed. Remove --no-lga-features to train on the available "
                 "schema, or regenerate features.csv without those columns."
             )
