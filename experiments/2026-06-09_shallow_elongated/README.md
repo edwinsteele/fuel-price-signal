@@ -4,38 +4,40 @@ Tests whether the two-axis (elongation × shallowness) features close the
 fold-7-style regression that the step5 row-level analysis traced to A's
 `network_px_std` signal misreading coordination in extended-descent rows.
 
-## Pre-flight: regenerate features.csv
+All three candidate features are computed **in-script** in `paired_wfcv.py`
+from columns already present in features.csv (`cycle_mean_length`,
+`cycle_days_since_peak`, `station_price_cents`, `cycle_last_max_cents`).
+They only land in `fuel_signal/features.py` via a follow-up PR if this
+experiment graduates them — mirrors the a_c_ablation → #216 pattern.
 
-Two new columns land in `fuel_signal/features.py` ahead of this experiment
-(`elongation_ratio`, `cycle_descent_slope_so_far`). The cached features.csv
-must be regenerated so these columns are present:
+## Candidate features
 
-```bash
-uv run python -m fuel_signal.features --output data/features.csv
-```
-
-The script asserts both columns exist in `df.columns` after `load_features()`
-and aborts with a clear message if they are missing.
+- **`elongation_ratio`** = `cycle_days_since_peak / station_baseline_cml`,
+  where `station_baseline_cml` is the network-wide rolling median of
+  `cycle_mean_length` over the 730d window ending at `(date - 1)` (`closed='left'`).
+  Non-adaptive — the frozen baseline is the failure-mode fix for
+  `step5d_leakage`'s adaptive recalibration. `cycle_mean_length` is identical
+  across stations on a given date (Sydney-avg series under the hood), so
+  "per-station median" in #214's framing → network-wide here.
+- **`cycle_descent_slope_so_far`** =
+  `(station_price_cents - cycle_last_max_cents) / cycle_days_since_peak`, null
+  at the peak. Negative during descent; less negative = shallower.
+- **`is_extended_shallow_descent`** =
+  `(elongation_ratio > 1.0) AND (cycle_descent_slope_so_far > -0.9)`.
 
 ## Run grid
 
-Baseline is the locked 54-feat baseline from #216 (FEATURE_COLUMNS +
-LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS — A and C already in.)
+Baseline is the locked 54-feat baseline from #216 (`FEATURE_COLUMNS +
+LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS` — A and C already in).
 
 | Run         | Columns added to 54-feat baseline                                    |
 |-------------|----------------------------------------------------------------------|
 | R0          | (baseline — A+C already locked in via #212/RAC_full)                 |
 | R_raw       | + `elongation_ratio` + `cycle_descent_slope_so_far`                  |
-| R_composite | + `is_extended_shallow_descent` (binary, derived in-script)          |
+| R_composite | + `is_extended_shallow_descent`                                      |
 
 3 runs × 14 folds × 5 seeds = **210 LightGBM fits**. Expected wall ≈ 10–12 min
 (extrapolated from a_c_ablation's 350-fit run at ~17 min).
-
-`is_extended_shallow_descent` is computed in the script (not in features.py)
-because it is a fallback test only. If raw axes pass, the composite is moot;
-if only the composite passes, we revisit landing it in features.py separately
-with `project_threshold_policy_lesson` in mind (binarising encodes the
-threshold and is brittle to regime drift).
 
 ## Decision rule (per #214)
 
@@ -96,10 +98,10 @@ PYTHONPATH=. uv run python experiments/2026-06-09_shallow_elongated/paired_wfcv.
 
 ## Acceptance criteria (mirrored from #214)
 
-- [ ] features.py landed with two new columns + PIT-safe + frozen-baseline tests.
 - [ ] Lab-book entry committed (README + script + result CSVs + meta + log + rowpreds).
 - [ ] Decision recorded against the four gates in `analysis.md`.
-- [ ] If a feature graduates → follow-up issue to retrain the 54→N-feat baseline.
+- [ ] If a feature graduates → follow-up issue to land it in `fuel_signal/features.py`
+      (with PIT-safe + frozen-baseline unit tests) and retrain the 54→N-feat baseline.
 - [ ] If rejected → document in `project_late_descent_investigation`, raise
       priority of #215's external-data branch.
 

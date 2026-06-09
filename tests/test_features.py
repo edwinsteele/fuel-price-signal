@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import datetime
 
-import pandas as pd
 import pytest
 
 from fuel_signal.brand_leadership import (
@@ -31,14 +30,11 @@ from fuel_signal.db import (
     upsert_stations,
 )
 from fuel_signal.features import (
-    CML_BASELINE_WINDOW_DAYS,
     DELTA_LAG_DAYS,
     FEATURE_COLUMNS,
-    LATE_DESCENT_FEATURE_COLUMNS,
     MIN_TRAINING_ROWS_PER_STATION,
     NETWORK_FEATURE_COLUMNS,
     _calendar_delta,
-    _cycle_mean_length_baseline_per_date,
     _lga_phase_std_per_date,
     _network_px_std_per_date,
     assemble_feature_rows,
@@ -1227,131 +1223,3 @@ def test_lga_phase_std_pit_safety(tmp_path):
     assert std_full == std_trunc, (
         f"lga_phase_std PIT drift: full={std_full}, truncated={std_trunc}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Late-descent features (issue #214)
-# ---------------------------------------------------------------------------
-
-
-def _stub_cycle_detector(cml_by_date: dict[str, float | None]):
-    """Lightweight CycleDetector stand-in for baseline tests.
-
-    The baseline helper only reads state.mean_cycle_length from cd.detect(d).
-    Returning a minimal stub keeps these tests focused on the median / window
-    / PIT logic without re-deriving cycle state from a synthetic price series.
-    """
-    from types import SimpleNamespace
-
-    class _CD:
-        def detect(self, d):
-            v = cml_by_date.get(d)
-            if v is None:
-                return None
-            return SimpleNamespace(mean_cycle_length=v)
-
-    return _CD()
-
-
-def test_cml_baseline_is_median_over_window():
-    """Baseline equals the median of cycle_mean_length over the window."""
-    cml = {f"2024-01-{i:02d}": float(i) for i in range(1, 11)}  # 1..10 over 10 days
-    cd = _stub_cycle_detector(cml)
-    # Window of 5 days ending 2024-01-11 - 1 = 2024-01-10 → values from
-    # 2024-01-06..2024-01-10 = [6, 7, 8, 9, 10] → median 8.0.
-    out = _cycle_mean_length_baseline_per_date(cd, ["2024-01-11"], window_days=5)
-    assert out["2024-01-11"] == 8.0
-
-
-def test_cml_baseline_is_pit_safe():
-    """Baseline at date_d does not read mean_cycle_length on date_d itself.
-
-    Place a deliberately outlier value on date_d. If the baseline silently
-    consumed it, the median would shift. PIT-strict means the value on date_d
-    must not enter the window.
-    """
-    cml: dict[str, float | None] = {
-        "2024-01-01": 30.0, "2024-01-02": 31.0, "2024-01-03": 32.0,
-        "2024-01-04": 33.0, "2024-01-05": 9999.0,  # would skew median if read
-    }
-    cd = _stub_cycle_detector(cml)
-    out = _cycle_mean_length_baseline_per_date(cd, ["2024-01-05"], window_days=4)
-    assert out["2024-01-05"] == 31.5  # median of [30,31,32,33]
-
-
-def test_cml_baseline_absent_when_window_empty():
-    """No baseline when window has no cycle_mean_length values."""
-    cd = _stub_cycle_detector({})  # cd.detect always returns None
-    out = _cycle_mean_length_baseline_per_date(cd, ["2024-01-10"], window_days=5)
-    assert "2024-01-10" not in out
-
-
-def test_assembler_includes_late_descent_columns(conn):
-    """elongation_ratio + cycle_descent_slope_so_far emitted with correct formulas."""
-    _add_station(conn, STATION_A)
-    _add_prices(conn, STATION_A, _16_CYCLES)  # 730d window needs a deep history
-
-    df = assemble_feature_rows(
-        conn, station_codes=[STATION_A], min_rows_per_station=0
-    )
-    assert len(df) > 0
-    for col in LATE_DESCENT_FEATURE_COLUMNS:
-        assert col in df.columns, f"Missing late-descent column: {col}"
-
-    # cycle_descent_slope_so_far = (station_price - cycle_last_max) / days_since_peak
-    # for days_since_peak > 0.
-    descent = df[df["cycle_days_since_peak"] > 0]
-    expected = (
-        descent["station_price_cents"] - descent["cycle_last_max_cents"]
-    ) / descent["cycle_days_since_peak"]
-    pd.testing.assert_series_equal(
-        descent["cycle_descent_slope_so_far"].reset_index(drop=True),
-        expected.reset_index(drop=True),
-        check_names=False,
-    )
-
-    # slope is non-positive across the sawtooth (prices ≤ last_max during descent).
-    assert (descent["cycle_descent_slope_so_far"] <= 0).all()
-
-
-def test_assembler_late_descent_slope_null_at_peak(conn):
-    """cycle_descent_slope_so_far is null when cycle_days_since_peak == 0
-    (we are AT the peak and division by zero is meaningless)."""
-    _add_station(conn, STATION_A)
-    _add_prices(conn, STATION_A, _16_CYCLES)
-
-    df = assemble_feature_rows(
-        conn, station_codes=[STATION_A], min_rows_per_station=0
-    )
-    at_peak = df[df["cycle_days_since_peak"] == 0]
-    if len(at_peak) > 0:
-        assert at_peak["cycle_descent_slope_so_far"].isna().all()
-
-
-def test_assembler_elongation_ratio_formula(conn):
-    """elongation_ratio matches cycle_days_since_peak / baseline_cml.
-
-    Verify by reconstructing the baseline independently and checking the ratio
-    on one date that has enough lookback history.
-    """
-    from fuel_signal.cycle import CycleDetector
-    from fuel_signal.db import average_price_series
-
-    _add_station(conn, STATION_A)
-    _add_prices(conn, STATION_A, _16_CYCLES)
-
-    df = assemble_feature_rows(
-        conn, station_codes=[STATION_A], min_rows_per_station=0
-    )
-    have = df.dropna(subset=["elongation_ratio"])
-    assert len(have) > 0, "No rows received an elongation_ratio — baseline window too long for the synthetic series?"
-
-    cd = CycleDetector(average_price_series(conn))
-    sample_date = have.iloc[-1]["price_date"]
-    baseline_lookup = _cycle_mean_length_baseline_per_date(
-        cd, [sample_date], window_days=CML_BASELINE_WINDOW_DAYS
-    )
-    baseline = baseline_lookup[sample_date]
-    days_since_peak = float(have.iloc[-1]["cycle_days_since_peak"])
-    expected = days_since_peak / baseline
-    assert abs(have.iloc[-1]["elongation_ratio"] - expected) < 1e-9

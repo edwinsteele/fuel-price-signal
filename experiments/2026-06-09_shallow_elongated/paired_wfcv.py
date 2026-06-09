@@ -4,11 +4,31 @@ Tests whether the two-axis (elongation × shallowness) features close the
 fold-7-style regression that the step5 row-level analysis traced to A's
 ``network_px_std`` signal misreading coordination in extended-descent rows.
 
+All candidate features are computed in-script from columns already present
+in features.csv — they only land in ``fuel_signal/features.py`` via a
+follow-up PR if this experiment graduates them (mirrors the a_c_ablation
+→ #216 pattern).
+
+Candidate features (all PIT-safe, derived from existing FEATURE_COLUMNS):
+
+- ``elongation_ratio`` = cycle_days_since_peak / station_baseline_cml,
+  where station_baseline_cml = network-wide median of cycle_mean_length over
+  the 730d window ending at (date - 1). Non-adaptive — the frozen baseline
+  is the failure-mode fix for step5d_leakage's adaptive recalibration.
+  (cycle_mean_length is derived from Sydney-wide average in CycleDetector,
+  so it's identical across stations on a given date; "per-station" in
+  #214's framing → network-wide here.)
+- ``cycle_descent_slope_so_far`` =
+  (station_price_cents - cycle_last_max_cents) / cycle_days_since_peak,
+  null at the peak.
+- ``is_extended_shallow_descent`` = (elongation_ratio > 1.0) AND
+  (cycle_descent_slope_so_far > -0.9). Fallback test only.
+
 Run grid (3 runs):
 
   R0           54-feat baseline (A+C already locked via #212 / RAC_full)
   R_raw        + elongation_ratio + cycle_descent_slope_so_far
-  R_composite  + is_extended_shallow_descent (binary, derived in-script)
+  R_composite  + is_extended_shallow_descent
 
 3 runs × 14 folds × 5 seeds = 210 LightGBM fits.
 
@@ -38,7 +58,6 @@ from lightgbm import LGBMClassifier
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import (
     FEATURE_COLUMNS,
-    LATE_DESCENT_FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
     NETWORK_FEATURE_COLUMNS,
     load_features,
@@ -48,9 +67,7 @@ OUT = pathlib.Path(__file__).parent
 SEEDS = (42, 43, 44, 45, 46)
 SHOCK_FOLDS = frozenset({1, 4, 9, 13})
 
-# Bucket thresholds for the row-level diagnostic (mirrors step5d/step5e).
-# - ext_descent: elongation_ratio > 1.0 (frozen-baseline lookup, not adaptive)
-# - ext_descent_shallow: ext_descent AND descent slope > -0.9 cents/day
+CML_BASELINE_WINDOW_DAYS = 730
 EXT_DESCENT_ELONGATION_THRESHOLD = 1.0
 SHALLOW_SLOPE_THRESHOLD = -0.9
 
@@ -65,18 +82,58 @@ RUNS: dict[str, list[str]] = {
 }
 
 
-def add_composite_column(df: pd.DataFrame) -> pd.DataFrame:
-    """Add the binary is_extended_shallow_descent column (fallback test only).
+def add_candidate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute the three candidate columns from FEATURE_COLUMNS inputs.
 
-    Defined in-script — not in features.py — because it is the threshold-encoding
-    fallback. If R_raw passes the gates, the composite is moot; if only the
-    composite passes, graduation happens in a separate PR with the
-    project_threshold_policy_lesson caveat noted.
+    Reads ``cycle_mean_length``, ``cycle_days_since_peak``,
+    ``station_price_cents`` and ``cycle_last_max_cents`` — all present in
+    features.csv.
     """
     df = df.copy()
+    df["price_date"] = pd.to_datetime(df["price_date"])
+
+    # --- station_baseline_cml: network-wide rolling median of cycle_mean_length ---
+    # cycle_mean_length is identical across stations on a given date (Sydney avg
+    # series under the hood), so taking the per-date first value matches
+    # taking the median across stations and is cheaper.
+    cml_by_date = (
+        df.dropna(subset=["cycle_mean_length"])
+        .drop_duplicates("price_date")
+        .set_index("price_date")["cycle_mean_length"]
+        .sort_index()
+    )
+    # Reindex to a contiguous daily series so rolling(window=730, by days) is
+    # well-defined even across data gaps.
+    full_idx = pd.date_range(cml_by_date.index.min(), cml_by_date.index.max(), freq="D")
+    cml_daily = cml_by_date.reindex(full_idx)
+    # closed='left' → today's value does NOT enter today's median (PIT-strict).
+    # min_periods=1 → emit a baseline as soon as any prior value is available.
+    baseline = (
+        cml_daily.rolling(f"{CML_BASELINE_WINDOW_DAYS}D", closed="left", min_periods=1)
+        .median()
+        .rename("station_baseline_cml")
+    )
+    df = df.join(baseline, on="price_date")
+
+    # --- elongation_ratio ---
+    safe = df["station_baseline_cml"] > 0
+    df[ELONGATION] = np.where(
+        safe, df["cycle_days_since_peak"] / df["station_baseline_cml"], np.nan,
+    )
+
+    # --- cycle_descent_slope_so_far ---
+    nonzero = df["cycle_days_since_peak"] > 0
+    df[SLOPE] = np.where(
+        nonzero,
+        (df["station_price_cents"] - df["cycle_last_max_cents"]) / df["cycle_days_since_peak"],
+        np.nan,
+    )
+
+    # --- is_extended_shallow_descent (composite) ---
     ext_descent = df[ELONGATION] > EXT_DESCENT_ELONGATION_THRESHOLD
     shallow = df[SLOPE] > SHALLOW_SLOPE_THRESHOLD
     df[COMPOSITE] = (ext_descent & shallow).astype(np.int8)
+
     return df
 
 
@@ -104,15 +161,10 @@ def main() -> None:
     df = load_features()
     print(f"  [load_features] {time.perf_counter() - t0:.1f}s  rows={len(df):,}", flush=True)
 
-    # Hard-fail before any fits if features.csv predates the #214 columns.
-    missing = [c for c in LATE_DESCENT_FEATURE_COLUMNS if c not in df.columns]
-    if missing:
-        raise RuntimeError(
-            f"features.csv is missing the #214 columns: {missing}. "
-            "Regenerate with: uv run python -m fuel_signal.features --output data/features.csv"
-        )
-
-    df = add_composite_column(df)
+    print("Computing candidate features in-script ...", flush=True)
+    t0 = time.perf_counter()
+    df = add_candidate_columns(df)
+    print(f"  [add_candidate_columns] {time.perf_counter() - t0:.1f}s", flush=True)
     print(
         f"  null rates: {ELONGATION}={df[ELONGATION].isna().mean()*100:.2f}%  "
         f"{SLOPE}={df[SLOPE].isna().mean()*100:.2f}%  "
@@ -126,7 +178,6 @@ def main() -> None:
     print(f"Run grid: {list(RUNS.keys())}", flush=True)
     print(f"Seeds: {SEEDS} (n={len(SEEDS)})", flush=True)
 
-    df["price_date"] = pd.to_datetime(df["price_date"])
     folds = list(_ev.walk_forward_folds(df, train_min_days=1825, val_days=90, step_days=90))
     print(f"Walk-forward folds: {len(folds)}\n", flush=True)
 
@@ -338,14 +389,21 @@ def main() -> None:
         "seeds": list(SEEDS),
         "shock_folds": sorted(SHOCK_FOLDS),
         "n_baseline_features": len(baseline_cols),
-        "new_columns_in_features_csv": LATE_DESCENT_FEATURE_COLUMNS,
-        "composite_definition": {
-            "name": COMPOSITE,
-            "formula": (
+        "candidate_columns_computed_in_script": [ELONGATION, SLOPE, COMPOSITE],
+        "definitions": {
+            ELONGATION: (
+                "cycle_days_since_peak / station_baseline_cml, where "
+                f"station_baseline_cml = rolling median over {CML_BASELINE_WINDOW_DAYS}d "
+                "ending d-1 (closed='left'). Non-adaptive (frozen baseline)."
+            ),
+            SLOPE: (
+                "(station_price_cents - cycle_last_max_cents) / cycle_days_since_peak; "
+                "null at the peak."
+            ),
+            COMPOSITE: (
                 f"({ELONGATION} > {EXT_DESCENT_ELONGATION_THRESHOLD}) AND "
                 f"({SLOPE} > {SHALLOW_SLOPE_THRESHOLD})"
             ),
-            "computed_in": "experiment script (not features.py — fallback test only)",
         },
         "bucket_definitions": {
             "ext_descent": f"{ELONGATION} > {EXT_DESCENT_ELONGATION_THRESHOLD}",
