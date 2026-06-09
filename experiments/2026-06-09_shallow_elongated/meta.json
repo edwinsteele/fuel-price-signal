@@ -1,0 +1,97 @@
+{
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "shock_folds": [
+    1,
+    4,
+    9,
+    13
+  ],
+  "n_baseline_features": 54,
+  "candidate_columns_computed_in_script": [
+    "elongation_ratio",
+    "cycle_descent_slope_so_far",
+    "is_extended_shallow_descent"
+  ],
+  "definitions": {
+    "elongation_ratio": "cycle_days_since_peak / station_baseline_cml, where station_baseline_cml = rolling median over 730d ending d-1 (closed='left'). Non-adaptive (frozen baseline).",
+    "cycle_descent_slope_so_far": "(station_price_cents - cycle_last_max_cents) / cycle_days_since_peak; null at the peak.",
+    "is_extended_shallow_descent": "(elongation_ratio > 1.0) AND (cycle_descent_slope_so_far > -0.9)"
+  },
+  "bucket_definitions": {
+    "ext_descent": "elongation_ratio > 1.0",
+    "ext_descent_shallow": "ext_descent AND cycle_descent_slope_so_far > -0.9"
+  },
+  "run_grid": {
+    "R0": [],
+    "R_raw": [
+      "elongation_ratio",
+      "cycle_descent_slope_so_far"
+    ],
+    "R_composite": [
+      "is_extended_shallow_descent"
+    ]
+  },
+  "cohort_definitions": {
+    "all": "full val set",
+    "hard25": "top quartile baseline per-row log-loss per fold"
+  },
+  "aggregation_convention": "Headline = median across 5 seeds per (fold, run); summary then averages those medians across 14 folds. Mean shown alongside.",
+  "seed_variance_gate": {
+    "rule": "ratio = seed_std / median(seed_std across cohort cells); flag > 5\u00d7",
+    "per_cohort": {
+      "all": {
+        "cohort_median_seed_std": 0.0077093458962602755,
+        "n_cells": 42,
+        "n_flagged_gt_5x": 0
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.023911844016022227,
+        "n_cells": 42,
+        "n_flagged_gt_5x": 0
+      }
+    },
+    "flagged_cells": []
+  },
+  "summary": [
+    {
+      "run": "R0",
+      "n_folds": 14,
+      "delta_all_median_mean": 0.0,
+      "delta_hard25_median_mean": 0.0,
+      "delta_hard25_mean_mean": 0.0,
+      "helps_hard25_n": 0,
+      "helps_hard25_n_folds": 14,
+      "fold7_delta_hard25_median": 0.0,
+      "worst_fold_delta_hard25_median": 0.0
+    },
+    {
+      "run": "R_raw",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.0013074965670183641,
+      "delta_hard25_median_mean": -0.0029001671416088687,
+      "delta_hard25_mean_mean": -0.00573171819725551,
+      "helps_hard25_n": 8,
+      "helps_hard25_n_folds": 14,
+      "fold7_delta_hard25_median": 0.009198121005135174,
+      "worst_fold_delta_hard25_median": 0.03398382496560104
+    },
+    {
+      "run": "R_composite",
+      "n_folds": 14,
+      "delta_all_median_mean": -6.979298712509701e-05,
+      "delta_hard25_median_mean": -0.00024961731660949615,
+      "delta_hard25_mean_mean": -0.0005403742785601771,
+      "helps_hard25_n": 7,
+      "helps_hard25_n_folds": 14,
+      "fold7_delta_hard25_median": 0.0,
+      "worst_fold_delta_hard25_median": 0.018212913308924605
+    }
+  ],
+  "total_wall_seconds": 712.7850311670045
+}
