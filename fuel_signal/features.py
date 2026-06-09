@@ -23,6 +23,7 @@ Batched (pre-build CycleDetector once for a large loop — see CLAUDE.md perf no
 
 from __future__ import annotations
 
+import bisect
 import pathlib
 import sqlite3
 from datetime import date as _date
@@ -99,6 +100,21 @@ NETWORK_FEATURE_COLUMNS: list[str] = [
     "network_px_std_delta_3d",
     "lga_phase_std",
     "lga_phase_std_delta_3d",
+]
+
+# Late-descent features (issue #214). Resolve the failure mode where A's
+# network_px_std signal misreads coordination in extended-descent rows: split
+# the regime along the two axes the row-level diagnostic identified —
+# cycle elongation and descent shallowness.
+#
+# Non-adaptive baseline: 730d rolling window means the elongation reference
+# survives one extended cycle without absorbing it (the adaptive
+# cycle_mean_length column does absorb it, which is what step5d_leakage
+# showed broke in fold 9).
+CML_BASELINE_WINDOW_DAYS: int = 730
+LATE_DESCENT_FEATURE_COLUMNS: list[str] = [
+    "elongation_ratio",
+    "cycle_descent_slope_so_far",
 ]
 
 # Brand trough feature columns are DB-derived (qualifying brands depend on
@@ -307,6 +323,55 @@ def _calendar_delta(
     return result
 
 
+def _cycle_mean_length_baseline_per_date(
+    cd: CycleDetector,
+    label_date_strs: list[str],
+    window_days: int = CML_BASELINE_WINDOW_DAYS,
+) -> dict[str, float]:
+    """Per-date frozen baseline: median of cycle_mean_length over the
+    ``window_days`` ending at ``date_d - 1``.
+
+    Cycle_mean_length is derived from the Sydney-wide average price series in
+    the CycleDetector — same value for all stations on a given date — so this
+    baseline is network-wide. PIT-safe: only dates strictly less than
+    ``date_d`` contribute.
+
+    Returns ``{date_iso: baseline_cml}``. Dates with no cycle_mean_length
+    values inside their lookback window are absent (→ None at the call site,
+    elongation_ratio absent).
+    """
+    if not label_date_strs:
+        return {}
+    label_set = sorted(set(label_date_strs))
+    min_label = _date.fromisoformat(label_set[0])
+    max_label = _date.fromisoformat(label_set[-1])
+    start = min_label - _timedelta(days=window_days)
+    end = max_label - _timedelta(days=1)
+
+    # One detect() per date in the union of all lookback windows — much cheaper
+    # than repeating the window scan per label date.
+    cml_dates: list[_date] = []
+    cml_values: list[float] = []
+    d = start
+    while d <= end:
+        state = cd.detect(d.isoformat())
+        if state is not None and state.mean_cycle_length is not None:
+            cml_dates.append(d)
+            cml_values.append(state.mean_cycle_length)
+        d += _timedelta(days=1)
+
+    result: dict[str, float] = {}
+    for d_str in label_set:
+        d_obj = _date.fromisoformat(d_str)
+        window_start = d_obj - _timedelta(days=window_days)
+        window_end = d_obj - _timedelta(days=1)
+        lo = bisect.bisect_left(cml_dates, window_start)
+        hi = bisect.bisect_right(cml_dates, window_end)
+        if hi > lo:
+            result[d_str] = float(np.median(cml_values[lo:hi]))
+    return result
+
+
 def _build_feature_dict(
     state: CycleState,
     station_price: float,
@@ -429,6 +494,7 @@ def assemble_feature_rows(
         + FEATURE_COLUMNS
         + LGA_FEATURE_COLUMNS
         + NETWORK_FEATURE_COLUMNS
+        + LATE_DESCENT_FEATURE_COLUMNS
         + brand_cols
     )
     if label_df.empty:
@@ -589,6 +655,11 @@ def assemble_feature_rows(
         lga_phase_std_by_date, label_date_strs
     )
 
+    # Cache 14: cycle_mean_length baseline (730d median ending d-1). Frozen
+    # reference for elongation_ratio; non-adaptive so an extended cycle does
+    # not silently move its own yardstick. PIT-safe (only uses dates < d).
+    cml_baseline_by_date = _cycle_mean_length_baseline_per_date(cd, label_date_strs)
+
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
     # on station_price / sydney_avg are upstream bugs, not data conditions.
@@ -617,6 +688,18 @@ def assemble_feature_rows(
         feature_dict["network_px_std_delta_3d"] = network_px_std_delta_by_date.get(date_d)
         feature_dict["lga_phase_std"] = lga_phase_std_by_date.get(date_d)
         feature_dict["lga_phase_std_delta_3d"] = lga_phase_std_delta_by_date.get(date_d)
+        days_since_peak = state.days_since_last_peak
+        baseline_cml = cml_baseline_by_date.get(date_d)
+        feature_dict["elongation_ratio"] = (
+            days_since_peak / baseline_cml
+            if baseline_cml is not None and baseline_cml > 0
+            else None
+        )
+        feature_dict["cycle_descent_slope_so_far"] = (
+            (station_price - state.last_cycle_max) / days_since_peak
+            if days_since_peak > 0
+            else None
+        )
         for _brand in qualifying_brand_list:
             feature_dict[f"days_since_trough_entry_{brand_slug(_brand)}"] = (
                 brand_days_since_by_key.get((date_d, _brand))
