@@ -107,7 +107,7 @@ Before filing an issue from an agent-driven logic review:
 
 ## Experiment scripts
 
-Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. Import with `PYTHONPATH=.`.
+Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. This includes `paired_wfcv.py` harnesses, step-level ablation scripts (`step*.py`), and oracle/diagnostic scripts that call `fit_score`. Import with `PYTHONPATH=.`.
 
 | Module | Purpose |
 |---|---|
