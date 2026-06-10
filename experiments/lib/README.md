@@ -18,7 +18,7 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 `seed_variance_gate(df_rows, cohort_ll_map)` — flags `(fold, run)` cells where `seed_std > 5× cohort median`. Returns `(summary_dict, flags_list)` and prints flagged cells. Raises `ValueError` if any cohort median is NaN or ≤ 0 (a zero denominator would silently suppress real outliers).
 
 ## aggregate.py
-`aggregate_with_deltas(df_rows, cohort_ll_map, baseline_run="R0")` — groups by `(fold, regime, run)`, computes mean/median/seedstd per cohort column, and appends `delta_*_mean` / `delta_*_median` columns vs the baseline run. Ready to write directly to `fold_run.csv`.
+`aggregate_with_deltas(df_rows, cohort_ll_map, baseline_run="R0")` — groups by `(fold, regime, run)`, computes mean/median/`{col}_seedstd` per cohort column, and appends `delta_*_mean` / `delta_*_median` columns vs the baseline run. Ready to write directly to `fold_run.csv`.
 
 ## io.py
 `to_jsonable(o)` — recursively converts non-finite floats to `None`. `write_meta(out_dir, meta)` — serialises `meta` with `to_jsonable`, writes `meta.json`, and prints the path.

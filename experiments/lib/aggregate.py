@@ -26,6 +26,15 @@ def aggregate_with_deltas(
     for c in cohort_ll_map.values():
         base_rename[f"{c}_mean"] = f"{c}_mean_base"
         base_rename[f"{c}_median"] = f"{c}_median_base"
+    missing_folds = set(fold_run["fold"].unique()) - set(
+        fold_run.loc[fold_run["run"] == baseline_run, "fold"]
+    )
+    if missing_folds:
+        raise ValueError(
+            f"baseline_run {baseline_run!r} has no rows for folds {sorted(missing_folds)}; "
+            "check that the baseline run completed for all folds."
+        )
+
     base = fold_run[fold_run["run"] == baseline_run][
         ["fold"]
         + [f"{c}_mean" for c in cohort_ll_map.values()]
