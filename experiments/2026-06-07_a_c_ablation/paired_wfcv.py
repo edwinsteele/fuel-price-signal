@@ -30,20 +30,24 @@ Usage:
 """
 from __future__ import annotations
 
-import json
 import pathlib
 import time
 
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMClassifier
+from experiments.lib.aggregate import aggregate_with_deltas
+from experiments.lib.constants import SEEDS, SHOCK_FOLDS
+from experiments.lib.fit import fit_score, per_row_log_loss
+from experiments.lib.gates import seed_variance_gate
+from experiments.lib.io import write_meta
 
+from experiments.lib.features.deltas import calendar_aware_delta
+from experiments.lib.features.diagnostics import px_change_lag_diagnostic
+from experiments.lib.features.dispersion import cohort_std_by_date
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, load_features
 
 OUT = pathlib.Path(__file__).parent
-SEEDS = (42, 43, 44, 45, 46)
-SHOCK_FOLDS = frozenset({1, 4, 9, 13})
 
 # Cohort thresholds (provisional pending #207); matches step2_paired_wfcv.py.
 COMP_BAND_CENTS = 5.0
@@ -77,12 +81,12 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["price_date"] = pd.to_datetime(df["price_date"])
 
-    # --- Signal A: cross-station dispersion within competitive cohort ---
-    comp = df[df["stickiness_score"].abs() <= COMP_BAND_CENTS]
-    a_by_date = comp.groupby("price_date")["station_price_cents"].std().rename(A_LEVEL)
-    df = df.join(a_by_date, on="price_date")
+    # Signal A: cross-station dispersion within competitive cohort.
+    comp_mask = df["stickiness_score"].abs() <= COMP_BAND_CENTS
+    df = df.join(cohort_std_by_date(df, comp_mask).rename(A_LEVEL), on="price_date")
 
-    # --- Signal C: std of days_since_trough across 35 LGAs ---
+    # Signal C: std of days_since_trough across 35 LGAs (row-wise std across
+    # columns, not cohort-filtered rows — doesn't fit cohort_std_by_date).
     lga_cols = [c for c in df.columns
                 if c.startswith("days_since_trough_entry_")
                 and c.removeprefix("days_since_trough_entry_") not in _BRANDS]
@@ -92,48 +96,17 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
             "If the LGA set changed upstream, review the C signal definition."
         )
     per_date = df.drop_duplicates("price_date").set_index("price_date")[lga_cols]
-    c_by_date = per_date.std(axis=1).rename(C_LEVEL)
-    df = df.join(c_by_date, on="price_date")
+    df = df.join(per_date.std(axis=1).rename(C_LEVEL), on="price_date")
 
-    # --- Calendar-aware deltas ---
+    # Calendar-aware deltas for A and C.
     for level_col, delta_col in [(A_LEVEL, A_DELTA), (C_LEVEL, C_DELTA)]:
-        per_date_level = (
-            df.drop_duplicates("price_date").set_index("price_date")[level_col].sort_index()
-        )
-        full_idx = pd.date_range(per_date_level.index.min(),
-                                 per_date_level.index.max(), freq="D")
-        s = per_date_level.reindex(full_idx)
-        delta = (s - s.shift(DELTA_LAG_DAYS)).rename(delta_col)
-        df = df.join(delta, on="price_date")
+        s = df.drop_duplicates("price_date").set_index("price_date")[level_col]
+        df = df.join(calendar_aware_delta(s, DELTA_LAG_DAYS).rename(delta_col), on="price_date")
 
-    # --- Diagnostic for `lated` cohort mask (NOT a feature) ---
-    lookup = df[["station_code", "price_date", "station_price_cents"]].rename(
-        columns={"price_date": "_lookup_date", "station_price_cents": "_px_5d_ago"}
-    )
-    df["_lookup_date"] = df["price_date"] - pd.Timedelta(days=5)
-    df = df.merge(lookup, on=["station_code", "_lookup_date"],
-                  how="left", validate="m:1")
-    df["_px_5d_change"] = df["station_price_cents"] - df["_px_5d_ago"]
-    df = df.drop(columns=["_lookup_date", "_px_5d_ago"])
+    # Diagnostic for `lated` cohort mask (NOT a feature).
+    df["_px_5d_change"] = px_change_lag_diagnostic(df, lag_days=5)
 
     return df
-
-
-def fit_score(train_df: pd.DataFrame, val_df: pd.DataFrame,
-              cols: list[str], seed: int) -> tuple[float, np.ndarray, float]:
-    t0 = time.perf_counter()
-    model = LGBMClassifier(random_state=seed, verbose=-1,
-                           subsample=0.8, subsample_freq=1)
-    model.fit(train_df[cols], train_df["label"].to_numpy(dtype=int))
-    p = model.predict_proba(val_df[cols])[:, 1]
-    ll = float(_ev.log_loss(val_df["label"].to_numpy(dtype=int), p))
-    return ll, p, time.perf_counter() - t0
-
-
-def per_row_log_loss(y: np.ndarray, p: np.ndarray) -> np.ndarray:
-    eps = 1e-15
-    p = np.clip(p, eps, 1 - eps)
-    return -(y * np.log(p) + (1 - y) * np.log(1 - p))
 
 
 def elongation_score(features: pd.DataFrame, val_start: pd.Timestamp,
@@ -264,81 +237,11 @@ def main() -> None:
     elong_df = pd.DataFrame(elong_rows)
     elong_df.to_csv(OUT / "elongation_per_fold.csv", index=False)
 
-    # --- Seed-variance gate ---
-    # Per (cohort, fold, run): seed_std and ratio = seed_std / median across
-    # all cells of the cohort. Flag ratio > 5x.
     cohort_ll = {"all": "ll_all", "hard25": "ll_hard25",
                  "hard10": "ll_hard10", "lated": "ll_lated"}
-    seed_var_flags: list[dict] = []
-    seed_var_summary: dict[str, dict] = {}
-    for cohort, col in cohort_ll.items():
-        agg = (
-            df_rows.groupby(["fold", "run"], as_index=False)
-            .agg(seed_std=(col, lambda s: float(np.nanstd(s, ddof=1))))
-        )
-        cohort_med = float(np.nanmedian(agg["seed_std"])) if len(agg) else float("nan")
-        # Guard the degenerate denominator: a NaN/0 cohort median would
-        # silently broadcast NaN across the whole ratio column and mask any
-        # real outlier (the gate would then report n_flagged_gt_5x = 0).
-        # Raise instead so the operator sees the problem.
-        if not np.isfinite(cohort_med) or cohort_med <= 0:
-            raise ValueError(
-                f"Seed-variance gate: cohort {cohort!r} median seed_std is "
-                f"{cohort_med!r} (n_cells={len(agg)}). The gate cannot run on "
-                "a zero or NaN denominator; investigate the seeds tuple or "
-                "the cohort definition before quoting any aggregate."
-            )
-        agg["seed_std_ratio"] = agg["seed_std"] / cohort_med
-        flagged = agg[agg["seed_std_ratio"] > 5.0]
-        seed_var_summary[cohort] = {
-            "cohort_median_seed_std": cohort_med,
-            "n_cells": int(len(agg)),
-            "n_flagged_gt_5x": int(len(flagged)),
-        }
-        for _, r in flagged.iterrows():
-            seed_var_flags.append({
-                "cohort": cohort,
-                "fold": int(r["fold"]), "run": r["run"],
-                "seed_std": float(r["seed_std"]),
-                "ratio_vs_cohort_median": float(r["seed_std_ratio"]),
-            })
+    seed_var_summary, seed_var_flags = seed_variance_gate(df_rows, cohort_ll)
 
-    if seed_var_flags:
-        print("\n!! SEED-VARIANCE FLAGS (seed_std > 5x cohort median) !!", flush=True)
-        print("   Drill into these cells per-seed BEFORE quoting their aggregates.", flush=True)
-        for f in seed_var_flags:
-            print(f"   [{f['cohort']:<6}] fold={f['fold']:>2}  run={f['run']:<10}  "
-                  f"seed_std={f['seed_std']:.4f}  ratio={f['ratio_vs_cohort_median']:.1f}x",
-                  flush=True)
-    else:
-        print("\nSeed-variance gate: no flagged cells (all seed_std ≤ 5x cohort median).",
-              flush=True)
-
-    # --- Aggregations: mean AND median across seeds per (fold, run) ---
-    agg_kwargs: dict[str, tuple[str, object]] = {}
-    for col in cohort_ll.values():
-        agg_kwargs[f"{col}_mean"] = (col, "mean")
-        agg_kwargs[f"{col}_median"] = (col, "median")
-        agg_kwargs[f"{col}_seedstd"] = (col, lambda s: float(np.nanstd(s, ddof=1)))
-    fold_run = df_rows.groupby(
-        ["fold", "regime", "run"], as_index=False
-    ).agg(**agg_kwargs)
-
-    # Delta vs baseline per fold, computed for BOTH mean and median.
-    base_rename = {}
-    for c in cohort_ll.values():
-        base_rename[f"{c}_mean"] = f"{c}_mean_base"
-        base_rename[f"{c}_median"] = f"{c}_median_base"
-    base = fold_run[fold_run["run"] == "R0"][
-        ["fold"]
-        + [f"{c}_mean" for c in cohort_ll.values()]
-        + [f"{c}_median" for c in cohort_ll.values()]
-    ].rename(columns=base_rename)
-    fold_run = fold_run.merge(base, on="fold")
-    for c in cohort_ll.values():
-        fold_run[f"delta_{c}_mean"] = fold_run[f"{c}_mean"] - fold_run[f"{c}_mean_base"]
-        fold_run[f"delta_{c}_median"] = fold_run[f"{c}_median"] - fold_run[f"{c}_median_base"]
-
+    fold_run = aggregate_with_deltas(df_rows, cohort_ll)
     fold_run.to_csv(OUT / "fold_run.csv", index=False)
 
     # --- Summary across folds (headline = median-of-seeds, mean-across-folds) ---
@@ -449,17 +352,7 @@ def main() -> None:
         "total_wall_seconds": time.perf_counter() - overall_t0,
     }
 
-    def _to_jsonable(o):
-        if isinstance(o, dict):
-            return {k: _to_jsonable(v) for k, v in o.items()}
-        if isinstance(o, (list, tuple)):
-            return [_to_jsonable(x) for x in o]
-        if isinstance(o, float) and not np.isfinite(o):
-            return None
-        return o
-
-    (OUT / "meta.json").write_text(json.dumps(_to_jsonable(meta), indent=2, default=str))
-    print(f"\nMeta: {OUT / 'meta.json'}", flush=True)
+    write_meta(OUT, meta)
     print(f"[total wall] {time.perf_counter() - overall_t0:.1f}s", flush=True)
 
 

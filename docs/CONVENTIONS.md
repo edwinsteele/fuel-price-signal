@@ -120,7 +120,19 @@ Any experiment script that runs LightGBM fits **must** use `experiments/lib/` he
 | `io.py` | `to_jsonable(o)`, `write_meta(out_dir, meta)` |
 | `timing.py` | `time_block(label)` context manager — prints `  [label] N.Ns` |
 
-Feature-computation primitives (rolling baselines, calendar-aware deltas, cohort std aggregations) still live inline until `experiments/lib/features/` is extracted (#230).
+### Feature-computation primitives
+
+The inside of every `compute_features()` / `add_candidate_columns()` uses helpers from `experiments/lib/features/`. Do not inline the primitive; import and name the intent.
+
+| Helper | Module | PIT-safety note |
+|---|---|---|
+| `cohort_std_by_date(df, mask)` | `dispersion` | mask must be same-date row attributes; no future rows enter |
+| `cohort_agg_diff_by_date(df, mask_a, mask_b)` | `dispersion` | same constraint as `cohort_std_by_date` |
+| `calendar_aware_delta(per_date_series, lag_days)` | `deltas` | reindexes to daily grid before shifting; gaps → NaN, not silent span |
+| `rolling_baseline(per_date_series, window_days)` | `rolling` | `closed='left'` by default; today excluded from today's aggregate |
+| `px_change_lag_diagnostic(df, lag_days)` | `diagnostics` | exact-date self-merge with `validate='m:1'`; never positional diff |
+
+Signal C in `a_c_ablation` (row-wise std across LGA columns) is column-wise, not row-filtered — `cohort_std_by_date` does not apply; that computation stays inline.
 
 Cross-reference: `feedback_load_features_helper` (use `load_features()`, never raw CSV); `feedback_experiment_scripts_pythonpath` (`PYTHONPATH=.` prefix); `feedback_instrument_walltime` (time + log per step); `feedback_throwaway_validation_scripts` (minimal one-off validators).
 

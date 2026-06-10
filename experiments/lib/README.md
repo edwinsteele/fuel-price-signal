@@ -25,3 +25,15 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 
 ## timing.py
 `time_block(label)` — context manager that prints `  [label] N.Ns` on exit.
+
+## features/ (sub-package)
+
+Primitives for the inside of `compute_features()` / `add_candidate_columns()`. See `features/README.md` for full docs.
+
+| Helper | Module |
+|---|---|
+| `cohort_std_by_date(df, mask)` | `features/dispersion` |
+| `cohort_agg_diff_by_date(df, mask_a, mask_b)` | `features/dispersion` |
+| `calendar_aware_delta(per_date_series, lag_days)` | `features/deltas` |
+| `rolling_baseline(per_date_series, window_days)` | `features/rolling` |
+| `px_change_lag_diagnostic(df, lag_days)` | `features/diagnostics` |
