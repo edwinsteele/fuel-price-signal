@@ -107,7 +107,7 @@ Before filing an issue from an agent-driven logic review:
 
 ## Experiment scripts
 
-New `paired_wfcv.py` scripts **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. Import with `PYTHONPATH=.`.
+Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. Import with `PYTHONPATH=.`.
 
 | Module | Purpose |
 |---|---|
