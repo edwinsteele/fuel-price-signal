@@ -115,7 +115,7 @@ Any experiment script that runs LightGBM fits **must** use `experiments/lib/` he
 | `fit.py` | `fit_score(train_df, val_df, cols, seed)`, `per_row_log_loss(y, p)` |
 | `folds.py` | `iter_folds_with_baseline_fit(df, baseline_cols)` — yields baseline fit per fold; per-fold loop body stays in the script |
 | `cohorts.py` | `hard_quantile_mask(prl, q)` — top-(1-q) fraction by per-row log-loss |
-| `gates.py` | `seed_variance_gate(df_rows, cohort_ll_map)` — flags cells where seed_std > 5× cohort median |
+| `gates.py` | `GateSpec` + `evaluate_gates(fold_run, spec, run)` — single source for Δ sign (`run − R0`; negative = better; passes when `value <= threshold`); `seed_variance_gate(df_rows, cohort_ll_map)` — flags cells where seed_std > 5× cohort median |
 | `aggregate.py` | `aggregate_with_deltas(df_rows, cohort_ll_map)` — groups by (fold, regime, run), appends delta_* vs R0 |
 | `io.py` | `to_jsonable(o)`, `write_meta(out_dir, meta)` |
 | `timing.py` | `time_block(label)` context manager — prints `  [label] N.Ns` |

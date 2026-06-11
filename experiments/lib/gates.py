@@ -1,7 +1,88 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
+
+# Sign convention: Δ = run − R0; negative is better (lower log-loss).
+# All threshold comparisons are "value <= threshold", so a negative target_max
+# demands improvement and a small positive worst_fold_max caps regression.
+
+
+@dataclass(frozen=True)
+class GateSpec:
+    """Thresholds for the three standard paired-WFCV decision gates.
+
+    cohort_col: delta column for gates 1 and 2 (e.g. ``delta_ll_hard25_median``).
+    pop_col:    delta column for gate 3        (e.g. ``delta_ll_all_median``).
+    target_fold: fold index that must show improvement (gate 1).
+    target_max: Δ must be <= this on target_fold (typically negative, e.g. -0.04).
+    worst_fold_max: no fold's Δ may exceed this (typically small positive, e.g. +0.01).
+    net_pop_max: mean Δ across folds on pop_col must be <= this (typically 0.0).
+    """
+
+    cohort_col: str
+    pop_col: str
+    target_fold: int
+    target_max: float
+    worst_fold_max: float
+    net_pop_max: float
+
+
+def evaluate_gates(
+    fold_run: pd.DataFrame,
+    spec: GateSpec,
+    run: str,
+) -> list[dict]:
+    """Evaluate the three standard gates for one run against the GateSpec.
+
+    Returns a list of dicts ``{name, threshold, value, passed}`` — one per gate.
+    The caller can write this directly into ``meta.json`` and print a verdict table.
+
+    Sign convention (single-sourced here): Δ = run − R0; negative is better.
+    A gate passes when ``value <= threshold``.
+    """
+    sub = fold_run[fold_run["run"] == run]
+
+    # Gate 1: target-fold cohort Δ
+    target_rows = sub.loc[sub["fold"] == spec.target_fold, spec.cohort_col]
+    if len(target_rows) == 0:
+        target_value = float("nan")
+    elif len(target_rows) == 1:
+        target_value = float(target_rows.iloc[0])
+    else:
+        raise ValueError(
+            f"Expected at most one row for (run={run!r}, fold={spec.target_fold}) "
+            f"but found {len(target_rows)} rows."
+        )
+
+    # Gate 2: worst-fold (maximum) cohort Δ across all folds
+    worst_value = float(sub[spec.cohort_col].max()) if len(sub) else float("nan")
+
+    # Gate 3: mean net-population Δ across all folds
+    net_pop_value = float(sub[spec.pop_col].mean()) if len(sub) else float("nan")
+
+    return [
+        {
+            "name": f"target_fold_{spec.target_fold}_{spec.cohort_col}",
+            "threshold": spec.target_max,
+            "value": target_value,
+            "passed": target_value <= spec.target_max,
+        },
+        {
+            "name": f"worst_fold_{spec.cohort_col}",
+            "threshold": spec.worst_fold_max,
+            "value": worst_value,
+            "passed": worst_value <= spec.worst_fold_max,
+        },
+        {
+            "name": f"net_pop_{spec.pop_col}",
+            "threshold": spec.net_pop_max,
+            "value": net_pop_value,
+            "passed": net_pop_value <= spec.net_pop_max,
+        },
+    ]
 
 
 def seed_variance_gate(
