@@ -1,0 +1,136 @@
+{
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "shock_folds": [
+    1,
+    4,
+    9,
+    13
+  ],
+  "n_baseline_features": 54,
+  "candidate_columns_computed_in_script": [
+    "A_x_shallow_elong",
+    "A_x_other",
+    "A_x_smooth"
+  ],
+  "definitions": {
+    "A_x_shallow_elong": "network_px_std \u00d7 is_extended_shallow_descent (A inside the corner, 0 outside)",
+    "A_x_other": "network_px_std \u00d7 (1 - is_extended_shallow_descent) (A outside the corner, 0 inside)",
+    "A_x_smooth": "network_px_std \u00d7 elongation_ratio \u00d7 max(0, cycle_descent_slope_so_far + 0.9) (continuous corner weight; 0 for steep descent)",
+    "elongation_ratio": "cycle_days_since_peak / station_baseline_cml, where station_baseline_cml = rolling median over 730d ending d-1 (closed='left'). Non-adaptive (frozen baseline).",
+    "cycle_descent_slope_so_far": "(station_price_cents - cycle_last_max_cents) / cycle_days_since_peak; null at the peak.",
+    "is_extended_shallow_descent": "(elongation_ratio > 1.0) AND (cycle_descent_slope_so_far > -0.9)"
+  },
+  "bucket_definitions": {
+    "ext_descent": "elongation_ratio > 1.0",
+    "ext_descent_shallow": "ext_descent AND cycle_descent_slope_so_far > -0.9"
+  },
+  "run_grid": {
+    "R0": [],
+    "R1": [
+      "A_x_shallow_elong"
+    ],
+    "R2": [
+      "A_x_shallow_elong",
+      "A_x_other"
+    ],
+    "R3": [
+      "A_x_smooth"
+    ]
+  },
+  "cohort_definitions": {
+    "all": "full val set",
+    "hard25": "top quartile baseline per-row log-loss per fold"
+  },
+  "aggregation_convention": "Headline = median across 5 seeds per (fold, run); summary then averages those medians across 14 folds. Mean shown alongside.",
+  "seed_variance_gate": {
+    "rule": "ratio = seed_std / median(seed_std across cohort cells); flag > 5\u00d7",
+    "per_cohort": {
+      "all": {
+        "cohort_median_seed_std": 0.007829944626141883,
+        "n_cells": 56,
+        "n_flagged_gt_5x": 1
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.02672660290582428,
+        "n_cells": 56,
+        "n_flagged_gt_5x": 2
+      }
+    },
+    "flagged_cells": [
+      {
+        "cohort": "all",
+        "fold": 4,
+        "run": "R1",
+        "seed_std": 0.04698854916177515,
+        "ratio_vs_cohort_median": 6.0011342870668845
+      },
+      {
+        "cohort": "hard25",
+        "fold": 4,
+        "run": "R1",
+        "seed_std": 0.16890847414240084,
+        "ratio_vs_cohort_median": 6.31986319913453
+      },
+      {
+        "cohort": "hard25",
+        "fold": 4,
+        "run": "R2",
+        "seed_std": 0.13558681553483523,
+        "ratio_vs_cohort_median": 5.073103230238365
+      }
+    ]
+  },
+  "summary": [
+    {
+      "run": "R0",
+      "n_folds": 14,
+      "delta_all_median_mean": 0.0,
+      "delta_hard25_median_mean": 0.0,
+      "delta_hard25_mean_mean": 0.0,
+      "helps_hard25_n": 0,
+      "helps_hard25_n_folds": 14,
+      "fold7_delta_hard25_median": 0.0,
+      "worst_fold_delta_hard25_median": 0.0
+    },
+    {
+      "run": "R1",
+      "n_folds": 14,
+      "delta_all_median_mean": 0.0012297981183389736,
+      "delta_hard25_median_mean": 0.002219101437179357,
+      "delta_hard25_mean_mean": 0.006445881239765456,
+      "helps_hard25_n": 6,
+      "helps_hard25_n_folds": 14,
+      "fold7_delta_hard25_median": 0.04022711937023804,
+      "worst_fold_delta_hard25_median": 0.04022711937023804
+    },
+    {
+      "run": "R2",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.0011576929436271585,
+      "delta_hard25_median_mean": 0.0013959195196702984,
+      "delta_hard25_mean_mean": -0.0005326505931887517,
+      "helps_hard25_n": 6,
+      "helps_hard25_n_folds": 14,
+      "fold7_delta_hard25_median": 0.018067916208958645,
+      "worst_fold_delta_hard25_median": 0.05785502311079971
+    },
+    {
+      "run": "R3",
+      "n_folds": 14,
+      "delta_all_median_mean": -0.0013972872676903034,
+      "delta_hard25_median_mean": 0.0011935054975223006,
+      "delta_hard25_mean_mean": -0.0038386427503627196,
+      "helps_hard25_n": 6,
+      "helps_hard25_n_folds": 14,
+      "fold7_delta_hard25_median": 0.03676243395582368,
+      "worst_fold_delta_hard25_median": 0.03927385426132912
+    }
+  ],
+  "total_wall_seconds": 853.2544160000107
+}
