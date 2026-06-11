@@ -109,6 +109,16 @@ Before filing an issue from an agent-driven logic review:
 
 Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. This includes `paired_wfcv.py` harnesses, step-level ablation scripts (`step*.py`), and oracle/diagnostic scripts that call `fit_score`. Import with `PYTHONPATH=.`.
 
+**Canonical skeleton:** `experiments/TEMPLATE_paired_wfcv.py` — copy, rename the dir, fill in the TODOs. Do not reverse-engineer the loop shape from a prior experiment.
+
+### In-script / lib seam
+
+**In-script (per-experiment):** `add_candidate_columns()`, run grid (`RUNS`), `GateSpec` thresholds, cohort/bucket boolean masks, `meta["definitions"]`.
+
+**Lib (always import):** fold iteration, fitting, per-row loss, cohort mask, row-pred collection, seed-variance gate, aggregation, gate evaluation, meta I/O, timing, shared constants.
+
+**Promotion rule:** if an `add_candidate_columns` block is copied into 2+ experiments unchanged, extract the primitive into `experiments/lib/features/` and import it.
+
 | Module | Purpose |
 |---|---|
 | `constants.py` | `SEEDS`, `SHOCK_FOLDS`, `LGBM_DEFAULTS` — import; never redefine per-script |
@@ -119,6 +129,7 @@ Any experiment script that runs LightGBM fits **must** use `experiments/lib/` he
 | `aggregate.py` | `aggregate_with_deltas(df_rows, cohort_ll_map)` — groups by (fold, regime, run), appends delta_* vs R0 |
 | `io.py` | `to_jsonable(o)`, `write_meta(out_dir, meta)` |
 | `timing.py` | `time_block(label)` context manager — prints `  [label] N.Ns` |
+| `rowpreds.py` | `RowPredCollector(ident_base)` — set `collector.ident_base = ident` each fold, call `collector.add(run, seed, proba)` per fit, `collector.to_parquet(path)` at the end |
 
 ### Feature-computation primitives
 

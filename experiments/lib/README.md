@@ -2,6 +2,22 @@
 
 Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 
+## In-script / lib seam
+
+**In-script (you own per experiment):**
+- `add_candidate_columns()` — compute new columns from features.csv columns
+- `RUNS` dict — run grid (R0 = baseline, R1+ add candidate cols)
+- `GATE` / `GateSpec` thresholds — numeric pass/fail criteria for this experiment
+- Cohort and bucket boolean masks — anything beyond `hard_quantile_mask`
+- `meta["definitions"]` — human-readable column/bucket descriptions
+
+**Lib (always import; never inline):**
+- Fold iteration, fitting, per-row loss, cohort mask, row-pred collection, seed-variance gate, aggregation, gate evaluation, meta I/O, timing, shared constants
+
+**Promotion rule:** if an `add_candidate_columns` block is copied into 2+ experiments unchanged, extract the primitive into `experiments/lib/features/` and import it.
+
+**Canonical skeleton:** `experiments/TEMPLATE_paired_wfcv.py` — copy, rename, fill in the TODOs.
+
 ## constants.py
 `SEEDS`, `SHOCK_FOLDS`, `LGBM_DEFAULTS` — shared constants. Import; never redefine per-script. Constants drift (LGBM params, seed tuple) between scripts is exactly what this lib prevents.
 
