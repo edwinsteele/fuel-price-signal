@@ -47,7 +47,15 @@ def evaluate_gates(
 
     # Gate 1: target-fold cohort Δ
     target_rows = sub.loc[sub["fold"] == spec.target_fold, spec.cohort_col]
-    target_value = float(target_rows.iloc[0]) if len(target_rows) else float("nan")
+    if len(target_rows) == 0:
+        target_value = float("nan")
+    elif len(target_rows) == 1:
+        target_value = float(target_rows.iloc[0])
+    else:
+        raise ValueError(
+            f"Expected at most one row for (run={run!r}, fold={spec.target_fold}) "
+            f"but found {len(target_rows)} rows."
+        )
 
     # Gate 2: worst-fold (maximum) cohort Δ across all folds
     worst_value = float(sub[spec.cohort_col].max()) if len(sub) else float("nan")

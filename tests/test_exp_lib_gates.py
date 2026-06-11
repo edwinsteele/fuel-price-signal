@@ -42,6 +42,11 @@ def test_gate_names_and_structure():
     assert len(results) == 3
     for g in results:
         assert {"name", "threshold", "value", "passed"} == set(g.keys())
+    assert {g["name"] for g in results} == {
+        "target_fold_7_delta_ll_hard25_median",
+        "worst_fold_delta_ll_hard25_median",
+        "net_pop_delta_ll_all_median",
+    }
 
 
 def test_target_fold_gate_fails_when_improvement_insufficient():
