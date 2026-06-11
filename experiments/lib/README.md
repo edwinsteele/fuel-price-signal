@@ -26,6 +26,9 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 ## timing.py
 `time_block(label)` — context manager that prints `  [label] N.Ns` on exit.
 
+## rowpreds.py
+`RowPredCollector(ident_base)` — accumulates per-`(run, seed)` row-level prediction blocks across all folds and writes a single parquet. Call `collector.ident_base = ident` at the start of each fold to update the base DataFrame, then `collector.add(run, seed, proba)` inside the run×seed loop, and `collector.to_parquet(path)` after all folds. Owns the dtype decisions: `seed` → `int16` (never overflows for any plausible seed value), `proba` → `float32`.
+
 ## features/ (sub-package)
 
 Primitives for the inside of `compute_features()` / `add_candidate_columns()`. See `features/README.md` for full docs.
