@@ -15,6 +15,13 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 `hard_quantile_mask(prl, q)` — returns a boolean mask of rows in the hardest `(1-q)` fraction by per-row log-loss. `q=0.75` → hard25; `q=0.90` → hard10.
 
 ## gates.py
+
+**Sign convention (single-sourced here): `Δ = run − R0`; negative is better. A gate passes when `value <= threshold`.**
+
+`GateSpec` — frozen dataclass: `cohort_col`, `pop_col`, `target_fold`, `target_max`, `worst_fold_max`, `net_pop_max`. Thresholds stay in the calling script; the helper owns the direction/comparison.
+
+`evaluate_gates(fold_run, spec, run) -> list[dict]` — evaluates the three standard gates for one run. Returns `[{name, threshold, value, passed}, ...]`. Feed directly into `meta.json` and print a verdict table.
+
 `seed_variance_gate(df_rows, cohort_ll_map)` — flags `(fold, run)` cells where `seed_std > 5× cohort median`. Returns `(summary_dict, flags_list)` and prints flagged cells. Raises `ValueError` if any cohort median is NaN or ≤ 0 (a zero denominator would silently suppress real outliers).
 
 ## aggregate.py
