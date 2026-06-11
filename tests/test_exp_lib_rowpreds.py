@@ -92,3 +92,31 @@ def test_to_parquet_column_set(tmp_path: pathlib.Path):
     expected_cols = {"fold", "station_code", "price_date", "label", "is_hard25",
                      "run", "seed", "proba"}
     assert expected_cols.issubset(set(df.columns))
+
+
+def test_add_rejects_seed_out_of_int16_range():
+    import pytest
+    collector = RowPredCollector(_ident())
+    with pytest.raises(ValueError, match="seed"):
+        collector.add("R0", 40000, np.zeros(4))
+
+
+def test_add_rejects_2d_proba():
+    import pytest
+    collector = RowPredCollector(_ident())
+    with pytest.raises(ValueError, match="1D"):
+        collector.add("R0", 42, np.zeros((4, 2)))
+
+
+def test_add_rejects_proba_length_mismatch():
+    import pytest
+    collector = RowPredCollector(_ident(n=4))
+    with pytest.raises(ValueError, match="Length mismatch"):
+        collector.add("R0", 42, np.zeros(5))
+
+
+def test_to_parquet_raises_on_empty(tmp_path: pathlib.Path):
+    import pytest
+    collector = RowPredCollector(_ident())
+    with pytest.raises(ValueError, match="No blocks"):
+        collector.to_parquet(tmp_path / "empty.parquet")

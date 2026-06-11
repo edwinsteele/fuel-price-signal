@@ -37,6 +37,16 @@ class RowPredCollector:
 
     def add(self, run: str, seed: int, proba: np.ndarray) -> None:
         """Append one (run, seed) block using the current ``ident_base``."""
+        _info = np.iinfo(SEED_DTYPE)
+        if not (_info.min <= seed <= _info.max):
+            raise ValueError(f"seed {seed} out of range for {SEED_DTYPE} [{_info.min}, {_info.max}]")
+        proba = np.asarray(proba)
+        if proba.ndim != 1:
+            raise ValueError(f"'proba' must be 1D, got shape {proba.shape!r}")
+        if proba.shape[0] != len(self.ident_base):
+            raise ValueError(
+                f"Length mismatch: proba ({proba.shape[0]}) vs ident_base ({len(self.ident_base)})"
+            )
         block = self.ident_base.copy()
         block["run"] = run
         block["seed"] = SEED_DTYPE(seed)
@@ -45,6 +55,8 @@ class RowPredCollector:
 
     def to_parquet(self, path: pathlib.Path, compression: str = "zstd") -> pd.DataFrame:
         """Concatenate all blocks and write to *path*. Returns the combined DataFrame."""
+        if not self._blocks:
+            raise ValueError("No blocks added — call add() at least once before writing.")
         df = pd.concat(self._blocks, ignore_index=True)
         df.to_parquet(path, index=False, compression=compression)
         return df
