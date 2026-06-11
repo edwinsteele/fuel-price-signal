@@ -23,6 +23,8 @@ def rolling_baseline(
     justify it.
     """
     s = per_date_series.sort_index()
+    if s.empty:
+        return s
     full_idx = pd.date_range(s.index.min(), s.index.max(), freq="D")
     s = s.reindex(full_idx)
     return s.rolling(f"{window_days}D", closed=closed, min_periods=min_periods).agg(agg)
