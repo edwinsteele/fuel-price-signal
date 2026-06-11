@@ -71,9 +71,11 @@ Baseline is the locked 54-feat baseline (`FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
 
 Median across 5 seeds, headline:
 
-1. **Fold-7 hard25 Δll** for the winning run vs R0: reduction of ≥ −0.04.
-2. **No fold's hard25 Δll** vs R0 may regress by more than +0.01.
-3. **Net population Δll** vs R0 must be ≥ 0 (across all rows).
+Sign convention (per `docs/CONVENTIONS.md`): `Δll = run − R0`, negative is better.
+
+1. **Fold-7 hard25 Δll** for the winning run vs R0: `Δll ≤ −0.04` (an improvement of at least 0.04).
+2. **No fold's hard25 Δll** vs R0 may regress by more than +0.01 (`Δll ≤ +0.01` on every fold).
+3. **Net population Δll** vs R0 must be `≤ 0` (neutral-or-better across all rows).
 4. **Per-(fold, bucket) row-level**: the winning run must reduce mean Δll on
    `ext_descent_shallow` rows specifically — verifying the mechanism (parquet
    saved for downstream `analysis.py`).
