@@ -2,6 +2,13 @@
 
 For project architecture, CLI patterns, data strategy, signal logic, and automation conventions, see [AGENTS.md](AGENTS.md).
 
+## Orientation (read these when picking up cold)
+
+- [AGENTS.md](AGENTS.md) — architecture, CLI pattern, data strategy, signal logic
+- [docs/STATUS.md](docs/STATUS.md) — current build state; what's shipped vs pending
+- [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — code & workflow rules (the changeable how-we-do-things layer)
+- `PLAN_ml_signal.md` — active ML-signal plan. **Lives at repo root and is gitignored** (despite some docs saying `docs/PLAN_ml_signal.md` — that path is wrong).
+
 ## Model/effort guidance
 
 - Sonnet for implementation (downloader, transformer, DB layer, tests)
@@ -9,23 +16,7 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
 
 ## Reuse from old projects
 
-These local repos contain the source code that was ported. Check them if you need to trace original logic.
-
-### `~/Code/ff-aws-backend` (primary)
-- `ff_aws_backend/recommendations.py` — `PriceCycleDetector`, all signal classes, `RecommendationManager`
-- `ff_analysis/purchasing_strategy.py` — backtest engine
-- `frugalfuel/nswfuel/tasks/retrieve_price_snapshot_from_fuelapi.py` — OAuth API auth pattern
-- `ff_aws_backend/cli.py` — CLI structure with Click
-
-### `~/Code/petrol_prices` (secondary)
-- `petrol_prices/management/commands/transformer.py` — CSV cleaner
-- `petrol_prices/management/commands/downloader.py` — bulk CSV downloader
-- `petrol_prices/management/commands/fill_daily_gaps.py` — forward-fill
-- `postcode_council_map.py` — postcode → LGA mapping
-
-### What NOT to carry over
-- DynamoDB, S3, SQS, SNS, Serverless framework, Django ORM
-- jsonpickle, `msrest` / AutoRest generated client
+The port from the original repos is done. If you ever need to trace original logic, the source lives in `~/Code/ff-aws-backend` (primary: `recommendations.py`, `purchasing_strategy.py`, FuelCheck OAuth task, Click `cli.py`) and `~/Code/petrol_prices` (secondary: transformer/downloader/gap-fill commands, postcode→LGA map). Do not carry over the AWS/Django infrastructure (DynamoDB, S3, SQS, SNS, Serverless, Django ORM) or `jsonpickle` / `msrest`.
 
 ## Automated worker vs interactive session
 

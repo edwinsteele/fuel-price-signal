@@ -30,13 +30,13 @@ A common mistake: treating label=0 as the "positive" class (waiting). Don't. BUY
 
 ## Pooled model — one model for all stations
 
-Per-station models were considered and rejected on data volume grounds. One model, all stations contribute training rows. Station enters as a categorical feature alongside brand/suburb.
+Per-station models were considered and rejected on data volume grounds. One model, all stations contribute training rows. The model uses **numeric features only** — station/brand/suburb do **not** enter as categoricals (the early plan proposed this; the built model went numeric-only). See [AGENTS.md § Station classification](../AGENTS.md#station-classification-competitive--discount--sticky) cold-start note.
 
 ## Station classification and aggregate features
 
 LGA- and Brand-level mean features used by the model must reflect **current pricing that buyers can act on**. Stations are classified Competitive / Discount / Sticky based on their median price premium versus the LGA competitive cluster over a rolling 45-day window. Sticky stations (persistently above cluster) are **excluded** from LGA/Brand means; Competitive and Discount stations are blended into the aggregate.
 
-See AGENTS.md § "Station classification" for the taxonomy, classifier mechanics, and PIT discipline. See [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) for the open implementation questions (materialisation strategy, brand bootstrap reference, recency threshold, cold-start handling).
+See AGENTS.md § "Station classification" for the taxonomy, classifier mechanics, and PIT discipline. The classifier is built (`classify.py`); [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) (closed) holds the original implementation discussion (materialisation strategy, brand bootstrap reference, recency threshold, cold-start handling).
 
 When constructing new aggregate features in Phase 3, default to the classifier-filtered aggregate, not the raw all-station mean.
 
@@ -52,9 +52,11 @@ Old rule "intra-series → cycle detector, cross-series → ML" is superseded. B
 |-------|------|--------|
 | 1 | Feature pipeline + PIT validation | Done |
 | 2 | Logistic regression baseline (cycle features only, 7d H, 3c X) | Done — locked 2026-05-09 |
-| 3 | LightGBM + station/cross-station lead features | Next |
-| 4 | Upstream features (TGP first, then MOPS/crude/FX) | Deferred |
-| 5 | Macro model (separate, longer horizon ~30–90d) | Deferred |
+| 3 | LightGBM + station/cross-station + LGA aggregate features | Done — Phase 3c locked |
+| 4 | LGA event-based leadership features (54-feat baseline) | Done — locked, #216 |
+| 5 | Macro model + upstream features (TGP/MOPS/crude/FX, ~30–90d) | Deferred |
+
+Note: the original plan numbered "upstream features" as Phase 4 and the macro model as Phase 5. In execution, an LGA event-leadership Phase 4 was added ahead of upstream work, which slipped into Phase 5. `docs/STATUS.md` is the source of truth for current phase numbering.
 
 ## Phase 2 results (locked baseline)
 

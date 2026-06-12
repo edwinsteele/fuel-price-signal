@@ -593,9 +593,9 @@ uv run python -m fuel_signal.score_phase2 --no-backtest
 
 **What it does:**
 
-1. Loads the model artifact at `--model-path` (default: `data/models/lgbm_calibrated.joblib`) and scores val directly.
-2. Sweeps τ ∈ [0.05, 0.95] (step 0.05) on val — prints precision, recall, F1, BUY%, and expected-cents-saved per row.
-3. Picks τ = argmax(expected cents/row on val), then applies a model-aware adjustment for val's elevated BUY rate: **+0.05 for raw artifacts, 0.00 for isotonic-calibrated artifacts**. Override with `--tau-adjustment <float>` (e.g. `--tau-adjustment 0.00` to disable).
+1. Loads the model artifact at `--model-path` (default: `data/models/lgbm_calibrated.joblib`).
+2. Selects τ. **With `--model-path` (current default), threshold selection runs on walk-forward CV out-of-fold (OOF) predictions over train** (#236). OOF predictions sit at the training base rate (~0.24), so val's elevated BUY rate (~0.32) no longer biases the choice and **no τ adjustment is applied**. τ ∈ [0.05, 0.95] (step 0.05); τ = argmax(expected cents/row). The #236 lock chose **τ=0.25**.
+3. *(Legacy path, preserved for backward compat.)* Without the OOF path, τ is swept on val directly and a model-aware adjustment is applied for val's elevated BUY rate: **+0.05 for raw artifacts, 0.00 for isotonic-calibrated**. The fixed +0.05 was a workaround for the val BUY-rate bias and can cross an isotonic plateau — hence 0.00 for isotonic. Override either path with `--tau-adjustment <float>`.
 4. Runs the realised-spend backtest at chosen τ over the test window using `--db` (default: `./fuel_signal.db`), populating `realised_spend_cpl` and `realised_savings_vs_always_buy_pct`. Skipped silently when the DB file or `--model-path` are absent (e.g. CI); use `--no-backtest` to skip explicitly.
 5. Scores test at chosen τ. Appends one row to `experiments/results.csv` using `--model-name`.
 

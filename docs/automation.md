@@ -19,10 +19,10 @@ Issue filed (chore/polish)
         ▼
 Worker picks up (next hourly run, no open claude-authored PRs)
         │
-        ├─ Posts plan comment (3–5 bullets)
         ├─ Implements minimal change
         ├─ Runs ruff + pytest locally
-        └─ Opens draft PR (claude-authored + chore|polish)
+        └─ Opens PR ready-for-review (claude-authored + chore|polish);
+           3–5 bullet plan in the PR body
                 │
                 ▼
         CI runs (lint, test, signal-regression)
@@ -30,9 +30,9 @@ Worker picks up (next hourly run, no open claude-authored PRs)
           ┌─────┴──────┐
         fail           pass
           │               │
-        Worker         Mark ready-for-review
+        Worker         Owner reviews
         fixes &            │
-        pushes         Owner reviews
+        pushes             │
                            │
                  ┌─────────┴──────────┐
            Comments left         No comments
@@ -68,15 +68,15 @@ You resolve the threads and merge when satisfied. The `[worker]` prefix is how t
 
 ## WIP cap
 
-The worker keeps at most **one batch of 3 draft PRs** open at a time. Before picking up issues, it checks `gh pr list --label claude-authored --state open`. If any open PR exists, it exits without doing anything.
+The worker keeps at most **one** open `claude-authored` PR at a time. Before picking up issues, it checks `gh pr list --label claude-authored --state open`. If any open PR exists, it exits without doing anything (one PR at a time, ready-for-review — no draft/batch flow).
 
-This means: review your open PRs before filing more issues if you want the queue to move.
+This means: review (or merge) the open PR before the worker will pick up anything new.
 
 ## Pausing the worker
 
 The worker is a scheduled remote Claude Code routine. To pause it:
 1. Go to the Claude Code scheduled tasks and disable the routine, **or**
-2. Open a draft PR manually with the `claude-authored` label — the WIP cap will stop the worker from picking up anything.
+2. Open a PR manually with the `claude-authored` label — the WIP cap will stop the worker from picking up anything.
 
 ## Spend monitoring
 

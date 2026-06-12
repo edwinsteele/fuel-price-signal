@@ -39,7 +39,18 @@ fuel_signal/
 ├── tp_benefit.py      # Diagnostic: empirical TP benefit distribution
 ├── fp_cost.py         # Diagnostic: empirical FP cost distribution (bimodal)
 ├── fn_cost.py         # Diagnostic: empirical FN cost distribution
-└── backtest.py        # Replay historical prices through purchasing strategies
+├── backtest.py        # Replay historical prices through purchasing strategies
+├── backtest_phase2.py # Phase 2 τ re-validation on realised spend
+├── train_lgbm.py      # Train LightGBM baseline; --no-brand-features for the locked 54-feat model
+├── classify.py        # Competitive/Discount/Sticky classifier → station_class table
+├── cv_report.py       # Paired walk-forward CV for feature add/drop/swap decisions
+├── lga_leadership.py  # Phase 4 LGA event-based leadership features
+├── brand_leadership.py# Brand trough features (computed; not in locked model)
+├── feature_redundancy.py  # SHAP-redundancy cluster analysis
+├── feature_diagnostics.py # Feature-level diagnostic utilities
+├── shap_report.py     # SHAP importance + per-prediction explanation
+├── loo_ablation.py    # Leave-one-out feature ablation
+└── postcode_council.py    # Postcode → LGA mapping; SYDNEY_METRO_COUNCILS
 ```
 
 ## CLI pattern
@@ -124,7 +135,7 @@ When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verif
 
 ### Station classification (Competitive / Discount / Sticky)
 
-LGA- and Brand-level mean features used by the ML model must reflect **current pricing that buyers can actually act on**. Stations fall into three behavioural classes; aggregation policy depends on which class they're in. See [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) for the design discussion and open implementation questions.
+LGA- and Brand-level mean features used by the ML model must reflect **current pricing that buyers can actually act on**. Stations fall into three behavioural classes; aggregation policy depends on which class they're in. The classifier is built (`classify.py` → `station_class` table); [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) (closed) holds the original design discussion.
 
 **The three classes:**
 
@@ -177,7 +188,7 @@ CREATE TABLE station_class (
 
 **Aggregation floor:** if fewer than 3 non-Sticky stations are available for a given LGA/brand/date, emit NULL rather than fall back. A silently-thin aggregate is worse than a gap. The floor protects against *thin samples* (high-variance aggregates from few stations); it does **not** protect against staleness — staleness protection lives entirely in the 28d forward-fill cap and the classifier.
 
-**Cold-start handling:** a station gets a classification entry as soon as it has at least one raw observation in the 45-day window. No minimum-observation threshold, no `is_classified` boolean, no default class. Stations with zero observations in the window have no entry and are excluded from aggregates (consistent with their absence from `daily_prices`). Because the pooled ML model has no station/brand/suburb categorical features (14 numeric features: 10 from cycle and price deltas plus 4 LGA/brand mean features — see `fuel_signal/features.py:FEATURE_COLUMNS`), there is no OOV problem at inference for a brand-new station — its numeric features can be computed from a single observation and the model produces a prediction without special handling. The 4 LGA/brand mean features may be NULL (NaN) if fewer than 3 non-Sticky stations are available; the model handles NaN natively.
+**Cold-start handling:** a station gets a classification entry as soon as it has at least one raw observation in the 45-day window. No minimum-observation threshold, no `is_classified` boolean, no default class. Stations with zero observations in the window have no entry and are excluded from aggregates (consistent with their absence from `daily_prices`). Because the pooled ML model uses numeric features only — no station/brand/suburb categorical (the locked baseline is 54 features; see § Canonical feature set) — there is no OOV problem at inference for a brand-new station: its numeric features can be computed from a single observation and the model produces a prediction without special handling. The LGA/brand mean features may be NULL (NaN) if fewer than 3 non-Sticky stations are available; the model handles NaN natively.
 
 ### Snapshot CSV schema
 

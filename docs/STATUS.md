@@ -2,6 +2,8 @@
 
 Project-level state for agents picking up cold. Update this file when a phase completes or a module ships.
 
+> **Canonical source for current model state** (feature count, on-disk artifact, calibration, τ, active phase). Other docs link here — don't restate these facts elsewhere. See [CONVENTIONS.md § One source of truth](CONVENTIONS.md#one-source-of-truth-for-current-model-state).
+
 ## All modules: built and tested
 
 | Module | Status | Notes |
@@ -29,6 +31,18 @@ Project-level state for agents picking up cold. Update this file when a phase co
 | `fp_cost.py` | Done | Empirical FP cost distribution (bimodal) |
 | `fn_cost.py` | Done | Empirical FN cost distribution |
 | `backtest.py` | Done | `AlwaysBuyStrategy`, `RuleBasedSignalStrategy`, `ModelStrategy`; CPL table per station |
+| `backtest_phase2.py` | Done | Phase 2 τ re-validation on realised spend |
+| `train_lgbm.py` | Done | LightGBM trainer; `--no-brand-features` for the locked 54-feat baseline |
+| `classify.py` | Done | Competitive/Discount/Sticky station classifier → `station_class` table |
+| `score_phase2.py` | Done | Threshold sweep on val → score test → append `results.csv`; multi-seed support |
+| `cv_report.py` | Done | Paired walk-forward CV for feature add/drop/swap decisions |
+| `lga_leadership.py` | Done | Phase 4 LGA event-based leadership features |
+| `brand_leadership.py` | Done | Brand trough features (computed; not in locked model — Phase 4b walked away) |
+| `feature_redundancy.py` | Done | SHAP-redundancy cluster analysis |
+| `feature_diagnostics.py` | Done | Feature-level diagnostic utilities |
+| `shap_report.py` | Done | SHAP importance + per-prediction explanation |
+| `loo_ablation.py` | Done | Leave-one-out feature ablation |
+| `postcode_council.py` | Done | Postcode → LGA mapping; `SYDNEY_METRO_COUNCILS` |
 | `.github/workflows/daily-snapshot.yml` | Done | Daily cron + workflow_dispatch; confirmed working |
 
 ## Canonical train/val/test split (fixed — do not adjust after results are in)
@@ -42,6 +56,15 @@ Project-level state for agents picking up cold. Update this file when a phase co
 7-day buffers between splits prevent label leakage.
 
 ## ML Phase results
+
+### Current production model (54-feat baseline)
+
+On-disk artifact: **54-feat LightGBM, isotonic-calibrated, τ=0.25.** Last feature column `lga_phase_std_delta_3d`.
+
+- **#216** (2026-06-09) — graduated the RAC_full network group (4 cols: `network_px_std`, `network_px_std_delta_3d`, `lga_phase_std`, `lga_phase_std_delta_3d`), retraining the 50-feat Phase 4 baseline to 54. Δh25 −0.045 over LGA-only. See [AGENTS.md § Canonical feature set](../AGENTS.md#canonical-feature-set-54-feat-baseline-locked-issue-216).
+- **#236** (2026-06-13, commit 740b601) — calibration + threshold selection moved to OOF CV over train with an 80/20 eval split; isotonic chosen over raw; τ=0.25. Realised backtest 3.04% vs always-buy (prior 1.98%).
+
+The phase-by-phase tables below are the historical lock record; the two items above are the current state.
 
 ### Phase 2 locked (2026-05-09)
 
@@ -76,9 +99,9 @@ Phase 3a (10-feat LGBM cycle features) → Phase 3b (14-feat, +LGA/brand aggrega
 
 At τ=0.65 test: P=0.702, R=0.851, F1=0.769, BUY%=29.9%.
 
-#### Current Phase 4 state (post-#144 boundary fix + post-#154 Central Coast removal)
+#### Phase 4 50-feat state (post-#144 boundary fix + post-#154 Central Coast removal — superseded by the 54-feat #216 lock above)
 
-On-disk model: 50-feat raw LGBM, banked as `phase4_5seed_lock_post_cc_removal` (commit 9afdd2f).
+Model at this lock: 50-feat raw LGBM, banked as `phase4_5seed_lock_post_cc_removal` (commit 9afdd2f).
 
 | Metric | Value |
 |---|--:|
@@ -97,10 +120,11 @@ Calibrate chose raw over isotonic.
 
 **Phase 4b evaluated and walked away (2026-06-02).** 60-feat schema (Phase 4 + 10 `days_since_trough_entry_<brand>`) hit 5-seed bank Δ −0.0062 (borderline) but lost 9/14 folds in paired walk-forward CV with a non-shock regression at fold 11 (+0.0297). Brand-trough feature code (PRs #183, #184) stays merged; columns continue to be computed in `features.csv` but are not used at the model level. Phase 4 (`phase4_5seed_lock_post_cc_removal`) remains operational baseline. Ledger: `phase4b_cv_negative` row in `experiments/results.csv`; per-fold artifacts at `experiments/cv_compare_phase4b/results.csv` (PR #187, close-not-merge). Compute-features per-row brand-col gap (#185) closed as moot.
 
-**Open follow-ups from validation:**
+**Open follow-ups:**
 
-- **#157** v2 peak features — `lead −7..−4` over-prediction (+0.157) is the dominant residual miscalibration. Design taxonomy: `docs/PLAN_phase4_event_leadership.md` § LGA feature roles in SHAP.
-- **LGA mechanism — open question (updated 2026-06-02).** The leadership-table predicted leaders (sutherland_shire, northern_beaches, ku_ring_gai) all rank in the bottom half of LGA SHAP. The 2026-05-30 hypothesis that brand variance was confounding the ranking was tested by Phase 4b — adding 10 brand-axis trough features didn't displace LGA cols at the model level (CV worse 9/14). Brand variance is not the missing axis. The model selects on a criterion we haven't characterised; the deferral anchor #75 no longer applies. Re-frame needed before next investigation.
+- **#157** (open, under consideration) — peak-side v2 features for the `lead −7..−4` over-prediction (+0.157), the dominant residual miscalibration. Design taxonomy: `docs/PLAN_phase4_event_leadership.md` § LGA feature roles in SHAP.
+
+The late-descent / extended-shallow-descent investigation that drove the 50→54-feat work is closed: #212 (RAC_full graduated → #216 lock), #219→#221 (canonical cohort), #214 rejected, #215 and #231 (interaction-column probe) closed. See those issues for the external-data decision; nothing from that chain is currently open.
 
 ## Pending work
 
@@ -113,10 +137,10 @@ Calibrate chose raw over isotonic.
 
 Models are written to fixed canonical paths. **Each Phase lock overwrites the previous Phase's artifact** — there is no per-phase suffix on the filename. Phase identification lives in `experiments/results.csv` (`name` column) and in commit history, not the filename.
 
-| Path | Writer | Currently (as of Phase 4 re-lock, 2026-05-29) |
+| Path | Writer | Currently (as of #236 calibration lock, 2026-06-13) |
 |------|--------|--------------------------------------------|
-| `data/models/lgbm.joblib` | `train_lgbm.py` | Phase 4 50-feat raw (post-#144 boundary fix) |
-| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | Phase 4 50-feat (raw chosen over isotonic), post-#144 |
+| `data/models/lgbm.joblib` | `train_lgbm.py` | 54-feat baseline (#216 RAC_full lock) |
+| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | 54-feat, isotonic-calibrated, τ=0.25 (#236) |
 | `data/models/logreg.joblib` | `train_logreg.py` | Phase 2 10-feat raw |
 | `data/models/logreg_calibrated.joblib` | `calibrate.py` | Phase 2 10-feat (raw chosen over calibration) |
 
@@ -126,6 +150,7 @@ To verify what's currently on disk before scoring:
 import joblib
 m = joblib.load("data/models/lgbm_calibrated.joblib")
 print(len(m["feature_columns"]), m["feature_columns"][-1])
+# 54 + ending in 'lga_phase_std_delta_3d' → 54-feat baseline (#216 RAC_full, current)
 # ~60 + ending in a 'days_since_trough_entry_<brand_slug>' (e.g. 'speedway') → Phase 4b
 # 50 + ending in 'days_since_trough_entry_woollahra' → Phase 4
 # 15 + ending in 'stickiness_score' → Phase 3c

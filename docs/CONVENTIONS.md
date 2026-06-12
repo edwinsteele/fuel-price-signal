@@ -20,6 +20,14 @@ In `db.py`, SQL is built with plain string literals (not f-strings, not `str % a
 
 **Why:** `coverage_matrix` originally had `%%100` in a plain string, which passed two literal `%` characters to SQLite and caused `OperationalError: near "%": syntax error`. Only escape to `%%` inside f-strings or `str % (args,)` formatting calls.
 
+### `db.py` owns SQL — compose helpers, don't inline queries
+
+Command modules in `fuel_signal/` read data through `db.py` helpers (`get_daily_prices`, `average_price_series`, etc.), never by issuing their own SQL against the schema. If a helper doesn't expose what you need, add or extend one in `db.py` and call it — don't inline a one-off `SELECT`.
+
+Experiments follow the same preference order, not an exemption. Reach for `load_features()` (the model-ready matrix) first, then a `db.py` read helper for raw/gap-filled series, then the `experiments/lib/features/` primitives for PIT-safe transforms. Compose SQL directly **only when no existing routine fits** — and if you find yourself recomputing something a helper already does (a market average, a gap-filled series), use the helper.
+
+**Why:** the helpers encode invariants raw SQL silently skips — `daily_prices` is gap-filled and PIT-safe where `prices` is raw; the decicents/YYYYMMDD storage conversion happens at the `db.py` boundary; Sticky-exclusion and the 3-station aggregation floor live in one place. A hand-rolled `AVG(price_decicents) FROM daily_prices` (no Sticky exclusion) is the anti-pattern — `average_price_series` already does it correctly.
+
 ### LightGBM fit + predict with DataFrame slices, not NumPy
 
 Pass `df[feature_columns]` (a DataFrame) to `.fit()` and `.predict_proba()` at the model boundary — avoids sklearn's feature-name mismatch warning (`X does not have valid feature names, but LGBMClassifier was fitted with feature names`).
@@ -60,6 +68,12 @@ Override is allowed when the regressing fold is known to be anomalous (a price-s
 
 **Why:** on 2026-06-03, `station_minus_last_max_cents` looked like a clean drop on one val window (5-seed Δ −0.0112 ± 0.0043), but a 14-fold paired walk-forward CV showed 7/14 fold-wins, mean Δ +0.0104, with fold 9 (2023-10→2024-01) regressing by +0.103. See `experiments/2026-06-03_drop_redundant_pair/`.
 
+### New constants must not silently diverge from a canonical equivalent
+
+When a change introduces a numeric constant (a band width, a window length, a threshold) that has a canonical equivalent already in the codebase, either reuse the canonical one or **ablate the divergence before merge** — cite the measured cost of the new value vs the canonical value, same evidence bar as a feature change.
+
+**Why:** #217 introduced `COMP_BAND_CENTS=5.0` for the dispersion cohort while the canonical Competitive band was `±10c`. The divergence went unmeasured and understated #212's lift by ~0.009 Δh25; #219→#221 later established the canonical ±10c was correct and dropped the constant. A new magic number that shadows an existing one is a silent regression surface.
+
 ## Definition of done
 
 Before considering a change complete, in this order:
@@ -76,6 +90,12 @@ Before considering a change complete, in this order:
 ## Decisions land in repo docs, not just memory
 
 When a design decision is made during a session, capture it in [AGENTS.md](../AGENTS.md), [docs/ML_SIGNAL.md](ML_SIGNAL.md), or the relevant `PLAN_*.md` — **before** the work that depends on it. Private memory files complement repo docs but never substitute for them; decisions that govern code structure must be discoverable and version-controlled.
+
+## One source of truth for current model state
+
+[docs/STATUS.md](STATUS.md) is the **only** place that states the live model's feature count, on-disk artifact, calibration method, τ, and active phase. Other docs (AGENTS.md, ML_SIGNAL.md, README.md, `PLAN_*.md`) link to STATUS for those facts rather than restating them. Lock tables and historical results stay as a dated record; it's the *"currently on disk"* claims that must live in one file.
+
+**Why:** before 2026-06-13 the current feature count was restated in four docs and drifted as the model moved 50→54 features and raw→isotonic calibration — STATUS said 50/raw while the artifact was 54/isotonic. A fact repeated in N places is a fact that's stale in N−1 of them after the next lock.
 
 ## Docs and memory: signal over sediment
 
@@ -108,6 +128,14 @@ Before filing an issue from an agent-driven logic review:
 ## Experiment scripts
 
 Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. This includes `paired_wfcv.py` harnesses, step-level ablation scripts (`step*.py`), and oracle/diagnostic scripts that call `fit_score`. Import with `PYTHONPATH=.`.
+
+These rules govern **new** scripts. `experiments/lib/` landed 2026-06-11 and `load_features()` postdates many existing experiment dirs; older scripts are frozen lab-book entries — some gitignored, untracked exploration — that are not retrofitted, not the template, and not the standard. Read them for their results, not as a pattern to copy.
+
+### Load the feature matrix via `load_features()`, never raw CSV
+
+In experiment scripts: `from fuel_signal.features import load_features` then `df = load_features()`. Do **not** `pd.read_csv("data/features.csv")` directly.
+
+**Why:** `load_features()` goes through the parquet cache (PR #193); the raw CSV read bypasses it, paying the full parse every run and risking a stale CSV when the parquet is newer.
 
 **Canonical skeleton:** `experiments/TEMPLATE_paired_wfcv.py` — copy, rename the dir, fill in the TODOs. Do not reverse-engineer the loop shape from a prior experiment.
 
@@ -145,7 +173,7 @@ The inside of every `compute_features()` / `add_candidate_columns()` uses helper
 
 Signal C in `a_c_ablation` (row-wise std across LGA columns) is column-wise, not row-filtered — `cohort_std_by_date` does not apply; that computation stays inline.
 
-Cross-reference: `feedback_load_features_helper` (use `load_features()`, never raw CSV); `feedback_experiment_scripts_pythonpath` (`PYTHONPATH=.` prefix); `feedback_instrument_walltime` (time + log per step); `feedback_throwaway_validation_scripts` (minimal one-off validators).
+Cross-reference: `feedback_experiment_scripts_pythonpath` (`PYTHONPATH=.` prefix); `feedback_instrument_walltime` (time + log per step); `feedback_throwaway_validation_scripts` (minimal one-off validators).
 
 ## Shell tooling
 
