@@ -40,9 +40,13 @@ def _date_range(start: str, n_days: int) -> list[str]:
 
 
 def _synthetic_df(seed: int = 0) -> pd.DataFrame:
-    """Feature frame spanning train/val/test windows with a separable label."""
+    """Feature frame spanning train/val/test windows with a separable label.
+
+    2000 train days keeps walk_forward_folds (train_min_days=1825) working
+    without injecting fold_params in CLI-level tests.
+    """
     rng = np.random.default_rng(seed)
-    train_dates = _date_range("2018-01-01", 800)
+    train_dates = _date_range("2018-01-01", 2000)
     val_dates = _date_range("2025-04-01", 60)
     test_dates = _date_range("2025-08-01", 60)
     all_dates = train_dates + val_dates + test_dates
@@ -147,32 +151,73 @@ class TestClassBalance:
 # compare_calibrations
 # ---------------------------------------------------------------------------
 
+_SMALL_FOLDS = {"train_min_days": 200, "val_days": 30, "step_days": 30}
+
+
 class TestCompareCalibrations:
     def test_returns_expected_keys(self, tmp_path):
         df = _synthetic_df()
         model_path = tmp_path / "models" / "logreg.joblib"
         _save_logreg(df, model_path)
-        result = compare_calibrations(df, model_path)
-        assert set(result.keys()) == {"raw", "sigmoid", "isotonic", "y_val"}
+        result = compare_calibrations(df, model_path, fold_params=_SMALL_FOLDS)
+        assert set(result.keys()) == {
+            "raw", "sigmoid", "isotonic", "y_val", "y_oof", "oof_buy_rate"
+        }
 
-    def test_all_variants_have_metrics(self, tmp_path):
+    def test_all_variants_have_oof_and_val_metrics(self, tmp_path):
         df = _synthetic_df()
         model_path = tmp_path / "models" / "logreg.joblib"
         _save_logreg(df, model_path)
-        result = compare_calibrations(df, model_path)
+        result = compare_calibrations(df, model_path, fold_params=_SMALL_FOLDS)
         for name in ("raw", "sigmoid", "isotonic"):
+            assert "oof_logloss" in result[name]
+            assert "oof_brier" in result[name]
             assert "val_logloss" in result[name]
             assert "val_brier" in result[name]
             assert "p_val" in result[name]
+            assert "p_oof" in result[name]
+
+    def test_oof_buy_rate_is_in_unit_interval(self, tmp_path):
+        df = _synthetic_df()
+        model_path = tmp_path / "models" / "logreg.joblib"
+        _save_logreg(df, model_path)
+        result = compare_calibrations(df, model_path, fold_params=_SMALL_FOLDS)
+        assert 0.0 < result["oof_buy_rate"] < 1.0
+
+    def test_shipped_model_uses_100pct_trained_base(self, tmp_path):
+        """Calibrated model's base_pipeline makes the same predictions as the 100%-trained raw model."""
+        df = _synthetic_df()
+        model_path = tmp_path / "models" / "logreg.joblib"
+        raw_pipe = _save_logreg(df, model_path)
+        result = compare_calibrations(df, model_path, fold_params=_SMALL_FOLDS)
+        X_probe = df[FEATURE_COLUMNS].iloc[:20]
+        p_raw = raw_pipe.predict_proba(X_probe)[:, 1]
+        for name in ("sigmoid", "isotonic"):
+            p_base = result[name]["model"].base_pipeline.predict_proba(X_probe)[:, 1]
+            np.testing.assert_allclose(
+                p_base, p_raw, rtol=1e-6,
+                err_msg=f"{name} base_pipeline differs from 100%-trained raw pipeline",
+            )
 
     def test_p_val_probabilities_in_unit_interval(self, tmp_path):
         df = _synthetic_df()
         model_path = tmp_path / "models" / "logreg.joblib"
         _save_logreg(df, model_path)
-        result = compare_calibrations(df, model_path)
+        result = compare_calibrations(df, model_path, fold_params=_SMALL_FOLDS)
         for name in ("raw", "sigmoid", "isotonic"):
             p = result[name]["p_val"]
-            assert np.all((p >= 0.0) & (p <= 1.0)), f"{name} probs out of range"
+            assert np.all((p >= 0.0) & (p <= 1.0)), f"{name} p_val probs out of range"
+            p_oof = result[name]["p_oof"]
+            assert np.all((p_oof >= 0.0) & (p_oof <= 1.0)), f"{name} p_oof probs out of range"
+
+    def test_no_folds_raises(self, tmp_path):
+        """Raises ValueError when train is too small for any fold."""
+        df = _synthetic_df()
+        model_path = tmp_path / "models" / "logreg.joblib"
+        _save_logreg(df, model_path)
+        # train_min_days > len(train) → no folds
+        with pytest.raises(ValueError, match="no CV folds"):
+            compare_calibrations(df, model_path, fold_params={"train_min_days": 99999})
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +232,12 @@ class TestPickBest:
         p = np.full(n, 0.3)
         dummy_model = object()
         return {
-            "raw": {"val_logloss": raw_ll, "val_brier": raw_br, "p_val": p},
-            "sigmoid": {"val_logloss": sig_ll, "val_brier": sig_br, "p_val": p, "model": dummy_model},
-            "isotonic": {"val_logloss": iso_ll, "val_brier": iso_br, "p_val": p, "model": dummy_model},
+            "raw": {"oof_logloss": raw_ll, "oof_brier": raw_br, "p_val": p, "p_oof": p},
+            "sigmoid": {"oof_logloss": sig_ll, "oof_brier": sig_br, "p_val": p, "p_oof": p, "model": dummy_model},
+            "isotonic": {"oof_logloss": iso_ll, "oof_brier": iso_br, "p_val": p, "p_oof": p, "model": dummy_model},
             "y_val": y,
+            "y_oof": y,
+            "oof_buy_rate": float(y.mean()),
         }
 
     _FLAGGED = 0.10   # > _MISCAL_THRESHOLD (0.05) → proceed to calibration check
@@ -256,6 +303,7 @@ class TestCalibrateCLI:
         assert "Class balance" in result.output
         assert "Reliability table" in result.output
         assert "Calibration comparison" in result.output
+        assert "OOF" in result.output
         assert model_out.exists()
 
     def test_calibrated_artifact_is_loadable(self, tmp_path):

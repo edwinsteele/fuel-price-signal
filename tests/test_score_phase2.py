@@ -136,9 +136,13 @@ def _date_range(start: str, n_days: int) -> list[str]:
 
 
 def _synthetic_df_for_seed_test(seed: int = 0) -> pd.DataFrame:
-    """Minimal DataFrame with train + val + test rows for multi_seed_raw_logloss tests."""
+    """DataFrame with train + val + test rows for score_phase2 tests.
+
+    2000 train days keeps walk_forward_folds (train_min_days=1825) working
+    without injecting fold_params in CLI-level tests.
+    """
     rng = np.random.default_rng(seed)
-    train_dates = _date_range("2018-01-01", 400)
+    train_dates = _date_range("2018-01-01", 2000)
     val_dates = _date_range("2025-04-01", 60)
     test_dates = _date_range("2025-08-01", 60)
     all_dates = train_dates + val_dates + test_dates
@@ -210,8 +214,8 @@ def _make_raw_artifact_from_df(df: pd.DataFrame, tmp_path: pathlib.Path) -> path
 # ---------------------------------------------------------------------------
 
 
-def test_warn_emitted_when_raw_model_no_explicit_tau(tmp_path):
-    """CLI emits WARNING when a raw artifact is loaded without explicit --tau-adjustment."""
+def test_model_path_uses_oof_threshold_selection(tmp_path):
+    """With --model-path, threshold sweep runs on OOF (not val) and reports OOF pos rate."""
     from unittest.mock import patch
 
     df = _synthetic_df_for_seed_test()
@@ -227,13 +231,13 @@ def test_warn_emitted_when_raw_model_no_explicit_tau(tmp_path):
             "--no-backtest",
         ])
     assert res.exit_code == 0, res.output
-    assert "WARNING" in res.output
-    assert "calibrated=False" in res.output
-    assert f"+{_TAU_STEP:.2f}" in res.output
+    assert "OOF" in res.output
+    # No val-bias warning — OOF handles base rate
+    assert "is raw (calibrated=False)" not in res.output
 
 
-def test_warn_suppressed_when_tau_adjustment_explicit(tmp_path):
-    """No WARNING when raw artifact is loaded but --tau-adjustment is given explicitly."""
+def test_model_path_no_tau_adjustment_in_output(tmp_path):
+    """OOF-based threshold selection never applies the +0.05 val-bias adjustment."""
     from unittest.mock import patch
 
     df = _synthetic_df_for_seed_test()
@@ -246,56 +250,11 @@ def test_warn_suppressed_when_tau_adjustment_explicit(tmp_path):
         res = runner.invoke(main, [
             "--features-csv", str(features_path),
             "--model-path", str(model_path),
-            "--tau-adjustment", "0.0",
             "--no-backtest",
         ])
     assert res.exit_code == 0, res.output
-    assert "is raw (calibrated=False)" not in res.output
-
-
-def test_warn_suppressed_when_model_isotonic_calibrated(tmp_path):
-    """No WARNING when the loaded artifact is isotonic-calibrated."""
-    from unittest.mock import patch
-
-    from sklearn.isotonic import IsotonicRegression
-    from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import StandardScaler
-
-    from fuel_signal import evaluate as _ev
-
-    df = _synthetic_df_for_seed_test()
-    features_path = tmp_path / "features.csv"
-    df.to_csv(features_path, index=False)
-
-    train, _, _ = _ev.split(df)
-    X_train = train[FEATURE_COLUMNS]
-    y_train = train["label"].to_numpy(dtype=int)
-    base_pipeline = Pipeline(
-        [("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=50))]
-    )
-    base_pipeline.fit(X_train, y_train)
-    raw_p_train = base_pipeline.predict_proba(X_train)[:, 1]
-    calibrator = IsotonicRegression(out_of_bounds="clip")
-    calibrator.fit(raw_p_train, y_train)
-    artifact = {
-        "base_pipeline": base_pipeline,
-        "calibrator": calibrator,
-        "calibration_method": "isotonic",
-        "feature_columns": FEATURE_COLUMNS,
-        "calibrated": True,
-    }
-    model_path = tmp_path / "iso_model.joblib"
-    joblib.dump(artifact, model_path)
-
-    runner = CliRunner()
-    with patch("fuel_signal.score_phase2._ev.log_experiment"):
-        res = runner.invoke(main, [
-            "--features-csv", str(features_path),
-            "--model-path", str(model_path),
-            "--no-backtest",
-        ])
-    assert res.exit_code == 0, res.output
-    assert "is raw (calibrated=False)" not in res.output
+    # No "Adjusted +0.05" line should appear for model_path OOF path
+    assert f"Adjusted +{_TAU_STEP:.2f}" not in res.output
 
 
 def test_seeds_invalid_format_errors(tmp_path):

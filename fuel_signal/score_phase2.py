@@ -1,17 +1,17 @@
-"""Phase 2 final evaluation: threshold sweep on val, one-time test scoring.
+"""Phase 2 final evaluation: threshold sweep on OOF/val, one-time test scoring.
 
-Issues #37 / #34. Train the canonical logreg pipeline on the train split, sweep
-decision thresholds on val to pick τ, then score test exactly once and append
-the result to experiments/results.csv.
+Issues #37 / #34 / #236.
 
-## Threshold-selection criterion
+## Threshold-selection criterion (updated #236)
 
-Criterion: highest expected-cents-per-row on val, adjusted upward by one τ step
-(+0.05) to account for val's elevated BUY rate (36.1%) vs test (26.9%). Without
-the adjustment, the cost-optimal τ on val would be too aggressive (too many BUYs)
-when applied to the test distribution, because val's 90-day lookback happens to
-anchor against a high-price Dec 2024–Feb 2025 reference period, making March 2025
-trough days look definitively cheap. See issue #34 for the full diagnosis.
+When --model-path is provided, threshold selection uses walk-forward CV OOF
+predictions over the training split (base rate ~0.24), not the single val window
+(BUY rate ~0.32).  OOF predictions are at training base rate so no τ adjustment
+is needed.  The old +0.05 adjustment was a workaround for the val BUY-rate bias;
+it is no longer applied on the model-path code path.
+
+When --model-path is absent (logreg retraining path), the legacy val-based sweep
+with tau_adjustment is preserved.
 
 ## Cost model (documented here; used consistently throughout)
 
@@ -264,6 +264,63 @@ def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str], str | None]
             "Pass a fitted sklearn-compatible classifier or a calibrated pipeline artifact."
         )
     return model, list(feature_columns), cal_method
+
+
+def oof_threshold_predictions(
+    artifact_path: pathlib.Path,
+    df: pd.DataFrame,
+    feature_columns: list[str],
+    fold_params: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (p_oof, y_oof) for threshold selection via walk-forward CV over train.
+
+    For each fold: clone the base pipeline from the artifact, fit on fold_train,
+    predict uncalibrated OOF on fold_val, then apply the calibrator (if any).
+    Returned predictions are at training base rate (~0.24) — no τ adjustment needed.
+
+    fold_params (optional): kwargs forwarded to walk_forward_folds, useful in tests.
+    """
+    from sklearn.base import clone as _clone
+
+    loaded = joblib.load(artifact_path)
+    calibrated = loaded.get("calibrated", False)
+    if calibrated:
+        raw_pipe = loaded["base_pipeline"]
+        calibrator = loaded["calibrator"]
+        cal_method: str | None = loaded["calibration_method"]
+    else:
+        raw_pipe = loaded["pipeline"]
+        calibrator = None
+        cal_method = None
+
+    train, _, _ = _ev.split(df)
+    oof_ps: list[np.ndarray] = []
+    oof_ys: list[np.ndarray] = []
+    _folds = fold_params or {}
+    for fold_train, fold_val in _ev.walk_forward_folds(train, **_folds):
+        if len(np.unique(fold_train["label"])) < 2:
+            continue
+        fold_base = _clone(raw_pipe)
+        fold_base.fit(fold_train[feature_columns], fold_train["label"].to_numpy(dtype=int))
+        p_uncal = fold_base.predict_proba(fold_val[feature_columns])[:, 1]
+
+        if calibrator is not None and cal_method == "sigmoid":
+            p = calibrator.predict_proba(p_uncal.reshape(-1, 1))[:, 1]
+        elif calibrator is not None:  # isotonic
+            p = np.clip(calibrator.predict(p_uncal), 0.0, 1.0)
+        else:
+            p = p_uncal
+
+        oof_ps.append(p)
+        oof_ys.append(fold_val["label"].to_numpy(dtype=int))
+
+    if not oof_ps:
+        raise ValueError(
+            "oof_threshold_predictions(): no CV folds generated — "
+            "train split may be too small for walk_forward_folds defaults. "
+            "Pass fold_params={'train_min_days': N, ...} to override."
+        )
+    return np.concatenate(oof_ps), np.concatenate(oof_ys)
 
 
 def score_test(
@@ -589,7 +646,7 @@ def main(
             "Re-run 'uv run python -m fuel_signal.features' to regenerate."
         )
 
-    # Step 1: obtain model + val predictions.
+    # Step 1: obtain model + threshold-selection predictions.
     if model_path is not None:
         artifact_path = pathlib.Path(model_path)
         if not artifact_path.exists():
@@ -599,12 +656,6 @@ def main(
             )
         click.echo(f"Loading pre-trained model from {model_path} …")
         pipeline, feature_columns, calibration_method = load_model_artifact(artifact_path)
-        if calibration_method is None and tau_adjustment is None:
-            click.echo(
-                f"WARNING: model at {model_path!r} is raw (calibrated=False); "
-                f"applying default tau-adjustment +{_TAU_STEP:.2f}\n"
-                f"         (pass --tau-adjustment 0.00 to override)"
-            )
 
         missing_cols = [c for c in feature_columns if c not in df.columns]
         if missing_cols:
@@ -614,17 +665,23 @@ def main(
             )
 
         train, val, _ = _ev.split(df)
+        p_baseline = _ev.baseline_prior(train)
+        train_positive_rate = float(train["label"].mean())
+        train_size = len(train)
+
+        # OOF-based threshold selection: base rate ~0.24, no adjustment needed.
+        click.echo("Running walk-forward CV over train for OOF threshold selection …")
+        p_thresh, y_thresh = oof_threshold_predictions(artifact_path, df, feature_columns)
+        oof_positive_rate = float(y_thresh.mean())
+
+        # Val metrics reported for reference only — not used for τ selection.
         X_val = val[feature_columns]
         y_val = val["label"].to_numpy(dtype=int)
         p_val = pipeline.predict_proba(X_val)[:, 1]
-
-        p_baseline = _ev.baseline_prior(train)
-        baseline_val_logloss = _ev.log_loss(y_val, np.full(len(y_val), p_baseline))
         val_logloss = _ev.log_loss(y_val, p_val)
         val_positive_rate = float(y_val.mean())
-        train_positive_rate = float(train["label"].mean())
-        train_size = len(train)
         val_size = len(val)
+        baseline_val_logloss = _ev.log_loss(y_val, np.full(len(y_val), p_baseline))
     else:
         click.echo("Training logreg on train split …")
         result = train_and_evaluate(df)
@@ -645,27 +702,38 @@ def main(
     click.echo(f"  Val:   {val_size:,} rows  (pos rate {val_positive_rate:.3f})")
     click.echo(f"  Val logloss: {val_logloss:.4f}  (baseline {baseline_val_logloss:.4f})")
 
-    # Step 2: threshold sweep on val.
-    click.echo("\nThreshold sweep on val:")
-    sweep = threshold_sweep(y_val, p_val)
-    click.echo(_format_sweep_table(sweep))
+    # Step 2: threshold sweep.
+    if model_path is not None:
+        # OOF sweep — base rate matches deployment, no adjustment.
+        click.echo(f"\nThreshold sweep on OOF ({len(y_thresh):,} rows, pos rate {oof_positive_rate:.3f}):")
+        sweep = threshold_sweep(y_thresh, p_thresh)
+        click.echo(_format_sweep_table(sweep))
+        effective_adj = 0.0
+        sweep_source = f"OOF (BUY {oof_positive_rate:.3f})"
+    else:
+        # Legacy val sweep for the no-model-path logreg retraining path.
+        click.echo("\nThreshold sweep on val:")
+        sweep = threshold_sweep(y_val, p_val)
+        click.echo(_format_sweep_table(sweep))
+        effective_adj = _resolve_tau_adjustment(calibration_method, tau_adjustment)
+        sweep_source = f"val (BUY {val_positive_rate:.3f})"
 
     # Step 3: pick τ.
     _, _, test_df = _ev.split(df)
     test_label_rate = float(test_df["label"].mean())
-    chosen_tau = pick_tau(sweep, calibration_method=calibration_method, tau_adjustment=tau_adjustment)
-    effective_adj = _resolve_tau_adjustment(calibration_method, tau_adjustment)
+    chosen_tau = pick_tau(sweep, calibration_method=calibration_method, tau_adjustment=effective_adj)
     best_row = max(sweep, key=lambda r: r["expected_cents_per_row"])
     click.echo(f"\nChosen τ = {chosen_tau:.2f}")
     click.echo(
-        f"  Basis: argmax(expected_cents_per_row) on val → τ={best_row['tau']:.2f}"
+        f"  Basis: argmax(expected_cents_per_row) on {sweep_source} → τ={best_row['tau']:.2f}"
         f" ({best_row['expected_cents_per_row']:.4f} c/row)"
     )
-    click.echo(
-        f"  Adjusted {effective_adj:+.2f} for val/test BUY-rate gap "
-        f"({val_positive_rate:.3f} vs {test_label_rate:.3f})"
-        + (f"  [calibration={calibration_method}]" if calibration_method else "")
-    )
+    if effective_adj != 0.0:
+        click.echo(
+            f"  Adjusted {effective_adj:+.2f} for BUY-rate gap "
+            f"({val_positive_rate:.3f} vs {test_label_rate:.3f})"
+            + (f"  [calibration={calibration_method}]" if calibration_method else "")
+        )
 
     # Step 4: score test once at chosen τ.
     click.echo("\nScoring test split …")
@@ -716,13 +784,14 @@ def main(
     )
 
     # Step 8: log to results.csv.
+    sweep_rate = oof_positive_rate if model_path is not None else val_positive_rate
     notes = (
         f"tau={chosen_tau:.2f}; "
-        f"criterion=max_expected_cents_val_adj{effective_adj:+.2f}; "
+        f"criterion=max_expected_cents_{sweep_source.replace(' ', '_')}_adj{effective_adj:+.2f}; "
         f"cost_model=TP+{_TP_REWARD_CENTS}c_FP-{_FP_COST_CENTS}c_FN-{_FN_COST_CENTS}c; "
         f"val_logloss={val_logloss:.4f}; "
         f"test_logloss={test_result['test_logloss']:.4f}; "
-        f"val_BUY_rate={val_positive_rate:.3f}; "
+        f"sweep_BUY_rate={sweep_rate:.3f}; "
         f"test_BUY_rate={test_label_rate:.3f}; "
         f"val_P={val_p:.3f}/R={val_r:.3f}/F1={val_f1:.3f}; "
         f"test_P={test_result['test_precision']:.3f}"
