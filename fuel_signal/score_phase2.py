@@ -280,7 +280,7 @@ def oof_threshold_predictions(
 
     fold_params (optional): kwargs forwarded to walk_forward_folds, useful in tests.
     """
-    from sklearn.base import clone as _clone
+    from fuel_signal.calibrate import pool_oof_predictions
 
     loaded = joblib.load(artifact_path)
     calibrated = loaded.get("calibrated", False)
@@ -294,33 +294,23 @@ def oof_threshold_predictions(
         cal_method = None
 
     train, _, _ = _ev.split(df)
-    oof_ps: list[np.ndarray] = []
-    oof_ys: list[np.ndarray] = []
-    _folds = fold_params or {}
-    for fold_train, fold_val in _ev.walk_forward_folds(train, **_folds):
-        if len(np.unique(fold_train["label"])) < 2:
-            continue
-        fold_base = _clone(raw_pipe)
-        fold_base.fit(fold_train[feature_columns], fold_train["label"].to_numpy(dtype=int))
-        p_uncal = fold_base.predict_proba(fold_val[feature_columns])[:, 1]
+    p_uncal, y_oof = pool_oof_predictions(raw_pipe, train, feature_columns, fold_params or {})
 
-        if calibrator is not None and cal_method == "sigmoid":
-            p = calibrator.predict_proba(p_uncal.reshape(-1, 1))[:, 1]
-        elif calibrator is not None:  # isotonic
-            p = np.clip(calibrator.predict(p_uncal), 0.0, 1.0)
-        else:
-            p = p_uncal
-
-        oof_ps.append(p)
-        oof_ys.append(fold_val["label"].to_numpy(dtype=int))
-
-    if not oof_ps:
+    if p_uncal.size == 0:
         raise ValueError(
             "oof_threshold_predictions(): no CV folds generated — "
             "train split may be too small for walk_forward_folds defaults. "
             "Pass fold_params={'train_min_days': N, ...} to override."
         )
-    return np.concatenate(oof_ps), np.concatenate(oof_ys)
+
+    if calibrator is not None and cal_method == "sigmoid":
+        p_oof = calibrator.predict_proba(p_uncal.reshape(-1, 1))[:, 1]
+    elif calibrator is not None:  # isotonic
+        p_oof = np.clip(calibrator.predict(p_uncal), 0.0, 1.0)
+    else:
+        p_oof = p_uncal
+
+    return p_oof, y_oof
 
 
 def score_test(
@@ -704,11 +694,12 @@ def main(
 
     # Step 2: threshold sweep.
     if model_path is not None:
-        # OOF sweep — base rate matches deployment, no adjustment.
+        # OOF sweep — base rate matches deployment, default adj=0.0.
+        # An explicit --tau-adjustment always overrides the default.
         click.echo(f"\nThreshold sweep on OOF ({len(y_thresh):,} rows, pos rate {oof_positive_rate:.3f}):")
         sweep = threshold_sweep(y_thresh, p_thresh)
         click.echo(_format_sweep_table(sweep))
-        effective_adj = 0.0
+        effective_adj = tau_adjustment if tau_adjustment is not None else 0.0
         sweep_source = f"OOF (BUY {oof_positive_rate:.3f})"
     else:
         # Legacy val sweep for the no-model-path logreg retraining path.

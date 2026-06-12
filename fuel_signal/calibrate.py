@@ -99,6 +99,38 @@ def class_balance(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Shared OOF helper
+# ---------------------------------------------------------------------------
+
+def pool_oof_predictions(
+    raw_pipe: Any,
+    train: pd.DataFrame,
+    feature_columns: list[str],
+    fold_params: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Run walk-forward CV over train and return (p_oof, y_oof).
+
+    For each fold: clone raw_pipe, fit on fold_train, predict uncalibrated
+    probabilities on fold_val.  Returns empty arrays when no folds are generated.
+    Used by both compare_calibrations (calibration fitting/selection) and
+    oof_threshold_predictions in score_phase2 (threshold sweep).
+    """
+    oof_ps: list[np.ndarray] = []
+    oof_ys: list[np.ndarray] = []
+    for fold_train, fold_val in _ev.walk_forward_folds(train, **fold_params):
+        if len(np.unique(fold_train["label"])) < 2:
+            continue
+        fold_base = clone(raw_pipe)
+        fold_base.fit(fold_train[feature_columns], fold_train["label"].to_numpy(dtype=int))
+        p = fold_base.predict_proba(fold_val[feature_columns])[:, 1]
+        oof_ps.append(p)
+        oof_ys.append(fold_val["label"].to_numpy(dtype=int))
+    if not oof_ps:
+        return np.array([]), np.array([])
+    return np.concatenate(oof_ps), np.concatenate(oof_ys)
+
+
+# ---------------------------------------------------------------------------
 # Calibration comparison
 # ---------------------------------------------------------------------------
 
@@ -136,27 +168,15 @@ def compare_calibrations(
     raw_pipe = loaded["pipeline"]
 
     # --- walk-forward OOF over train to pool predictions at training base rate ---
-    oof_ps: list[np.ndarray] = []
-    oof_ys: list[np.ndarray] = []
     _folds = fold_params or {}
-    for fold_train, fold_val in _ev.walk_forward_folds(train, **_folds):
-        if len(np.unique(fold_train["label"])) < 2:
-            continue
-        fold_base = clone(raw_pipe)
-        fold_base.fit(fold_train[feature_columns], fold_train["label"].to_numpy(dtype=int))
-        p_oof = fold_base.predict_proba(fold_val[feature_columns])[:, 1]
-        oof_ps.append(p_oof)
-        oof_ys.append(fold_val["label"].to_numpy(dtype=int))
+    p_oof_all, y_oof_all = pool_oof_predictions(raw_pipe, train, feature_columns, _folds)
 
-    if not oof_ps:
+    if p_oof_all.size == 0:
         raise ValueError(
             "compare_calibrations(): no CV folds generated over train — "
             "train split may be too small for walk_forward_folds defaults. "
             "Pass fold_params={'train_min_days': N, ...} to override."
         )
-
-    p_oof_all = np.concatenate(oof_ps)
-    y_oof_all = np.concatenate(oof_ys)
 
     if len(np.unique(y_oof_all)) < 2:
         raise ValueError(
