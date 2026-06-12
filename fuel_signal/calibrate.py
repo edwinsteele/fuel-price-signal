@@ -165,6 +165,12 @@ def compare_calibrations(
     train, val, _ = _ev.split(df)
 
     loaded = joblib.load(raw_pipeline_path)
+    if loaded.get("calibrated", False):
+        raise ValueError(
+            f"compare_calibrations(): {raw_pipeline_path} is a calibrated artifact "
+            "(produced by calibrate.py). Pass the raw base model instead "
+            "(produced by train_lgbm.py or train_logreg.py)."
+        )
     raw_pipe = loaded["pipeline"]
 
     # --- walk-forward OOF over train to pool predictions at training base rate ---
@@ -184,10 +190,44 @@ def compare_calibrations(
             "cannot fit sigmoid or isotonic calibrators."
         )
 
-    # --- fit calibrators on OOF predictions ---
+    # --- split OOF 80/20 for unbiased method selection ---
+    # Isotonic (non-parametric) evaluated in-sample wins by construction — it
+    # directly minimises Brier on its training set, making the selection criterion
+    # vacuous.  Sigmoid is 2-parameter and barely overfit, but use the same eval
+    # split for consistency.  Ship calibrators refit on full OOF for deployment.
+    _MIN_EVAL = 50
+    n_eval = max(_MIN_EVAL, len(p_oof_all) // 5)
+    _can_split = (
+        len(p_oof_all) > n_eval + _MIN_EVAL
+        and len(np.unique(y_oof_all[:-n_eval])) == 2
+        and len(np.unique(y_oof_all[-n_eval:])) == 2
+    )
+    if _can_split:
+        p_sel_fit, p_sel_eval = p_oof_all[:-n_eval], p_oof_all[-n_eval:]
+        y_sel_fit, y_sel_eval = y_oof_all[:-n_eval], y_oof_all[-n_eval:]
+    else:
+        p_sel_fit, p_sel_eval = p_oof_all, p_oof_all
+        y_sel_fit, y_sel_eval = y_oof_all, y_oof_all
+
+    _sig_sel = LogisticRegression().fit(p_sel_fit.reshape(-1, 1), y_sel_fit)
+    _iso_sel = IsotonicRegression(out_of_bounds="clip").fit(p_sel_fit, y_sel_fit)
+    p_sel_sig = _sig_sel.predict_proba(p_sel_eval.reshape(-1, 1))[:, 1]
+    p_sel_iso = np.clip(_iso_sel.predict(p_sel_eval), 0.0, 1.0)
+
+    sel_ll = {
+        "raw": _ev.log_loss(y_sel_eval, p_sel_eval),
+        "sigmoid": _ev.log_loss(y_sel_eval, p_sel_sig),
+        "isotonic": _ev.log_loss(y_sel_eval, p_sel_iso),
+    }
+    sel_br = {
+        "raw": _ev.brier(y_sel_eval, p_sel_eval),
+        "sigmoid": _ev.brier(y_sel_eval, p_sel_sig),
+        "isotonic": _ev.brier(y_sel_eval, p_sel_iso),
+    }
+
+    # --- fit shipped calibrators on ALL OOF (best deployment coverage) ---
     sigmoid_cal = LogisticRegression()
     sigmoid_cal.fit(p_oof_all.reshape(-1, 1), y_oof_all)
-
     isotonic_cal = IsotonicRegression(out_of_bounds="clip")
     isotonic_cal.fit(p_oof_all, y_oof_all)
 
@@ -200,6 +240,10 @@ def compare_calibrations(
     p_raw_val = raw_pipe.predict_proba(X_val)[:, 1]
 
     # Shipped models use raw_pipe (100%-trained) as base — no 80%-train handicap.
+    # Known trade-off: calibrators fit on per-fold-base OOF; deployed base is
+    # 100%-trained (slightly sharper probabilities).  This is the standard
+    # CalibratedClassifierCV pattern; the alternative (prefit 80% base) had a
+    # larger handicap against the raw model.
     sig_model = _CalibratedPipeline(raw_pipe, sigmoid_cal, "sigmoid")
     iso_model = _CalibratedPipeline(raw_pipe, isotonic_cal, "isotonic")
     p_sig_val = sig_model.predict_proba(X_val)[:, 1]
@@ -207,16 +251,16 @@ def compare_calibrations(
 
     return {
         "raw": {
-            "oof_logloss": _ev.log_loss(y_oof_all, p_oof_all),
-            "oof_brier": _ev.brier(y_oof_all, p_oof_all),
+            "oof_logloss": sel_ll["raw"],      # eval-portion — unbiased selection
+            "oof_brier": sel_br["raw"],
             "val_logloss": _ev.log_loss(y_val, p_raw_val),
             "val_brier": _ev.brier(y_val, p_raw_val),
             "p_val": p_raw_val,
-            "p_oof": p_oof_all,
+            "p_oof": p_oof_all,                # full OOF for reporting/reliability
         },
         "sigmoid": {
-            "oof_logloss": _ev.log_loss(y_oof_all, p_oof_sig),
-            "oof_brier": _ev.brier(y_oof_all, p_oof_sig),
+            "oof_logloss": sel_ll["sigmoid"],
+            "oof_brier": sel_br["sigmoid"],
             "val_logloss": _ev.log_loss(y_val, p_sig_val),
             "val_brier": _ev.brier(y_val, p_sig_val),
             "p_val": p_sig_val,
@@ -224,8 +268,8 @@ def compare_calibrations(
             "model": sig_model,
         },
         "isotonic": {
-            "oof_logloss": _ev.log_loss(y_oof_all, p_oof_iso),
-            "oof_brier": _ev.brier(y_oof_all, p_oof_iso),
+            "oof_logloss": sel_ll["isotonic"],
+            "oof_brier": sel_br["isotonic"],
             "val_logloss": _ev.log_loss(y_val, p_iso_val),
             "val_brier": _ev.brier(y_val, p_iso_val),
             "p_val": p_iso_val,
@@ -405,6 +449,11 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
 
     # --- load model metadata (raw_pipe used if best_name == "raw") ---
     loaded = joblib.load(model_path)
+    if loaded.get("calibrated", False):
+        raise click.ClickException(
+            f"Model at {model_in!r} is already a calibrated artifact (produced by calibrate.py). "
+            "Pass the raw base model produced by train_lgbm.py or train_logreg.py."
+        )
     raw_pipe = loaded["pipeline"]
     feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
 

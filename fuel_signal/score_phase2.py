@@ -201,16 +201,18 @@ def pick_tau(
     calibration_method: str | None = None,
     tau_adjustment: float | None = None,
 ) -> float:
-    """Return the chosen τ: argmax(expected_cents_per_row) on val, model-aware adjusted.
+    """Return the chosen τ: argmax(expected_cents_per_row), optionally adjusted.
 
-    The adjustment accounts for val's elevated BUY rate vs test (#34). The default
-    adjustment depends on the model's calibration scheme:
+    When called from the --model-path OOF path (main() in score_phase2), the
+    caller already passes tau_adjustment=0.0 (OOF base rate matches deployment,
+    no correction needed) or the user's explicit override.  The model-aware
+    defaults below are only active for the legacy val-sweep path (no --model-path):
       - calibration_method == 'isotonic': default tau_adjustment = 0.0
         Isotonic calibration is piecewise constant; a fixed step can jump a plateau
-        and discard thousands of correct BUYs. Use val argmax directly instead.
+        and discard thousands of correct BUYs.  Use val argmax directly instead.
         See memory project_threshold_policy_lesson.md for the Phase 3b diagnosis.
       - sigmoid or raw (None): default tau_adjustment = +_TAU_STEP (0.05)
-        Original behaviour — smooth probability surface makes a fixed step safe.
+        Original val-BUY-rate correction — smooth probability surface, fixed step safe.
 
     An explicit tau_adjustment argument always overrides the model-aware default.
     Result is clamped to [_TAU_STEP, 1.0 - _TAU_STEP].
@@ -559,9 +561,11 @@ def run_realised_spend_backtest(
     default=None,
     type=float,
     help=(
-        "Override the τ adjustment applied to the val argmax. "
-        "Default is model-aware: 0.0 for isotonic-calibrated models, "
-        f"+{_TAU_STEP} for sigmoid or raw models."
+        "Override the τ adjustment applied to the sweep argmax. "
+        "With --model-path (OOF sweep): default 0.0 — OOF base rate already matches "
+        "deployment, so no correction is needed; an explicit value still applies. "
+        "Without --model-path (val sweep, legacy logreg path): model-aware default "
+        f"(0.0 for isotonic, +{_TAU_STEP} for sigmoid/raw)."
     ),
 )
 @click.option(
@@ -701,6 +705,7 @@ def main(
         click.echo(_format_sweep_table(sweep))
         effective_adj = tau_adjustment if tau_adjustment is not None else 0.0
         sweep_source = f"OOF (BUY {oof_positive_rate:.3f})"
+        sweep_key = "OOF_cv"  # compact token for results.csv criterion field
     else:
         # Legacy val sweep for the no-model-path logreg retraining path.
         click.echo("\nThreshold sweep on val:")
@@ -708,6 +713,7 @@ def main(
         click.echo(_format_sweep_table(sweep))
         effective_adj = _resolve_tau_adjustment(calibration_method, tau_adjustment)
         sweep_source = f"val (BUY {val_positive_rate:.3f})"
+        sweep_key = "val"
 
     # Step 3: pick τ.
     _, _, test_df = _ev.split(df)
@@ -778,7 +784,7 @@ def main(
     sweep_rate = oof_positive_rate if model_path is not None else val_positive_rate
     notes = (
         f"tau={chosen_tau:.2f}; "
-        f"criterion=max_expected_cents_{sweep_source.replace(' ', '_')}_adj{effective_adj:+.2f}; "
+        f"criterion=max_expected_cents_{sweep_key}_adj{effective_adj:+.2f}; "
         f"cost_model=TP+{_TP_REWARD_CENTS}c_FP-{_FP_COST_CENTS}c_FN-{_FN_COST_CENTS}c; "
         f"val_logloss={val_logloss:.4f}; "
         f"test_logloss={test_result['test_logloss']:.4f}; "

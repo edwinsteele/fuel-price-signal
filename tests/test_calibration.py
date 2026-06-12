@@ -219,6 +219,18 @@ class TestCompareCalibrations:
         with pytest.raises(ValueError, match="no CV folds"):
             compare_calibrations(df, model_path, fold_params={"train_min_days": 99999})
 
+    def test_calibrated_artifact_as_model_in_raises(self, tmp_path):
+        """compare_calibrations raises ValueError when passed a calibrated artifact."""
+        df = _synthetic_df()
+        # Write a minimal calibrated-artifact-shaped joblib directly
+        cal_path = tmp_path / "models" / "cal.joblib"
+        cal_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump({"calibrated": True, "base_pipeline": None, "calibrator": None,
+                     "calibration_method": "sigmoid", "feature_columns": list(FEATURE_COLUMNS)},
+                    cal_path)
+        with pytest.raises(ValueError, match="calibrated artifact"):
+            compare_calibrations(df, cal_path, fold_params=_SMALL_FOLDS)
+
 
 # ---------------------------------------------------------------------------
 # pick_best
@@ -364,3 +376,21 @@ class TestCalibrateCLI:
         ])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
+
+    def test_calibrated_artifact_as_model_in_cli_errors(self, tmp_path):
+        """CLI exits non-zero with a clear message when --model-in is a calibrated artifact."""
+        df = _synthetic_df()
+        features_path = tmp_path / "features.csv"
+        df.to_csv(features_path, index=False)
+        cal_path = tmp_path / "models" / "cal.joblib"
+        cal_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump({"calibrated": True, "base_pipeline": None, "calibrator": None,
+                     "calibration_method": "sigmoid", "feature_columns": list(FEATURE_COLUMNS)},
+                    cal_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "--features-csv", str(features_path),
+            "--model-in", str(cal_path),
+        ])
+        assert result.exit_code != 0
+        assert "calibrated artifact" in result.output.lower() or "already" in result.output.lower()
