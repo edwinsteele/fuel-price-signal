@@ -1,21 +1,19 @@
 """Calibration diagnostics and calibrated-model artifact for the logreg baseline.
 
 Issue #36: Phase 2.2 — Calibration check + handle val class imbalance.
+Issue #236: Fix calibration selection bias from unrepresentative val window.
 
 ## What this does
 
 1. Reports class balance (BUY rate) for train / val / test.
-2. Loads the fitted logreg pipeline from issue #35 and prints a 10-bin
-   reliability table on val.  Flags if max |gap| > 0.05.
-3. If miscalibrated: refits the base pipeline on the first 80% of train,
-   then wraps it with ``CalibratedClassifierCV(cv='prefit')`` and fits the
-   calibration layer on the remaining 20% — once for 'sigmoid' (Platt) and
-   once for 'isotonic'.  Picks whichever reduces val logloss without
-   increasing val Brier by more than 0.005.
-4. Saves the chosen model (raw pipeline or calibrated wrapper) to
-   ``data/models/logreg_calibrated.joblib``.
-5. Appends a row to ``experiments/results.csv`` with val metrics and notes
-   on the calibration decision and the val/train BUY-rate gap.
+2. Runs walk-forward CV over the training split to pool OOF predictions at
+   training base rate (~0.24), not val rate (~0.32).
+3. Fits sigmoid and isotonic calibrators on OOF predictions; selects the best
+   method by OOF logloss (representative base rate).
+4. Saves the chosen model to ``data/models/lgbm_calibrated.joblib``.
+   Calibrated artifacts ship the 100%-trained raw base — no 80%-train handicap.
+5. Appends a row to ``experiments/results.csv`` with OOF + val metrics and a
+   note on the calibration decision.
 
 ## Calibration concepts
 
@@ -27,8 +25,10 @@ Isotonic calibration is a non-parametric step function — more expressive but
 requires more calibration data and can overfit on small sets.  It is the right
 choice when the sigmoid fit is still visibly off the diagonal.
 
-Both use ``cv='prefit'`` which means the base estimator is already fitted and
-the calibration data is a held-out slice that the base model never saw.
+Both calibrators are fit on OOF predictions pooled from walk-forward CV over the
+training split.  Selection also uses OOF logloss (not val), so the 0.32 val BUY
+rate does not bias the decision.  The shipped base is the 100%-trained raw
+pipeline, not the 80%-refit sub-model used in the pre-#236 design.
 """
 
 from __future__ import annotations
@@ -53,7 +53,6 @@ DEFAULT_MODEL_OUT = pathlib.Path("data/models/lgbm_calibrated.joblib")
 
 _MISCAL_THRESHOLD = 0.05
 _BRIER_REGRESSION_LIMIT = 0.005
-_CALIB_HOLDOUT_FRAC = 0.20
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +99,38 @@ def class_balance(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Shared OOF helper
+# ---------------------------------------------------------------------------
+
+def pool_oof_predictions(
+    raw_pipe: Any,
+    train: pd.DataFrame,
+    feature_columns: list[str],
+    fold_params: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Run walk-forward CV over train and return (p_oof, y_oof).
+
+    For each fold: clone raw_pipe, fit on fold_train, predict uncalibrated
+    probabilities on fold_val.  Returns empty arrays when no folds are generated.
+    Used by both compare_calibrations (calibration fitting/selection) and
+    oof_threshold_predictions in score_phase2 (threshold sweep).
+    """
+    oof_ps: list[np.ndarray] = []
+    oof_ys: list[np.ndarray] = []
+    for fold_train, fold_val in _ev.walk_forward_folds(train, **fold_params):
+        if len(np.unique(fold_train["label"])) < 2:
+            continue
+        fold_base = clone(raw_pipe)
+        fold_base.fit(fold_train[feature_columns], fold_train["label"].to_numpy(dtype=int))
+        p = fold_base.predict_proba(fold_val[feature_columns])[:, 1]
+        oof_ps.append(p)
+        oof_ys.append(fold_val["label"].to_numpy(dtype=int))
+    if not oof_ps:
+        return np.array([]), np.array([])
+    return np.concatenate(oof_ps), np.concatenate(oof_ys)
+
+
+# ---------------------------------------------------------------------------
 # Calibration comparison
 # ---------------------------------------------------------------------------
 
@@ -107,96 +138,147 @@ def compare_calibrations(
     df: pd.DataFrame,
     raw_pipeline_path: pathlib.Path,
     feature_columns: list[str] | None = None,
+    fold_params: dict | None = None,
 ) -> dict:
-    """Compare raw logreg, sigmoid, and isotonic calibration on val.
+    """Compare raw, sigmoid, and isotonic calibration using train-CV OOF predictions.
 
-    Re-fits the base pipeline on the first 80% of train (temporal order) and
-    fits both calibration wrappers on the remaining 20%.  Evaluates all three
-    on val.
+    Runs walk-forward CV over the training split to pool OOF predictions at
+    training base rate (~0.24).  Both calibration fitting and method selection
+    use OOF metrics — not val metrics at the unrepresentative 0.32 BUY rate.
+
+    Shipped calibrated models use the 100%-trained raw pipeline as their base
+    (no 80%-train handicap from the pre-#236 implementation).
+
+    fold_params (optional): kwargs forwarded to walk_forward_folds, e.g.
+        {"train_min_days": 200, "val_days": 30, "step_days": 30}.
+        Useful in tests to generate folds on small synthetic datasets.
 
     Returns a dict with keys:
-        "raw"      → {"val_logloss", "val_brier", "p_val"}
-        "sigmoid"  → {"val_logloss", "val_brier", "p_val", "model"}
-        "isotonic" → {"val_logloss", "val_brier", "p_val", "model"}
+        "raw"      → {"oof_logloss", "oof_brier", "val_logloss", "val_brier", "p_val", "p_oof"}
+        "sigmoid"  → {"oof_logloss", "oof_brier", "val_logloss", "val_brier", "p_val", "p_oof", "model"}
+        "isotonic" → {"oof_logloss", "oof_brier", "val_logloss", "val_brier", "p_val", "p_oof", "model"}
         "y_val"    → np.ndarray
+        "y_oof"    → np.ndarray
+        "oof_buy_rate" → float
     """
     feature_columns = feature_columns or FEATURE_COLUMNS
-    train, val, _test = _ev.split(df)
+    train, val, _ = _ev.split(df)
 
-    # --- raw model predictions on val ---
     loaded = joblib.load(raw_pipeline_path)
+    if loaded.get("calibrated", False):
+        raise ValueError(
+            f"compare_calibrations(): {raw_pipeline_path} is a calibrated artifact "
+            "(produced by calibrate.py). Pass the raw base model instead "
+            "(produced by train_lgbm.py or train_logreg.py)."
+        )
     raw_pipe = loaded["pipeline"]
-    X_val = val[feature_columns]
-    y_val = val["label"].to_numpy(dtype=int)
-    p_raw = raw_pipe.predict_proba(X_val)[:, 1]
 
-    # --- split train temporally: refit base on first 80%, calibrate on last 20% ---
-    train_sorted = train.sort_values("price_date")
-    n_calib = max(1, int(len(train_sorted) * _CALIB_HOLDOUT_FRAC))
-    df_fit = train_sorted.iloc[:-n_calib]
-    df_calib = train_sorted.iloc[-n_calib:]
+    # --- walk-forward OOF over train to pool predictions at training base rate ---
+    _folds = fold_params or {}
+    p_oof_all, y_oof_all = pool_oof_predictions(raw_pipe, train, feature_columns, _folds)
 
-    if df_fit.empty:
+    if p_oof_all.size == 0:
         raise ValueError(
-            "compare_calibrations(): fit slice is empty after temporal split — "
-            "train split is too small for calibration."
+            "compare_calibrations(): no CV folds generated over train — "
+            "train split may be too small for walk_forward_folds defaults. "
+            "Pass fold_params={'train_min_days': N, ...} to override."
         )
 
-    X_fit = df_fit[feature_columns]
-    y_fit = df_fit["label"].to_numpy(dtype=int)
-    X_calib = df_calib[feature_columns]
-    y_calib = df_calib["label"].to_numpy(dtype=int)
-
-    if len(np.unique(y_fit)) < 2:
+    if len(np.unique(y_oof_all)) < 2:
         raise ValueError(
-            "compare_calibrations(): fit slice has only one class — "
-            "cannot fit the base logistic regression."
-        )
-    if len(np.unique(y_calib)) < 2:
-        raise ValueError(
-            "compare_calibrations(): calibration slice has only one class — "
+            "compare_calibrations(): OOF labels contain only one class — "
             "cannot fit sigmoid or isotonic calibrators."
         )
 
-    base = clone(raw_pipe)
-    base.fit(X_fit, y_fit)
-    p_calib_raw = base.predict_proba(X_calib)[:, 1]
-    p_val_from_base = base.predict_proba(X_val)[:, 1]
+    # --- split OOF 80/20 for unbiased method selection ---
+    # Isotonic (non-parametric) evaluated in-sample wins by construction — it
+    # directly minimises Brier on its training set, making the selection criterion
+    # vacuous.  Sigmoid is 2-parameter and barely overfit, but use the same eval
+    # split for consistency.  Ship calibrators refit on full OOF for deployment.
+    _MIN_EVAL = 50
+    n_eval = max(_MIN_EVAL, len(p_oof_all) // 5)
+    _can_split = (
+        len(p_oof_all) > n_eval + _MIN_EVAL
+        and len(np.unique(y_oof_all[:-n_eval])) == 2
+        and len(np.unique(y_oof_all[-n_eval:])) == 2
+    )
+    if _can_split:
+        p_sel_fit, p_sel_eval = p_oof_all[:-n_eval], p_oof_all[-n_eval:]
+        y_sel_fit, y_sel_eval = y_oof_all[:-n_eval], y_oof_all[-n_eval:]
+    else:
+        p_sel_fit, p_sel_eval = p_oof_all, p_oof_all
+        y_sel_fit, y_sel_eval = y_oof_all, y_oof_all
 
-    # Sigmoid (Platt): fit a LogisticRegression on (p_calib, y_calib).
-    sigmoid_cal = LogisticRegression()
-    sigmoid_cal.fit(p_calib_raw.reshape(-1, 1), y_calib)
-    p_sig = sigmoid_cal.predict_proba(p_val_from_base.reshape(-1, 1))[:, 1]
+    _sig_sel = LogisticRegression().fit(p_sel_fit.reshape(-1, 1), y_sel_fit)
+    _iso_sel = IsotonicRegression(out_of_bounds="clip").fit(p_sel_fit, y_sel_fit)
+    p_sel_sig = _sig_sel.predict_proba(p_sel_eval.reshape(-1, 1))[:, 1]
+    p_sel_iso = np.clip(_iso_sel.predict(p_sel_eval), 0.0, 1.0)
 
-    # Isotonic: fit IsotonicRegression(out_of_bounds='clip') on (p_calib, y_calib).
-    isotonic_cal = IsotonicRegression(out_of_bounds="clip")
-    isotonic_cal.fit(p_calib_raw, y_calib)
-    p_iso = np.clip(isotonic_cal.predict(p_val_from_base), 0.0, 1.0)
-
-    calibrated = {
-        "sigmoid": {
-            "model": _CalibratedPipeline(base, sigmoid_cal, "sigmoid"),
-            "val_logloss": _ev.log_loss(y_val, p_sig),
-            "val_brier": _ev.brier(y_val, p_sig),
-            "p_val": p_sig,
-        },
-        "isotonic": {
-            "model": _CalibratedPipeline(base, isotonic_cal, "isotonic"),
-            "val_logloss": _ev.log_loss(y_val, p_iso),
-            "val_brier": _ev.brier(y_val, p_iso),
-            "p_val": p_iso,
-        },
+    sel_ll = {
+        "raw": _ev.log_loss(y_sel_eval, p_sel_eval),
+        "sigmoid": _ev.log_loss(y_sel_eval, p_sel_sig),
+        "isotonic": _ev.log_loss(y_sel_eval, p_sel_iso),
     }
+    sel_br = {
+        "raw": _ev.brier(y_sel_eval, p_sel_eval),
+        "sigmoid": _ev.brier(y_sel_eval, p_sel_sig),
+        "isotonic": _ev.brier(y_sel_eval, p_sel_iso),
+    }
+
+    # --- fit shipped calibrators on ALL OOF (best deployment coverage) ---
+    sigmoid_cal = LogisticRegression()
+    sigmoid_cal.fit(p_oof_all.reshape(-1, 1), y_oof_all)
+    isotonic_cal = IsotonicRegression(out_of_bounds="clip")
+    isotonic_cal.fit(p_oof_all, y_oof_all)
+
+    p_oof_sig = sigmoid_cal.predict_proba(p_oof_all.reshape(-1, 1))[:, 1]
+    p_oof_iso = np.clip(isotonic_cal.predict(p_oof_all), 0.0, 1.0)
+
+    # --- val metrics (secondary — reported but not used for selection) ---
+    X_val = val[feature_columns]
+    y_val = val["label"].to_numpy(dtype=int)
+    p_raw_val = raw_pipe.predict_proba(X_val)[:, 1]
+
+    # Shipped models use raw_pipe (100%-trained) as base — no 80%-train handicap.
+    # Known trade-off: calibrators fit on per-fold-base OOF; deployed base is
+    # 100%-trained (slightly sharper probabilities).  This is the standard
+    # CalibratedClassifierCV pattern; the alternative (prefit 80% base) had a
+    # larger handicap against the raw model.
+    sig_model = _CalibratedPipeline(raw_pipe, sigmoid_cal, "sigmoid")
+    iso_model = _CalibratedPipeline(raw_pipe, isotonic_cal, "isotonic")
+    p_sig_val = sig_model.predict_proba(X_val)[:, 1]
+    p_iso_val = iso_model.predict_proba(X_val)[:, 1]
 
     return {
         "raw": {
-            "val_logloss": _ev.log_loss(y_val, p_raw),
-            "val_brier": _ev.brier(y_val, p_raw),
-            "p_val": p_raw,
+            "oof_logloss": sel_ll["raw"],      # eval-portion — unbiased selection
+            "oof_brier": sel_br["raw"],
+            "val_logloss": _ev.log_loss(y_val, p_raw_val),
+            "val_brier": _ev.brier(y_val, p_raw_val),
+            "p_val": p_raw_val,
+            "p_oof": p_oof_all,                # full OOF for reporting/reliability
         },
-        "sigmoid": calibrated["sigmoid"],
-        "isotonic": calibrated["isotonic"],
+        "sigmoid": {
+            "oof_logloss": sel_ll["sigmoid"],
+            "oof_brier": sel_br["sigmoid"],
+            "val_logloss": _ev.log_loss(y_val, p_sig_val),
+            "val_brier": _ev.brier(y_val, p_sig_val),
+            "p_val": p_sig_val,
+            "p_oof": p_oof_sig,
+            "model": sig_model,
+        },
+        "isotonic": {
+            "oof_logloss": sel_ll["isotonic"],
+            "oof_brier": sel_br["isotonic"],
+            "val_logloss": _ev.log_loss(y_val, p_iso_val),
+            "val_brier": _ev.brier(y_val, p_iso_val),
+            "p_val": p_iso_val,
+            "p_oof": p_oof_iso,
+            "model": iso_model,
+        },
         "y_val": y_val,
+        "y_oof": y_oof_all,
+        "oof_buy_rate": float(y_oof_all.mean()),
     }
 
 
@@ -204,28 +286,28 @@ def pick_best(compare: dict, max_gap: float) -> tuple[str, object]:
     """Pick the best model variant; return (name, model_or_None).
 
     'model_or_None' is None for 'raw' (caller should load the raw pipeline).
+    Selection uses OOF logloss/brier (train-CV base rate) not val metrics.
     Decision rule:
       1. If raw is well-calibrated (max |gap| ≤ _MISCAL_THRESHOLD) → use raw.
-      2. Otherwise pick the calibration method that has lower val logloss
-         provided it does not regress Brier by more than _BRIER_REGRESSION_LIMIT.
+      2. Otherwise pick the calibration method that has lower OOF logloss
+         provided it does not regress OOF Brier by more than _BRIER_REGRESSION_LIMIT.
       3. If neither calibration method beats raw, fall back to raw.
     """
     if max_gap <= _MISCAL_THRESHOLD:
         return "raw", None
 
-    raw_ll = compare["raw"]["val_logloss"]
-    raw_br = compare["raw"]["val_brier"]
+    raw_ll = compare["raw"]["oof_logloss"]
+    raw_br = compare["raw"]["oof_brier"]
 
     candidates = []
     for method in ("sigmoid", "isotonic"):
         c = compare[method]
-        if c["val_logloss"] < raw_ll and (c["val_brier"] - raw_br) <= _BRIER_REGRESSION_LIMIT:
-            candidates.append((method, c["val_logloss"], c["model"]))
+        if c["oof_logloss"] < raw_ll and (c["oof_brier"] - raw_br) <= _BRIER_REGRESSION_LIMIT:
+            candidates.append((method, c["oof_logloss"], c["model"]))
 
     if not candidates:
         return "raw", None
 
-    # lowest logloss among valid candidates
     best_method, _, best_model = min(candidates, key=lambda t: t[1])
     return best_method, best_model
 
@@ -244,9 +326,9 @@ def _fmt_class_balance(cb: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def _fmt_reliability(tbl: pd.DataFrame, max_gap: float, flagged: bool) -> str:
+def _fmt_reliability(tbl: pd.DataFrame, max_gap: float, flagged: bool, source: str = "OOF") -> str:
     lines = [
-        "Reliability table — val (10 bins):",
+        f"Reliability table — {source} (10 bins):",
         f"  {'bin':>3}  {'mean_pred':>9}  {'actual_rate':>11}  {'count':>7}  {'gap':>7}",
     ]
     for i, row in tbl.iterrows():
@@ -261,38 +343,40 @@ def _fmt_reliability(tbl: pd.DataFrame, max_gap: float, flagged: bool) -> str:
 
 
 def _fmt_comparison(compare: dict, best_name: str) -> str:
-    lines = ["Calibration comparison (val):"]
+    lines = ["Calibration comparison (OOF primary / val secondary):"]
     for name in ("raw", "sigmoid", "isotonic"):
         c = compare[name]
         marker = " ◄ chosen" if name == best_name else ""
         lines.append(
-            f"  {name:<9}: logloss {c['val_logloss']:.4f}  brier {c['val_brier']:.4f}{marker}"
+            f"  {name:<9}: OOF logloss {c['oof_logloss']:.4f}  brier {c['oof_brier']:.4f}"
+            f"  |  val logloss {c['val_logloss']:.4f}  brier {c['val_brier']:.4f}{marker}"
         )
     return "\n".join(lines)
 
 
-def _build_notes(cb: pd.DataFrame, max_gap: float, best_name: str, compare: dict) -> str:
+def _build_notes(
+    cb: pd.DataFrame,
+    max_gap: float,
+    best_name: str,
+    compare: dict,
+) -> str:
     train_rate = cb.loc[cb["split"] == "train", "buy_rate"].iloc[0]
     val_rate = cb.loc[cb["split"] == "val", "buy_rate"].iloc[0]
     test_rate = cb.loc[cb["split"] == "test", "buy_rate"].iloc[0]
+    oof_rate = compare.get("oof_buy_rate", float("nan"))
     ratio = val_rate / train_rate if train_rate > 0 else float("nan")
     calibrated = best_name != "raw"
     cal_note = (
-        f"Calibration applied ({best_name}); raw logloss {compare['raw']['val_logloss']:.4f} "
-        f"→ {compare[best_name]['val_logloss']:.4f}."
+        f"Calibration applied ({best_name}); raw OOF logloss {compare['raw']['oof_logloss']:.4f} "
+        f"→ {compare[best_name]['oof_logloss']:.4f}."
         if calibrated
-        else f"Raw logreg well-calibrated (max |gap| {max_gap:.4f}); no wrapper applied."
+        else f"Raw model well-calibrated on OOF (max |gap| {max_gap:.4f}); no wrapper applied."
     )
     rate_summary = (
-        f"Val/train BUY-rate ratio: {ratio:.2f} "
-        f"(val {val_rate:.3f} vs train {train_rate:.3f} vs test {test_rate:.3f})."
+        f"OOF BUY rate {oof_rate:.3f} (train {train_rate:.3f} / val {val_rate:.3f} / test {test_rate:.3f}). "
+        f"Val/train ratio: {ratio:.2f} — selection based on OOF, not val."
     )
-    threshold_note = (
-        "Issue 2.3 must not pick a threshold on val without correcting for this "
-        "elevated positive rate — test mirrors train (ratio ≈1); any val-tuned "
-        "threshold will be pessimistic on precision at test time."
-    )
-    return f"{cal_note} {rate_summary} {threshold_note}"
+    return f"{cal_note} {rate_summary}"
 
 
 # ---------------------------------------------------------------------------
@@ -339,8 +423,8 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
     """Calibration check and artifact for a fitted model.
 
     Default: reads data/models/lgbm.joblib, writes data/models/lgbm_calibrated.joblib.
-    Prints class balance, reliability table, and calibration comparison on val.
-    Saves the best model (raw or calibrated) to --model-out.
+    Runs walk-forward CV over train to select and fit calibration at training base
+    rate.  Saves the best model (raw or calibrated) to --model-out.
     Appends a result row to experiments/results.csv unless --skip-results-csv.
     """
     features_path = pathlib.Path(features_csv)
@@ -363,23 +447,33 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
     click.echo(_fmt_class_balance(cb))
     click.echo()
 
-    # --- reliability table on val ---
-    _, val, _ = _ev.split(df)
+    # --- load model metadata (raw_pipe used if best_name == "raw") ---
     loaded = joblib.load(model_path)
+    if loaded.get("calibrated", False):
+        raise click.ClickException(
+            f"Model at {model_in!r} is already a calibrated artifact (produced by calibrate.py). "
+            "Pass the raw base model produced by train_lgbm.py or train_logreg.py."
+        )
     raw_pipe = loaded["pipeline"]
     feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
-    X_val = val[feature_columns]
-    y_val = val["label"].to_numpy(dtype=int)
-    p_raw = raw_pipe.predict_proba(X_val)[:, 1]
 
-    tbl = _ev.reliability_table(y_val, p_raw)
+    # --- CV-based calibration comparison ---
+    click.echo("Running walk-forward CV over train to pool OOF predictions …")
+    compare = compare_calibrations(df, model_path, feature_columns)
+
+    # --- reliability table on OOF ---
+    p_oof = compare["raw"]["p_oof"]
+    y_oof = compare["y_oof"]
+    tbl = _ev.reliability_table(y_oof, p_oof)
     max_gap = float(tbl["gap"].abs().max())
     flagged = max_gap > _MISCAL_THRESHOLD
-    click.echo(_fmt_reliability(tbl, max_gap, flagged))
+    click.echo(_fmt_reliability(
+        tbl, max_gap, flagged,
+        source=f"train OOF ({len(y_oof):,} rows, BUY {compare['oof_buy_rate']:.3f})",
+    ))
     click.echo()
 
-    # --- calibration comparison (always run so we can report numbers) ---
-    compare = compare_calibrations(df, model_path, feature_columns)
+    # --- pick best and show comparison ---
     best_name, best_model = pick_best(compare, max_gap)
     click.echo(_fmt_comparison(compare, best_name))
     click.echo()
@@ -391,9 +485,6 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
         joblib.dump({"pipeline": raw_pipe, "feature_columns": feature_columns, "calibrated": False}, out_path)
         click.echo(f"Calibration decision: raw pipeline is sufficient — saved as-is to {out_path}")
     else:
-        # Store sklearn primitives rather than the _CalibratedPipeline instance so that
-        # the artifact can be loaded from any entry point (the custom class has a
-        # __module__='__main__' when calibrate.py is run with -m, which breaks joblib).
         joblib.dump(
             {
                 "base_pipeline": best_model.base_pipeline,
@@ -413,23 +504,23 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
         _ev.log_experiment(
             name=f"{model_name}_calibration_check_{best_name}",
             features=feature_columns,
-            holdout_logloss=chosen["val_logloss"],
-            holdout_brier=chosen["val_brier"],
+            holdout_logloss=chosen["oof_logloss"],
+            holdout_brier=chosen["oof_brier"],
             notes=notes,
         )
         click.echo("Appended calibration row to experiments/results.csv")
 
-    # --- val/train BUY-rate summary ---
+    # --- BUY-rate summary ---
     train_rate = cb.loc[cb["split"] == "train", "buy_rate"].iloc[0]
     val_rate = cb.loc[cb["split"] == "val", "buy_rate"].iloc[0]
     test_rate = cb.loc[cb["split"] == "test", "buy_rate"].iloc[0]
     click.echo()
     click.echo(
-        f"Val/train BUY-rate ratio: {val_rate / train_rate:.2f}  "
-        f"(train {train_rate:.3f} / val {val_rate:.3f} / test {test_rate:.3f})\n"
-        f"Threshold note for issue 2.3: val has a higher BUY rate than train/test.\n"
-        f"Any threshold chosen purely on val will be tuned to an elevated positive rate.\n"
-        f"Test mirrors train — validate chosen threshold on test before trusting it."
+        f"BUY-rate summary:\n"
+        f"  OOF   (selection basis) : {compare['oof_buy_rate']:.3f}\n"
+        f"  Train                   : {train_rate:.3f}\n"
+        f"  Val   (not used for sel): {val_rate:.3f}  (×{val_rate / train_rate:.2f} vs train)\n"
+        f"  Test                    : {test_rate:.3f}"
     )
 
 
