@@ -68,7 +68,5 @@ jobs:
             fi
 
             echo "PR #$pr: all checks green, merging."
-            gh pr merge "$pr" --squash --delete-branch \
-              --subject "$(gh pr view "$pr" --json title --jq .title)" \
-              --body "Auto-merged: chore PR, all CI checks green."
+            gh pr merge "$pr" --squash --delete-branch
           done
