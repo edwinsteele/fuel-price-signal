@@ -208,11 +208,12 @@ class ModelStrategy:
             # Calibrated artifact stores sklearn primitives to avoid __main__ pickle issues.
             # Reconstruct _CalibratedPipeline here where fuel_signal.calibrate is importable.
             from fuel_signal.calibrate import _CalibratedPipeline
-            self._pipeline = _CalibratedPipeline(
-                loaded["base_pipeline"], loaded["calibrator"], loaded["calibration_method"]
-            )
             self._feature_columns: list[str] = list(
                 loaded.get("feature_columns", FEATURE_COLUMNS)
+            )
+            self._pipeline = _CalibratedPipeline(
+                loaded["base_pipeline"], loaded["calibrator"], loaded["calibration_method"],
+                self._feature_columns,
             )
         elif isinstance(loaded, dict):
             self._pipeline = loaded["pipeline"]

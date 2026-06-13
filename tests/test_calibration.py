@@ -292,6 +292,54 @@ class TestPickBest:
 
 
 # ---------------------------------------------------------------------------
+# _CalibratedPipeline wrapper
+# ---------------------------------------------------------------------------
+
+class TestCalibratedPipeline:
+    """Unit tests for _CalibratedPipeline.predict_proba numpy-array coercion."""
+
+    def _make_pipeline(self, tmp_path: pathlib.Path):
+        """Return (pipeline, feature_columns) with a fitted logreg as base."""
+        df = _synthetic_df()
+        model_path = tmp_path / "models" / "logreg.joblib"
+        pipe = _save_logreg(df, model_path)
+        return pipe, list(FEATURE_COLUMNS)
+
+    def test_numpy_array_input_emits_no_warnings(self, tmp_path):
+        from sklearn.linear_model import LogisticRegression
+
+        from fuel_signal.calibrate import _CalibratedPipeline
+        pipe, fc = self._make_pipeline(tmp_path)
+        df = _synthetic_df()
+        train, _, _ = _ev.split(df)
+        p_raw = pipe.predict_proba(train[fc])[:, 1]
+        calibrator = LogisticRegression().fit(p_raw.reshape(-1, 1), train["label"].to_numpy(dtype=int))
+        cp = _CalibratedPipeline(pipe, calibrator, "sigmoid", fc)
+
+        X_np = df[fc].iloc[:5].to_numpy()
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            proba = cp.predict_proba(X_np)
+        assert proba.shape == (5, 2)
+
+    def test_numpy_and_dataframe_predictions_identical(self, tmp_path):
+        from sklearn.linear_model import LogisticRegression
+
+        from fuel_signal.calibrate import _CalibratedPipeline
+        pipe, fc = self._make_pipeline(tmp_path)
+        df = _synthetic_df()
+        train, _, _ = _ev.split(df)
+        p_raw = pipe.predict_proba(train[fc])[:, 1]
+        calibrator = LogisticRegression().fit(p_raw.reshape(-1, 1), train["label"].to_numpy(dtype=int))
+        cp = _CalibratedPipeline(pipe, calibrator, "sigmoid", fc)
+
+        X_df = df[fc].iloc[:10]
+        X_np = X_df.to_numpy()
+        np.testing.assert_array_equal(cp.predict_proba(X_df), cp.predict_proba(X_np))
+
+
+# ---------------------------------------------------------------------------
 # CLI smoke test
 # ---------------------------------------------------------------------------
 
@@ -348,7 +396,8 @@ class TestCalibrateCLI:
             assert "calibrator" in saved
             assert "calibration_method" in saved
             pipeline = _CalibratedPipeline(
-                saved["base_pipeline"], saved["calibrator"], saved["calibration_method"]
+                saved["base_pipeline"], saved["calibrator"], saved["calibration_method"],
+                list(saved.get("feature_columns", FEATURE_COLUMNS)),
             )
         else:
             assert "pipeline" in saved
