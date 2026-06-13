@@ -242,10 +242,10 @@ def load_model_artifact(path: pathlib.Path) -> tuple[Any, list[str], str | None]
             raise ValueError(f"Calibrated artifact missing required keys: {missing}")
         from fuel_signal.calibrate import _CalibratedPipeline
         cal_method: str | None = loaded["calibration_method"]
-        model = _CalibratedPipeline(
-            loaded["base_pipeline"], loaded["calibrator"], cal_method
-        )
         feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
+        model = _CalibratedPipeline(
+            loaded["base_pipeline"], loaded["calibrator"], cal_method, list(feature_columns)
+        )
     elif isinstance(loaded, dict):
         if "pipeline" not in loaded:
             raise ValueError(

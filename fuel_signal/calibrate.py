@@ -67,12 +67,21 @@ class _CalibratedPipeline:
     regardless of whether calibration was applied.
     """
 
-    def __init__(self, base_pipeline: Any, calibrator: Any, method: str) -> None:
+    def __init__(
+        self,
+        base_pipeline: Any,
+        calibrator: Any,
+        method: str,
+        feature_columns: list[str],
+    ) -> None:
         self.base_pipeline = base_pipeline
         self.calibrator = calibrator
         self.method = method
+        self.feature_columns = feature_columns
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+    def predict_proba(self, X: np.ndarray | pd.DataFrame) -> np.ndarray:
+        if isinstance(X, np.ndarray):
+            X = pd.DataFrame(X, columns=self.feature_columns)
         p = self.base_pipeline.predict_proba(X)[:, 1]
         if self.method == "sigmoid":
             p_cal = self.calibrator.predict_proba(p.reshape(-1, 1))[:, 1]
@@ -244,8 +253,8 @@ def compare_calibrations(
     # 100%-trained (slightly sharper probabilities).  This is the standard
     # CalibratedClassifierCV pattern; the alternative (prefit 80% base) had a
     # larger handicap against the raw model.
-    sig_model = _CalibratedPipeline(raw_pipe, sigmoid_cal, "sigmoid")
-    iso_model = _CalibratedPipeline(raw_pipe, isotonic_cal, "isotonic")
+    sig_model = _CalibratedPipeline(raw_pipe, sigmoid_cal, "sigmoid", feature_columns)
+    iso_model = _CalibratedPipeline(raw_pipe, isotonic_cal, "isotonic", feature_columns)
     p_sig_val = sig_model.predict_proba(X_val)[:, 1]
     p_iso_val = iso_model.predict_proba(X_val)[:, 1]
 
