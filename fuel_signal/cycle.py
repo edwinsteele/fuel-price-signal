@@ -60,6 +60,9 @@ class CycleDetector:
         series: list[tuple[str, float]],
         smooth: bool = False,
     ) -> None:
+        # _first_confirm maps peak index -> the first series position at which
+        # that peak became scipy-confirmed. Built lazily and cached (see #250).
+        self._first_confirm: dict[int, int] | None = None
         if not series:
             self._series: pd.Series = pd.Series(dtype=float)
             return
@@ -81,67 +84,49 @@ class CycleDetector:
         calculations, so this is safe to call with historical dates for
         backtesting without re-querying the database.
 
-        Returns None when fewer than 2 peaks are detected (insufficient data
+        Returns None when fewer than 2 confirmed peaks exist (insufficient data
         for a cycle phase estimate).
+
+        Peak confirmation (#250)
+        ------------------------
+        ``days_since_last_peak`` is driven solely by ``scipy.find_peaks``
+        confirmed peaks, applied causally and *with memory*:
+
+        - A peak is only counted once its right-side prominence has accumulated
+          (i.e. price has fallen far enough after the peak for ``find_peaks`` to
+          confirm it). This introduces a small confirmation lag near peaks.
+        - Once confirmed, a peak is **never un-confirmed** — the confirmed set
+          only grows, so the "last confirmed peak" index is non-decreasing in
+          date. ``days_since_last_peak`` therefore counts up monotonically
+          within a cycle and resets exactly once per genuine new peak.
+
+        This replaces the old expanding-window scheme, whose
+        ``_plateau_width_at_boundary`` heuristic guessed at an unconfirmed
+        boundary peak and flip-flopped that guess day-to-day, producing the
+        whipsaw documented in #250. ``_plateau_width_at_boundary`` is retained
+        for the inspection-page visualisation (``peaks_for_plot``) only.
         """
-        # TODO: implement
-        #
-        # Steps:
-        # 1. Slice self._series up to and including as_of_date.
-        #    Use: sliced = self._series.loc[:as_of_date]
-        #    Guard: return None if sliced is empty.
-        #
-        # 2. Detect peaks on the sliced series via self._get_peaks(sliced).
-        #    Return None if fewer than 2 peaks found.
-        #    (plateau_width_at_boundary can provide a synthetic "current peak"
-        #    on the right boundary — include it in the effective peak list
-        #    when it fires.)
-        #
-        # 3. Compute days_since_last_peak:
-        #    last_peak_date = sliced.index[effective_last_peak_idx]
-        #    days_since_last_peak = (pd.Timestamp(as_of_date) - last_peak_date).days
-        #
-        # 4. Compute mean_cycle_length via self._mean_cycle_length(sliced, peaks,
-        #    plateau_width).  See _mean_cycle_length docstring.
-        #
-        # 5. Compute pct_through_cycle = days_since_last_peak / mean_cycle_length.
-        #
-        # 6. Compute last_cycle_min / last_cycle_max via
-        #    self._last_cycle_prices(sliced, peaks, plateau_width).
-        #
-        # 7. Compute last_3_gradients = np.gradient(sliced.values)[-3:].round(2).tolist()
-        #    (use the smoothed series if smooth=True was set — self._series is
-        #    already smoothed, so np.gradient on sliced is correct regardless)
-        #
-        # 8. Return CycleState(...)
         if self._series.empty:
             return None
         sliced = self._series.loc[:as_of_date]
         if sliced.empty:
             return None
 
-        peaks, _ = self._get_peaks(sliced)
-        plateau_width = self._plateau_width_at_boundary(
-            sliced, self._PEAK_PROMINENCE
-        )
-
-        effective_peak_count = len(peaks) + (1 if plateau_width else 0)
-        if effective_peak_count < 2:
+        boundary_pos = len(sliced) - 1
+        peaks = self._confirmed_peaks_as_of(boundary_pos)
+        if len(peaks) < 2:
             return None
 
-        if plateau_width:
-            last_peak_idx = len(sliced) - plateau_width
-        else:
-            last_peak_idx = int(peaks[-1])
+        last_peak_idx = int(peaks[-1])
         last_peak_date = sliced.index[last_peak_idx]
         days_since_last_peak = (pd.Timestamp(as_of_date) - last_peak_date).days
 
-        mean_cycle_length = self._mean_cycle_length(sliced, peaks, plateau_width)
+        mean_cycle_length = self._mean_cycle_length(sliced, peaks, 0)
         if mean_cycle_length <= 0 or np.isnan(mean_cycle_length):
             return None
         pct_through_cycle = days_since_last_peak / mean_cycle_length
 
-        last_cycle = self._last_cycle_prices(sliced, peaks, plateau_width)
+        last_cycle = self._last_cycle_prices(sliced, peaks, 0)
         if last_cycle.empty:
             return None
         last_cycle_min = float(last_cycle.min())
@@ -157,8 +142,50 @@ class CycleDetector:
             last_cycle_min=last_cycle_min,
             last_cycle_max=last_cycle_max,
             last_3_gradients=last_3_gradients,
-            peak_count=effective_peak_count,
+            peak_count=len(peaks),
         )
+
+    def _confirmed_peaks_as_of(self, boundary_pos: int) -> np.ndarray:
+        """Return sorted peak indices confirmed at or before *boundary_pos*.
+
+        Confirmation is computed causally and is sticky: see ``detect``. The
+        returned indices are positions into ``self._series`` and are guaranteed
+        ``<= boundary_pos`` (a peak's confirmation position is never earlier
+        than the peak itself).
+        """
+        first_confirm = self._build_first_confirm()
+        idxs = sorted(p for p, c in first_confirm.items() if c <= boundary_pos)
+        return np.array(idxs, dtype=int)
+
+    def _build_first_confirm(self) -> dict[int, int]:
+        """Map each peak index to the first series position at which it became
+        ``find_peaks``-confirmed.
+
+        Scans the series forward once, accumulating the union of all peaks ever
+        reported by ``find_peaks`` on a growing prefix. ``find_peaks`` is
+        monotone-stable for interior peaks (right-side prominence only
+        accumulates as data grows); the union additionally absorbs the rare
+        boundary peak that ``find_peaks`` reports, transiently evicts, then
+        re-reports — keeping the confirmed set monotone (#250).
+
+        Cached after the first call. Cost is O(n) ``find_peaks`` calls, the same
+        order as the previous per-date detection, and the detector is built once
+        per backtest/feature run.
+        """
+        if self._first_confirm is not None:
+            return self._first_confirm
+        first_confirm: dict[int, int] = {}
+        values = self._series.values
+        for j in range(len(values)):
+            peaks, _ = scipy.signal.find_peaks(
+                values[: j + 1],
+                distance=self._PEAK_DISTANCE,
+                prominence=self._PEAK_PROMINENCE,
+            )
+            for p in peaks:
+                first_confirm.setdefault(int(p), j)
+        self._first_confirm = first_confirm
+        return first_confirm
 
     # ------------------------------------------------------------------
     # Internal helpers (ported from ff-aws-backend PriceCycleDetector)

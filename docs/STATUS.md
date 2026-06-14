@@ -14,7 +14,7 @@ Project-level state for agents picking up cold. Update this file when a phase co
 | `fill.py` | Done | Forward-fill per-station gaps into `daily_prices` |
 | `live.py` | Done | FuelCheck OAuth2; all-NSW all-fuel-type snapshots |
 | `series.py` | Done | `resolve()`, `resolve_members()`, `enumerate_groups()`, `SeriesError` |
-| `cycle.py` | Done | `CycleDetector`; `detect(as_of_date)` → `CycleState`; 21 unit tests |
+| `cycle.py` | Done | `CycleDetector`; `detect(as_of_date)` → `CycleState`; sticky `find_peaks` confirmation (#250, no boundary whipsaw); 26 unit tests |
 | `signal.py` | Done | Four-signal port; `combine_signals`; 38 unit + integration tests |
 | `compare.py` | Done | Station/LGA/brand/sydney series comparison |
 | `inspect.py` | Done | Flask workbench; line/scatter/heatmap charts; URL-driven state |
