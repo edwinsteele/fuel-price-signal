@@ -173,6 +173,18 @@ class CycleDetector:
         so ``_confirmed_peaks_as_of`` is monotone in date (#250). A trailing
         peak whose drop has not yet accumulated is simply absent until it does.
 
+        Point-in-time caveat (the price of running ``find_peaks`` over the full
+        series instead of per-prefix): the gated result equals a per-date
+        truncation ONLY because genuine cycle peaks are spaced far wider than
+        ``_PEAK_DISTANCE`` (~35d apart vs the 7-sample window). If two peaks
+        ever fell within ``_PEAK_DISTANCE`` of each other with the LATER one
+        taller, ``find_peaks``'s distance-dedup would retroactively evict the
+        earlier peak using future data — a look-ahead leak that would change the
+        historical answer. This cannot occur on the NSW metro series, but if the
+        cycle ever shortened to ~weekly, revert this method to per-prefix
+        ``find_peaks`` (O(n^2) but PIT-safe by construction). Guarded by
+        ``test_future_data_does_not_affect_historical_state``.
+
         Cached after the first call. Cost is one ``find_peaks`` plus an O(n)
         scan; the detector is built once per backtest/feature run.
         """
