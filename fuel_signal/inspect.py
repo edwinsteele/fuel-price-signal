@@ -164,15 +164,6 @@ def _build_annotations(peak_data: dict, labels: list[str],
             "borderDash": [5, 3],
         }
 
-    plateau_date = peak_data.get("plateau_peak_date")
-    if plateau_date and plateau_date in label_set:
-        out["plateau"] = {
-            "type": "line", "scaleID": "x", "value": plateau_date,
-            "borderColor": "#7c3aed", "borderWidth": 3,
-            "label": {"display": True, "content": "△ boundary", "position": "start",
-                      "color": "#7c3aed", "font": {"size": 10}},
-        }
-
     s, e = peak_data.get("last_cycle_start"), peak_data.get("last_cycle_end")
     if s and e and s in label_set and e in label_set:
         out["last_cycle"] = {
@@ -241,8 +232,7 @@ def _build_line_spec(
             "spanGaps": True,
         }
         # Dash patterns chosen to differ from cycle/event vertical annotations:
-        #   scipy peak  = red [5,3] thin vertical
-        #   plateau     = purple solid thick vertical
+        #   confirmed peak = red [5,3] thin vertical
         if r.kind == "sydney":
             ds["borderDash"] = [12, 3, 2, 3]  # dash-dot
             ds["fill"] = True
@@ -256,20 +246,15 @@ def _build_line_spec(
 
     annotations = _build_annotations(peak_data, all_dates, boundaries) if show_annotations else {}
 
-    plateau_peak_date = peak_data.get("plateau_peak_date")
     last_cycle_start = peak_data.get("last_cycle_start")
     last_cycle_end = peak_data.get("last_cycle_end")
 
     n_peaks = len(peak_data.get("peak_dates", []))
-    plateau_note = (
-        f" + boundary plateau on {plateau_peak_date}"
-        if plateau_peak_date else ""
-    )
     last_cycle_note = (
         f"Last cycle: {last_cycle_start} → {last_cycle_end}"
         if last_cycle_start else ""
     )
-    peak_summary = f"{n_peaks} scipy peaks{plateau_note}"
+    peak_summary = f"{n_peaks} confirmed peaks"
     if last_cycle_note:
         peak_summary += f" — {last_cycle_note}"
 

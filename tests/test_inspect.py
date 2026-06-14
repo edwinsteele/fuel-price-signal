@@ -215,7 +215,6 @@ def test_slice_points_empty_window_returns_empty():
 
 _PEAK_DATA_EMPTY = {
     "peak_dates": [],
-    "plateau_peak_date": None,
     "last_cycle_start": None,
     "last_cycle_end": None,
 }

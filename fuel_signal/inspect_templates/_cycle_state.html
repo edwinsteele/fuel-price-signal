@@ -22,11 +22,6 @@
   </div>
 </div>
 <p class="cycle-box">
-  {% if peak_data.plateau_peak_date %}
-    <span style="color:#7c3aed; font-weight:700">▲ boundary plateau detected ({{ peak_data.plateau_peak_date }})</span> &mdash;
-  {% else %}
-    <span style="color:#888">no boundary plateau</span> &mdash;
-  {% endif %}
   last 3 gradients: {{ cycle_state.last_3_gradients }}
 </p>
 {% else %}

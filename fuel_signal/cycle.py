@@ -103,8 +103,7 @@ class CycleDetector:
         This replaces the old expanding-window scheme, whose
         ``_plateau_width_at_boundary`` heuristic guessed at an unconfirmed
         boundary peak and flip-flopped that guess day-to-day, producing the
-        whipsaw documented in #250. ``_plateau_width_at_boundary`` is retained
-        for the inspection-page visualisation (``peaks_for_plot``) only.
+        whipsaw documented in #250. That heuristic has been removed entirely.
         """
         if self._series.empty:
             return None
@@ -121,12 +120,12 @@ class CycleDetector:
         last_peak_date = sliced.index[last_peak_idx]
         days_since_last_peak = (pd.Timestamp(as_of_date) - last_peak_date).days
 
-        mean_cycle_length = self._mean_cycle_length(sliced, peaks, 0)
+        mean_cycle_length = self._mean_cycle_length(sliced, peaks)
         if mean_cycle_length <= 0 or np.isnan(mean_cycle_length):
             return None
         pct_through_cycle = days_since_last_peak / mean_cycle_length
 
-        last_cycle = self._last_cycle_prices(sliced, peaks, 0)
+        last_cycle = self._last_cycle_prices(sliced, peaks)
         if last_cycle.empty:
             return None
         last_cycle_min = float(last_cycle.min())
@@ -207,118 +206,34 @@ class CycleDetector:
         )
 
     @staticmethod
-    def _plateau_width_at_boundary(series: pd.Series, prominence: float) -> int:
-        """Return how many trailing points are part of an unconfirmed peak at the
-        right boundary of *series*.
-
-        scipy cannot detect a peak at the boundary because it has no right-side
-        drop-off to measure prominence against.  This method identifies the case
-        where the series has plateaued (or barely declined) at the end and the
-        upswing before the plateau was large enough to constitute a peak.
-
-        Returns 0 if no boundary peak is detected.
-
-        Ported from ff-aws-backend PriceCycleDetector._plateau_width_at_boundary.
-        Logic summary:
-        - Compute np.gradient(series.values).
-        - Walk backwards through gradients, accumulating the running decline.
-        - Stop when either (a) a positive gradient is encountered (we've entered
-          the ramp-up of a new cycle) or (b) the accumulated decline exceeds
-          -prominence (the drop is large enough that scipy would have seen the
-          peak already).
-        - If the stop was caused by (a) and the gradient just before the
-          positive step is >= 2 * prominence, the plateau points count as a
-          peak boundary.  Return 1 + len(plateau_gradients).
-        - Otherwise return 0.
-
-        The original implementation in ff-aws-backend:
-
-            def _plateau_width_at_boundary(self) -> int:
-                plateau_width_at_boundary = 0
-                if len(self.daily_prices) > 1:
-                    gradients = np.gradient(self.daily_prices)
-                    plateau_gradients, other_gradients = (
-                        self.partition_when_threshold_reached(
-                            list(reversed(gradients)),
-                            -self.PRICE_SERIES_MIN_PROMINENCE,
-                        )
-                    )
-                    if (
-                        other_gradients
-                        and other_gradients[0] >= 2 * self.PRICE_SERIES_MIN_PROMINENCE
-                    ):
-                        plateau_width_at_boundary = 1 + len(plateau_gradients)
-                return plateau_width_at_boundary
-
-            @staticmethod
-            def partition_when_threshold_reached(input_list, threshold):
-                running_total = 0.0
-                for idx, val in enumerate(input_list):
-                    if val > 0:
-                        return input_list[:idx], input_list[idx:]
-                    if running_total + val < threshold:
-                        return input_list[:idx], input_list[idx:]
-                    else:
-                        running_total += val
-                return input_list, []
-        """
-        plateau_width = 0
-        if len(series) > 1:
-            gradients = np.gradient(series.values)
-            reversed_grads = list(reversed(gradients))
-            running_total = 0.0
-            plateau_grads: list[float] = reversed_grads
-            other_grads: list[float] = []
-            for idx, val in enumerate(reversed_grads):
-                if val > 0:
-                    plateau_grads = reversed_grads[:idx]
-                    other_grads = reversed_grads[idx:]
-                    break
-                if running_total + val < -prominence:
-                    plateau_grads = reversed_grads[:idx]
-                    other_grads = reversed_grads[idx:]
-                    break
-                running_total += val
-            if other_grads and other_grads[0] >= 2 * prominence:
-                plateau_width = 1 + len(plateau_grads)
-        return plateau_width
-
-    @staticmethod
     def _last_cycle_prices(
         series: pd.Series,
         peak_indices: np.ndarray,
-        plateau_width: int,
     ) -> pd.Series:
         """Return the price sub-series spanning the last complete cycle.
 
-        When plateau_width > 0 the current boundary counts as the latest peak,
-        so the last complete cycle runs from peak[-1] to the start of the plateau.
-        When plateau_width == 0 the last complete cycle runs from peak[-2] to peak[-1].
-
-        Returns an empty Series if fewer than 2 effective peaks exist.
+        The last complete cycle runs from peak[-2] to peak[-1]. Returns an empty
+        Series if fewer than 2 confirmed peaks exist.
 
         Ported from ff-aws-backend PriceCycleDetector._get_last_cycle_prices.
         """
         if len(peak_indices) >= 2:
-            if plateau_width:
-                return series.iloc[peak_indices[-1] : -plateau_width]
             return series.iloc[peak_indices[-2] : peak_indices[-1]]
-        if len(peak_indices) >= 1 and plateau_width:
-            return series.iloc[peak_indices[-1] : -plateau_width]
         return pd.Series(dtype=float)
 
     def peaks_for_plot(self, as_of_date: str | None = None) -> dict:
         """Return peak metadata for visualisation in the inspection page.
 
+        Uses the same confirmed-peak timeline as ``detect`` (#250): peaks are
+        scipy-confirmed and sticky, so the chart matches the feature.
+
         Returns:
-            peak_dates:         YYYY-MM-DD list of scipy-confirmed peak dates
-            plateau_peak_date:  YYYY-MM-DD of the synthetic boundary peak, or None
+            peak_dates:         YYYY-MM-DD list of confirmed peak dates
             last_cycle_start:   left edge of the last-cycle window (date str or None)
             last_cycle_end:     right edge of the last-cycle window (date str or None)
         """
         empty: dict = {
             "peak_dates": [],
-            "plateau_peak_date": None,
             "last_cycle_start": None,
             "last_cycle_end": None,
         }
@@ -328,29 +243,16 @@ class CycleDetector:
         if series.empty:
             return empty
 
-        peaks, _ = self._get_peaks(series)
-        plateau_width = self._plateau_width_at_boundary(series, self._PEAK_PROMINENCE)
-
+        peaks = self._confirmed_peaks_as_of(len(series) - 1)
         peak_dates = [series.index[int(i)].strftime("%Y-%m-%d") for i in peaks]
-        plateau_peak_date = (
-            series.index[-plateau_width].strftime("%Y-%m-%d") if plateau_width else None
-        )
 
         last_cycle_start = last_cycle_end = None
         if len(peaks) >= 2:
-            if plateau_width:
-                last_cycle_start = series.index[int(peaks[-1])].strftime("%Y-%m-%d")
-                last_cycle_end = series.index[-plateau_width].strftime("%Y-%m-%d")
-            else:
-                last_cycle_start = series.index[int(peaks[-2])].strftime("%Y-%m-%d")
-                last_cycle_end = series.index[int(peaks[-1])].strftime("%Y-%m-%d")
-        elif len(peaks) >= 1 and plateau_width:
-            last_cycle_start = series.index[int(peaks[-1])].strftime("%Y-%m-%d")
-            last_cycle_end = series.index[-plateau_width].strftime("%Y-%m-%d")
+            last_cycle_start = series.index[int(peaks[-2])].strftime("%Y-%m-%d")
+            last_cycle_end = series.index[int(peaks[-1])].strftime("%Y-%m-%d")
 
         return {
             "peak_dates": peak_dates,
-            "plateau_peak_date": plateau_peak_date,
             "last_cycle_start": last_cycle_start,
             "last_cycle_end": last_cycle_end,
         }
@@ -359,26 +261,14 @@ class CycleDetector:
     def _mean_cycle_length(
         series: pd.Series,
         peak_indices: np.ndarray,
-        plateau_width: int,
     ) -> float:
-        """Return mean inter-peak distance in days.
-
-        When plateau_width > 0, the right-boundary plateau point is appended
-        to the peak timestamps before computing inter-peak differences.
+        """Return mean inter-peak distance in days over the confirmed peaks.
 
         Ported from ff-aws-backend PriceCycleDetector.get_mean_cycle_time.
         """
-        effective_count = len(peak_indices) + (1 if plateau_width else 0)
-        if effective_count < 2:
+        if len(peak_indices) < 2:
             return float("nan")
-        peak_times = series.index[peak_indices].astype("datetime64[ns]")
-        if plateau_width:
-            cycle_times = np.append(
-                peak_times,
-                series.index[[-plateau_width]].astype("datetime64[ns]"),
-            )
-        else:
-            cycle_times = peak_times
+        cycle_times = series.index[peak_indices].astype("datetime64[ns]")
         days_between_peaks = (
             np.diff(cycle_times).astype("float64") / 1_000_000_000 / 60 / 60 / 24
         )
