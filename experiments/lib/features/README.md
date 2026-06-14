@@ -18,6 +18,12 @@ Each function carries a PIT-safety contract in its docstring. The guiding rule: 
 
 `rolling_baseline(per_date_series, window_days, closed, min_periods, agg)` — PIT-strict rolling aggregation. Reindexes to a contiguous daily range, then applies `rolling(f"{window_days}D", closed=closed)`. Default `closed='left'` excludes today's value from today's aggregate. Returns a Series on the full daily index; callers join on date. PIT-safe by default; callers that pass `closed='right'` opt into including the current date and must justify it.
 
+## cycle_shape.py
+
+`label_cycle_shape(per_date, ...)` — **ORACLE** classification of network price cycles by eventual shape. Reconstructs cycle boundaries from resets in `cycle_days_since_peak`, summarises each cycle by length + peak→trough descent slope, and labels it `normal` / `elongated_steep` / `elongated_shallow` using the train-median length cutoff and a `-0.9 c/day` shallow threshold. Returns `(per_date, cyc)`: the input frame tagged with `cycle_id` + `cycle_type`, and a per-cycle summary. **Uses future info** (full-cycle length/trough) — valid only for train-only existence diagnostics; the `cycle_type` label must never become a model feature. Extracted from `2026-06-09_shallow_elongated/phase_oracle_cycles.py` (#214) so later oracle diagnostics classify cycles identically. First reused by `2026-06-14_corner_oracle_sweep` (#237).
+
+> ⚠️ **PARKED / KNOWN-FLAWED (#250).** `cycle_days_since_peak` whipsaws at cycle boundaries, so the dsp-reset reconstruction over-segments ~2.6× vs `find_peaks(distance=7, prominence=1.0)`. Do not trust classifications from this until it is rebuilt on `find_peaks`. Kept only as the parked #237 record.
+
 ## diagnostics.py
 
 `px_change_lag_diagnostic(df, lag_days, station_col, date_col, value_col)` — per-row price change vs `lag_days` calendar days prior for the same station. Returns a Series aligned to `df.index`. NaN when no observation exists at exactly `(date − lag_days)`. Uses an exact-date self-merge with `validate='m:1'` rather than positional diff; positional diff silently spans data gaps and corrupts cohort definitions that depend on a fixed calendar window.

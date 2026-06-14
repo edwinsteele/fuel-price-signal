@@ -1,0 +1,219 @@
+{
+  "issue": 237,
+  "kind": "train-only oracle existence sweep (no model fitting)",
+  "train_end_excl": "2021-11-01",
+  "params": {
+    "COMP_BAND_CENTS": 5.0,
+    "DISC_THRESH": -5.0,
+    "DROP_CENTS": 0.3,
+    "TROUGH_RECENT_DAYS": 3,
+    "MIN_BIN_COUNT": 5,
+    "predictive_zone": [
+      0.15,
+      0.6
+    ],
+    "late_tail_zone": [
+      1.0,
+      1.5
+    ]
+  },
+  "n_cycles": {
+    "normal": 31,
+    "elongated_steep": 19,
+    "elongated_shallow": 8
+  },
+  "candidates": [
+    "days_since_meaningful_drop",
+    "down_run_length",
+    "px_change_5d",
+    "lga_phase_std",
+    "lga_trough_fraction",
+    "network_disc_gap",
+    "network_disc_gap_delta_3d"
+  ],
+  "separation": {
+    "days_since_meaningful_drop": {
+      "shallow_vs_steep_sep_predictive_zone": 0.0,
+      "shallow_vs_steep_sep_late_tail": 0.0,
+      "windows": {
+        "early-mid descent (0.15-0.40)": {
+          "normal": 0.0,
+          "elongated_steep": 0.0,
+          "elongated_shallow": 0.0
+        },
+        "trough zone (0.40-0.60)": {
+          "normal": 0.0,
+          "elongated_steep": 0.0,
+          "elongated_shallow": 0.0
+        },
+        "approach peak (0.70-0.95)": {
+          "normal": 1.5,
+          "elongated_steep": 1.0,
+          "elongated_shallow": 0.0
+        },
+        "elongation tail (1.0-1.5)": {
+          "normal": null,
+          "elongated_steep": 1.0,
+          "elongated_shallow": 1.0
+        }
+      }
+    },
+    "down_run_length": {
+      "shallow_vs_steep_sep_predictive_zone": 0.5,
+      "shallow_vs_steep_sep_late_tail": 3.5,
+      "windows": {
+        "early-mid descent (0.15-0.40)": {
+          "normal": 8.0,
+          "elongated_steep": 9.0,
+          "elongated_shallow": 8.5
+        },
+        "trough zone (0.40-0.60)": {
+          "normal": 14.5,
+          "elongated_steep": 15.0,
+          "elongated_shallow": 14.75
+        },
+        "approach peak (0.70-0.95)": {
+          "normal": 0.0,
+          "elongated_steep": 21.0,
+          "elongated_shallow": 23.0
+        },
+        "elongation tail (1.0-1.5)": {
+          "normal": null,
+          "elongated_steep": 30.0,
+          "elongated_shallow": 26.5
+        }
+      }
+    },
+    "px_change_5d": {
+      "shallow_vs_steep_sep_predictive_zone": 2.8352530683046524,
+      "shallow_vs_steep_sep_late_tail": 1.490030584361584,
+      "windows": {
+        "early-mid descent (0.15-0.40)": {
+          "normal": -6.174440686293025,
+          "elongated_steep": -7.006243126311148,
+          "elongated_shallow": -4.062657379161877
+        },
+        "trough zone (0.40-0.60)": {
+          "normal": -5.293315847105774,
+          "elongated_steep": -5.800064581761681,
+          "elongated_shallow": -3.4755152303211645
+        },
+        "approach peak (0.70-0.95)": {
+          "normal": -0.813798659387686,
+          "elongated_steep": -2.784221378516989,
+          "elongated_shallow": -3.134856219261877
+        },
+        "elongation tail (1.0-1.5)": {
+          "normal": null,
+          "elongated_steep": -2.9915016552623044,
+          "elongated_shallow": -1.5014710709007204
+        }
+      }
+    },
+    "lga_phase_std": {
+      "shallow_vs_steep_sep_predictive_zone": 1.2750964040069168,
+      "shallow_vs_steep_sep_late_tail": 5.19008517518067,
+      "windows": {
+        "early-mid descent (0.15-0.40)": {
+          "normal": 2.116166562333937,
+          "elongated_steep": 2.3483717974385714,
+          "elongated_shallow": 2.4765567494675613
+        },
+        "trough zone (0.40-0.60)": {
+          "normal": 2.2117762144910835,
+          "elongated_steep": 2.6306292621197285,
+          "elongated_shallow": 3.950342719579364
+        },
+        "approach peak (0.70-0.95)": {
+          "normal": 8.614033409752071,
+          "elongated_steep": 9.026879630799264,
+          "elongated_shallow": 6.4030344817682066
+        },
+        "elongation tail (1.0-1.5)": {
+          "normal": null,
+          "elongated_steep": 13.80106913617319,
+          "elongated_shallow": 18.99115431135386
+        }
+      }
+    },
+    "lga_trough_fraction": {
+      "shallow_vs_steep_sep_predictive_zone": 0.0,
+      "shallow_vs_steep_sep_late_tail": 0.05,
+      "windows": {
+        "early-mid descent (0.15-0.40)": {
+          "normal": 0.0,
+          "elongated_steep": 0.0,
+          "elongated_shallow": 0.0
+        },
+        "trough zone (0.40-0.60)": {
+          "normal": 0.0,
+          "elongated_steep": 0.0,
+          "elongated_shallow": 0.0
+        },
+        "approach peak (0.70-0.95)": {
+          "normal": 0.11666666666666667,
+          "elongated_steep": 0.03333333333333333,
+          "elongated_shallow": 0.0
+        },
+        "elongation tail (1.0-1.5)": {
+          "normal": null,
+          "elongated_steep": 0.016666666666666666,
+          "elongated_shallow": 0.06666666666666667
+        }
+      }
+    },
+    "network_disc_gap": {
+      "shallow_vs_steep_sep_predictive_zone": 3.450000000000003,
+      "shallow_vs_steep_sep_late_tail": 3.0,
+      "windows": {
+        "early-mid descent (0.15-0.40)": {
+          "normal": 7.8500000000000085,
+          "elongated_steep": 11.0,
+          "elongated_shallow": 11.700000000000003
+        },
+        "trough zone (0.40-0.60)": {
+          "normal": 5.024999999999999,
+          "elongated_steep": 5.550000000000001,
+          "elongated_shallow": 8.724999999999998
+        },
+        "approach peak (0.70-0.95)": {
+          "normal": 4.800000000000004,
+          "elongated_steep": 4.0,
+          "elongated_shallow": 5.650000000000006
+        },
+        "elongation tail (1.0-1.5)": {
+          "normal": null,
+          "elongated_steep": 3.0,
+          "elongated_shallow": 6.0
+        }
+      }
+    },
+    "network_disc_gap_delta_3d": {
+      "shallow_vs_steep_sep_predictive_zone": 1.0499999999999972,
+      "shallow_vs_steep_sep_late_tail": 1.0999999999999943,
+      "windows": {
+        "early-mid descent (0.15-0.40)": {
+          "normal": -2.1000000000000085,
+          "elongated_steep": -2.299999999999983,
+          "elongated_shallow": -0.950000000000017
+        },
+        "trough zone (0.40-0.60)": {
+          "normal": -1.1000000000000156,
+          "elongated_steep": -1.475000000000005,
+          "elongated_shallow": -1.1000000000000014
+        },
+        "approach peak (0.70-0.95)": {
+          "normal": -0.10000000000000853,
+          "elongated_steep": -0.7999999999999972,
+          "elongated_shallow": -0.5999999999999943
+        },
+        "elongation tail (1.0-1.5)": {
+          "normal": null,
+          "elongated_steep": 0.19999999999998863,
+          "elongated_shallow": -0.9000000000000057
+        }
+      }
+    }
+  },
+  "note": "shallow_vs_steep_sep_* are |\u0394median| between elongated_shallow and elongated_steep within the phase zone. A LEAD requires meaningful predictive-zone separation; separation only in the late tail repeats A's failure mode. Oracle hit is a lead only \u2014 PIT-safe proxy + paired-WFCV on untouched folds is the non-negotiable real test."
+}
