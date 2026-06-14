@@ -160,29 +160,41 @@ class CycleDetector:
         """Map each peak index to the first series position at which it became
         ``find_peaks``-confirmed.
 
-        Scans the series forward once, accumulating the union of all peaks ever
-        reported by ``find_peaks`` on a growing prefix. ``find_peaks`` is
-        monotone-stable for interior peaks (right-side prominence only
-        accumulates as data grows); the union additionally absorbs the rare
-        boundary peak that ``find_peaks`` reports, transiently evicts, then
-        re-reports — keeping the confirmed set monotone (#250).
+        A cycle peak is confirmed (gains right-side prominence) once the price
+        has fallen at least ``_PEAK_PROMINENCE`` below it — which is exactly
+        when ``find_peaks`` on the growing prefix first reports it, since the
+        right-side base is the running minimum of the descent. So we run
+        ``find_peaks`` once over the full held series for the canonical peak set
+        and, in a single forward pass, record each peak's confirmation position
+        as the first day its cumulative drop crosses the prominence threshold.
 
-        Cached after the first call. Cost is O(n) ``find_peaks`` calls, the same
-        order as the previous per-date detection, and the detector is built once
-        per backtest/feature run.
+        Confirmation is therefore causal (uses only data up to that position)
+        and sticky: a peak, once confirmed, is in the set for all later dates,
+        so ``_confirmed_peaks_as_of`` is monotone in date (#250). A trailing
+        peak whose drop has not yet accumulated is simply absent until it does.
+
+        Cached after the first call. Cost is one ``find_peaks`` plus an O(n)
+        scan; the detector is built once per backtest/feature run.
         """
         if self._first_confirm is not None:
             return self._first_confirm
         first_confirm: dict[int, int] = {}
         values = self._series.values
-        for j in range(len(values)):
-            peaks, _ = scipy.signal.find_peaks(
-                values[: j + 1],
-                distance=self._PEAK_DISTANCE,
-                prominence=self._PEAK_PROMINENCE,
-            )
-            for p in peaks:
-                first_confirm.setdefault(int(p), j)
+        n = len(values)
+        peaks, _ = scipy.signal.find_peaks(
+            values,
+            distance=self._PEAK_DISTANCE,
+            prominence=self._PEAK_PROMINENCE,
+        )
+        for raw_p in peaks:
+            p = int(raw_p)
+            running_min = values[p]
+            for j in range(p + 1, n):
+                if values[j] < running_min:
+                    running_min = values[j]
+                if values[p] - running_min >= self._PEAK_PROMINENCE:
+                    first_confirm[p] = j
+                    break
         self._first_confirm = first_confirm
         return first_confirm
 
