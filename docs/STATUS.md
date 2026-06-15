@@ -138,10 +138,10 @@ The late-descent / extended-shallow-descent investigation that drove the 50→54
 
 Models are written to fixed canonical paths. **Each Phase lock overwrites the previous Phase's artifact** — there is no per-phase suffix on the filename. Phase identification lives in `experiments/results.csv` (`name` column) and in commit history, not the filename.
 
-| Path | Writer | Currently (as of #236 calibration lock, 2026-06-13) |
+| Path | Writer | Currently (as of #250 cycle-fix rebuild, 2026-06-15) |
 |------|--------|--------------------------------------------|
-| `data/models/lgbm.joblib` | `train_lgbm.py` | 54-feat baseline (#216 RAC_full lock) |
-| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | 54-feat, isotonic-calibrated, τ=0.25 (#236) |
+| `data/models/lgbm.joblib` | `train_lgbm.py` | 54-feat baseline (#216 feature set, re-cut on the #250 cycle fix) |
+| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | 54-feat, isotonic-calibrated, τ=0.25 (#250 rebuild; calibration design from #236) |
 | `data/models/logreg.joblib` | `train_logreg.py` | Phase 2 10-feat raw |
 | `data/models/logreg_calibrated.joblib` | `calibrate.py` | Phase 2 10-feat (raw chosen over calibration) |
 
