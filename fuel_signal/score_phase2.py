@@ -595,6 +595,17 @@ def run_realised_spend_backtest(
     default=False,
     help="Skip the realised-spend backtest even when the DB and model are available.",
 )
+@click.option(
+    "--skip-results-csv",
+    "skip_results_csv",
+    is_flag=True,
+    default=False,
+    help=(
+        "Do not append a row to experiments/results.csv. Use for measurement / "
+        "decision runs (e.g. the #254 realised-backtest) where the stdout backtest "
+        "figures are read directly and no lock row is wanted. Mirrors calibrate.py."
+    ),
+)
 def main(
     features_csv: str,
     model_path: str | None,
@@ -603,6 +614,7 @@ def main(
     seeds_str: str | None,
     db_path: str,
     no_backtest: bool,
+    skip_results_csv: bool,
 ) -> None:
     """Threshold sweep on val, one-time test scoring, append to results.csv.
 
@@ -795,19 +807,25 @@ def main(
         f"/R={test_result['test_recall']:.3f}"
         f"/F1={test_result['test_f1']:.3f}"
     )
-    _ev.log_experiment(
-        name=model_name,
-        features=feature_columns,
-        holdout_logloss=test_result["test_logloss"],
-        holdout_brier=test_result["test_brier"],
-        notes=notes,
-        realised_spend_cpl=realised_cpl,
-        realised_savings_vs_always_buy_pct=realised_savings_pct,
-        seed_test_logloss_vector=seed_result["logloss_vector"] if seed_result else None,
-        seed_test_logloss_mean=seed_result["logloss_mean"] if seed_result else None,
-        seed_test_logloss_std=seed_result["logloss_std"] if seed_result else None,
-    )
-    click.echo(f"\nAppended result to experiments/results.csv  (name={model_name})")
+    if skip_results_csv:
+        click.echo(
+            "\nSkipping experiments/results.csv append (--skip-results-csv). "
+            "Read the realised-spend backtest figures from the output above."
+        )
+    else:
+        _ev.log_experiment(
+            name=model_name,
+            features=feature_columns,
+            holdout_logloss=test_result["test_logloss"],
+            holdout_brier=test_result["test_brier"],
+            notes=notes,
+            realised_spend_cpl=realised_cpl,
+            realised_savings_vs_always_buy_pct=realised_savings_pct,
+            seed_test_logloss_vector=seed_result["logloss_vector"] if seed_result else None,
+            seed_test_logloss_mean=seed_result["logloss_mean"] if seed_result else None,
+            seed_test_logloss_std=seed_result["logloss_std"] if seed_result else None,
+        )
+        click.echo(f"\nAppended result to experiments/results.csv  (name={model_name})")
     click.echo(
         "\nNext step: update SHAP artifacts to match this model run:\n"
         "  uv run python -m fuel_signal.shap_report \\\n"

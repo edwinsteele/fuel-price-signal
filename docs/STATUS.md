@@ -62,9 +62,10 @@ Project-level state for agents picking up cold. Update this file when a phase co
 On-disk artifact: **54-feat LightGBM, isotonic-calibrated, τ=0.25.** Last feature column `lga_phase_std_delta_3d`.
 
 - **#216** (2026-06-09) — graduated the RAC_full network group (4 cols: `network_px_std`, `network_px_std_delta_3d`, `lga_phase_std`, `lga_phase_std_delta_3d`), retraining the 50-feat Phase 4 baseline to 54. Δh25 −0.045 over LGA-only. See [AGENTS.md § Canonical feature set](../AGENTS.md#canonical-feature-set-54-feat-baseline-locked-issue-216).
-- **#236** (2026-06-13, commit 740b601) — calibration + threshold selection moved to OOF CV over train with an 80/20 eval split; isotonic chosen over raw; τ=0.25. Realised backtest 3.04% vs always-buy (prior 1.98%).
+- **#236** (2026-06-13, commit 740b601) — calibration + threshold selection moved to OOF CV over train with an 80/20 eval split; isotonic chosen over raw; τ=0.25. Realised backtest 3.04% (185.94 c/L) vs always-buy 191.78 at the time (prior raw/τ=0.55 was 1.98%).
+- **#250 cycle-fix rebuild** (2026-06-15, commit 7bee0e8) — re-cut the same 54-feat pipeline on the merged #250 whipsaw fix (sticky causal `find_peaks`), changing two cycle inputs (`cycle_days_since_peak`, `cycle_pct_through`). Isotonic re-chosen on OOF (0.3036 < raw 0.3051), **τ held at 0.25**. Realised backtest moved forward to **3.37% (185.32 c/L)** vs always-buy 191.78; test logloss flat (0.2629→0.2626). This rebuild is what's on disk now. Single window/seed; a multi-fold paired CV of realised CPL was scoped but not run.
 
-The phase-by-phase tables below are the historical lock record; the two items above are the current state.
+The phase-by-phase tables below are the historical lock record; the three items above are the current state.
 
 ### Phase 2 locked (2026-05-09)
 
@@ -137,10 +138,10 @@ The late-descent / extended-shallow-descent investigation that drove the 50→54
 
 Models are written to fixed canonical paths. **Each Phase lock overwrites the previous Phase's artifact** — there is no per-phase suffix on the filename. Phase identification lives in `experiments/results.csv` (`name` column) and in commit history, not the filename.
 
-| Path | Writer | Currently (as of #236 calibration lock, 2026-06-13) |
+| Path | Writer | Currently (as of #250 cycle-fix rebuild, 2026-06-15) |
 |------|--------|--------------------------------------------|
-| `data/models/lgbm.joblib` | `train_lgbm.py` | 54-feat baseline (#216 RAC_full lock) |
-| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | 54-feat, isotonic-calibrated, τ=0.25 (#236) |
+| `data/models/lgbm.joblib` | `train_lgbm.py` | 54-feat baseline (#216 feature set, re-cut on the #250 cycle fix) |
+| `data/models/lgbm_calibrated.joblib` | `calibrate.py` | 54-feat, isotonic-calibrated, τ=0.25 (#250 rebuild; calibration design from #236) |
 | `data/models/logreg.joblib` | `train_logreg.py` | Phase 2 10-feat raw |
 | `data/models/logreg_calibrated.joblib` | `calibrate.py` | Phase 2 10-feat (raw chosen over calibration) |
 
