@@ -189,6 +189,11 @@ def run_paired_realised_backtest(
     """
     if not arms:
         raise ValueError("run_paired_realised_backtest() needs at least one arm.")
+    names = [a.name for a in arms]
+    if len(names) != len(set(names)):
+        # name keys histories AND groups every result frame — a collision would
+        # silently overwrite an arm's history and corrupt the deltas.
+        raise ValueError(f"ArmSpec names must be unique; got {names}.")
     ref_index = arms[0].df.index
     for a in arms[1:]:
         if not a.df.index.equals(ref_index):
@@ -288,7 +293,9 @@ def run_paired_realised_backtest(
             "arm": a.name,
             "n_windows": len(sub),
             "own_tau_median": float(sub["own_tau"].median()),
-            "held_tau": float(sub["held_tau"].iloc[0]),
+            # held_tau can vary per window when held_tau=None (it's the baseline's
+            # per-fold own τ), so summarise rather than expose one window's value.
+            "held_tau_median": float(sub["held_tau"].median()),
             "cpl_own": cpl_own, "cpl_held": cpl_held,
         })
     aggregate = pd.DataFrame(agg_rows)

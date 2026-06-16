@@ -14,9 +14,11 @@ import pandas as pd
 import pytest
 
 from experiments.lib.realised import (
+    ArmSpec,
     _plan_folds,
     _saving_pct,
     _train_calibrate_select_tau,
+    run_paired_realised_backtest,
 )
 
 
@@ -63,6 +65,26 @@ def test_train_calibrate_select_tau_returns_pipeline_and_valid_tau():
     assert proba.shape == (5, 2)
     assert np.all((proba >= 0.0) & (proba <= 1.0))
     assert 0.05 <= tau <= 0.95  # pick_tau clamps to [_TAU_STEP, 1 - _TAU_STEP]
+
+
+def test_paired_backtest_rejects_duplicate_arm_names():
+    """Duplicate ArmSpec names are rejected before any DB access (they key histories)."""
+    df = _synth_df(n=60)
+    with pytest.raises(ValueError, match="names must be unique"):
+        run_paired_realised_backtest(
+            [ArmSpec("dup", df), ArmSpec("dup", df.copy())], ["f1", "f2"]
+        )
+
+
+def test_paired_backtest_rejects_mismatched_index():
+    """Arms must share an index so a fold's train rows select identically."""
+    df = _synth_df(n=60)
+    other = df.copy()
+    other.index = other.index + 1000
+    with pytest.raises(ValueError, match="index differs"):
+        run_paired_realised_backtest(
+            [ArmSpec("baseline", df), ArmSpec("candidate", other)], ["f1", "f2"]
+        )
 
 
 def test_train_calibrate_select_tau_raises_without_oof_folds():
