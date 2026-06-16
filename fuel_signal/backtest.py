@@ -22,8 +22,9 @@ import datetime
 import math
 import pathlib
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import click
 import numpy as np
@@ -78,11 +79,16 @@ class PriceHistory:
     network_px_std_delta_3d_by_date: dict[str, float] = field(default_factory=dict)
     lga_phase_std_by_date: dict[str, float] = field(default_factory=dict)
     lga_phase_std_delta_3d_by_date: dict[str, float] = field(default_factory=dict)
+    # Cycle-detector factory: builds the detector from avg_series. Defaults to the
+    # production CycleDetector; an experiment can inject an alternate cycle-feature
+    # source (e.g. a regime-local detector) in-process, no production-code branch
+    # needed. The detector must expose detect(as_of) -> CycleState | None.
+    detector_factory: Callable[[list[tuple[str, float]]], CycleDetector] = CycleDetector
 
     def __post_init__(self) -> None:
         self._avg_by_date: dict[str, float] = dict(self.avg_series)
         self._avg_dates: list[str] = [d for d, _ in self.avg_series]
-        self._detector: CycleDetector = CycleDetector(self.avg_series)
+        self._detector: CycleDetector = self.detector_factory(self.avg_series)
         self._station_dates: dict[int, list[str]] = {
             code: [d for d, _ in prices]
             for code, prices in self.station_prices.items()
@@ -195,14 +201,31 @@ class RuleBasedSignalStrategy:
 
 @dataclass
 class ModelStrategy:
-    """Loads a sklearn pipeline and decides via P(BUY) ≥ threshold."""
+    """Decides via P(BUY) ≥ threshold.
 
-    model_path: pathlib.Path
+    Source is either a joblib artifact (``model_path``) or an already-fitted
+    in-memory pipeline (``pipeline`` + ``feature_columns``). The in-memory path
+    lets an experiment harness score a freshly trained/calibrated model without
+    writing a joblib to ``data/models/`` (no production-artifact side effects).
+    Exactly one of ``model_path`` / ``pipeline`` must be given.
+    """
+
+    model_path: pathlib.Path | None = None
     threshold: float = 0.40
+    pipeline: Any = None
+    feature_columns: list[str] | None = None
 
     def __post_init__(self) -> None:
-        import joblib  # defer import so non-ML callers don't pay the cost
         self.name: str = f"model(τ={self.threshold})"
+        if self.pipeline is not None:
+            if not hasattr(self.pipeline, "predict_proba"):
+                raise ValueError("ModelStrategy(pipeline=...) needs a predict_proba interface.")
+            self._pipeline = self.pipeline
+            self._feature_columns = list(self.feature_columns or FEATURE_COLUMNS)
+            return
+        if self.model_path is None:
+            raise ValueError("ModelStrategy requires either model_path or pipeline.")
+        import joblib  # defer import so non-ML callers don't pay the cost
         loaded = joblib.load(self.model_path)
         if isinstance(loaded, dict) and loaded.get("calibrated"):
             # Calibrated artifact stores sklearn primitives to avoid __main__ pickle issues.
@@ -398,6 +421,7 @@ def load_history(
     conn: sqlite3.Connection,
     station_codes: list[int],
     eval_dates: list[str] | None = None,
+    detector_factory: Callable[[list[tuple[str, float]]], CycleDetector] = CycleDetector,
 ) -> PriceHistory:
     """Load avg series, per-station prices, and Phase 4 feature caches from DB once.
 
@@ -417,7 +441,11 @@ def load_history(
             station_prices[code] = prices
 
     if not station_codes:
-        return PriceHistory(avg_series=avg_series, station_prices=station_prices)
+        return PriceHistory(
+            avg_series=avg_series,
+            station_prices=station_prices,
+            detector_factory=detector_factory,
+        )
 
     fid = db.fuel_type_id(conn, "E10")
     _sc_ph = ", ".join(["?"] * len(station_codes))
@@ -504,6 +532,7 @@ def load_history(
         network_px_std_delta_3d_by_date=network_px_std_delta_3d_by_date,
         lga_phase_std_by_date=lga_phase_std_by_date,
         lga_phase_std_delta_3d_by_date=lga_phase_std_delta_3d_by_date,
+        detector_factory=detector_factory,
     )
 
 

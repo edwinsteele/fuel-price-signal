@@ -559,3 +559,76 @@ def test_model_strategy_decide_with_54feat_calibrated_artifact(tmp_path):
     strategy = ModelStrategy(model_path=model_path, threshold=0.40)
     result = strategy.decide("2018-09-01", station_code, history)
     assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# Injection seams (#255): in-memory ModelStrategy + custom detector factory
+# ---------------------------------------------------------------------------
+
+def _calibrated_pipeline_and_history(prices, station_code):
+    """Build an in-memory calibrated pipeline + a populated PriceHistory."""
+    import numpy as np
+    from sklearn.dummy import DummyClassifier
+    from sklearn.isotonic import IsotonicRegression
+
+    from fuel_signal.calibrate import _CalibratedPipeline
+
+    n_feat = len(FEATURE_COLUMNS)
+    X_dummy = np.zeros((2, n_feat))
+    base_clf = DummyClassifier(strategy="most_frequent").fit(X_dummy, [0, 1])
+    iso = IsotonicRegression(out_of_bounds="clip").fit(base_clf.predict_proba(X_dummy)[:, 1], [0, 1])
+    pipeline = _CalibratedPipeline(base_clf, iso, "isotonic", list(FEATURE_COLUMNS))
+
+    history = PriceHistory(
+        avg_series=prices,
+        station_prices={station_code: prices},
+        station_lga_brand={station_code: ("Penrith", "BP")},
+        lga_mean_by_key={(d, "Penrith"): 175.0 for d, _ in prices},
+        brand_mean_by_key={(d, "BP"): 178.0 for d, _ in prices},
+        stickiness_by_key={(station_code, d): 3.0 for d, _ in prices},
+        network_px_std_by_date={d: 4.5 for d, _ in prices},
+        network_px_std_delta_3d_by_date={d: 0.2 for d, _ in prices},
+        lga_phase_std_by_date={d: 6.0 for d, _ in prices},
+        lga_phase_std_delta_3d_by_date={d: -0.1 for d, _ in prices},
+    )
+    return pipeline, history
+
+
+def test_model_strategy_in_memory_pipeline_decides():
+    """ModelStrategy(pipeline=...) scores without loading a joblib from disk."""
+    n, period, station_code = 270, 45, 889
+    dates = _dates_from("2018-01-01", n)
+    prices = [(d, 180.0 + 20.0 * math.sin(2 * math.pi * i / period)) for i, d in enumerate(dates)]
+
+    pipeline, history = _calibrated_pipeline_and_history(prices, station_code)
+    strategy = ModelStrategy(pipeline=pipeline, feature_columns=list(FEATURE_COLUMNS), threshold=0.40)
+    assert strategy.model_path is None
+    assert isinstance(strategy.decide("2018-09-01", station_code, history), bool)
+
+
+def test_model_strategy_requires_path_or_pipeline():
+    """Constructing with neither model_path nor pipeline is an error."""
+    import pytest
+
+    with pytest.raises(ValueError, match="either model_path or pipeline"):
+        ModelStrategy()
+
+
+def test_price_history_uses_injected_detector_factory():
+    """PriceHistory builds its detector via the injected factory, not always CycleDetector."""
+    series = [("2020-01-01", 150.0), ("2020-01-02", 151.0)]
+    sentinel = object()
+    calls: list[object] = []
+
+    class _StubDetector:
+        def __init__(self, avg_series):
+            calls.append(avg_series)
+
+        def detect(self, as_of):
+            return sentinel
+
+    history = PriceHistory(
+        avg_series=series, station_prices={}, detector_factory=_StubDetector
+    )
+    assert calls == [series]  # factory received avg_series exactly once
+    assert history.cycle_state("2020-01-02") is sentinel
