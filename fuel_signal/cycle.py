@@ -215,21 +215,6 @@ class CycleDetector:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _get_peaks(series: pd.Series) -> tuple[np.ndarray, dict]:
-        """Run scipy peak detection on *series*. Returns (peak_indices, properties)."""
-        # TODO: implement
-        # scipy.signal.find_peaks(
-        #     series.values,
-        #     distance=CycleDetector._PEAK_DISTANCE,
-        #     prominence=CycleDetector._PEAK_PROMINENCE,
-        # )
-        return scipy.signal.find_peaks(
-            series.values,
-            distance=CycleDetector._PEAK_DISTANCE,
-            prominence=CycleDetector._PEAK_PROMINENCE,
-        )
-
-    @staticmethod
     def _last_cycle_prices(
         series: pd.Series,
         peak_indices: np.ndarray,
