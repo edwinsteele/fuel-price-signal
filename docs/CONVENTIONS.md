@@ -74,6 +74,24 @@ When a change introduces a numeric constant (a band width, a window length, a th
 
 **Why:** #217 introduced `COMP_BAND_CENTS=5.0` for the dispersion cohort while the canonical Competitive band was `±10c`. The divergence went unmeasured and understated #212's lift by ~0.009 Δh25; #219→#221 later established the canonical ±10c was correct and dropped the constant. A new magic number that shadows an existing one is a silent regression surface.
 
+### Choosing the gate metric — classify the candidate first
+
+The gate metric is an **explicit per-experiment choice**, stated and justified in the experiment README. Do **not** default to `delta_ll_hard25_median` (or any single proxy) — for a whole class of features it is the wrong arbiter.
+
+Before choosing the gate, classify the candidate on two axes:
+
+- **Decision-bias carrier vs descriptive covariate.** A feature whose value is a *cost/timing preference* — it biases *when* you buy under asymmetric payoffs — belongs in τ / the cost model, not the feature set. A feature that adds *information* belongs in the feature set. The two are tested differently; a hedge dressed as a feature will look inert once each arm picks its own honest τ.
+- **Is the part you're correcting the part the model leans on?** A "more accurate" version of an existing feature only helps if the model actually uses the component you're fixing. Check SHAP leverage *and what shape* of the feature the model uses (a slow drift / regime clock vs a level vs the estimator's error) before assuming a correctness fix moves the objective. The CPL-optimal estimator is often *biased* vs the accurate one by construction.
+
+For **decision-timing / trough / cycle-phase** features, WFCV per-row log-loss is a **non-rejecting SCREEN, not a verdict** — flat or slightly-negative log-loss does NOT reject. Their value lands in realised buyer outcome, which a calibration average washes out. The arbiter is a **paired realised backtest at a held operating point** (don't let a τ move masquerade as a feature win).
+
+Two cheap pre-screens (no retrain) before committing to a feature-regen → retrain → recalibrate:
+
+- **Log-loss as the clock-vs-hedge fingerprint.** An *information* (clock) signal moves the threshold-free measure (log-loss); a *cost-preference* (hedge) does not and is absorbed once each arm picks its own honest τ. Flat log-loss ⇒ not a clock.
+- **τ-sweep inertness check** over the saved WFCV row predictions (`rowpreds.parquet`): buy-rate-vs-τ, proxy-economics peak + local flatness, and per-fold decision-disagreement at a common τ (split by regime to close the "a regime-localized effect cancels in the pool" escape hatch). Near-coincident arms ⇒ the change is economically inert; don't pay the retrain.
+
+**Why:** #250 (boundary fix) and #254 (regime cycle-length denominator) both showed flat WFCV log-loss. #250 was realised-positive (saving 3.04% → 3.37%) and would have been wrongly binned on the screen; #254's τ-sweep showed the apparent realised "win" was an operating-point artifact and the feature economically inert (fold 7 — where the denominators diverge most in value — had the *lowest* decision-disagreement, 1.3%). A single proxy promoted to a hard reject gate fails for any feature class whose value is orthogonal to the proxy. The realised-backtest harness that makes the held-τ arbiter a one-call capability is tracked as #255.
+
 ## Definition of done
 
 Before considering a change complete, in this order:
