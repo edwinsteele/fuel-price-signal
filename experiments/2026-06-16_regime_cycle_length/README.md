@@ -226,9 +226,15 @@ clock signal the data says is already captured.
 
 **Dormancy + wake-up condition.** Regime-median `pct_through` is a built, cheap,
 harmless descriptive covariate — keep it **dormant**, don't engineer around it.
-Wake-up requires BOTH gates:
-1. **Regime-shaped error** — model loss, stratified by regime, is materially
-   elevated in elongated/transition rows vs normal. If not → dormant, full stop.
+Wake-up requires BOTH gates (tracked forward in #259):
+1. **Regime-shaped *economic* error** — realised **decision-regret / CPL**,
+   stratified by regime, is materially elevated in elongated/transition rows vs
+   normal. If not → dormant, full stop. **Must be economic, not log-loss:** WFCV
+   per-row log-loss is a non-rejecting screen for this feature class (CONVENTIONS.md
+   § Choosing the gate metric), so a log-loss gate 1 cannot confirm dormancy *or*
+   opportunity. Per-regime realised economics is the #255 harness's job → **gate 1
+   depends on #255**. (Cheap directional pre-read only: proxy-economics by regime
+   off `rowpreds.parquet`; two-exams caveat.)
 2. **Oracle existence check** — an oracle regime feature (true cycle length/regime,
    full-info, train-only, leaky) cuts that excess loss **beyond** what the existing
    drift already delivers. Yes → build a PIT-safe handle, *then* a targeted
