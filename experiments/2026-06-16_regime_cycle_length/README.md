@@ -191,6 +191,49 @@ And it argues for designing phase features against the CPL objective directly (o
 handing the model *both* denominators, whose difference is the elongation signal),
 rather than chasing estimator accuracy.
 
+## Follow-up: τ-sweep diagnostics — decisive close (2026-06-16, session 2)
+
+Cheap post-hoc analysis over the saved WFCV row predictions (`rowpreds.parquet`,
+R0 vs R1), no retrain. Scripts: `tau_coordinate.py`, `tau_by_fold.py`.
+
+- **Aggregate (14 folds pooled):** the two rulers are near decision-twins.
+  Buy-rate-vs-τ curves nearly coincide (≤0.3pp apart); both proxy-economics
+  curves peak at **τ\*≈0.21** (R0 0.1334 vs R1 0.1301 c/row — stale a hair ahead).
+  So the single-window realised **τ=0.20-vs-0.25 split was mostly operating-point
+  noise**, not a structural shift. See `tau_coordinate.png`.
+- **Hedge vs clock, resolved by fingerprint:** a real *information* (clock) signal
+  would cost the honest ruler on the threshold-free measure (log-loss) — it is
+  **flat → not clock**. A cost-preference (hedge) is absorbed once each ruler
+  picks its own honest τ — both land ~0.21 → **hedge, already handled by τ**. Both
+  homes empty.
+- **Per-regime split (the escape hatch):** errors localized to the elongation era
+  could cancel in the pool. They don't. **Fold 7 (ELONG)** — where the denominators
+  diverge most in *value* — shows the **lowest** decision disagreement of all 14
+  folds (**1.3%**); per-fold Δcpr is sign-random scatter (±0.06) with no regime
+  pattern. The effect isn't hiding anywhere.
+
+**Refined conclusion.** `cycle_mean_length` is **mid-pack** (mean|SHAP| 0.4414,
+importance rank 25/52, r +0.18 w/ target) — *not* "barely used." The model leans on
+its slow **drift** (24→38d = a calendar/regime clock), not the
+expanding-vs-regime-median distinction the accuracy fix changes. **The regime clock
+is real but already captured**; a more "accurate" denominator just swaps one clock
+shape for another → wash. So there are now **two distinct reasons "accuracy ≠
+objective"**: (1) asymmetric loss [original], (2) the corrected component has low
+leverage / is already captured [this].
+
+**Dual-denominator feature: not worth building** — it presumes an *uncaptured*
+clock signal the data says is already captured.
+
+**Dormancy + wake-up condition.** Regime-median `pct_through` is a built, cheap,
+harmless descriptive covariate — keep it **dormant**, don't engineer around it.
+Wake-up requires BOTH gates:
+1. **Regime-shaped error** — model loss, stratified by regime, is materially
+   elevated in elongated/transition rows vs normal. If not → dormant, full stop.
+2. **Oracle existence check** — an oracle regime feature (true cycle length/regime,
+   full-info, train-only, leaky) cuts that excess loss **beyond** what the existing
+   drift already delivers. Yes → build a PIT-safe handle, *then* a targeted
+   phase×regime interaction test. No → dormancy confirmed.
+
 ## Followups
 
 - **#254** — close: investigated, not graduating (accuracy is the wrong objective).
