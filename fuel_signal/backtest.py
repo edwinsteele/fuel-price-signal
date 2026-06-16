@@ -218,6 +218,8 @@ class ModelStrategy:
     def __post_init__(self) -> None:
         self.name: str = f"model(τ={self.threshold})"
         if self.pipeline is not None:
+            if self.model_path is not None:
+                raise ValueError("ModelStrategy: pass exactly one of model_path / pipeline, not both.")
             if not hasattr(self.pipeline, "predict_proba"):
                 raise ValueError("ModelStrategy(pipeline=...) needs a predict_proba interface.")
             self._pipeline = self.pipeline

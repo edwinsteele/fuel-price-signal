@@ -238,10 +238,13 @@ def run_paired_realised_backtest(
     rows: list[dict] = []
     for p in plans:
         ft0 = time.perf_counter()
-        # Always-buy CPL is detector-independent — compute once per window.
-        always_cpl = aggregate_backtest(
+        # Always-buy is detector-independent — compute once per window. Keep its
+        # spend/litres so the aggregate can pool a single always-buy CPL (and thus
+        # an honest pooled saving%) rather than averaging per-window CPLs.
+        always = aggregate_backtest(
             histories[arms[0].name], AlwaysBuyStrategy(), station_codes, p.val_start, p.val_end, tank
-        )["cpl"]
+        )
+        always_cpl = always["cpl"]
 
         # Train each arm and record its own τ first (baseline τ defines the held τ).
         fitted: dict[str, tuple[Any, float]] = {}
@@ -259,15 +262,21 @@ def run_paired_realised_backtest(
                 ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=own_tau),
                 station_codes, p.val_start, p.val_end, tank,
             )
-            cpl_held = aggregate_backtest(
-                histories[a.name],
-                ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=held),
-                station_codes, p.val_start, p.val_end, tank,
-            )
+            # The held-τ replay is identical when own τ == held (always true for the
+            # baseline in the held_tau=None path) — reuse it, don't pay it twice.
+            if math.isclose(own_tau, held):
+                cpl_held = cpl_own
+            else:
+                cpl_held = aggregate_backtest(
+                    histories[a.name],
+                    ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=held),
+                    station_codes, p.val_start, p.val_end, tank,
+                )
             rows.append({
                 "fold": p.fold, "arm": a.name,
                 "val_start": p.val_start, "val_end": p.val_end,
                 "always_cpl": always_cpl,
+                "always_spend": always["total_spend_cents"], "always_litres": always["total_litres"],
                 "own_tau": own_tau, "held_tau": held,
                 "cpl_own": cpl_own["cpl"], "saving_own_pct": _saving_pct(always_cpl, cpl_own["cpl"]),
                 "cpl_held": cpl_held["cpl"], "saving_held_pct": _saving_pct(always_cpl, cpl_held["cpl"]),
@@ -283,12 +292,19 @@ def run_paired_realised_backtest(
 
     per_window = pd.DataFrame(rows)
 
-    # Aggregate: pool spend + litres across windows for an honest CPL per arm.
+    # Aggregate: pool spend + litres across windows for an honest CPL per arm, and
+    # a pooled always-buy CPL so saving% is computed on pooled totals (not a mean of
+    # per-window saving%). always_cpl is detector-independent, so it's shared.
+    def _pooled(spend_col: str, litres_col: str, frame: pd.DataFrame) -> float:
+        litres = frame[litres_col].sum()
+        return frame[spend_col].sum() / litres if litres > 0 else float("nan")
+
+    pooled_always = _pooled("always_spend", "always_litres", per_window.drop_duplicates("fold"))
     agg_rows: list[dict] = []
     for a in arms:
         sub = per_window[per_window["arm"] == a.name]
-        cpl_own = sub["spend_own"].sum() / sub["litres_own"].sum() if sub["litres_own"].sum() > 0 else float("nan")
-        cpl_held = sub["spend_held"].sum() / sub["litres_held"].sum() if sub["litres_held"].sum() > 0 else float("nan")
+        cpl_own = _pooled("spend_own", "litres_own", sub)
+        cpl_held = _pooled("spend_held", "litres_held", sub)
         agg_rows.append({
             "arm": a.name,
             "n_windows": len(sub),
@@ -296,7 +312,9 @@ def run_paired_realised_backtest(
             # held_tau can vary per window when held_tau=None (it's the baseline's
             # per-fold own τ), so summarise rather than expose one window's value.
             "held_tau_median": float(sub["held_tau"].median()),
-            "cpl_own": cpl_own, "cpl_held": cpl_held,
+            "always_cpl": pooled_always,
+            "cpl_own": cpl_own, "saving_own_pct": _saving_pct(pooled_always, cpl_own),
+            "cpl_held": cpl_held, "saving_held_pct": _saving_pct(pooled_always, cpl_held),
         })
     aggregate = pd.DataFrame(agg_rows)
 

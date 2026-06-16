@@ -614,6 +614,18 @@ def test_model_strategy_requires_path_or_pipeline():
         ModelStrategy()
 
 
+def test_model_strategy_rejects_both_path_and_pipeline():
+    """Passing both sources is an error, not a silent ignore of model_path."""
+    import pytest
+
+    class _Stub:
+        def predict_proba(self, X):  # pragma: no cover - never reached
+            raise AssertionError
+
+    with pytest.raises(ValueError, match="exactly one"):
+        ModelStrategy(model_path="x.joblib", pipeline=_Stub(), feature_columns=["a"])
+
+
 def test_price_history_uses_injected_detector_factory():
     """PriceHistory builds its detector via the injected factory, not always CycleDetector."""
     series = [("2020-01-01", 150.0), ("2020-01-02", 151.0)]
