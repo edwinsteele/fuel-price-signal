@@ -52,6 +52,30 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 ## rowpreds.py
 `RowPredCollector(ident_base)` — accumulates per-`(run, seed)` row-level prediction blocks across all folds and writes a single parquet. Call `collector.ident_base = ident` at the start of each fold to update the base DataFrame, then `collector.add(run, seed, proba)` inside the run×seed loop, and `collector.to_parquet(path)` after all folds. Owns the dtype decisions: `seed` → `int16` (never overflows for any plausible seed value), `proba` → `float32`.
 
+## realised.py — the objective-aligned arbiter (#255)
+
+`run_paired_realised_backtest(arms, feature_columns, ...)` — the realised-spend
+counterpart to the `folds.py` log-loss screen. Walk-forward over the **same** WFCV
+folds; per fold trains a raw LightGBM + isotonic calibrator and picks τ via OOF on
+the fold's train (mirrors production #236); replays each fold's val window through
+the real `aggregate_backtest` economics; scores each arm at its **own** τ and a
+**held** common τ (clean attribution — the #254 τ-move-vs-feature decomposition);
+pools spend + litres across windows for an honest aggregate CPL. Returns a
+`RealisedResult` (`per_window`, `aggregate`, `deltas`, `meta`) — programmatic, no
+production-artifact or `results.csv` writes.
+
+- `ArmSpec(name, df, detector_factory=CycleDetector)` — one arm. `df`'s canonical
+  cycle columns hold THAT arm's values (trained on); `detector_factory` is the live
+  cycle source for the replay. Arms share an index (`candidate = baseline.copy()`
+  with cycle cols overwritten). In-process injection — **no production branch**.
+- A single arm is the degenerate gate-1 use (per-regime realised regret, #259):
+  group the per-window CPL by the caller's regime labels.
+- Isotonic-only calibration (the AC3 lock) keeps a paired run near WFCV wall-clock.
+  Tune cost with `fold_subset` / `inner_fold_params` / `station_codes`.
+
+Relies on two `fuel_signal/backtest.py` injection seams (added in #255):
+`PriceHistory(..., detector_factory=...)` and `ModelStrategy(pipeline=..., feature_columns=...)`.
+
 ## features/ (sub-package)
 
 Primitives for the inside of `compute_features()` / `add_candidate_columns()`. See `features/README.md` for full docs.
