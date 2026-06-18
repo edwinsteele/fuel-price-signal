@@ -490,7 +490,7 @@ def run_backtest(
 
 
 def _oracle_transitions(
-    level: float, price: float | None, tank: TankParams,
+    level: float, price: float | None, tank: TankParams, *, deplete: bool = True,
 ) -> list[tuple[float, float, float, bool]]:
     """Feasible (next_decide_level, spend_add, litres_add, emergency) from ``level``.
 
@@ -500,6 +500,12 @@ def _oracle_transitions(
     uniformly across BUY / WAIT / skipped-date, so every surviving transition
     depletes exactly D. That keeps litres pinned per arrival level (the invariant
     run_oracle_backtest relies on to equate min-spend with min-CPL).
+
+    ``deplete=False`` is passed for the *final* eval date: the engine depletes at
+    the top of the next date, so the last date has no subsequent step to survive
+    — depleting (and pruning) there would spuriously reject a final fill/wait the
+    engine accepts. With deplete off the arrival level is the post-decision level
+    (still a uniform per-layer rule, so conservation holds with N−1 depletions).
 
     This is a *deliberate* divergence from run_backtest, which on a WAIT clamps a
     dry tank to 0 with no emergency (the emergency rule checks the current level,
@@ -522,32 +528,32 @@ def _oracle_transitions(
     depletion = tank.daily_consumption_litres * tank.evaluation_interval_days
     out: list[tuple[float, float, float, bool]] = []
 
+    def _emit(post: float, spend_add: float, litres_add: float, emergency: bool) -> None:
+        if not deplete:
+            out.append((post, spend_add, litres_add, emergency))
+            return
+        nxt = post - depletion
+        if nxt >= -1e-9:  # run-dry paths pruned uniformly
+            out.append((max(0.0, nxt), spend_add, litres_add, emergency))
+
     if price is None:
-        nxt = level - depletion
-        if nxt >= -1e-9:
-            out.append((max(0.0, nxt), 0.0, 0.0, False))
+        _emit(level, 0.0, 0.0, False)  # skipped date: no fill, no emergency
         return out
 
     # BUY → fill to full (no-op fill if already full).
     buy_litres = size - level
     buy_spend = buy_litres * price if buy_litres > 1e-9 else 0.0
     buy_litres = buy_litres if buy_litres > 1e-9 else 0.0
-    nxt = size - depletion
-    if nxt >= -1e-9:
-        out.append((max(0.0, nxt), buy_spend, buy_litres, False))
+    _emit(size, buy_spend, buy_litres, False)
 
     # WAIT → forced emergency half-fill if below floor, else hold.
     if level / size < tank.floor_fraction:
         target = 0.5 * size
         emerg_litres = max(0.0, target - level)
         post = target if emerg_litres > 1e-9 else level
-        nxt = post - depletion
-        if nxt >= -1e-9:
-            out.append((max(0.0, nxt), emerg_litres * price, emerg_litres, True))
+        _emit(post, emerg_litres * price, emerg_litres, True)
     else:
-        nxt = level - depletion
-        if nxt >= -1e-9:
-            out.append((max(0.0, nxt), 0.0, 0.0, False))
+        _emit(level, 0.0, 0.0, False)
 
     return out
 
@@ -605,15 +611,20 @@ def run_oracle_backtest(
     def _key(level: float) -> float:
         return round(level, 6)
 
+    # back = (prev_level_key, fill_litres, fill_price, emergency); None at the start.
+    BackPtr = tuple[float, float, float | None, bool] | None
     start_level = 0.5 * tank.tank_size_litres
-    layers: list[dict[float, tuple[float, float, Any]]] = [
+    layers: list[dict[float, tuple[float, float, BackPtr]]] = [
         {_key(start_level): (0.0, 0.0, None)}
     ]
-    for price in prices:
+    last_i = len(prices) - 1
+    for i, price in enumerate(prices):
         prev = layers[-1]
-        nxt_layer: dict[float, tuple[float, float, Any]] = {}
+        nxt_layer: dict[float, tuple[float, float, BackPtr]] = {}
         for level_key, (spend, litres, _back) in prev.items():
-            for next_level, sa, la, emergency in _oracle_transitions(level_key, price, tank):
+            for next_level, sa, la, emergency in _oracle_transitions(
+                level_key, price, tank, deplete=(i != last_i)
+            ):
                 cand_spend = spend + sa
                 key = _key(next_level)
                 cur = nxt_layer.get(key)
