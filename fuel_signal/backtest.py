@@ -295,6 +295,24 @@ class TankParams:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class FillRecord:
+    """One fill event in a backtest replay (the reusable per-fill ledger row).
+
+    Emitted only when ``run_backtest(..., collect_fills=True)``. The engine stays
+    agnostic about *why* a caller slices these — downstream experiments group by
+    regime / season / LGA / shock-fold etc. ``emergency`` marks a floor-triggered
+    half-fill (the strategy waited but the tank hit ``floor_fraction``).
+    """
+
+    date: str
+    station_code: int
+    price: float          # cents/litre paid
+    litres: float
+    spend_cents: float
+    emergency: bool
+
+
+@dataclass
 class BacktestResult:
     strategy_name: str
     station_code: int
@@ -306,6 +324,7 @@ class BacktestResult:
     realised_cpl: float           # cents per litre
     always_buy_cpl: float | None = None
     savings_vs_always_buy_pct: float | None = None
+    fills: list[FillRecord] = field(default_factory=list)
 
     def set_baseline(self, always_buy_cpl: float) -> None:
         """Compute savings percentage relative to the always-buy CPL."""
@@ -344,6 +363,7 @@ def run_backtest(
     start_date: str,
     end_date: str,
     tank: TankParams | None = None,
+    collect_fills: bool = False,
 ) -> BacktestResult:
     """Replay strategy over [start_date, end_date] and return spend metrics.
 
@@ -352,6 +372,10 @@ def run_backtest(
     strategy decides whether to fill up (True) or wait (False). If the
     strategy waits but the tank is below tank.floor_fraction, an emergency
     half-fill is triggered to prevent running dry before the next evaluation.
+
+    collect_fills: when True, populate ``result.fills`` with a per-fill ledger
+        (date / price / litres / spend / emergency) for downstream stratification.
+        Default False = zero behaviour change.
     """
     if tank is None:
         tank = TankParams()
@@ -373,6 +397,20 @@ def run_backtest(
     total_spend = 0.0
     total_litres = 0.0
     fill_events = 0
+    fills: list[FillRecord] = []
+
+    def _record(as_of: str, price: float, litres: float, emergency: bool) -> None:
+        if collect_fills:
+            fills.append(
+                FillRecord(
+                    date=as_of,
+                    station_code=station_code,
+                    price=price,
+                    litres=litres,
+                    spend_cents=litres * price,
+                    emergency=emergency,
+                )
+            )
 
     for i, as_of in enumerate(eval_dates):
         if i > 0:
@@ -392,6 +430,7 @@ def run_backtest(
                 total_litres += litres
                 fill_events += 1
                 tank_level = tank.tank_size_litres
+                _record(as_of, price, litres, emergency=False)
         elif tank_level / tank.tank_size_litres < tank.floor_fraction:
             # Emergency half-fill to avoid running dry before next evaluation
             target = tank.tank_size_litres * 0.5
@@ -401,6 +440,7 @@ def run_backtest(
                 total_litres += litres
                 fill_events += 1
                 tank_level = target
+                _record(as_of, price, litres, emergency=True)
 
     realised_cpl = total_spend / total_litres if total_litres > 0 else float("nan")
     return BacktestResult(
@@ -412,6 +452,7 @@ def run_backtest(
         total_litres=total_litres,
         fill_events=fill_events,
         realised_cpl=realised_cpl,
+        fills=fills,
     )
 
 

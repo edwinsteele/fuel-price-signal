@@ -48,28 +48,41 @@ def aggregate_backtest(
     start_date: str,
     end_date: str,
     tank: TankParams,
+    collect_fills: bool = False,
 ) -> dict:
     """Run strategy on all stations; pool spend + litres → single aggregate CPL.
 
     Stations with no price data are silently skipped. Returns NaN CPL only
     when every station has no data or no fill events occur.
+
+    collect_fills: when True, add a ``"fills"`` key — the concatenated per-fill
+        ledger (``FillRecord``) across all stations, for downstream stratification
+        (e.g. the #259 per-regime realised gate). Default False.
     """
     total_spend = 0.0
     total_litres = 0.0
     fill_events = 0
+    fills: list = []
     for code in station_codes:
-        result = run_backtest(history, strategy, code, start_date, end_date, tank)
+        result = run_backtest(
+            history, strategy, code, start_date, end_date, tank, collect_fills=collect_fills
+        )
         if not math.isnan(result.realised_cpl):
             total_spend += result.total_spend_cents
             total_litres += result.total_litres
             fill_events += result.fill_events
+            if collect_fills:
+                fills.extend(result.fills)
     cpl = total_spend / total_litres if total_litres > 0 else float("nan")
-    return {
+    out = {
         "total_spend_cents": total_spend,
         "total_litres": total_litres,
         "fill_events": fill_events,
         "cpl": cpl,
     }
+    if collect_fills:
+        out["fills"] = fills
+    return out
 
 
 def run_tau_sweep(
