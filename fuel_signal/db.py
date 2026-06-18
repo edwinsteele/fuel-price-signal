@@ -197,6 +197,20 @@ def fuel_type_id(conn: sqlite3.Connection, code: str) -> int:
     return row[0]
 
 
+def _in_clause(values) -> tuple[str, list]:
+    """Return ('?,?,…', sorted_values) for a SQL ``IN (…)`` clause.
+
+    Sorting gives deterministic placeholder ordering across call sites.
+    """
+    ordered = sorted(values)
+    return ",".join("?" * len(ordered)), ordered
+
+
+def _year_month_sql(col: str) -> str:
+    """SQL fragment formatting a YYYYMMDD integer column as a 'YYYY-MM' string."""
+    return f"PRINTF('%04d-%02d', {col}/10000, ({col}/100)%100)"
+
+
 def open_db(db_path: pathlib.Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -280,16 +294,19 @@ def upsert_stations(conn: sqlite3.Connection, stations: list[dict]) -> int:
     return len(rows)
 
 
-def insert_prices(conn: sqlite3.Connection, rows: list[dict], source: str = "h") -> None:
-    """Bulk-insert prices; silently ignores duplicates.
+def insert_prices(conn: sqlite3.Connection, rows: list[dict], source: str = "h") -> int:
+    """Bulk-insert prices; silently ignores duplicates. Returns rows inserted.
 
     Expected keys: station_code, fuel_code, price_date (YYYY-MM-DD), price_cents.
     source: 's' for snapshot, 'h' for historical CSV (default).
     """
     if not rows:
-        return
+        return 0
     fuel_map = _ensure_fuel_types(conn, {r["fuel_code"] for r in rows})
     source_id = _ensure_source_id(conn, source)
+    # total_changes delta counts only rows the INSERT OR IGNORE actually wrote
+    # (ignored duplicates don't count) — avoids a full COUNT(*) scan per call.
+    before = conn.total_changes
     conn.executemany(
         "INSERT OR IGNORE INTO prices"
         " (station_code, fuel_type_id, price_date, price_decicents, source_id)"
@@ -301,6 +318,7 @@ def insert_prices(conn: sqlite3.Connection, rows: list[dict], source: str = "h")
         ],
     )
     conn.commit()
+    return conn.total_changes - before
 
 
 # ---------------------------------------------------------------------------
@@ -373,11 +391,11 @@ def load_snapshot_csv(
     # normalised address. Filter prices to avoid FK errors on those orphaned codes.
     batch_codes = {s["station_code"] for s in stations}
     if batch_codes:
-        placeholders = ",".join("?" * len(batch_codes))
+        placeholders, ordered_codes = _in_clause(batch_codes)
         known_codes = {
             r[0] for r in conn.execute(
                 f"SELECT station_code FROM stations WHERE station_code IN ({placeholders})",
-                sorted(batch_codes),
+                ordered_codes,
             )
         }
         dropped_codes = batch_codes - known_codes
@@ -394,10 +412,7 @@ def load_snapshot_csv(
                 )
         prices = [p for p in prices if p["station_code"] in known_codes]
 
-    before = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
-    insert_prices(conn, prices, source="s")
-    after = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
-    return n_stations, after - before
+    return n_stations, insert_prices(conn, prices, source="s")
 
 
 def load_all_snapshots(
@@ -496,11 +511,7 @@ def load_cleaned_csv(
                 "price_cents":  price_cents,
             })
 
-    before = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
-    if prices:
-        insert_prices(conn, prices)
-    after = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
-    return after - before, skipped
+    return insert_prices(conn, prices), skipped
 
 
 def backfill_station_suburbs(conn: sqlite3.Connection, suburb_backfill: dict[int, str]) -> int:
@@ -602,6 +613,38 @@ def station_price_series(
     return [(_date_from_int(r[0]), r[1] / 10) for r in conn.execute(query, params)]
 
 
+def _average_price_series_by(
+    conn: sqlite3.Connection,
+    fuel_code: str,
+    column: str,
+    values: frozenset[str] | None,
+) -> list[tuple[str, float]]:
+    """Return [(price_date, avg_price_cents)] from daily_prices (gap-filled).
+
+    When ``values`` is given, average only stations whose ``s.<column>`` is in
+    the set. ``column`` is an internal literal ('council' or 'brand'), never
+    user input, so interpolating it into the SQL is safe.
+    """
+    fid = fuel_type_id(conn, fuel_code)
+    if values is not None:
+        placeholders, ordered = _in_clause(values)
+        query = (
+            "SELECT dp.price_date, AVG(dp.price_decicents)"
+            " FROM daily_prices dp"
+            " JOIN stations s USING(station_code)"
+            f" WHERE dp.fuel_type_id = ? AND s.{column} IN ({placeholders})"  # noqa: S608
+            " GROUP BY dp.price_date ORDER BY dp.price_date"
+        )
+        params: list = [fid, *ordered]
+    else:
+        query = (
+            "SELECT price_date, AVG(price_decicents) FROM daily_prices"
+            " WHERE fuel_type_id = ? GROUP BY price_date ORDER BY price_date"
+        )
+        params = [fid]
+    return [(_date_from_int(r[0]), r[1] / 10) for r in conn.execute(query, params)]
+
+
 def average_price_series(
     conn: sqlite3.Connection,
     fuel_code: str = "E10",
@@ -615,27 +658,7 @@ def average_price_series(
 
     Requires fill.fill_all() to have been run first.
     """
-    fid = fuel_type_id(conn, fuel_code)
-    if councils is not None:
-        placeholders = ",".join("?" * len(councils))
-        query = (
-            "SELECT dp.price_date, AVG(dp.price_decicents)"
-            " FROM daily_prices dp"
-            " JOIN stations s USING(station_code)"
-            f" WHERE dp.fuel_type_id = ? AND s.council IN ({placeholders})"
-            " GROUP BY dp.price_date ORDER BY dp.price_date"
-        )
-        params: list = [fid, *sorted(councils)]
-    else:
-        query = (
-            "SELECT price_date, AVG(price_decicents) FROM daily_prices"
-            " WHERE fuel_type_id = ? GROUP BY price_date ORDER BY price_date"
-        )
-        params = [fid]
-    return [
-        (_date_from_int(r[0]), r[1] / 10)
-        for r in conn.execute(query, params)
-    ]
+    return _average_price_series_by(conn, fuel_code, "council", councils)
 
 
 def upsert_daily_prices(
@@ -681,13 +704,13 @@ def coverage_by_month(
     """Return [(YYYY-MM, station_count)] for the most recent months."""
     fid = fuel_type_id(conn, fuel_code)
     rows = conn.execute(
-        "SELECT PRINTF('%04d-%02d', price_date/10000, (price_date/100)%100) AS ym,"
+        f"SELECT {_year_month_sql('price_date')} AS ym,"  # noqa: S608
         "       COUNT(DISTINCT station_code)"
         " FROM prices WHERE fuel_type_id = ?"
         " GROUP BY ym ORDER BY ym DESC LIMIT ?",
         (fid, months),
     ).fetchall()
-    return [(r[0], r[1]) for r in rows]
+    return list(rows)
 
 
 def recent_prices(
@@ -738,24 +761,7 @@ def average_price_series_by_brand(
     brands: if provided, average only stations whose brand is in this set.
     Same gap-fill semantics as average_price_series (uses daily_prices).
     """
-    fid = fuel_type_id(conn, fuel_code)
-    if brands is not None:
-        placeholders = ",".join("?" * len(brands))
-        query = (
-            "SELECT dp.price_date, AVG(dp.price_decicents)"
-            " FROM daily_prices dp"
-            " JOIN stations s USING(station_code)"
-            f" WHERE dp.fuel_type_id = ? AND s.brand IN ({placeholders})"
-            " GROUP BY dp.price_date ORDER BY dp.price_date"
-        )
-        params: list = [fid, *sorted(brands)]
-    else:
-        query = (
-            "SELECT price_date, AVG(price_decicents) FROM daily_prices"
-            " WHERE fuel_type_id = ? GROUP BY price_date ORDER BY price_date"
-        )
-        params = [fid]
-    return [(_date_from_int(r[0]), r[1] / 10) for r in conn.execute(query, params)]
+    return _average_price_series_by(conn, fuel_code, "brand", brands)
 
 
 def distinct_brands(
@@ -819,18 +825,16 @@ def coverage_matrix(
     params: list = [fid]
     where_clauses = ["p.fuel_type_id = ?"]
 
+    ym_expr = _year_month_sql("p.price_date")
     if start_date:
         where_clauses.append("p.price_date >= ?")
         params.append(_date_to_int(start_date))
     else:
         today = _dt.date.today()
-        cutoff_month = today.replace(day=1)
-        for _ in range(months - 1):
-            cutoff_month = (cutoff_month - _dt.timedelta(days=1)).replace(day=1)
-        cutoff_ym = cutoff_month.strftime("%Y-%m")
-        where_clauses.append(
-            "PRINTF('%04d-%02d', p.price_date/10000, (p.price_date/100)%100) >= ?"
-        )
+        # Step back (months - 1) whole months from the current month.
+        total_months = today.year * 12 + (today.month - 1) - (months - 1)
+        cutoff_ym = f"{total_months // 12:04d}-{total_months % 12 + 1:02d}"
+        where_clauses.append(f"{ym_expr} >= ?")
         params.append(cutoff_ym)
 
     if end_date:
@@ -838,15 +842,12 @@ def coverage_matrix(
         params.append(_date_to_int(end_date))
 
     sql = (
-        "SELECT p.station_code, s.name,"
-        "       PRINTF('%04d-%02d', p.price_date/10000, (p.price_date/100)%100) AS ym,"
-        "       COUNT(*) AS n"
+        f"SELECT p.station_code, s.name, {ym_expr} AS ym, COUNT(*) AS n"  # noqa: S608
         " FROM prices p JOIN stations s USING(station_code)"
         f" WHERE {' AND '.join(where_clauses)}"
         " GROUP BY p.station_code, ym ORDER BY ym, s.name"
     )
-    rows = conn.execute(sql, params).fetchall()
-    return [(r[0], r[1], r[2], r[3]) for r in rows]
+    return list(conn.execute(sql, params).fetchall())
 
 
 def gradient_by_lga(
@@ -872,9 +873,9 @@ def gradient_by_lga(
     cond = "dp.fuel_type_id = ? AND s.council IS NOT NULL"
     params: list = [fid]
     if councils:
-        placeholders = ",".join("?" * len(councils))
+        placeholders, ordered = _in_clause(councils)
         cond += f" AND s.council IN ({placeholders})"
-        params.extend(councils)
+        params.extend(ordered)
 
     all_rows = conn.execute(
         f"SELECT s.council, dp.price_date, AVG(dp.price_decicents)"  # noqa: S608
@@ -909,6 +910,29 @@ def gradient_by_lga(
                 results.append((council, week_start, float(np.mean(grads))))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Snapshot-table helpers (shared by station_class / classification_summary /
+# lga_leadership — all keyed by an integer snapshot_date)
+# ---------------------------------------------------------------------------
+
+def _delete_for_snapshot_date(conn: sqlite3.Connection, table: str, snapshot_date: str) -> int:
+    """Remove all rows in ``table`` for snapshot_date. Returns rows deleted.
+
+    ``table`` is an internal literal, never user input.
+    """
+    cur = conn.execute(
+        f"DELETE FROM {table} WHERE snapshot_date = ?",  # noqa: S608
+        (_date_to_int(snapshot_date),),
+    )
+    return cur.rowcount or 0
+
+
+def _latest_snapshot_date(conn: sqlite3.Connection, table: str) -> str | None:
+    """Return the most recent snapshot_date (YYYY-MM-DD) in ``table``, or None."""
+    row = conn.execute(f"SELECT MAX(snapshot_date) FROM {table}").fetchone()  # noqa: S608
+    return _date_from_int(row[0]) if row and row[0] else None
 
 
 # ---------------------------------------------------------------------------
@@ -960,11 +984,7 @@ def upsert_station_class_rows(
 
 def delete_station_class_for_date(conn: sqlite3.Connection, snapshot_date: str) -> int:
     """Remove all station_class rows for snapshot_date. Returns rows deleted."""
-    cur = conn.execute(
-        "DELETE FROM station_class WHERE snapshot_date = ?",
-        (_date_to_int(snapshot_date),),
-    )
-    return cur.rowcount or 0
+    return _delete_for_snapshot_date(conn, "station_class", snapshot_date)
 
 
 def upsert_classification_summary_rows(
@@ -989,11 +1009,7 @@ def delete_classification_summary_for_date(
     conn: sqlite3.Connection, snapshot_date: str
 ) -> int:
     """Remove all classification_summary rows for snapshot_date. Returns rows deleted."""
-    cur = conn.execute(
-        "DELETE FROM classification_summary WHERE snapshot_date = ?",
-        (_date_to_int(snapshot_date),),
-    )
-    return cur.rowcount or 0
+    return _delete_for_snapshot_date(conn, "classification_summary", snapshot_date)
 
 
 def get_station_class(
@@ -1012,8 +1028,7 @@ def get_station_class(
 
 def latest_station_class_date(conn: sqlite3.Connection) -> str | None:
     """Return the most recent snapshot_date (YYYY-MM-DD) in station_class, or None."""
-    row = conn.execute("SELECT MAX(snapshot_date) FROM station_class").fetchone()
-    return _date_from_int(row[0]) if row and row[0] else None
+    return _latest_snapshot_date(conn, "station_class")
 
 
 # ---------------------------------------------------------------------------
@@ -1045,17 +1060,12 @@ def upsert_lga_leadership_rows(
 
 def delete_lga_leadership_for_date(conn: sqlite3.Connection, snapshot_date: str) -> int:
     """Remove all lga_leadership rows for snapshot_date. Returns rows deleted."""
-    cur = conn.execute(
-        "DELETE FROM lga_leadership WHERE snapshot_date = ?",
-        (_date_to_int(snapshot_date),),
-    )
-    return cur.rowcount or 0
+    return _delete_for_snapshot_date(conn, "lga_leadership", snapshot_date)
 
 
 def latest_lga_leadership_date(conn: sqlite3.Connection) -> str | None:
     """Return the most recent snapshot_date (YYYY-MM-DD) in lga_leadership, or None."""
-    row = conn.execute("SELECT MAX(snapshot_date) FROM lga_leadership").fetchone()
-    return _date_from_int(row[0]) if row and row[0] else None
+    return _latest_snapshot_date(conn, "lga_leadership")
 
 
 def get_lga_leadership_board(
