@@ -466,11 +466,15 @@ def run_backtest(
 # headline regime gradient was mostly a moving always-buy denominator, not skill).
 #
 # The oracle answers the second question. It sees the whole price path and plays
-# the cost-optimal feasible buy/wait sequence under the SAME tank dynamics as
-# run_backtest (start 50%, deplete D=daily_consumption×interval per step, chosen
-# buy → full, forced emergency half-fill when a wait drops below the floor). So
-# ``model_cpl − oracle_cpl`` is the recoverable headroom: a strict upper bound on
-# cents a PIT-safe feature could win in a zone.
+# the cost-optimal NEVER-DRY buy/wait sequence under run_backtest's tank dynamics
+# (start 50%, deplete D=daily_consumption×interval per step, chosen buy → full,
+# forced emergency half-fill when a wait drops below the floor). It is the strict
+# CPL ceiling over never-dry strategies — which always-buy and the production
+# model (kept fed by its emergency rule) both are — so ``model_cpl − oracle_cpl``
+# is the recoverable headroom: an upper bound on cents a PIT-safe feature could
+# win in a zone. (It deliberately does not model the engine's degenerate
+# run-dry-and-clamp escape; see _oracle_transitions for why and the tank-config
+# caveat. The default TankParams used by #262 makes it a strict ceiling.)
 #
 # It is *leaky by construction* (uses the future). A non-zero gap proves money
 # EXISTS (necessary), not that a PIT-safe signal can CAPTURE it (sufficient) —
@@ -490,20 +494,38 @@ def _oracle_transitions(
 ) -> list[tuple[float, float, float, bool]]:
     """Feasible (next_decide_level, spend_add, litres_add, emergency) from ``level``.
 
-    Mirrors run_backtest's per-date logic exactly: depletion of D = daily ×
+    Mirrors run_backtest's per-date fill/emergency logic: depletion of D = daily ×
     interval is applied on the way to the *next* decide point. A transition that
-    would run the tank dry (next level < 0) is infeasible and omitted — the oracle
-    is held to never-dry plans, the same guarantee the emergency rule gives a
-    forward strategy. With a None price the date is skipped entirely (the engine's
-    ``continue``): no fill, no emergency, depletion still applied (and dryness is
-    tolerated there, matching the engine).
+    would run the tank dry (pre-clamp next level < 0) is infeasible and omitted —
+    uniformly across BUY / WAIT / skipped-date, so every surviving transition
+    depletes exactly D. That keeps litres pinned per arrival level (the invariant
+    run_oracle_backtest relies on to equate min-spend with min-CPL).
+
+    This is a *deliberate* divergence from run_backtest, which on a WAIT clamps a
+    dry tank to 0 with no emergency (the emergency rule checks the current level,
+    not the post-depletion overshoot). The oracle models a driver who must cover
+    the route — it never exploits running dry to buy fewer litres. Consequence:
+    the oracle is the strict CPL ceiling over *never-dry* strategies (always-buy
+    and the production model, kept fed by its emergency rule, are both never-dry),
+    but it is NOT a lower bound against an adversarial strategy that deliberately
+    strands the tank in a tank config where a reachable decide-level lands in the
+    gap (floor·size, D). The default TankParams reachable lattice is {0, full−D},
+    which avoids that gap, so under the #262 headroom usage it is a strict ceiling.
+
+    A None price skips the date (the engine's ``continue``): no fill, no emergency
+    — but the same never-dry gate applies, so a leading no-data prefix long enough
+    to drain the tank yields no feasible plan (NaN CPL) rather than a spurious
+    clamped-depletion path. station_price_at forward-fills, so None occurs only as
+    a leading prefix in practice.
     """
     size = tank.tank_size_litres
     depletion = tank.daily_consumption_litres * tank.evaluation_interval_days
     out: list[tuple[float, float, float, bool]] = []
 
     if price is None:
-        out.append((max(0.0, level - depletion), 0.0, 0.0, False))
+        nxt = level - depletion
+        if nxt >= -1e-9:
+            out.append((max(0.0, nxt), 0.0, 0.0, False))
         return out
 
     # BUY → fill to full (no-op fill if already full).
@@ -540,15 +562,20 @@ def run_oracle_backtest(
 ) -> BacktestResult:
     """Perfect-foresight cost-optimal replay — the economic ceiling (issue #262).
 
-    Returns the lowest realised CPL achievable over [start_date, end_date] under
-    the identical tank dynamics of ``run_backtest``, found by exact DP over the
-    feasible buy/wait sequences. ``model_cpl − run_oracle_backtest(...).realised_cpl``
-    is the recoverable headroom (see module note for the leaky-ceiling caveat).
+    Returns the lowest realised CPL achievable over [start_date, end_date] among
+    NEVER-DRY buy/wait sequences under ``run_backtest``'s tank dynamics, found by
+    exact DP. ``model_cpl − run_oracle_backtest(...).realised_cpl`` is the
+    recoverable headroom (see module note + _oracle_transitions for the
+    leaky-ceiling and never-dry caveats).
 
-    For a fixed arrival level, total litres purchased is pinned by conservation
-    (start 50% + Σfills − Σdepletions), so minimising spend per arrival level is
-    equivalent to minimising CPL there; the result is the min CPL over arrival
-    levels. ``collect_fills`` reconstructs the optimal plan's FillRecord ledger.
+    Why minimising spend per arrival level yields min CPL: every feasible
+    transition depletes exactly D (run-dry paths are pruned, not clamped), so for
+    a fixed arrival level total litres is pinned by conservation (start 50% +
+    Σfills − Σdepletions = arrival − 0.5·size + N·D). Equal denominator ⇒ the
+    min-spend path is the min-CPL path at that level; the result is the min CPL
+    over arrival levels. ``collect_fills`` reconstructs the optimal plan's
+    FillRecord ledger. NaN CPL when no feasible plan exists (e.g. the tank cannot
+    cover one step, or a leading no-data prefix drains it).
     """
     if tank is None:
         tank = TankParams()

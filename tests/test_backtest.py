@@ -497,6 +497,59 @@ def test_oracle_fills_only_collected_when_requested():
     assert len(run_oracle_backtest(history, *args, collect_fills=True).fills) > 0
 
 
+def test_oracle_stays_ceiling_and_faithful_in_gap_tank():
+    """Tank config where the engine could run dry on a wait (floor·size < D and a
+    reachable level lands in the (floor·size, D) gap). The oracle is held to
+    never-dry plans there, but it must still (a) be ≤ always-buy — which is itself
+    never-dry — and (b) return an engine-faithful plan."""
+    # size 50, floor 5; D = 30/day × 1 = 30 ⇒ gap (5, 30); start level 25 ∈ gap.
+    gap_tank = TankParams(
+        tank_size_litres=50.0,
+        daily_consumption_litres=30.0,
+        evaluation_interval_days=1,
+        floor_fraction=0.10,
+    )
+    history = _square_wave_history(
+        50, "2020-01-01", n_cycles=20, high_cents=210.0, low_cents=150.0, half_period=1
+    )
+    args = (50, "2020-01-02", "2020-02-20", gap_tank)
+    oracle = run_oracle_backtest(history, *args, collect_fills=True)
+    always = run_backtest(history, AlwaysBuyStrategy(), *args)
+    assert not math.isnan(oracle.realised_cpl)
+    assert oracle.realised_cpl <= always.realised_cpl + 1e-9
+    chosen = {f.date for f in oracle.fills if not f.emergency}
+    replay = run_backtest(history, _ReplayStrategy(chosen), *args)
+    assert math.isclose(replay.total_spend_cents, oracle.total_spend_cents, rel_tol=1e-9)
+    assert math.isclose(replay.realised_cpl, oracle.realised_cpl, rel_tol=1e-9)
+
+
+def test_oracle_handles_leading_no_data_prefix():
+    """When the window opens before the station has any price, those eval dates
+    are None (skipped). The never-dry gate still holds, so the returned plan is
+    engine-faithful and conservation is intact (min-spend == min-CPL)."""
+    # Gentle tank so a short no-data prefix doesn't drain the tank.
+    gentle = TankParams(
+        tank_size_litres=50.0,
+        daily_consumption_litres=50.0 / 70,
+        evaluation_interval_days=7,
+        floor_fraction=0.10,
+    )
+    avg = [(d, 180.0) for d in _dates_from("2020-01-01", 200)]
+    # Station prices begin 21 days in → the first ~3 eval dates are None.
+    station = [(d, p) for d, p in _square_wave_history(
+        9, "2020-01-22", n_cycles=12, high_cents=200.0, low_cents=150.0, half_period=7
+    ).station_prices[9]]
+    history = PriceHistory(avg_series=avg, station_prices={9: station})
+    args = (9, "2020-01-01", "2020-06-01", gentle)
+    oracle = run_oracle_backtest(history, *args, collect_fills=True)
+    assert not math.isnan(oracle.realised_cpl)
+    chosen = {f.date for f in oracle.fills if not f.emergency}
+    replay = run_backtest(history, _ReplayStrategy(chosen), *args)
+    assert math.isclose(replay.total_spend_cents, oracle.total_spend_cents, rel_tol=1e-9)
+    assert math.isclose(replay.total_litres, oracle.total_litres, rel_tol=1e-9)
+    assert math.isclose(replay.realised_cpl, oracle.realised_cpl, rel_tol=1e-9)
+
+
 def test_oracle_prefers_deferring_to_a_known_cheaper_day():
     """With a gentle tank (long deferral horizon) the oracle reaches the global
     minimum price, so its CPL tracks the cheap days, not the path mean."""
