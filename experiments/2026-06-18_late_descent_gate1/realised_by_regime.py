@@ -86,6 +86,11 @@ def main() -> None:
     # many_to_one: features has one row per (station, date) — guard against a dup
     # key silently duplicating fills (which would skew the per-regime CPL).
     fills = fills.merge(tag, on=["station_code", "date"], how="left", validate="many_to_one")
+    # Persist the FULL merged ledger (pre-drop, NaN pct rows kept) so post-hoc
+    # cleanup checks (chosen-only saving%, drop regime-correlation) run with no
+    # re-fit. See cleanup_checks.py.
+    fills.to_parquet(HERE / "realised_fills.parquet")
+    print(f"[ledger] wrote realised_fills.parquet ({len(fills)} rows)", flush=True)
     # A NaN pct (fill date absent from the feature frame) would silently bucket
     # into 'normal' via _band — biasing the gate's deciding regime. Drop loudly.
     missing = fills["cycle_pct_through"].isna().sum()

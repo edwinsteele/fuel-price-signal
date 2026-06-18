@@ -117,27 +117,57 @@ Pooled: 1.87% at τ=0.25 (harness independently picked τ=0.25 = the production 
   trough), and even it beats normal. So the target sharpens to "lift late-descent
   capture toward overdue's," not "rescue an elongation pit."
 
-### Verdict: **Gate 1 FIRES** → proceed to Gate 2.
+### Verdict (headline): Gate 1 fires — but see Layer 3, which overturns the reading.
 
-### Interpretation caveat + pending cleanup (do before final writeup)
+## Layer 3 — cleanup checks (DONE — they overturn the reframe)
 
-- **saving% ≠ recoverable headroom.** It's measured vs *always-buy* (weak baseline),
-  so it's value-*delivered*, not catchable-value-*missed*. late_descent's modest
-  number is partly because always-buy is itself cheap there (188.6, near-trough) —
-  little room to beat, not necessarily poor skill. Whether the gap is **recoverable**
-  is exactly Gate 2's oracle job (the realised arbiter has no oracle ceiling, by
-  design).
-- **Emergency-fill confound.** `normal` is 88% forced (tank-floor) fills → an
-  abstention zone, not skill. Even late/overdue are ~half forced. A **chosen-only
-  (non-emergency) saving%** would isolate decision skill — `result.fills` has the
-  `emergency` flag; cheap post-hoc, **PENDING**.
-- **9.5% dropped fills (158/1659)** lost the pct-join (dropped, not mis-bucketed).
-  Verify the drops aren't **regime-correlated** (would weaken a band's numbers).
-  Cheap post-hoc on the ledger, **PENDING**.
+`cleanup_checks.py`: post-hoc on the saved `realised_fills.parquet` (written by
+`realised_by_regime.py`), **no re-fit**.
 
-## Gate 2 (next — Gate 1 fired)
+```bash
+PYTHONPATH=. uv run python experiments/2026-06-18_late_descent_gate1/cleanup_checks.py
+```
 
-Train-only oracle existence check: does an oracle regime feature cut the
-`late_descent` excess loss **beyond what the model's existing `cycle_mean_length`
-drift clock already delivers** (the sharpened #254 bar)? Reuses the #237
-`phase_oracle_cycles.py` template.
+### Check 1 — chosen-only (`~emergency`) saving%
+
+| regime | model_fills | chosen | emerg_frac | always_cpl | model_cpl_chosen | saving_all% | saving_chosen% |
+|---|---|---|---|---|---|---|---|
+| normal | 327 | 41 | 0.875 | 197.05 | 174.50 | 0.64 | **11.45** |
+| late_descent | 218 | 112 | 0.486 | 188.56 | 176.40 | 2.13 | **6.45** |
+| overdue | 134 | 73 | 0.455 | 196.58 | 174.90 | 4.06 | **11.03** |
+
+The model's CPL on its **chosen** fills is **flat across regimes** (174.5 / 176.4 /
+174.9). The headline gradient was an artifact of (a) emergency-fill dilution
+(`normal` is 87.5% forced) and (b) the regime-varying always-buy denominator
+(197 / 189 / 197 — *cheapest* in late_descent, near the trough). Chosen-only
+saving% is `normal 11.4% ≈ overdue 11.0% > late_descent 6.4%` — the monotonic
+gradient is **gone / inverted**. late_descent's small gap is only because blind
+buying is already cheap there, not poor model skill.
+
+### Check 2 — drop regime-correlation
+
+The 9.3% pct-join-miss drops (70 model fills) are **100% overdue** (as-of approx;
+conservative, so true regime is overdue-or-deeper). That censors ~34% of overdue
+fills at the extreme-elongation tail → the overdue "best zone" number sits on a
+sample stripped of its most-stretched members. Year-skewed (14/21/35 over
+2021→2023, none 2019–20) → consistent with an end-of-window label-horizon trim. A
+caveat on overdue; doesn't change the verdict.
+
+## Revised verdict: skill-gap reading DISPROVED; decision quality is regime-uniform
+
+The Gate-1 headline gradient is a **measurement artifact** (emergency dilution +
+regime-varying blind denominator + overdue censor), not model skill. On chosen-only
+realised economics the model pays **~175 c/L wherever it chooses to buy, in every
+regime**. The "late descent is a soft spot to fix" premise is **disproved** — the
+realised echo of #254's "regime denominator economically inert." Prediction
+difficulty (late descent's ±1–2d trough jitter) does **not** translate to economic
+loss: flat-bottom troughs mean log-loss cares about the exact day, CPL does not.
+
+## Successor: headroom map (#262); #259 closed
+
+The narrow Gate-2 ("oracle on late descent beyond the drift clock") is **moot** —
+there is no late-descent deficit to attack. The one surviving question is generic
+and zone-agnostic: **is the flat ~175 near the real floor, or does it miss deeper
+troughs anywhere?** Only an oracle ceiling (`model_cpl − oracle_cpl`, *not* vs
+always-buy) can answer it. Reframed as a **headroom map** across slicing axes
+(cycle regime / season / volatility) — filed as **#262**. #259 closed.
