@@ -91,6 +91,12 @@ class RealisedResult:
     aggregate: pd.DataFrame       # one row per arm: pooled cpl + saving at own & held τ
     deltas: pd.DataFrame          # candidate − baseline, per window + aggregate
     meta: dict = field(default_factory=dict)
+    # Per-fill ledger (fold, arm, own_tau, date, station_code, price, litres,
+    # spend_cents, emergency) at each arm's OWN τ — populated only when
+    # run_paired_realised_backtest(..., collect_fills=True). Empty otherwise.
+    # The reusable realised analog of rowpreds.parquet: a caller groups these by
+    # regime / season / LGA (the #259 per-regime gate). None when not collected.
+    fills: pd.DataFrame | None = None
 
 
 def _train_calibrate_select_tau(
@@ -155,6 +161,16 @@ def _plan_folds(
     return plans
 
 
+def _fill_row(fold: int, arm: str, own_tau: float, fr: Any) -> dict:
+    """One ledger row from a FillRecord (single schema for both collection sites)."""
+    return {
+        "fold": fold, "arm": arm, "own_tau": own_tau,
+        "date": fr.date, "station_code": fr.station_code,
+        "price": fr.price, "litres": fr.litres,
+        "spend_cents": fr.spend_cents, "emergency": fr.emergency,
+    }
+
+
 def _saving_pct(always_cpl: float, model_cpl: float) -> float:
     if not (always_cpl > 0) or math.isnan(model_cpl):
         return float("nan")
@@ -173,6 +189,7 @@ def run_paired_realised_backtest(
     fold_subset: Iterable[int] | None = None,
     db_path: Any = None,
     tank: TankParams | None = None,
+    collect_fills: bool = False,
     verbose: bool = True,
 ) -> RealisedResult:
     """Run the paired walk-forward realised-spend backtest.
@@ -186,6 +203,10 @@ def run_paired_realised_backtest(
     outer_fold_params / inner_fold_params: walk_forward_folds kwargs for the outer
         windows and the inner OOF (calibration + τ). Defaults = production folds.
     fold_subset: 1-indexed fold numbers to run (iteration / smoke speed-up).
+    collect_fills: when True, attach a per-fill ledger DataFrame to
+        ``result.fills`` (each arm's fills at its OWN τ, tagged fold/arm). The
+        #259 gate-1 use groups it by cycle regime. Off by default (the extra
+        per-fill bookkeeping is wasted for a pure CPL run).
     """
     if not arms:
         raise ValueError("run_paired_realised_backtest() needs at least one arm.")
@@ -194,6 +215,9 @@ def run_paired_realised_backtest(
         # name keys histories AND groups every result frame — a collision would
         # silently overwrite an arm's history and corrupt the deltas.
         raise ValueError(f"ArmSpec names must be unique; got {names}.")
+    if collect_fills and "always_buy" in names:
+        # "always_buy" is reserved for the baseline ledger in the fills frame.
+        raise ValueError("'always_buy' is a reserved arm name when collect_fills=True.")
     ref_index = arms[0].df.index
     for a in arms[1:]:
         if not a.df.index.equals(ref_index):
@@ -236,15 +260,22 @@ def run_paired_realised_backtest(
         print(f"[realised] loaded {len(arms)} arm histories  ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     rows: list[dict] = []
+    fill_rows: list[dict] = []
     for p in plans:
         ft0 = time.perf_counter()
         # Always-buy is detector-independent — compute once per window. Keep its
         # spend/litres so the aggregate can pool a single always-buy CPL (and thus
         # an honest pooled saving%) rather than averaging per-window CPLs.
         always = aggregate_backtest(
-            histories[arms[0].name], AlwaysBuyStrategy(), station_codes, p.val_start, p.val_end, tank
+            histories[arms[0].name], AlwaysBuyStrategy(), station_codes, p.val_start, p.val_end, tank,
+            collect_fills=collect_fills,
         )
         always_cpl = always["cpl"]
+        if collect_fills:
+            # The always-buy fill ledger is the regime-matched denominator for a
+            # stratified saving% — tag it arm="always_buy" (reserved name).
+            for fr in always["fills"]:
+                fill_rows.append(_fill_row(p.fold, "always_buy", float("nan"), fr))
 
         # Train each arm and record its own τ first (baseline τ defines the held τ).
         fitted: dict[str, tuple[Any, float]] = {}
@@ -261,7 +292,11 @@ def run_paired_realised_backtest(
                 histories[a.name],
                 ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=own_tau),
                 station_codes, p.val_start, p.val_end, tank,
+                collect_fills=collect_fills,
             )
+            if collect_fills:
+                for fr in cpl_own["fills"]:
+                    fill_rows.append(_fill_row(p.fold, a.name, own_tau, fr))
             # The held-τ replay is identical when own τ == held (always true for the
             # baseline in the held_tau=None path) — reuse it, don't pay it twice.
             if math.isclose(own_tau, held):
@@ -347,8 +382,12 @@ def run_paired_realised_backtest(
         "fold_subset": list(fold_subset) if fold_subset is not None else None,
         "n_windows": len(plans),
         "calibration": "isotonic",
+        "collect_fills": collect_fills,
         "total_wall_seconds": time.perf_counter() - t0,
     }
+    fills = pd.DataFrame(fill_rows) if collect_fills else None
     if verbose:
         print(f"[realised] done  ({meta['total_wall_seconds']:.1f}s)", flush=True)
-    return RealisedResult(per_window=per_window, aggregate=aggregate, deltas=deltas, meta=meta)
+    return RealisedResult(
+        per_window=per_window, aggregate=aggregate, deltas=deltas, meta=meta, fills=fills
+    )

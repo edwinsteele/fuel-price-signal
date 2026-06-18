@@ -76,6 +76,15 @@ def test_paired_backtest_rejects_duplicate_arm_names():
         )
 
 
+def test_paired_backtest_rejects_reserved_always_buy_arm_when_collecting_fills():
+    """'always_buy' is reserved for the baseline ledger when collect_fills=True."""
+    df = _synth_df(n=60)
+    with pytest.raises(ValueError, match="reserved arm name"):
+        run_paired_realised_backtest(
+            [ArmSpec("always_buy", df)], ["f1", "f2"], collect_fills=True
+        )
+
+
 def test_paired_backtest_rejects_mismatched_index():
     """Arms must share an index so a fold's train rows select identically."""
     df = _synth_df(n=60)

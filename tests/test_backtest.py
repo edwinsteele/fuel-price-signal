@@ -15,6 +15,7 @@ import sqlite3
 from fuel_signal.backtest import (
     AlwaysBuyStrategy,
     BacktestResult,
+    FillRecord,
     ModelStrategy,
     PriceHistory,
     RuleBasedSignalStrategy,
@@ -212,6 +213,65 @@ def test_no_emergency_when_tank_above_floor():
         history, AlwaysWaitStrategy(), 21, "2020-01-01", "2020-01-14", tank
     )
     assert result.fill_events == 0
+
+
+# ---------------------------------------------------------------------------
+# Per-fill ledger (collect_fills) — #259 realised-gate capability
+# ---------------------------------------------------------------------------
+
+def test_collect_fills_off_by_default():
+    """Default run records no ledger (zero behaviour change for existing callers)."""
+    history = _constant_history(40, "2020-01-01", 29, 150.0)
+    result = run_backtest(history, AlwaysBuyStrategy(), 40, "2020-01-01", "2020-01-29", TANK)
+    assert result.fills == []
+
+
+def test_collect_fills_one_record_per_fill_event():
+    """With collect_fills, len(fills) == fill_events and each row is a FillRecord."""
+    history = _constant_history(41, "2020-01-01", 29, 150.0)
+    result = run_backtest(
+        history, AlwaysBuyStrategy(), 41, "2020-01-01", "2020-01-29", TANK, collect_fills=True
+    )
+    assert result.fill_events == 5
+    assert len(result.fills) == 5
+    assert all(isinstance(f, FillRecord) for f in result.fills)
+
+
+def test_collect_fills_ledger_reconciles_with_pooled_totals():
+    """Per-fill spend/litres sum back to the pooled totals (no double counting)."""
+    history = _square_wave_history(42, "2020-01-01", 6, high_cents=200.0, low_cents=140.0)
+    result = run_backtest(
+        history, AlwaysBuyStrategy(), 42, "2020-01-07", "2020-03-15", TANK, collect_fills=True
+    )
+    assert abs(sum(f.spend_cents for f in result.fills) - result.total_spend_cents) < 1e-6
+    assert abs(sum(f.litres for f in result.fills) - result.total_litres) < 1e-6
+    # spend_cents is price × litres for every row.
+    for f in result.fills:
+        assert abs(f.spend_cents - f.price * f.litres) < 1e-9
+        assert f.station_code == 42
+
+
+def test_collect_fills_marks_emergency():
+    """A floor-triggered half-fill is flagged emergency=True."""
+
+    class AlwaysWaitStrategy:
+        name = "always_wait"
+
+        def decide(self, *_):
+            return False
+
+    history = _constant_history(43, "2020-01-01", 15, 200.0)
+    tank = TankParams(
+        tank_size_litres=50.0,
+        daily_consumption_litres=50.0 / 14,
+        evaluation_interval_days=7,
+        floor_fraction=0.10,
+    )
+    result = run_backtest(
+        history, AlwaysWaitStrategy(), 43, "2020-01-01", "2020-01-14", tank, collect_fills=True
+    )
+    assert len(result.fills) == 1
+    assert result.fills[0].emergency is True
 
 
 # ---------------------------------------------------------------------------
