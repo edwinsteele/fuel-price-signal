@@ -457,6 +457,194 @@ def run_backtest(
 
 
 # ---------------------------------------------------------------------------
+# Perfect-foresight oracle (the economic ceiling, issue #262)
+# ---------------------------------------------------------------------------
+#
+# The realised buyer backtest measures how the model does *vs always-buy*. That
+# answers "is the signal worth anything" but not "how much is left on the table" —
+# always-buy is a weak yardstick whose CPL itself varies by regime (#259 found the
+# headline regime gradient was mostly a moving always-buy denominator, not skill).
+#
+# The oracle answers the second question. It sees the whole price path and plays
+# the cost-optimal feasible buy/wait sequence under the SAME tank dynamics as
+# run_backtest (start 50%, deplete D=daily_consumption×interval per step, chosen
+# buy → full, forced emergency half-fill when a wait drops below the floor). So
+# ``model_cpl − oracle_cpl`` is the recoverable headroom: a strict upper bound on
+# cents a PIT-safe feature could win in a zone.
+#
+# It is *leaky by construction* (uses the future). A non-zero gap proves money
+# EXISTS (necessary), not that a PIT-safe signal can CAPTURE it (sufficient) —
+# flat-bottom troughs let log-loss and CPL decouple. Any feature chasing a hot
+# zone must still clear the realised arbiter. See experiments/2026-06-19_headroom_map.
+#
+# Implementation note — why a standalone function and not a ``Strategy``:
+# foresight needs the whole window at once, but ``Strategy.decide`` is called one
+# eval date at a time with no tank-state or look-ahead. Rather than widen that
+# contract (and carry fragile per-station replay state across folds), the oracle
+# is a self-contained optimiser that mirrors run_backtest's exact transition order
+# and emits the same FillRecord ledger, so it slots into the #259 per-zone tagging.
+
+
+def _oracle_transitions(
+    level: float, price: float | None, tank: TankParams,
+) -> list[tuple[float, float, float, bool]]:
+    """Feasible (next_decide_level, spend_add, litres_add, emergency) from ``level``.
+
+    Mirrors run_backtest's per-date logic exactly: depletion of D = daily ×
+    interval is applied on the way to the *next* decide point. A transition that
+    would run the tank dry (next level < 0) is infeasible and omitted — the oracle
+    is held to never-dry plans, the same guarantee the emergency rule gives a
+    forward strategy. With a None price the date is skipped entirely (the engine's
+    ``continue``): no fill, no emergency, depletion still applied (and dryness is
+    tolerated there, matching the engine).
+    """
+    size = tank.tank_size_litres
+    depletion = tank.daily_consumption_litres * tank.evaluation_interval_days
+    out: list[tuple[float, float, float, bool]] = []
+
+    if price is None:
+        out.append((max(0.0, level - depletion), 0.0, 0.0, False))
+        return out
+
+    # BUY → fill to full (no-op fill if already full).
+    buy_litres = size - level
+    buy_spend = buy_litres * price if buy_litres > 1e-9 else 0.0
+    buy_litres = buy_litres if buy_litres > 1e-9 else 0.0
+    nxt = size - depletion
+    if nxt >= -1e-9:
+        out.append((max(0.0, nxt), buy_spend, buy_litres, False))
+
+    # WAIT → forced emergency half-fill if below floor, else hold.
+    if level / size < tank.floor_fraction:
+        target = 0.5 * size
+        emerg_litres = max(0.0, target - level)
+        post = target if emerg_litres > 1e-9 else level
+        nxt = post - depletion
+        if nxt >= -1e-9:
+            out.append((max(0.0, nxt), emerg_litres * price, emerg_litres, True))
+    else:
+        nxt = level - depletion
+        if nxt >= -1e-9:
+            out.append((max(0.0, nxt), 0.0, 0.0, False))
+
+    return out
+
+
+def run_oracle_backtest(
+    history: PriceHistory,
+    station_code: int,
+    start_date: str,
+    end_date: str,
+    tank: TankParams | None = None,
+    collect_fills: bool = False,
+) -> BacktestResult:
+    """Perfect-foresight cost-optimal replay — the economic ceiling (issue #262).
+
+    Returns the lowest realised CPL achievable over [start_date, end_date] under
+    the identical tank dynamics of ``run_backtest``, found by exact DP over the
+    feasible buy/wait sequences. ``model_cpl − run_oracle_backtest(...).realised_cpl``
+    is the recoverable headroom (see module note for the leaky-ceiling caveat).
+
+    For a fixed arrival level, total litres purchased is pinned by conservation
+    (start 50% + Σfills − Σdepletions), so minimising spend per arrival level is
+    equivalent to minimising CPL there; the result is the min CPL over arrival
+    levels. ``collect_fills`` reconstructs the optimal plan's FillRecord ledger.
+    """
+    if tank is None:
+        tank = TankParams()
+
+    eval_dates = _evaluation_dates(start_date, end_date, tank.evaluation_interval_days)
+    nan_result = BacktestResult(
+        strategy_name="oracle",
+        station_code=station_code,
+        start_date=start_date,
+        end_date=end_date,
+        total_spend_cents=0.0,
+        total_litres=0.0,
+        fill_events=0,
+        realised_cpl=float("nan"),
+    )
+    if not eval_dates:
+        return nan_result
+
+    prices = [history.station_price_at(station_code, d) for d in eval_dates]
+
+    # DP, one layer per decide point. A state is a rounded decide-level mapping to
+    # (min_spend, litres, back), where back = (prev_level_key, fill_litres,
+    # fill_price, emergency) records the transition INTO this state for ledger
+    # reconstruction. Levels are rounded so float drift doesn't fragment
+    # otherwise-identical states. All layers are retained so the optimal plan can
+    # be walked back from the terminal argmin.
+    def _key(level: float) -> float:
+        return round(level, 6)
+
+    start_level = 0.5 * tank.tank_size_litres
+    layers: list[dict[float, tuple[float, float, Any]]] = [
+        {_key(start_level): (0.0, 0.0, None)}
+    ]
+    for price in prices:
+        prev = layers[-1]
+        nxt_layer: dict[float, tuple[float, float, Any]] = {}
+        for level_key, (spend, litres, _back) in prev.items():
+            for next_level, sa, la, emergency in _oracle_transitions(level_key, price, tank):
+                cand_spend = spend + sa
+                key = _key(next_level)
+                cur = nxt_layer.get(key)
+                if cur is None or cand_spend < cur[0]:
+                    nxt_layer[key] = (cand_spend, litres + la, (level_key, la, price, emergency))
+        if not nxt_layer:
+            # Every path ran dry (tank too small for the consumption) → no plan.
+            return nan_result
+        layers.append(nxt_layer)
+
+    # Terminal: pick the arrival level with the lowest CPL (spend / litres).
+    terminal = layers[-1]
+    best_key = min(
+        (k for k, (s, lit, _b) in terminal.items() if lit > 0),
+        key=lambda k: terminal[k][0] / terminal[k][1],
+        default=None,
+    )
+    if best_key is None:
+        return nan_result
+
+    total_spend, total_litres, _ = terminal[best_key]
+
+    # Walk the backpointer chain from the terminal state to the start, emitting a
+    # FillRecord wherever the chosen transition filled (cheap to do unconditionally;
+    # also yields the honest fill_events count).
+    fills: list[FillRecord] = []
+    key = best_key
+    for i in range(len(prices), 0, -1):
+        _spend, _litres, back = layers[i][key]
+        prev_key, la, price, emergency = back
+        if la > 0:
+            fills.append(
+                FillRecord(
+                    date=eval_dates[i - 1],
+                    station_code=station_code,
+                    price=price,
+                    litres=la,
+                    spend_cents=la * price,
+                    emergency=emergency,
+                )
+            )
+        key = prev_key
+    fills.reverse()
+
+    return BacktestResult(
+        strategy_name="oracle",
+        station_code=station_code,
+        start_date=start_date,
+        end_date=end_date,
+        total_spend_cents=total_spend,
+        total_litres=total_litres,
+        fill_events=len(fills),
+        realised_cpl=total_spend / total_litres,
+        fills=fills if collect_fills else [],
+    )
+
+
+# ---------------------------------------------------------------------------
 # DB loader
 # ---------------------------------------------------------------------------
 
