@@ -74,6 +74,12 @@ def main() -> None:
         columns={"price_date": "date"}
     )
     fills = fills.merge(tag, on=["station_code", "date"], how="left")
+    # A NaN pct (fill date absent from the feature frame) would silently bucket
+    # into 'normal' via _band — biasing the gate's deciding regime. Drop loudly.
+    missing = fills["cycle_pct_through"].isna().sum()
+    if missing:
+        print(f"[warn] {missing}/{len(fills)} fills lost the pct join — dropping", flush=True)
+        fills = fills.dropna(subset=["cycle_pct_through"])
     fills["regime"] = fills["cycle_pct_through"].map(_band)
 
     # Per regime: model CPL vs regime-matched always-buy CPL → saving%.

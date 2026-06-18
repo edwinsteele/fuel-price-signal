@@ -161,6 +161,16 @@ def _plan_folds(
     return plans
 
 
+def _fill_row(fold: int, arm: str, own_tau: float, fr: Any) -> dict:
+    """One ledger row from a FillRecord (single schema for both collection sites)."""
+    return {
+        "fold": fold, "arm": arm, "own_tau": own_tau,
+        "date": fr.date, "station_code": fr.station_code,
+        "price": fr.price, "litres": fr.litres,
+        "spend_cents": fr.spend_cents, "emergency": fr.emergency,
+    }
+
+
 def _saving_pct(always_cpl: float, model_cpl: float) -> float:
     if not (always_cpl > 0) or math.isnan(model_cpl):
         return float("nan")
@@ -265,12 +275,7 @@ def run_paired_realised_backtest(
             # The always-buy fill ledger is the regime-matched denominator for a
             # stratified saving% — tag it arm="always_buy" (reserved name).
             for fr in always["fills"]:
-                fill_rows.append({
-                    "fold": p.fold, "arm": "always_buy", "own_tau": float("nan"),
-                    "date": fr.date, "station_code": fr.station_code,
-                    "price": fr.price, "litres": fr.litres,
-                    "spend_cents": fr.spend_cents, "emergency": fr.emergency,
-                })
+                fill_rows.append(_fill_row(p.fold, "always_buy", float("nan"), fr))
 
         # Train each arm and record its own τ first (baseline τ defines the held τ).
         fitted: dict[str, tuple[Any, float]] = {}
@@ -291,12 +296,7 @@ def run_paired_realised_backtest(
             )
             if collect_fills:
                 for fr in cpl_own["fills"]:
-                    fill_rows.append({
-                        "fold": p.fold, "arm": a.name, "own_tau": own_tau,
-                        "date": fr.date, "station_code": fr.station_code,
-                        "price": fr.price, "litres": fr.litres,
-                        "spend_cents": fr.spend_cents, "emergency": fr.emergency,
-                    })
+                    fill_rows.append(_fill_row(p.fold, a.name, own_tau, fr))
             # The held-τ replay is identical when own τ == held (always true for the
             # baseline in the held_tau=None path) — reuse it, don't pay it twice.
             if math.isclose(own_tau, held):
