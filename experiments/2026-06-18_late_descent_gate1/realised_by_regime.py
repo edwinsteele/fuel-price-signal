@@ -73,7 +73,9 @@ def main() -> None:
     tag = df[["station_code", "price_date", "cycle_pct_through"]].rename(
         columns={"price_date": "date"}
     )
-    fills = fills.merge(tag, on=["station_code", "date"], how="left")
+    # many_to_one: features has one row per (station, date) — guard against a dup
+    # key silently duplicating fills (which would skew the per-regime CPL).
+    fills = fills.merge(tag, on=["station_code", "date"], how="left", validate="many_to_one")
     # A NaN pct (fill date absent from the feature frame) would silently bucket
     # into 'normal' via _band — biasing the gate's deciding regime. Drop loudly.
     missing = fills["cycle_pct_through"].isna().sum()

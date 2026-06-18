@@ -60,7 +60,9 @@ def main() -> None:
     rp["price_date"] = pd.to_datetime(rp["price_date"])
     feats["price_date"] = pd.to_datetime(feats["price_date"])
     tag = feats[["station_code", "price_date", "cycle_pct_through"]]
-    rp = rp.merge(tag, on=["station_code", "price_date"], how="left")
+    # many_to_one: features has one row per (station, date); fail loudly if not,
+    # else a dup key would silently duplicate rows and inflate the regret metrics.
+    rp = rp.merge(tag, on=["station_code", "price_date"], how="left", validate="many_to_one")
     missing = rp["cycle_pct_through"].isna().sum()
     if missing:
         print(f"[warn] {missing} rows lost the pct join — dropping", flush=True)

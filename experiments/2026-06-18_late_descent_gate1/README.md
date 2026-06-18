@@ -55,8 +55,9 @@ PYTHONPATH=. uv run python experiments/2026-06-18_late_descent_gate1/proxy_regre
 | late_descent | 248,707 | 0.331 | 0.39 | **1.72** | **19%** | 0.25 |
 | overdue | 207,332 | 0.353 | 0.93 | 1.32 | **42%** | 0.05 |
 
-Seed std on regret 0.018–0.036 — <2% of the levels and far below the ~0.67 c/row
-cross-regime gap. Passes the variance sanity gate; means are trustworthy.
+Seed std on regret is 0.018–0.036 — <2% of the levels and far below the ~0.67
+c/row cross-regime gap, so it passes the variance sanity gate and the means are
+trustworthy.
 
 ### Reading (regret vs efficiency reconcile)
 
