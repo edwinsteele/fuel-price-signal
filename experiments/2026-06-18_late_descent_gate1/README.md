@@ -82,17 +82,60 @@ simulation (two-exams). And the oracle ceiling assumes *perfect* trough-calling,
 which the jitter makes impossible — so 1.72 is not "1.72 recoverable." A fired
 proxy is permission to build the realised gate, not the gate passing.
 
-## Layer 2 — realised gate (in progress)
+## Layer 2 — realised gate (DONE — fires, with a reframe)
 
-Harden Layer 1 on **realised CPL** via a reusable per-fill ledger on
-`run_backtest` (the realised analog of `rowpreds.parquet`): emit per-fill
-`(date, station, price, litres, spend)`, bucket by regime-at-fill-date, compute
-regime-stratified realised CPL + a regime-matched always-buy baseline, walk-forward
-via the #255 harness. The engine stays agnostic about *why* you slice; the
-experiment does the stratification. (Reusable for Phase-4 leadership, shock-fold,
-season/LGA slicing.)
+`realised_by_regime.py`: production baseline (54 feat) through the #255 harness
+with `collect_fills=True`, 14-fold walk-forward, seed 42, isotonic. Every fill
+tagged by the cycle regime at its fill date; model CPL vs a regime-matched
+always-buy. 523s.
 
-## Gate 2 (only if Layer 2 confirms)
+> **Harness gotcha:** the inner-OOF calibration runs inside each *outer* fold's
+> train. Fold 1's train is ~1825d (the outer `train_min_days`), so the inner
+> default (also 1825d) yields 0 folds → `ValueError`. Pass
+> `inner_fold_params={"train_min_days": 1095, "val_days": 90, "step_days": 90}`
+> (3y inner min-train, production 90d val/step). Only moves τ uniformly — the
+> per-regime comparison is a post-hoc tag on the same fitted models, so unaffected.
+
+### Result — saving% vs regime-matched always-buy
+
+| regime | model_cpl | always_cpl | **saving%** | emergency_frac |
+|---|---|---|---|---|
+| normal | 195.80 | 197.05 | **0.64%** | 0.88 |
+| late_descent | 184.54 | 188.56 | **2.13%** | 0.49 |
+| overdue | 188.59 | 196.58 | **4.06%** | 0.46 |
+
+Pooled: 1.87% at τ=0.25 (harness independently picked τ=0.25 = the production lock).
+
+- **Confirms the proxy on real spend.** Monotonic gradient `0.64 → 2.13 → 4.06`
+  (6× spread); overdue ≈ 2× late_descent — same "captures far more once the trough
+  is obvious" pattern as the proxy (42% vs 19%). The regime axis is economically
+  **live**.
+- **Reframes the hypothesis.** #254/#259 expected the *elongation* zone to be
+  economically *worse*. The opposite: **overdue/elongated is the model's BEST zone**
+  (crushes always-buy 196.6→188.6 — a stretched cycle is an unambiguous, easy-to-call
+  deep trough). The soft spot is **late descent** (the ambiguous descent *into* the
+  trough), and even it beats normal. So the target sharpens to "lift late-descent
+  capture toward overdue's," not "rescue an elongation pit."
+
+### Verdict: **Gate 1 FIRES** → proceed to Gate 2.
+
+### Interpretation caveat + pending cleanup (do before final writeup)
+
+- **saving% ≠ recoverable headroom.** It's measured vs *always-buy* (weak baseline),
+  so it's value-*delivered*, not catchable-value-*missed*. late_descent's modest
+  number is partly because always-buy is itself cheap there (188.6, near-trough) —
+  little room to beat, not necessarily poor skill. Whether the gap is **recoverable**
+  is exactly Gate 2's oracle job (the realised arbiter has no oracle ceiling, by
+  design).
+- **Emergency-fill confound.** `normal` is 88% forced (tank-floor) fills → an
+  abstention zone, not skill. Even late/overdue are ~half forced. A **chosen-only
+  (non-emergency) saving%** would isolate decision skill — `result.fills` has the
+  `emergency` flag; cheap post-hoc, **PENDING**.
+- **9.5% dropped fills (158/1659)** lost the pct-join (dropped, not mis-bucketed).
+  Verify the drops aren't **regime-correlated** (would weaken a band's numbers).
+  Cheap post-hoc on the ledger, **PENDING**.
+
+## Gate 2 (next — Gate 1 fired)
 
 Train-only oracle existence check: does an oracle regime feature cut the
 `late_descent` excess loss **beyond what the model's existing `cycle_mean_length`

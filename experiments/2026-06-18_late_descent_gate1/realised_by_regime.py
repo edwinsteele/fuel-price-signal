@@ -42,6 +42,15 @@ BANDS = [
     ("overdue", 1.0, np.inf),
 ]
 
+# Inner OOF folds for the per-fold isotonic calibrator + τ pick. MUST be smaller
+# than the outer train window: the harness runs this inside each outer fold's
+# train, and outer fold 1's train is only ~1825d (the outer train_min_days), so
+# the inner default (also 1825d) yields zero folds. A 3y inner min-train keeps the
+# production 90d val/step granularity while fitting inside fold 1. The choice only
+# moves the operating-point τ (applied uniformly across regimes) — the per-regime
+# comparison is a post-hoc tag on the SAME fitted models, so it's unaffected.
+INNER_FOLDS = {"train_min_days": 1095, "val_days": 90, "step_days": 90}
+
 
 def _band(pct: float) -> str:
     for name, lo, hi in BANDS:
@@ -61,7 +70,8 @@ def main() -> None:
     df["price_date"] = pd.to_datetime(df["price_date"])
 
     res = run_paired_realised_backtest(
-        [ArmSpec("baseline", df)], FEATURES, collect_fills=True, seed=42
+        [ArmSpec("baseline", df)], FEATURES, collect_fills=True, seed=42,
+        inner_fold_params=INNER_FOLDS,
     )
     fills = res.fills.copy()
     print(f"\n[ledger] {len(fills)} fills "
