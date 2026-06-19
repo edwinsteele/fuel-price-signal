@@ -5,6 +5,7 @@ import logging
 import pathlib
 import re
 import sqlite3
+from typing import Literal
 
 import click
 
@@ -626,7 +627,7 @@ def _average_price_series_by(
     user input, so interpolating it into the SQL is safe.
     """
     fid = fuel_type_id(conn, fuel_code)
-    if values is not None:
+    if values:
         placeholders, ordered = _in_clause(values)
         query = (
             "SELECT dp.price_date, AVG(dp.price_decicents)"
@@ -831,6 +832,7 @@ def coverage_matrix(
         params.append(_date_to_int(start_date))
     else:
         today = _dt.date.today()
+        months = max(1, months)
         # Step back (months - 1) whole months from the current month.
         total_months = today.year * 12 + (today.month - 1) - (months - 1)
         cutoff_ym = f"{total_months // 12:04d}-{total_months % 12 + 1:02d}"
@@ -917,7 +919,10 @@ def gradient_by_lga(
 # lga_leadership — all keyed by an integer snapshot_date)
 # ---------------------------------------------------------------------------
 
-def _delete_for_snapshot_date(conn: sqlite3.Connection, table: str, snapshot_date: str) -> int:
+_SnapshotTable = Literal["station_class", "classification_summary", "lga_leadership"]
+
+
+def _delete_for_snapshot_date(conn: sqlite3.Connection, table: _SnapshotTable, snapshot_date: str) -> int:
     """Remove all rows in ``table`` for snapshot_date. Returns rows deleted.
 
     ``table`` is an internal literal, never user input.
@@ -929,7 +934,7 @@ def _delete_for_snapshot_date(conn: sqlite3.Connection, table: str, snapshot_dat
     return cur.rowcount or 0
 
 
-def _latest_snapshot_date(conn: sqlite3.Connection, table: str) -> str | None:
+def _latest_snapshot_date(conn: sqlite3.Connection, table: _SnapshotTable) -> str | None:
     """Return the most recent snapshot_date (YYYY-MM-DD) in ``table``, or None."""
     row = conn.execute(f"SELECT MAX(snapshot_date) FROM {table}").fetchone()  # noqa: S608
     return _date_from_int(row[0]) if row and row[0] else None
