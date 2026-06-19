@@ -1,0 +1,108 @@
+{
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "shock_folds": [
+    1,
+    4,
+    9,
+    13
+  ],
+  "n_baseline_features": 54,
+  "horizons": [
+    3,
+    7,
+    14
+  ],
+  "candidate_columns": [
+    "tgp_delta_3d",
+    "tgp_delta_7d",
+    "tgp_delta_14d"
+  ],
+  "definitions": {
+    "tgp_delta_3d": "PIT Sydney ULP TGP - same 3 days prior (c/L); N-day momentum",
+    "tgp_delta_7d": "PIT Sydney ULP TGP - same 7 days prior (c/L); N-day momentum",
+    "tgp_delta_14d": "PIT Sydney ULP TGP - same 14 days prior (c/L); N-day momentum"
+  },
+  "run_grid": {
+    "R0": [],
+    "vel3": [
+      "tgp_delta_3d"
+    ],
+    "vel7": [
+      "tgp_delta_7d"
+    ],
+    "vel14": [
+      "tgp_delta_14d"
+    ]
+  },
+  "cohort_definitions": {
+    "all": "full val set",
+    "hard25": "top quartile baseline per-row log-loss per fold"
+  },
+  "seed_variance_gate": {
+    "rule": "ratio = seed_std / median(seed_std across cohort cells); flag > 5\u00d7",
+    "per_cohort": {
+      "all": {
+        "cohort_median_seed_std": 0.006464671722178619,
+        "n_cells": 56,
+        "n_flagged_gt_5x": 4
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.02777317815120603,
+        "n_cells": 56,
+        "n_flagged_gt_5x": 2
+      }
+    },
+    "flagged_cells": [
+      {
+        "cohort": "all",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.042511277084920404,
+        "ratio_vs_cohort_median": 6.57593748172474
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "vel3",
+        "seed_std": 0.28632871283434613,
+        "ratio_vs_cohort_median": 44.29129971936955
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "vel7",
+        "seed_std": 0.05645733369765616,
+        "ratio_vs_cohort_median": 8.733209685491937
+      },
+      {
+        "cohort": "all",
+        "fold": 4,
+        "run": "R0",
+        "seed_std": 0.03378725014386593,
+        "ratio_vs_cohort_median": 5.2264448367812095
+      },
+      {
+        "cohort": "hard25",
+        "fold": 3,
+        "run": "vel3",
+        "seed_std": 0.1866648348670143,
+        "ratio_vs_cohort_median": 6.721046970236948
+      },
+      {
+        "cohort": "hard25",
+        "fold": 3,
+        "run": "vel7",
+        "seed_std": 0.15774878540067894,
+        "ratio_vs_cohort_median": 5.679896788975475
+      }
+    ]
+  },
+  "note": "Velocity horizon sweep (velocity-only, point-to-point N-day momentum). Headline = regime split of \u0394ll_all. R3 (gap+velocity) deferred.",
+  "total_wall_seconds": 955.2925304169767
+}
