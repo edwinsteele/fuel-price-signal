@@ -76,6 +76,16 @@ production-artifact or `results.csv` writes.
 Relies on two `fuel_signal/backtest.py` injection seams (added in #255):
 `PriceHistory(..., detector_factory=...)` and `ModelStrategy(pipeline=..., feature_columns=...)`.
 
+## zones.py
+
+Helpers shared across realised-fill ledger experiments that tag fills by cycle zone.
+
+`CYCLE_REGIME_BANDS` — canonical three-band cut on `cycle_pct_through` (= days_since_peak / mean_cycle_length): `normal` [0, 0.6), `late_descent` [0.6, 1.0), `overdue` [1.0, ∞). Single-sourced here; never redefine per-script.
+
+`assign_regime(pct)` — maps a `cycle_pct_through` float to its regime name. Returns `"unmatched"` for NaN (fill date had no prior feature row via the as-of join in `cleanup_checks.py`); falls back to `"normal"` for any value outside the band table.
+
+`pooled_cpl(fills)` — pooled cost-per-litre from a fill ledger: `spend_cents.sum() / litres.sum()`. Returns NaN when the ledger has zero total litres.
+
 ## features/ (sub-package)
 
 Primitives for the inside of `compute_features()` / `add_candidate_columns()`. See `features/README.md` for full docs.

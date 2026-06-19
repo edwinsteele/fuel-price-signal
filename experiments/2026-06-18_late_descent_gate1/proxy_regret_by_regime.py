@@ -26,25 +26,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from experiments.lib.zones import CYCLE_REGIME_BANDS, assign_regime
 from fuel_signal.features import load_features
 from fuel_signal.score_phase2 import _TP_REWARD_CENTS, threshold_sweep
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROWPREDS = HERE.parent / "2026-06-16_regime_cycle_length" / "rowpreds.parquet"
-
-# Three-band cut on cycle_pct_through (= days_since_peak / mean_cycle_length).
-BANDS = [
-    ("normal", 0.0, 0.6),
-    ("late_descent", 0.6, 1.0),
-    ("overdue", 1.0, np.inf),
-]
-
-
-def _band(pct: float) -> str:
-    for name, lo, hi in BANDS:
-        if lo <= pct < hi:
-            return name
-    return "normal"
 
 
 def main() -> None:
@@ -67,13 +54,13 @@ def main() -> None:
     if missing:
         print(f"[warn] {missing} rows lost the pct join — dropping", flush=True)
         rp = rp.dropna(subset=["cycle_pct_through"])
-    rp["regime"] = rp["cycle_pct_through"].map(_band)
+    rp["regime"] = rp["cycle_pct_through"].map(assign_regime)
     print(f"[join] tagged {rp.shape}  ({time.perf_counter()-t0:.1f}s)", flush=True)
     print(rp.groupby("regime").size().to_string(), flush=True)
 
     # Per (regime, seed): sweep tau, take peak expected_cents and the oracle ceiling.
     recs = []
-    for regime, lo, hi in BANDS:
+    for regime, lo, hi in CYCLE_REGIME_BANDS:
         sub_r = rp[rp["regime"] == regime]
         for seed, sub in sub_r.groupby("seed"):
             y = sub["label"].to_numpy(dtype=int)
@@ -108,7 +95,7 @@ def main() -> None:
             regret_mean=("regret", "mean"),
             regret_std=("regret", "std"),
         )
-        .reindex([b[0] for b in BANDS])
+        .reindex([b[0] for b in CYCLE_REGIME_BANDS])
     )
     summ.to_csv(HERE / "proxy_regret_by_regime.csv")
     print("\n=== proxy regret by regime (mean over 5 seeds) ===", flush=True)
@@ -118,7 +105,7 @@ def main() -> None:
     # with oracle ceilings as dashed h-lines + peak markers.
     fig, ax = plt.subplots(figsize=(8, 5))
     colors = {"normal": "#2c7fb8", "late_descent": "#d95f0e", "overdue": "#cb181d"}
-    for regime, _, _ in BANDS:
+    for regime, _, _ in CYCLE_REGIME_BANDS:
         sub = rp[rp["regime"] == regime]
         y = sub["label"].to_numpy(dtype=int)
         p = sub["proba"].to_numpy(dtype=float)
