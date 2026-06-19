@@ -23,44 +23,30 @@ import pathlib
 import numpy as np
 import pandas as pd
 
+from experiments.lib.zones import CYCLE_REGIME_BANDS, assign_regime, pooled_cpl
 from fuel_signal.features import load_features
 
 HERE = pathlib.Path(__file__).resolve().parent
-BANDS = [("normal", 0.0, 0.6), ("late_descent", 0.6, 1.0), ("overdue", 1.0, np.inf)]
-
-
-def _band(pct: float) -> str:
-    if pd.isna(pct):
-        return "unmatched"
-    for name, lo, hi in BANDS:
-        if lo <= pct < hi:
-            return name
-    return "normal"
-
-
-def _cpl(frame: pd.DataFrame) -> float:
-    litres = frame["litres"].sum()
-    return frame["spend_cents"].sum() / litres if litres > 0 else float("nan")
 
 
 def main() -> None:
     fills = pd.read_parquet(HERE / "realised_fills.parquet")
     fills["date"] = pd.to_datetime(fills["date"])
     retained = fills[fills["cycle_pct_through"].notna()].copy()
-    retained["regime"] = retained["cycle_pct_through"].map(_band)
+    retained["regime"] = retained["cycle_pct_through"].map(assign_regime)
 
     # ---- Check 1: chosen-only saving% ----------------------------------------
     print("=== Check 1: chosen-only (~emergency) saving% vs always-buy ===")
     recs = []
-    for regime, _, _ in BANDS:
+    for regime, _, _ in CYCLE_REGIME_BANDS:
         sub = retained[retained["regime"] == regime]
         model = sub[sub["arm"] == "baseline"]
         always = sub[sub["arm"] == "always_buy"]
         chosen = model[~model["emergency"]]
-        always_cpl = _cpl(always)
+        always_cpl = pooled_cpl(always)
 
         def sav(frame: pd.DataFrame) -> float:
-            c = _cpl(frame)
+            c = pooled_cpl(frame)
             return (always_cpl - c) / always_cpl * 100 if always_cpl > 0 and not np.isnan(c) else float("nan")
 
         recs.append({
@@ -69,8 +55,8 @@ def main() -> None:
             "chosen_fills": len(chosen),
             "emergency_frac": model["emergency"].mean() if len(model) else float("nan"),
             "always_emerg_frac": always["emergency"].mean() if len(always) else float("nan"),
-            "model_cpl_all": _cpl(model),
-            "model_cpl_chosen": _cpl(chosen),
+            "model_cpl_all": pooled_cpl(model),
+            "model_cpl_chosen": pooled_cpl(chosen),
             "always_cpl": always_cpl,
             "saving_all_%": sav(model),
             "saving_chosen_%": sav(chosen),
@@ -94,7 +80,7 @@ def main() -> None:
         dropped[["date", "station_code"]], tag,
         on="date", by="station_code", direction="backward",
     )["cycle_pct_through"].to_numpy()
-    dropped["regime"] = dropped["approx_pct"].map(_band)
+    dropped["regime"] = dropped["approx_pct"].map(assign_regime)
 
     # Model arm only (the gate-relevant ledger); compare drop mix vs retained mix.
     drop_model = dropped[dropped["arm"] == "baseline"]

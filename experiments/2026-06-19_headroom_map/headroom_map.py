@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 from experiments.lib.realised import ArmSpec, run_paired_realised_backtest
+from experiments.lib.zones import CYCLE_REGIME_BANDS, assign_regime, pooled_cpl
 from fuel_signal import db as _db
 from fuel_signal.backtest import TankParams, load_history, run_oracle_backtest
 from fuel_signal.config import PREFERRED_STATIONS
@@ -55,20 +56,6 @@ FEATURES = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS  # 54
 # only moves τ uniformly (the per-zone tag is post-hoc on the same fitted models).
 INNER_FOLDS = {"train_min_days": 1095, "val_days": 90, "step_days": 90}
 
-REGIME_BANDS = [("normal", 0.0, 0.6), ("late_descent", 0.6, 1.0), ("overdue", 1.0, np.inf)]
-
-
-def _regime(pct: float) -> str:
-    for name, lo, hi in REGIME_BANDS:
-        if lo <= pct < hi:
-            return name
-    return "normal"
-
-
-def _cpl(frame: pd.DataFrame) -> float:
-    litres = frame["litres"].sum()
-    return frame["spend_cents"].sum() / litres if litres > 0 else float("nan")
-
 
 def _headroom_by_axis(model: pd.DataFrame, oracle: pd.DataFrame, axis: str) -> pd.DataFrame:
     """model_cpl − oracle_cpl per zone of `axis`, with fill/litre counts per arm."""
@@ -78,7 +65,7 @@ def _headroom_by_axis(model: pd.DataFrame, oracle: pd.DataFrame, axis: str) -> p
     for z in zones:
         m = model[model[axis] == z]
         o = oracle[oracle[axis] == z]
-        m_cpl, o_cpl = _cpl(m), _cpl(o)
+        m_cpl, o_cpl = pooled_cpl(m), pooled_cpl(o)
         recs.append({
             "axis": axis, "zone": z,
             "model_fills": len(m), "model_litres": m["litres"].sum(), "model_cpl": m_cpl,
@@ -113,7 +100,7 @@ def _tag(fills: pd.DataFrame, lookup: pd.DataFrame) -> pd.DataFrame:
     if missing:
         print(f"[warn] {missing}/{len(fills)} fills lost the date join — dropping", flush=True)
         fills = fills.dropna(subset=["cycle_pct_through"])
-    fills["regime"] = fills["cycle_pct_through"].map(_regime)
+    fills["regime"] = fills["cycle_pct_through"].map(assign_regime)
     fills["quarter"] = "Q" + fills["date"].dt.quarter.astype(str)
     return fills
 
@@ -171,8 +158,8 @@ def main() -> None:
     oracle_fills.to_parquet(HERE / "oracle_fills.parquet")
 
     # --- Headroom per axis ------------------------------------------------------
-    print(f"\n[overall] model_cpl={_cpl(model_fills):.2f}  oracle_cpl={_cpl(oracle_fills):.2f}  "
-          f"headroom={_cpl(model_fills) - _cpl(oracle_fills):.2f}", flush=True)
+    print(f"\n[overall] model_cpl={pooled_cpl(model_fills):.2f}  oracle_cpl={pooled_cpl(oracle_fills):.2f}  "
+          f"headroom={pooled_cpl(model_fills) - pooled_cpl(oracle_fills):.2f}", flush=True)
     maps = {ax: _headroom_by_axis(model_fills, oracle_fills, ax)
             for ax in ("regime", "quarter", "volatility", "fold")}
     out = pd.concat(maps.values(), ignore_index=True)

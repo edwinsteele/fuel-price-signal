@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from experiments.lib.realised import ArmSpec, run_paired_realised_backtest
+from experiments.lib.zones import CYCLE_REGIME_BANDS, assign_regime, pooled_cpl
 from fuel_signal.features import (
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
@@ -36,12 +37,6 @@ from fuel_signal.features import (
 HERE = pathlib.Path(__file__).resolve().parent
 FEATURES = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS  # 54, production
 
-BANDS = [
-    ("normal", 0.0, 0.6),
-    ("late_descent", 0.6, 1.0),
-    ("overdue", 1.0, np.inf),
-]
-
 # Inner OOF folds for the per-fold isotonic calibrator + τ pick. MUST be smaller
 # than the outer train window: the harness runs this inside each outer fold's
 # train, and outer fold 1's train is only ~1825d (the outer train_min_days), so
@@ -50,18 +45,6 @@ BANDS = [
 # moves the operating-point τ (applied uniformly across regimes) — the per-regime
 # comparison is a post-hoc tag on the SAME fitted models, so it's unaffected.
 INNER_FOLDS = {"train_min_days": 1095, "val_days": 90, "step_days": 90}
-
-
-def _band(pct: float) -> str:
-    for name, lo, hi in BANDS:
-        if lo <= pct < hi:
-            return name
-    return "normal"
-
-
-def _cpl(frame: pd.DataFrame) -> float:
-    litres = frame["litres"].sum()
-    return frame["spend_cents"].sum() / litres if litres > 0 else float("nan")
 
 
 def main() -> None:
@@ -97,16 +80,16 @@ def main() -> None:
     if missing:
         print(f"[warn] {missing}/{len(fills)} fills lost the pct join — dropping", flush=True)
         fills = fills.dropna(subset=["cycle_pct_through"])
-    fills["regime"] = fills["cycle_pct_through"].map(_band)
+    fills["regime"] = fills["cycle_pct_through"].map(assign_regime)
 
     # Per regime: model CPL vs regime-matched always-buy CPL → saving%.
     recs = []
-    for regime, _, _ in BANDS:
+    for regime, _, _ in CYCLE_REGIME_BANDS:
         sub = fills[fills["regime"] == regime]
         model = sub[sub["arm"] == "baseline"]
         always = sub[sub["arm"] == "always_buy"]
-        model_cpl = _cpl(model)
-        always_cpl = _cpl(always)
+        model_cpl = pooled_cpl(model)
+        always_cpl = pooled_cpl(always)
         saving = (
             (always_cpl - model_cpl) / always_cpl * 100
             if always_cpl > 0 and not np.isnan(model_cpl)
