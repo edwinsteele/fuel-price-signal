@@ -404,10 +404,11 @@ def run_paired_realised_backtest(
         "arms": [a.name for a in arms],
         "baseline_arm": base,
         "feature_columns": list(feature_columns),
-        "arm_feature_columns": {
-            a.name: list(a.feature_columns) if a.feature_columns is not None else None
-            for a in arms
-        },
+        # Record the RESOLVED columns each arm actually trained/scored on (None →
+        # the shared list), not the raw override — a reader reconstructing an arm
+        # shouldn't have to re-apply the resolution rule, and None would misstate
+        # what the baseline arm used.
+        "arm_feature_columns": {a.name: list(_arm_cols(a, feature_columns)) for a in arms},
         "station_codes": station_codes,
         "seed": seed,
         "held_tau": held_tau,

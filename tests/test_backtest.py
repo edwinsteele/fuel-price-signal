@@ -927,6 +927,38 @@ def test_extra_feature_provider_rejects_core_key_shadowing():
         strategy.decide("2018-09-01", station_code, history)
 
 
+def test_extra_feature_provider_missing_column_raises_clear_error():
+    """A provider that omits a column listed in feature_columns gets a named error."""
+    import pytest
+
+    n, period, station_code = 270, 45, 893
+    dates = _dates_from("2018-01-01", n)
+    prices = [(d, 180.0 + 20.0 * math.sin(2 * math.pi * i / period)) for i, d in enumerate(dates)]
+    pipeline, history = _calibrated_pipeline_and_history(prices, station_code)
+
+    def forgetful_provider(as_of, sc, station_price):
+        return {}  # should have supplied "tgp_delta_7d"
+
+    strategy = ModelStrategy(
+        pipeline=pipeline, feature_columns=list(FEATURE_COLUMNS) + ["tgp_delta_7d"],
+        threshold=0.40, extra_feature_provider=forgetful_provider,
+    )
+    with pytest.raises(ValueError, match="tgp_delta_7d.*no value was produced"):
+        strategy.decide("2018-09-01", station_code, history)
+
+
+def test_model_strategy_rejects_empty_feature_columns():
+    """feature_columns=[] is a misconfiguration, not a silent swap for FEATURE_COLUMNS."""
+    import pytest
+
+    class _Stub:
+        def predict_proba(self, X):  # pragma: no cover - never reached
+            raise AssertionError
+
+    with pytest.raises(ValueError, match="empty"):
+        ModelStrategy(pipeline=_Stub(), feature_columns=[])
+
+
 def test_decide_without_provider_is_unchanged():
     """extra_feature_provider=None (default) is a no-op — baseline path unchanged."""
     n, period, station_code = 270, 45, 891

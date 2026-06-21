@@ -236,7 +236,14 @@ class ModelStrategy:
             if not hasattr(self.pipeline, "predict_proba"):
                 raise ValueError("ModelStrategy(pipeline=...) needs a predict_proba interface.")
             self._pipeline = self.pipeline
-            self._feature_columns = list(self.feature_columns or FEATURE_COLUMNS)
+            # Explicit None check (not `or`): an empty list is a misconfiguration to
+            # surface, not a silent swap for the 54-col default — matches realised's
+            # _arm_cols so the two gatekeepers agree.
+            self._feature_columns = list(
+                self.feature_columns if self.feature_columns is not None else FEATURE_COLUMNS
+            )
+            if not self._feature_columns:
+                raise ValueError("ModelStrategy(feature_columns=[]) is empty; pass columns or None.")
             return
         if self.model_path is None:
             raise ValueError("ModelStrategy requires either model_path or pipeline.")
@@ -296,7 +303,16 @@ class ModelStrategy:
                     f"extra_feature_provider shadows core feature(s): {sorted(shadowed)}"
                 )
             features.update(extra)
-        X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
+        try:
+            X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
+        except KeyError as e:
+            # A feature_columns entry that neither the standard dict nor the provider
+            # supplied — usually a provider that omits a key for some date, or a typo
+            # in feature_columns. Name it instead of a bare KeyError mid-backtest.
+            raise ValueError(
+                f"feature {e.args[0]!r} is in feature_columns but no value was produced "
+                f"for it (extra_feature_provider must supply every added column)."
+            ) from e
         prob = float(self._pipeline.predict_proba(X)[0][1])
         return prob >= self.threshold
 
