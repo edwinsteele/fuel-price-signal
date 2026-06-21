@@ -75,6 +75,16 @@ class ArmSpec:
     name: str
     df: pd.DataFrame
     detector_factory: Callable[[list[tuple[str, float]]], CycleDetector] = CycleDetector
+    # Per-arm training/scoring columns. None → the call-level ``feature_columns``.
+    # Lets a candidate arm carry an ADDED column (e.g. baseline 54 vs vel7 55); the
+    # arm's ``df`` must contain every column listed here.
+    feature_columns: list[str] | None = None
+    # In-process source for an added feature with no production PriceHistory yet —
+    # passed straight to this arm's ModelStrategy (see ModelStrategy docstring).
+    # ``(as_of, station_code, station_price) -> {col: value}``. None → baseline path.
+    extra_feature_provider: (
+        Callable[[str, int, float], dict[str, float | None]] | None
+    ) = None
 
 
 @dataclass
@@ -278,19 +288,25 @@ def run_paired_realised_backtest(
                 fill_rows.append(_fill_row(p.fold, "always_buy", float("nan"), fr))
 
         # Train each arm and record its own τ first (baseline τ defines the held τ).
+        # Each arm trains/scores on its own feature_columns (None → the shared list),
+        # so a candidate arm can carry an ADDED column the baseline lacks.
         fitted: dict[str, tuple[Any, float]] = {}
         for a in arms:
             train_df = a.df.loc[p.train_index]
             fitted[a.name] = _train_calibrate_select_tau(
-                train_df, feature_columns, seed, inner_fold_params
+                train_df, a.feature_columns or feature_columns, seed, inner_fold_params
             )
         held = held_tau if held_tau is not None else fitted[arms[0].name][1]
 
         for a in arms:
             cal_pipe, own_tau = fitted[a.name]
+            cols = a.feature_columns or feature_columns
             cpl_own = aggregate_backtest(
                 histories[a.name],
-                ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=own_tau),
+                ModelStrategy(
+                    pipeline=cal_pipe, feature_columns=cols, threshold=own_tau,
+                    extra_feature_provider=a.extra_feature_provider,
+                ),
                 station_codes, p.val_start, p.val_end, tank,
                 collect_fills=collect_fills,
             )
@@ -304,7 +320,10 @@ def run_paired_realised_backtest(
             else:
                 cpl_held = aggregate_backtest(
                     histories[a.name],
-                    ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=held),
+                    ModelStrategy(
+                        pipeline=cal_pipe, feature_columns=cols, threshold=held,
+                        extra_feature_provider=a.extra_feature_provider,
+                    ),
                     station_codes, p.val_start, p.val_end, tank,
                 )
             rows.append({
@@ -374,6 +393,10 @@ def run_paired_realised_backtest(
         "arms": [a.name for a in arms],
         "baseline_arm": base,
         "feature_columns": list(feature_columns),
+        "arm_feature_columns": {
+            a.name: list(a.feature_columns) if a.feature_columns is not None else None
+            for a in arms
+        },
         "station_codes": station_codes,
         "seed": seed,
         "held_tau": held_tau,

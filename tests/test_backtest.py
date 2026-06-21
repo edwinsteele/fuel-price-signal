@@ -861,3 +861,59 @@ def test_price_history_uses_injected_detector_factory():
     )
     assert calls == [series]  # factory received avg_series exactly once
     assert history.cycle_state("2020-01-02") is sentinel
+
+
+def test_extra_feature_provider_injects_added_column_into_vector():
+    """extra_feature_provider value reaches the model for an ADDED feature column.
+
+    The #268 seam: a candidate feature with no PriceHistory source (here a stand-in
+    "tgp_delta_7d") is supplied live by the provider and must land in the vector at
+    its feature_columns index. Uses a capturing pipeline to read the exact X built,
+    and asserts the provider was called with (as_of, station_code, station_price).
+    """
+    import numpy as np
+
+    n, period, station_code = 270, 45, 890
+    dates = _dates_from("2018-01-01", n)
+    prices = [(d, 180.0 + 20.0 * math.sin(2 * math.pi * i / period)) for i, d in enumerate(dates)]
+    _, history = _calibrated_pipeline_and_history(prices, station_code)
+
+    captured: dict[str, object] = {}
+
+    class _CapturingPipeline:
+        def predict_proba(self, X):
+            captured["X"] = np.asarray(X)
+            return np.array([[0.5, 0.5]])
+
+    calls: list[tuple] = []
+
+    def provider(as_of, sc, station_price):
+        calls.append((as_of, sc, station_price))
+        return {"tgp_delta_7d": -3.25}
+
+    feature_columns = list(FEATURE_COLUMNS) + ["tgp_delta_7d"]
+    strategy = ModelStrategy(
+        pipeline=_CapturingPipeline(), feature_columns=feature_columns,
+        threshold=0.40, extra_feature_provider=provider,
+    )
+    as_of = "2018-09-01"
+    strategy.decide(as_of, station_code, history)
+
+    # Provider invoked once with the live decision context (station_price matches).
+    assert len(calls) == 1
+    assert calls[0][0] == as_of and calls[0][1] == station_code
+    assert calls[0][2] == history.station_price_at(station_code, as_of)
+    # The injected value occupies the added column's slot in the live vector.
+    assert captured["X"][0, feature_columns.index("tgp_delta_7d")] == -3.25
+
+
+def test_decide_without_provider_is_unchanged():
+    """extra_feature_provider=None (default) is a no-op — baseline path unchanged."""
+    n, period, station_code = 270, 45, 891
+    dates = _dates_from("2018-01-01", n)
+    prices = [(d, 180.0 + 20.0 * math.sin(2 * math.pi * i / period)) for i, d in enumerate(dates)]
+    pipeline, history = _calibrated_pipeline_and_history(prices, station_code)
+
+    strategy = ModelStrategy(pipeline=pipeline, feature_columns=list(FEATURE_COLUMNS), threshold=0.40)
+    assert strategy.extra_feature_provider is None
+    assert isinstance(strategy.decide("2018-09-01", station_code, history), bool)

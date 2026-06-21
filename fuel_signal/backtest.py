@@ -208,12 +208,25 @@ class ModelStrategy:
     lets an experiment harness score a freshly trained/calibrated model without
     writing a joblib to ``data/models/`` (no production-artifact side effects).
     Exactly one of ``model_path`` / ``pipeline`` must be given.
+
+    ``extra_feature_provider`` is an optional in-process injection seam for
+    candidate features that have no production ``PriceHistory`` source yet. Called
+    as ``(as_of, station_code, station_price) -> {col: value}`` after the standard
+    feature dict is built; its keys are merged in before the live vector is
+    assembled. ``None`` (default) is a no-op — every existing caller is unchanged.
+    The returned values only matter for columns present in ``feature_columns``
+    (the vector is built from those), so a provider may return extra keys harmlessly.
+    Lets an experiment score an added feature (e.g. a TGP velocity from a cached
+    series) through the real backtest without graduating it to ``FEATURE_COLUMNS``.
     """
 
     model_path: pathlib.Path | None = None
     threshold: float = 0.40
     pipeline: Any = None
     feature_columns: list[str] | None = None
+    extra_feature_provider: (
+        Callable[[str, int, float], dict[str, float | None]] | None
+    ) = None
 
     def __post_init__(self) -> None:
         self.name: str = f"model(τ={self.threshold})"
@@ -271,6 +284,8 @@ class ModelStrategy:
         features["network_px_std_delta_3d"] = history.network_px_std_delta_3d_at(as_of)
         features["lga_phase_std"] = history.lga_phase_std_at(as_of)
         features["lga_phase_std_delta_3d"] = history.lga_phase_std_delta_3d_at(as_of)
+        if self.extra_feature_provider is not None:
+            features.update(self.extra_feature_provider(as_of, station_code, station_price))
         X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
         prob = float(self._pipeline.predict_proba(X)[0][1])
         return prob >= self.threshold
