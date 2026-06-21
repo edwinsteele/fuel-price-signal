@@ -75,6 +75,16 @@ class ArmSpec:
     name: str
     df: pd.DataFrame
     detector_factory: Callable[[list[tuple[str, float]]], CycleDetector] = CycleDetector
+    # Per-arm training/scoring columns. None → the call-level ``feature_columns``.
+    # Lets a candidate arm carry an ADDED column (e.g. baseline 54 vs vel7 55); the
+    # arm's ``df`` must contain every column listed here.
+    feature_columns: list[str] | None = None
+    # In-process source for an added feature with no production PriceHistory yet —
+    # passed straight to this arm's ModelStrategy (see ModelStrategy docstring).
+    # ``(as_of, station_code, station_price) -> {col: value}``. None → baseline path.
+    extra_feature_provider: (
+        Callable[[str, int, float], dict[str, float | None]] | None
+    ) = None
 
 
 @dataclass
@@ -169,6 +179,16 @@ def _fill_row(fold: int, arm: str, own_tau: float, fr: Any) -> dict:
         "price": fr.price, "litres": fr.litres,
         "spend_cents": fr.spend_cents, "emergency": fr.emergency,
     }
+
+
+def _arm_cols(arm: ArmSpec, shared: list[str]) -> list[str]:
+    """Resolve an arm's training/scoring columns. Explicit None (not falsy) check so
+    an intentional empty list isn't silently swapped for the shared list — it's a
+    misconfiguration the caller should hear about, not a fallback trigger."""
+    cols = arm.feature_columns if arm.feature_columns is not None else shared
+    if not cols:
+        raise ValueError(f"arm {arm.name!r} resolved to empty feature_columns.")
+    return cols
 
 
 def _saving_pct(always_cpl: float, model_cpl: float) -> float:
@@ -278,19 +298,26 @@ def run_paired_realised_backtest(
                 fill_rows.append(_fill_row(p.fold, "always_buy", float("nan"), fr))
 
         # Train each arm and record its own τ first (baseline τ defines the held τ).
+        # Each arm trains/scores on its own feature_columns (None → the shared list),
+        # so a candidate arm can carry an ADDED column the baseline lacks.
         fitted: dict[str, tuple[Any, float]] = {}
         for a in arms:
+            cols = _arm_cols(a, feature_columns)
             train_df = a.df.loc[p.train_index]
             fitted[a.name] = _train_calibrate_select_tau(
-                train_df, feature_columns, seed, inner_fold_params
+                train_df, cols, seed, inner_fold_params
             )
         held = held_tau if held_tau is not None else fitted[arms[0].name][1]
 
         for a in arms:
             cal_pipe, own_tau = fitted[a.name]
+            cols = _arm_cols(a, feature_columns)
             cpl_own = aggregate_backtest(
                 histories[a.name],
-                ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=own_tau),
+                ModelStrategy(
+                    pipeline=cal_pipe, feature_columns=cols, threshold=own_tau,
+                    extra_feature_provider=a.extra_feature_provider,
+                ),
                 station_codes, p.val_start, p.val_end, tank,
                 collect_fills=collect_fills,
             )
@@ -304,7 +331,10 @@ def run_paired_realised_backtest(
             else:
                 cpl_held = aggregate_backtest(
                     histories[a.name],
-                    ModelStrategy(pipeline=cal_pipe, feature_columns=feature_columns, threshold=held),
+                    ModelStrategy(
+                        pipeline=cal_pipe, feature_columns=cols, threshold=held,
+                        extra_feature_provider=a.extra_feature_provider,
+                    ),
                     station_codes, p.val_start, p.val_end, tank,
                 )
             rows.append({
@@ -374,6 +404,11 @@ def run_paired_realised_backtest(
         "arms": [a.name for a in arms],
         "baseline_arm": base,
         "feature_columns": list(feature_columns),
+        # Record the RESOLVED columns each arm actually trained/scored on (None →
+        # the shared list), not the raw override — a reader reconstructing an arm
+        # shouldn't have to re-apply the resolution rule, and None would misstate
+        # what the baseline arm used.
+        "arm_feature_columns": {a.name: list(_arm_cols(a, feature_columns)) for a in arms},
         "station_codes": station_codes,
         "seed": seed,
         "held_tau": held_tau,

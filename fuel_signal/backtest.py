@@ -208,12 +208,25 @@ class ModelStrategy:
     lets an experiment harness score a freshly trained/calibrated model without
     writing a joblib to ``data/models/`` (no production-artifact side effects).
     Exactly one of ``model_path`` / ``pipeline`` must be given.
+
+    ``extra_feature_provider`` is an optional in-process injection seam for
+    candidate features that have no production ``PriceHistory`` source yet. Called
+    as ``(as_of, station_code, station_price) -> {col: value}`` after the standard
+    feature dict is built; its keys are merged in before the live vector is
+    assembled. ``None`` (default) is a no-op — every existing caller is unchanged.
+    The returned values only matter for columns present in ``feature_columns``
+    (the vector is built from those), so a provider may return extra keys harmlessly.
+    Lets an experiment score an added feature (e.g. a TGP velocity from a cached
+    series) through the real backtest without graduating it to ``FEATURE_COLUMNS``.
     """
 
     model_path: pathlib.Path | None = None
     threshold: float = 0.40
     pipeline: Any = None
     feature_columns: list[str] | None = None
+    extra_feature_provider: (
+        Callable[[str, int, float], dict[str, float | None]] | None
+    ) = None
 
     def __post_init__(self) -> None:
         self.name: str = f"model(τ={self.threshold})"
@@ -223,7 +236,14 @@ class ModelStrategy:
             if not hasattr(self.pipeline, "predict_proba"):
                 raise ValueError("ModelStrategy(pipeline=...) needs a predict_proba interface.")
             self._pipeline = self.pipeline
-            self._feature_columns = list(self.feature_columns or FEATURE_COLUMNS)
+            # Explicit None check (not `or`): an empty list is a misconfiguration to
+            # surface, not a silent swap for the 54-col default — matches realised's
+            # _arm_cols so the two gatekeepers agree.
+            self._feature_columns = list(
+                self.feature_columns if self.feature_columns is not None else FEATURE_COLUMNS
+            )
+            if not self._feature_columns:
+                raise ValueError("ModelStrategy(feature_columns=[]) is empty; pass columns or None.")
             return
         if self.model_path is None:
             raise ValueError("ModelStrategy requires either model_path or pipeline.")
@@ -271,7 +291,28 @@ class ModelStrategy:
         features["network_px_std_delta_3d"] = history.network_px_std_delta_3d_at(as_of)
         features["lga_phase_std"] = history.lga_phase_std_at(as_of)
         features["lga_phase_std_delta_3d"] = history.lga_phase_std_delta_3d_at(as_of)
-        X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
+        if self.extra_feature_provider is not None:
+            extra = self.extra_feature_provider(as_of, station_code, station_price)
+            # The seam is add-only: shadowing a core key would silently change model
+            # behaviour, so reject collisions loudly rather than overwrite. (A None
+            # value is fine — it becomes NaN in the float vector, like the Phase-4
+            # features that already default to None.)
+            shadowed = extra.keys() & features.keys()
+            if shadowed:
+                raise ValueError(
+                    f"extra_feature_provider shadows core feature(s): {sorted(shadowed)}"
+                )
+            features.update(extra)
+        try:
+            X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
+        except KeyError as e:
+            # A feature_columns entry that neither the standard dict nor the provider
+            # supplied — usually a provider that omits a key for some date, or a typo
+            # in feature_columns. Name it instead of a bare KeyError mid-backtest.
+            raise ValueError(
+                f"feature {e.args[0]!r} is in feature_columns but no value was produced "
+                f"for it (extra_feature_provider must supply every added column)."
+            ) from e
         prob = float(self._pipeline.predict_proba(X)[0][1])
         return prob >= self.threshold
 
