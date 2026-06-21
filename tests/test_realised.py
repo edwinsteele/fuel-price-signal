@@ -15,6 +15,7 @@ import pytest
 
 from experiments.lib.realised import (
     ArmSpec,
+    _arm_cols,
     _plan_folds,
     _saving_pct,
     _train_calibrate_select_tau,
@@ -94,6 +95,16 @@ def test_paired_backtest_rejects_mismatched_index():
         run_paired_realised_backtest(
             [ArmSpec("baseline", df), ArmSpec("candidate", other)], ["f1", "f2"]
         )
+
+
+def test_arm_cols_resolves_explicit_none_not_falsy():
+    """None → shared list; an explicit list is used as-is; an empty list raises."""
+    df = _synth_df(n=10)
+    shared = ["f1", "f2"]
+    assert _arm_cols(ArmSpec("a", df), shared) == shared            # None → shared
+    assert _arm_cols(ArmSpec("a", df, feature_columns=["f1"]), shared) == ["f1"]
+    with pytest.raises(ValueError, match="empty feature_columns"):  # [] is loud, not a fallback
+        _arm_cols(ArmSpec("a", df, feature_columns=[]), shared)
 
 
 def test_train_calibrate_select_tau_raises_without_oof_folds():

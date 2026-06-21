@@ -181,6 +181,16 @@ def _fill_row(fold: int, arm: str, own_tau: float, fr: Any) -> dict:
     }
 
 
+def _arm_cols(arm: ArmSpec, shared: list[str]) -> list[str]:
+    """Resolve an arm's training/scoring columns. Explicit None (not falsy) check so
+    an intentional empty list isn't silently swapped for the shared list — it's a
+    misconfiguration the caller should hear about, not a fallback trigger."""
+    cols = arm.feature_columns if arm.feature_columns is not None else shared
+    if not cols:
+        raise ValueError(f"arm {arm.name!r} resolved to empty feature_columns.")
+    return cols
+
+
 def _saving_pct(always_cpl: float, model_cpl: float) -> float:
     if not (always_cpl > 0) or math.isnan(model_cpl):
         return float("nan")
@@ -292,15 +302,16 @@ def run_paired_realised_backtest(
         # so a candidate arm can carry an ADDED column the baseline lacks.
         fitted: dict[str, tuple[Any, float]] = {}
         for a in arms:
+            cols = _arm_cols(a, feature_columns)
             train_df = a.df.loc[p.train_index]
             fitted[a.name] = _train_calibrate_select_tau(
-                train_df, a.feature_columns or feature_columns, seed, inner_fold_params
+                train_df, cols, seed, inner_fold_params
             )
         held = held_tau if held_tau is not None else fitted[arms[0].name][1]
 
         for a in arms:
             cal_pipe, own_tau = fitted[a.name]
-            cols = a.feature_columns or feature_columns
+            cols = _arm_cols(a, feature_columns)
             cpl_own = aggregate_backtest(
                 histories[a.name],
                 ModelStrategy(

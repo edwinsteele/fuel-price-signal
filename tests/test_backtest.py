@@ -907,6 +907,26 @@ def test_extra_feature_provider_injects_added_column_into_vector():
     assert captured["X"][0, feature_columns.index("tgp_delta_7d")] == -3.25
 
 
+def test_extra_feature_provider_rejects_core_key_shadowing():
+    """A provider that returns a core feature key raises rather than silently overwrite."""
+    import pytest
+
+    n, period, station_code = 270, 45, 892
+    dates = _dates_from("2018-01-01", n)
+    prices = [(d, 180.0 + 20.0 * math.sin(2 * math.pi * i / period)) for i, d in enumerate(dates)]
+    pipeline, history = _calibrated_pipeline_and_history(prices, station_code)
+
+    def shadowing_provider(as_of, sc, station_price):
+        return {"station_price_cents": 1.0}  # collides with a core feature key
+
+    strategy = ModelStrategy(
+        pipeline=pipeline, feature_columns=list(FEATURE_COLUMNS), threshold=0.40,
+        extra_feature_provider=shadowing_provider,
+    )
+    with pytest.raises(ValueError, match="shadows core feature"):
+        strategy.decide("2018-09-01", station_code, history)
+
+
 def test_decide_without_provider_is_unchanged():
     """extra_feature_provider=None (default) is a no-op — baseline path unchanged."""
     n, period, station_code = 270, 45, 891

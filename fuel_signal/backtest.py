@@ -285,7 +285,17 @@ class ModelStrategy:
         features["lga_phase_std"] = history.lga_phase_std_at(as_of)
         features["lga_phase_std_delta_3d"] = history.lga_phase_std_delta_3d_at(as_of)
         if self.extra_feature_provider is not None:
-            features.update(self.extra_feature_provider(as_of, station_code, station_price))
+            extra = self.extra_feature_provider(as_of, station_code, station_price)
+            # The seam is add-only: shadowing a core key would silently change model
+            # behaviour, so reject collisions loudly rather than overwrite. (A None
+            # value is fine — it becomes NaN in the float vector, like the Phase-4
+            # features that already default to None.)
+            shadowed = extra.keys() & features.keys()
+            if shadowed:
+                raise ValueError(
+                    f"extra_feature_provider shadows core feature(s): {sorted(shadowed)}"
+                )
+            features.update(extra)
         X = np.array([[features[col] for col in self._feature_columns]], dtype=float)
         prob = float(self._pipeline.predict_proba(X)[0][1])
         return prob >= self.threshold
