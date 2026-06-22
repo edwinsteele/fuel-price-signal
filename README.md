@@ -66,6 +66,17 @@ uv run --env-file .env python -m fuel_signal.live
 
 This writes one snapshot CSV to `data/snapshots/YYYY/MM/YYYY-MM-DD.csv` and is also what GitHub Actions runs daily.
 
+### 2b. (Optional) Refresh the AIP TGP series
+
+Pulls the AIP Sydney ULP Terminal Gate Price (wholesale floor, c/L) and refreshes `data/tgp/tgp_sydney.csv` — the upstream series for the pending `tgp_delta_7d` feature (#271).
+
+```bash
+uv run python -m fuel_signal.tgp                       # scrape + download the latest AIP xlsx
+uv run python -m fuel_signal.tgp --from-xlsx FILE.xlsx # parse a local xlsx instead (offline/backfill)
+```
+
+The AIP file always carries the full 2004→present history, so each run overwrites the CSV; unchanged days produce no commit. The `Daily AIP TGP fetch` GitHub Action runs this and commits `data/tgp/`.
+
 ### 3. Load everything into SQLite
 
 ```bash
