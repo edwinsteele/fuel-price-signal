@@ -4,6 +4,7 @@ import datetime
 import pathlib
 
 import pandas as pd
+import pytest
 import responses as rsps
 from click.testing import CliRunner
 
@@ -73,6 +74,22 @@ def test_parse_sydney_series_accepts_bytes(tmp_path):
     _make_xlsx(xlsx, ["2004-01-01"], [86.3])
     s = parse_sydney_series(xlsx.read_bytes())
     assert s.loc["2004-01-01"] == 86.3
+
+
+def test_parse_sydney_series_raises_on_layout_change(tmp_path):
+    wrong_sheet = tmp_path / "sheet.xlsx"
+    pd.DataFrame({"date": ["2004-01-01"], "Sydney": [86.3]}).to_excel(
+        wrong_sheet, sheet_name="Wrong", index=False
+    )
+    with pytest.raises(RuntimeError, match="sheet"):
+        parse_sydney_series(wrong_sheet)
+
+    no_city = tmp_path / "city.xlsx"
+    pd.DataFrame({"date": ["2004-01-01"], "Melbourne": [85.0]}).to_excel(
+        no_city, sheet_name="Petrol TGP", index=False
+    )
+    with pytest.raises(RuntimeError, match="Sydney"):
+        parse_sydney_series(no_city)
 
 
 # ---------------------------------------------------------------------------

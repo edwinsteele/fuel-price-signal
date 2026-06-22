@@ -97,7 +97,16 @@ def parse_sydney_series(source: str | pathlib.Path | bytes) -> pd.Series:
     """
     if isinstance(source, bytes):
         source = io.BytesIO(source)
-    raw = pd.read_excel(source, sheet_name=SHEET)
+    try:
+        raw = pd.read_excel(source, sheet_name=SHEET)
+    except ValueError as exc:  # pandas raises ValueError when the sheet is absent
+        raise RuntimeError(
+            f"AIP xlsx has no {SHEET!r} sheet — layout may have changed"
+        ) from exc
+    if CITY not in raw.columns:
+        raise RuntimeError(
+            f"AIP {SHEET!r} sheet missing {CITY!r} column — layout may have changed"
+        )
     date_col = raw.columns[0]
     df = raw[[date_col, CITY]].rename(columns={date_col: "date", CITY: "tgp_cents"})
     df["date"] = pd.to_datetime(df["date"], errors="coerce")

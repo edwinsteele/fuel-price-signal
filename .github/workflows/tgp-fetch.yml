@@ -38,7 +38,10 @@ jobs:
             git push && break
             if [ "$attempt" -lt "$max_attempts" ]; then
               sleep_time=$((2 ** attempt))
-              echo "Push failed (attempt $attempt/$max_attempts), retrying in ${sleep_time}s..."
+              echo "Push failed (attempt $attempt/$max_attempts), rebasing on remote then retrying in ${sleep_time}s..."
+              # main may have advanced (e.g. a merge landed); rebase before retry
+              # so the loop recovers from non-fast-forward, not just transient errors.
+              git pull --rebase || echo "rebase failed; retrying push anyway"
               sleep "$sleep_time"
             else
               echo "Push failed after $max_attempts attempts"
