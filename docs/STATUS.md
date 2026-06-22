@@ -13,6 +13,7 @@ Project-level state for agents picking up cold. Update this file when a phase co
 | `db.py` | Done | SQLite schema; upsert/load helpers; all read helpers |
 | `fill.py` | Done | Forward-fill per-station gaps into `daily_prices` |
 | `live.py` | Done | FuelCheck OAuth2; all-NSW all-fuel-type snapshots |
+| `tgp.py` | Partial | AIP Sydney TGP downloader → `data/tgp/tgp_sydney.csv`; daily `tgp-fetch.yml` action. Feeds pending `tgp_delta_7d` feature (#271); not yet in DB/features/model. |
 | `series.py` | Done | `resolve()`, `resolve_members()`, `enumerate_groups()`, `SeriesError` |
 | `cycle.py` | Done | `CycleDetector`; `detect(as_of_date)` → `CycleState`; sticky `find_peaks` confirmation (#250, no boundary whipsaw); 26 unit tests |
 | `signal.py` | Done | Four-signal port; `combine_signals`; 38 unit + integration tests |

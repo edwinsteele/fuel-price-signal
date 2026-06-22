@@ -1,0 +1,47 @@
+name: Daily AIP TGP fetch
+
+on:
+  schedule:
+    # Must land before the ~5am Sydney price-inference run, so the freshest TGP
+    # is committed first. The tgp_delta_7d feature is shift(1) — inference at day
+    # T needs T-1's TGP (available since T-1 closed), not today's. 17:00 UTC is
+    # ~3-4am Sydney: before 5am in both AEST (19:00 UTC) and AEDT (18:00 UTC),
+    # with buffer. TODO(#271): AIP's own publish time is unknown — confirm from
+    # the tgp.py data_lag_days logs that T-1 is reliably present by this slot.
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Fetch TGP series
+        run: uv run python -m fuel_signal.tgp
+
+      - name: Commit TGP CSV
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/tgp/
+          git diff --cached --quiet || git commit -m "tgp: $(date -u +%Y-%m-%d)"
+          max_attempts=5
+          for attempt in $(seq 1 "$max_attempts"); do
+            git push && break
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              sleep_time=$((2 ** attempt))
+              echo "Push failed (attempt $attempt/$max_attempts), retrying in ${sleep_time}s..."
+              sleep "$sleep_time"
+            else
+              echo "Push failed after $max_attempts attempts"
+              exit 1
+            fi
+          done
