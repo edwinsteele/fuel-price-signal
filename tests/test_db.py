@@ -16,15 +16,18 @@ from fuel_signal.db import (
     gradient_by_lga,
     insert_prices,
     is_file_loaded,
+    latest_tgp_date,
     load_all_cleaned,
     load_all_snapshots,
     load_cleaned_csv,
     load_snapshot_csv,
+    load_tgp_csv,
     mark_file_loaded,
     normalize_address,
     open_db,
     station_price_series,
     station_search,
+    tgp_series,
     upsert_daily_prices,
     upsert_stations,
 )
@@ -872,3 +875,88 @@ def test_gradient_by_lga_councils_filter(conn):
     councils_seen = {r[0] for r in results}
     assert "Blue Mountains" in councils_seen
     assert len(councils_seen) == 1, "councils filter must exclude other LGAs"
+
+
+# ---------------------------------------------------------------------------
+# TGP table
+# ---------------------------------------------------------------------------
+
+def _write_tgp_csv(path: pathlib.Path, rows: list[tuple[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["date", "tgp_cents"])
+        writer.writerows(rows)
+
+
+def test_load_tgp_csv_and_read_series(conn, tmp_path):
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [
+        ("2024-01-01", "129.3175"),
+        ("2024-01-02", "130.05"),
+        ("2024-01-03", "131.2"),
+    ])
+    n = load_tgp_csv(conn, csv_path)
+    assert n == 3
+    series = tgp_series(conn)
+    assert series == [
+        ("2024-01-01", 129.3175),  # sub-cent precision preserved (REAL, not decicents)
+        ("2024-01-02", 130.05),
+        ("2024-01-03", 131.2),
+    ]
+
+
+def test_load_tgp_csv_start_date_filter(conn, tmp_path):
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-06-01", "120.0")])
+    load_tgp_csv(conn, csv_path)
+    assert tgp_series(conn, start_date="2024-02-01") == [("2024-06-01", 120.0)]
+
+
+def test_load_tgp_csv_self_reconciling_revision(conn, tmp_path):
+    """A re-load with a revised price overwrites the existing row."""
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-01-02", "101.0")])
+    load_tgp_csv(conn, csv_path)
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-01-02", "99.5")])
+    load_tgp_csv(conn, csv_path)
+    assert tgp_series(conn) == [("2024-01-01", 100.0), ("2024-01-02", 99.5)]
+
+
+def test_load_tgp_csv_self_reconciling_removal(conn, tmp_path):
+    """A re-load missing a previously-present date drops it (DELETE + INSERT)."""
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-01-02", "101.0")])
+    load_tgp_csv(conn, csv_path)
+    _write_tgp_csv(csv_path, [("2024-01-02", "101.0")])
+    load_tgp_csv(conn, csv_path)
+    assert tgp_series(conn) == [("2024-01-02", 101.0)]
+
+
+def test_load_tgp_csv_skips_unparseable_rows(conn, tmp_path):
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [
+        ("2024-01-01", "100.0"),
+        ("bad-date", "101.0"),  # bad date, valid price
+        ("2024-01-02", "x"),    # valid date, bad price
+    ])
+    assert load_tgp_csv(conn, csv_path) == 1
+    assert tgp_series(conn) == [("2024-01-01", 100.0)]
+
+
+def test_load_tgp_csv_empty_parse_leaves_table_untouched(conn, tmp_path):
+    """A CSV that parses to zero rows must not wipe an existing table."""
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0")])
+    load_tgp_csv(conn, csv_path)
+    _write_tgp_csv(csv_path, [("bad-date", "x")])
+    assert load_tgp_csv(conn, csv_path) == 0
+    assert tgp_series(conn) == [("2024-01-01", 100.0)]
+
+
+def test_latest_tgp_date(conn, tmp_path):
+    assert latest_tgp_date(conn) is None
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-03-15", "110.0")])
+    load_tgp_csv(conn, csv_path)
+    assert latest_tgp_date(conn) == "2024-03-15"

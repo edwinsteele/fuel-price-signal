@@ -17,6 +17,10 @@ from fuel_signal.postcode_council import SYDNEY_METRO_POSTCODES, primary_council
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = pathlib.Path("fuel_signal.db")
+# Canonical Sydney TGP CSV maintained by fuel_signal.tgp (kept in sync with
+# fuel_signal.tgp.DEFAULT_CSV_PATH; literal here to keep db.py free of the
+# downloader's requests/bs4 imports).
+DEFAULT_TGP_CSV_PATH = pathlib.Path("data/tgp/tgp_sydney.csv")
 
 # ---------------------------------------------------------------------------
 # Address normalization
@@ -166,6 +170,13 @@ CREATE TABLE IF NOT EXISTS lga_leadership (
     PRIMARY KEY (lga, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS lga_leadership_snapshot ON lga_leadership(snapshot_date);
+
+CREATE TABLE IF NOT EXISTS tgp (
+    tgp_date  INTEGER PRIMARY KEY,   -- YYYYMMDD; AIP Sydney ULP terminal gate price date
+    tgp_cents REAL    NOT NULL       -- c/L GST-inclusive; REAL (not decicents) — the AIP
+                                     -- series carries sub-cent precision that decicent
+                                     -- rounding would lose and corrupt tgp_delta_7d
+);
 """
 
 
@@ -1093,6 +1104,64 @@ def get_lga_leadership_board(
 
 
 # ---------------------------------------------------------------------------
+# TGP (terminal gate price) helpers
+# ---------------------------------------------------------------------------
+
+def load_tgp_csv(
+    conn: sqlite3.Connection,
+    csv_path: pathlib.Path = DEFAULT_TGP_CSV_PATH,
+) -> int:
+    """Load the canonical Sydney TGP CSV into the tgp table. Returns rows written.
+
+    CSV schema (from fuel_signal.tgp): date (YYYY-MM-DD), tgp_cents (c/L GST-incl).
+    Full-rewrite/self-reconciling, mirroring the downloader: the table is cleared
+    and repopulated from the CSV in one transaction, so revisions *and* removals
+    auto-correct (the table exactly mirrors the file). Rows with an unparseable
+    date or price are skipped. As a safety net, a CSV that parses to zero rows
+    (read failure / wholly malformed) leaves the existing table untouched.
+    """
+    rows: list[tuple[int, float]] = []
+    skipped = 0
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            try:
+                rows.append((_date_to_int(row["date"]), float(row["tgp_cents"])))
+            except (ValueError, KeyError):
+                skipped += 1
+    if not rows:
+        logger.warning("No parseable TGP rows in %s (%d skipped); table unchanged", csv_path, skipped)
+        return 0
+    if skipped:
+        logger.warning("Skipped %d unparseable TGP row(s) in %s", skipped, csv_path)
+    # DELETE + INSERT (not INSERT OR REPLACE) so removed dates don't linger;
+    # both statements run before the single commit, so the swap is atomic.
+    conn.execute("DELETE FROM tgp")
+    conn.executemany("INSERT INTO tgp (tgp_date, tgp_cents) VALUES (?, ?)", rows)
+    conn.commit()
+    return len(rows)
+
+
+def tgp_series(
+    conn: sqlite3.Connection,
+    start_date: str | None = None,
+) -> list[tuple[str, float]]:
+    """Return [(tgp_date, tgp_cents)] for the Sydney ULP TGP series, date-ascending."""
+    query = "SELECT tgp_date, tgp_cents FROM tgp"
+    params: list = []
+    if start_date:
+        query += " WHERE tgp_date >= ?"
+        params.append(_date_to_int(start_date))
+    query += " ORDER BY tgp_date"
+    return [(_date_from_int(r[0]), r[1]) for r in conn.execute(query, params)]
+
+
+def latest_tgp_date(conn: sqlite3.Connection) -> str | None:
+    """Return the most recent tgp_date (YYYY-MM-DD) in the tgp table, or None."""
+    row = conn.execute("SELECT MAX(tgp_date) FROM tgp").fetchone()
+    return _date_from_int(row[0]) if row and row[0] else None
+
+
+# ---------------------------------------------------------------------------
 # Entry point: rebuild DB from snapshots + historical data
 # ---------------------------------------------------------------------------
 
@@ -1133,6 +1202,12 @@ def main(db_path: str, force: bool, verbose: bool) -> None:
     if cleaned_dir.exists():
         inserted, skipped = load_all_cleaned(conn, cleaned_dir, force=force)
         logger.info("Historical: %d inserted, %d skipped", inserted, skipped)
+
+    if DEFAULT_TGP_CSV_PATH.exists():
+        n_tgp = load_tgp_csv(conn, DEFAULT_TGP_CSV_PATH)
+        logger.info("TGP: %d rows from %s", n_tgp, DEFAULT_TGP_CSV_PATH)
+    else:
+        logger.warning("No %s — run fuel_signal.tgp first to populate the tgp table", DEFAULT_TGP_CSV_PATH)
 
     conn.close()
 
