@@ -1114,22 +1114,29 @@ def load_tgp_csv(
     """Load the canonical Sydney TGP CSV into the tgp table. Returns rows written.
 
     CSV schema (from fuel_signal.tgp): date (YYYY-MM-DD), tgp_cents (c/L GST-incl).
-    Uses INSERT OR REPLACE so the load is full-rewrite/self-reconciling, mirroring
-    the downloader: each run replaces every row, so a rare historical revision
-    auto-corrects. Rows with an unparseable date or price are skipped.
+    Full-rewrite/self-reconciling, mirroring the downloader: the table is cleared
+    and repopulated from the CSV in one transaction, so revisions *and* removals
+    auto-correct (the table exactly mirrors the file). Rows with an unparseable
+    date or price are skipped. As a safety net, a CSV that parses to zero rows
+    (read failure / wholly malformed) leaves the existing table untouched.
     """
     rows: list[tuple[int, float]] = []
+    skipped = 0
     with open(csv_path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             try:
                 rows.append((_date_to_int(row["date"]), float(row["tgp_cents"])))
             except (ValueError, KeyError):
-                continue
+                skipped += 1
     if not rows:
+        logger.warning("No parseable TGP rows in %s (%d skipped); table unchanged", csv_path, skipped)
         return 0
-    conn.executemany(
-        "INSERT OR REPLACE INTO tgp (tgp_date, tgp_cents) VALUES (?, ?)", rows
-    )
+    if skipped:
+        logger.warning("Skipped %d unparseable TGP row(s) in %s", skipped, csv_path)
+    # DELETE + INSERT (not INSERT OR REPLACE) so removed dates don't linger;
+    # both statements run before the single commit, so the swap is atomic.
+    conn.execute("DELETE FROM tgp")
+    conn.executemany("INSERT INTO tgp (tgp_date, tgp_cents) VALUES (?, ?)", rows)
     conn.commit()
     return len(rows)
 

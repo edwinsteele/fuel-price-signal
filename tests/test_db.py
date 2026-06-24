@@ -913,8 +913,8 @@ def test_load_tgp_csv_start_date_filter(conn, tmp_path):
     assert tgp_series(conn, start_date="2024-02-01") == [("2024-06-01", 120.0)]
 
 
-def test_load_tgp_csv_self_reconciling(conn, tmp_path):
-    """A re-load with a revised price overwrites the existing row (INSERT OR REPLACE)."""
+def test_load_tgp_csv_self_reconciling_revision(conn, tmp_path):
+    """A re-load with a revised price overwrites the existing row."""
     csv_path = tmp_path / "tgp.csv"
     _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-01-02", "101.0")])
     load_tgp_csv(conn, csv_path)
@@ -923,10 +923,35 @@ def test_load_tgp_csv_self_reconciling(conn, tmp_path):
     assert tgp_series(conn) == [("2024-01-01", 100.0), ("2024-01-02", 99.5)]
 
 
+def test_load_tgp_csv_self_reconciling_removal(conn, tmp_path):
+    """A re-load missing a previously-present date drops it (DELETE + INSERT)."""
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-01-02", "101.0")])
+    load_tgp_csv(conn, csv_path)
+    _write_tgp_csv(csv_path, [("2024-01-02", "101.0")])
+    load_tgp_csv(conn, csv_path)
+    assert tgp_series(conn) == [("2024-01-02", 101.0)]
+
+
 def test_load_tgp_csv_skips_unparseable_rows(conn, tmp_path):
     csv_path = tmp_path / "tgp.csv"
-    _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("bad-date", "x")])
+    _write_tgp_csv(csv_path, [
+        ("2024-01-01", "100.0"),
+        ("bad-date", "101.0"),  # bad date, valid price
+        ("2024-01-02", "x"),    # valid date, bad price
+    ])
     assert load_tgp_csv(conn, csv_path) == 1
+    assert tgp_series(conn) == [("2024-01-01", 100.0)]
+
+
+def test_load_tgp_csv_empty_parse_leaves_table_untouched(conn, tmp_path):
+    """A CSV that parses to zero rows must not wipe an existing table."""
+    csv_path = tmp_path / "tgp.csv"
+    _write_tgp_csv(csv_path, [("2024-01-01", "100.0")])
+    load_tgp_csv(conn, csv_path)
+    _write_tgp_csv(csv_path, [("bad-date", "x")])
+    assert load_tgp_csv(conn, csv_path) == 0
+    assert tgp_series(conn) == [("2024-01-01", 100.0)]
 
 
 def test_latest_tgp_date(conn, tmp_path):
