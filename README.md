@@ -77,13 +77,15 @@ uv run python -m fuel_signal.tgp --from-xlsx FILE.xlsx # parse a local xlsx inst
 
 The AIP file always carries the full 2004→present history, so each run overwrites the CSV; unchanged days produce no commit. The `Daily AIP TGP fetch` GitHub Action runs this and commits `data/tgp/`.
 
+Step 3 below ingests this CSV into the `tgp` table (full-rewrite/self-reconciling, so re-running is safe), the upstream of the `tgp_delta_7d` feature.
+
 ### 3. Load everything into SQLite
 
 ```bash
 uv run python -m fuel_signal.db
 ```
 
-Loads all snapshot CSVs (from `data/snapshots/`) then all historical cleaned CSVs (from `data/cleaned/`).
+Loads all snapshot CSVs (from `data/snapshots/`) then all historical cleaned CSVs (from `data/cleaned/`), and finally the Sydney TGP CSV (from `data/tgp/tgp_sydney.csv`, if present) into the `tgp` table.
 
 ### 4. Forward-fill daily price gaps
 
