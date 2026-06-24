@@ -34,9 +34,11 @@ from fuel_signal.features import (
     FEATURE_COLUMNS,
     MIN_TRAINING_ROWS_PER_STATION,
     NETWORK_FEATURE_COLUMNS,
+    TGP_FEATURE_COLUMNS,
     _calendar_delta,
     _lga_phase_std_per_date,
     _network_px_std_per_date,
+    _tgp_delta_by_date,
     assemble_feature_rows,
     compute_features,
 )
@@ -1223,3 +1225,76 @@ def test_lga_phase_std_pit_safety(tmp_path):
     assert std_full == std_trunc, (
         f"lga_phase_std PIT drift: full={std_full}, truncated={std_trunc}"
     )
+
+
+# ---------------------------------------------------------------------------
+# tgp_delta_7d (#271)
+# ---------------------------------------------------------------------------
+
+def _add_tgp(conn, rows: list[tuple[str, float]]) -> None:
+    conn.executemany(
+        "INSERT OR REPLACE INTO tgp (tgp_date, tgp_cents) VALUES (?, ?)",
+        [(int(d.replace("-", "")), c) for d, c in rows],
+    )
+    conn.commit()
+
+
+def test_tgp_delta_by_date_lag_and_diff(conn):
+    # Linear ramp from 2024-01-01: tgp on day i = 100 + i. With the 1-day lag,
+    # tgp_delta_7d(D) = tgp(D-1) - tgp(D-8) = 7.0 wherever both endpoints exist.
+    base = datetime.date(2024, 1, 1)
+    _add_tgp(conn, [
+        ((base + datetime.timedelta(days=i)).isoformat(), 100.0 + i)
+        for i in range(20)
+    ])
+    delta = _tgp_delta_by_date(conn)
+    assert delta["2024-01-15"] == pytest.approx(7.0)
+    assert delta["2024-01-09"] == pytest.approx(7.0)  # earliest valid date (needs D-8)
+    assert "2024-01-08" not in delta  # D-8 falls before the series start
+
+
+def test_tgp_delta_by_date_ffills_gap(conn):
+    # Linear ramp value(dom) = 100 + (dom - 1) over 2024-01-01..20, with a 2-day
+    # gap (01-13, 01-14) omitted. asfreq + ffill must carry 01-12's value across
+    # the gap, else any delta whose lagged endpoint lands in it would be NaN.
+    rows = [
+        (f"2024-01-{dom:02d}", 100.0 + (dom - 1))
+        for dom in range(1, 21)
+        if dom not in (13, 14)
+    ]
+    _add_tgp(conn, rows)
+    delta = _tgp_delta_by_date(conn)
+    # D=01-14: pit(01-14)=ffilled(01-13)=value(01-12)=111; pit(01-07)=value(01-06)=105
+    assert delta["2024-01-14"] == pytest.approx(6.0)
+    # Outside the gap the constant slope-1 ramp gives the full 7.0
+    assert delta["2024-01-20"] == pytest.approx(7.0)
+
+
+def test_tgp_delta_by_date_empty_table(conn):
+    assert _tgp_delta_by_date(conn) == {}
+
+
+def test_assembler_includes_tgp_delta_column(conn):
+    """assemble_feature_rows output carries tgp_delta_7d, populated and float64."""
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    base = datetime.date.fromisoformat(_START)
+    _add_tgp(conn, [
+        ((base + datetime.timedelta(days=i)).isoformat(), 120.0 + 0.1 * i)
+        for i in range(180)
+    ])
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+    assert TGP_FEATURE_COLUMNS == ["tgp_delta_7d"]
+    assert "tgp_delta_7d" in df.columns
+    assert str(df["tgp_delta_7d"].dtype) == "float64"
+    assert df["tgp_delta_7d"].notna().any()
+
+
+def test_assembler_tgp_delta_float64_when_table_empty(conn):
+    """With no TGP rows the column is present, all-NaN, and still float64."""
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+    assert "tgp_delta_7d" in df.columns
+    assert str(df["tgp_delta_7d"].dtype) == "float64"
+    assert df["tgp_delta_7d"].isna().all()

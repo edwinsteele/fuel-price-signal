@@ -101,6 +101,13 @@ NETWORK_FEATURE_COLUMNS: list[str] = [
     "lga_phase_std_delta_3d",
 ]
 
+# TGP momentum feature (#271), graduated from experiment 2026-06-20_leading_indicators.
+# Separate list (like NETWORK_FEATURE_COLUMNS) so the column lands in the features
+# CSV now while the trained model contract (FEATURE_COLUMNS) only changes at the
+# chip-4 re-lock retrain.
+TGP_DELTA_DAYS: int = 7
+TGP_FEATURE_COLUMNS: list[str] = ["tgp_delta_7d"]
+
 # Brand trough feature columns are DB-derived (qualifying brands depend on
 # station counts) so they cannot be a module-level constant.  Call
 # brand_feature_columns(conn) within assemble_feature_rows to get the list,
@@ -307,6 +314,37 @@ def _calendar_delta(
     return result
 
 
+def _tgp_delta_by_date(
+    conn: sqlite3.Connection,
+    n: int = TGP_DELTA_DAYS,
+) -> dict[str, float]:
+    """Per-date PIT Sydney ULP TGP N-day momentum, keyed by ISO date string.
+
+    Matches the graduating experiment (2026-06-20_leading_indicators) exactly:
+    the raw weekday series is resampled to a daily grid, weekend-/holiday-ffilled,
+    then lagged one day (``pit = s.asfreq("D").ffill().shift(1)``) so inference on
+    day D reads TGP only up to D−1. The feature is ``pit(D) − pit(D−n)``.
+
+    Returned as {date_iso: value} for ``.get()`` onto label rows; dates with no
+    valid prior (start of history) are absent. MUST stay bit-identical to the
+    live provider added in chip 5 — see the realised-arbiter two-sites rule.
+    """
+    series = _db.tgp_series(conn)
+    if not series:
+        return {}
+    s = pd.Series(
+        [c for _, c in series],
+        index=pd.to_datetime([d for d, _ in series]),
+    ).sort_index()
+    pit = s.asfreq("D").ffill().shift(1)
+    delta = pit - pit.shift(n)
+    return {
+        ts.strftime("%Y-%m-%d"): float(v)
+        for ts, v in delta.items()
+        if pd.notna(v)
+    }
+
+
 def _build_feature_dict(
     state: CycleState,
     station_price: float,
@@ -429,6 +467,7 @@ def assemble_feature_rows(
         + FEATURE_COLUMNS
         + LGA_FEATURE_COLUMNS
         + NETWORK_FEATURE_COLUMNS
+        + TGP_FEATURE_COLUMNS
         + brand_cols
     )
     if label_df.empty:
@@ -589,6 +628,11 @@ def assemble_feature_rows(
         lga_phase_std_by_date, label_date_strs
     )
 
+    # Cache 14: tgp_delta_7d per date — PIT Sydney ULP TGP 7-day momentum (#271).
+    # Empty when the tgp table is unpopulated (e.g. a DB built before chip 2 ran);
+    # the column is then all-NaN, never a row drop.
+    tgp_delta_by_date = _tgp_delta_by_date(conn)
+
     # Every (station_code, price_date) in label_df came from daily_prices, and
     # every label date is in cd._series for the same reason — so cache misses
     # on station_price / sydney_avg are upstream bugs, not data conditions.
@@ -617,6 +661,7 @@ def assemble_feature_rows(
         feature_dict["network_px_std_delta_3d"] = network_px_std_delta_by_date.get(date_d)
         feature_dict["lga_phase_std"] = lga_phase_std_by_date.get(date_d)
         feature_dict["lga_phase_std_delta_3d"] = lga_phase_std_delta_by_date.get(date_d)
+        feature_dict["tgp_delta_7d"] = tgp_delta_by_date.get(date_d)
         for _brand in qualifying_brand_list:
             feature_dict[f"days_since_trough_entry_{brand_slug(_brand)}"] = (
                 brand_days_since_by_key.get((date_d, _brand))
@@ -630,6 +675,8 @@ def assemble_feature_rows(
     # to any column with mixed int+None or all-None values.  LightGBM rejects
     # object columns — cast to float so None → NaN and dtype becomes float64.
     _cast_trough_columns(df)
+    # Same object-dtype risk for tgp_delta_7d when the tgp table is empty (all-None).
+    df["tgp_delta_7d"] = pd.to_numeric(df["tgp_delta_7d"], errors="raise")
     return df
 
 
