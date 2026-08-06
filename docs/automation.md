@@ -2,6 +2,8 @@
 
 This document describes how `chore` and `polish` issues flow from filing to merged PR with minimal owner involvement, while `design` issues stay manual.
 
+Issues referenced below live in Beads (`bd`), not GitHub Issues — see [AGENTS.md § Beads](../AGENTS.md#beads). PRs, CI, and review threads are still on GitHub; only issue tracking moved.
+
 ## Issue labels
 
 | Label | Who files | Who works it | Merge path |

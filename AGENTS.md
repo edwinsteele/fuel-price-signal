@@ -320,6 +320,18 @@ Tests are required alongside all implementation. Key areas:
 - DB read/write roundtrips
 - Backtest engine: known price series + known strategy → verify simulated spend
 
+## Beads
+
+Work items (what was previously GitHub Issues) live in [Beads](https://github.com/gastownhall/beads) (`bd`), a git-native, dependency-aware issue tracker. GitHub Issues were retired for this project 2026-08-06; PRs, CI, and reviews still live on GitHub as before — only the backlog moved.
+
+- `.beads/` holds bd's config (git-tracked) and its Dolt database (`.beads/embeddeddolt/`, gitignored — it does not travel via ordinary `git push`). Cross-checkout sync is `bd dolt pull` / `bd dolt push` against the `origin` Dolt remote, not git.
+- Finding work: `bd ready` (open, unblocked), `bd show <id>` (full detail + deps), `bd search <query>`.
+- Working an issue: `bd update <id> --claim` (marks in_progress), `bd close <id>` when done — there is no GitHub auto-close-on-merge equivalent, closing is always an explicit step. Run `bd dolt push` after any write you want visible elsewhere.
+- Filing work: `bd create --title "..." --description "..." --labels chore|polish|design` — see [§ Issue label taxonomy](#issue-label-taxonomy) below for which label. The `spawn_task` redirect in [CLAUDE.md](CLAUDE.md) uses this.
+- The 12 open design issues carried over from GitHub keep their original number as `external_ref` (e.g. `https://github.com/edwinsteele/fuel-price-signal/issues/271`) for traceability into old PR/commit history. New issues created directly in bd have no GitHub counterpart.
+- **Decision pointer convention:** when a closed `design` issue represents a settled decision (an approach tried and accepted/rejected), file a thin `bd create --type=decision` — title + one-line takeaway + `--deps discovered-from:<resolved-issue-id>` + a reference to the doc section with the actual argument (e.g. "see ML_SIGNAL.md § TGP leading indicator"). The bd record is a queryable pointer so `bd search`/`bd find-duplicates` can catch re-litigation of settled ground; it is **not** a second copy of the argument. [docs/STATUS.md](docs/STATUS.md)/[docs/ML_SIGNAL.md](docs/ML_SIGNAL.md)/`PLAN_ml_signal.md` remain the only place the reasoning itself lives — see [docs/CONVENTIONS.md § One source of truth](docs/CONVENTIONS.md#one-source-of-truth-for-current-model-state). Backfill lazily as decisions come up in conversation, not as a batch project.
+- **Ignore bd's own generic priming advice where it conflicts with this project's conventions.** `bd prime` (bd's built-in AI-context command) tells agents to stop using TodoWrite/TaskCreate and to stop keeping MEMORY.md files, in favour of `bd remember`. That's bd's generic pitch for projects adopting it as the *sole* state layer; this project made a deliberate narrower choice instead — bd holds work items plus a handful of atomic technical gotchas (`bd memories`), while process rules stay in CLAUDE.md/CONVENTIONS.md, decision narratives stay in docs, and Claude's own per-user memory (preferences, teaching style) stays in its private memory system outside this repo. Follow this file's conventions over `bd prime`'s generic ones when they conflict.
+
 ## Automation workflow
 
 See [docs/automation.md](docs/automation.md) for the full state machine and operational details.
@@ -341,14 +353,14 @@ See [docs/automation.md](docs/automation.md) for the full state machine and oper
 
 **Escape hatch — polish → design upgrade:**
 If while implementing a `polish` issue you discover it actually requires design work:
-1. Relabel the issue: `gh issue edit N --add-label design --remove-label polish`
-2. Post a comment explaining why you stopped and what the design question is.
+1. Relabel the issue: `bd update <id> --add-label design --remove-label polish`
+2. `bd note <id> "<why you stopped and what the design question is>"`, then `bd dolt push`.
 3. Do not write any code.
 
 ### Branch and PR conventions
 
-- Branch naming: `worker/issue-<N>-<short-slug>` (e.g. `worker/issue-7-add-type-hints`)
-- PR title: `fix: <issue title> (closes #N)` for chore; `feat: <issue title> (closes #N)` for polish
+- Branch naming: `worker/<bd-id>-<short-slug>` (e.g. `worker/fps-1785999730120-5-048485f0-add-type-hints`)
+- PR title: `fix: <issue title> (bd-<id>)` for chore; `feat: <issue title> (bd-<id>)` for polish — plus a `Resolves: <id>` line in the PR body (no GitHub auto-close magic on a bd issue; see [CLAUDE.md](CLAUDE.md#automated-worker-vs-interactive-session))
 - PR body: 3–5 bullet plan (what changed, what didn't, what test was added)
 - Target branch: always `main` (`--base main`)
 - Run `uv run ruff check . && uv run pytest -q` before pushing; fix any failures
