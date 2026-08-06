@@ -8,6 +8,7 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
 - [docs/STATUS.md](docs/STATUS.md) — current build state; what's shipped vs pending
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — code & workflow rules (the changeable how-we-do-things layer)
 - `PLAN_ml_signal.md` — active ML-signal plan. **Lives at repo root and is gitignored** (despite some docs saying `docs/PLAN_ml_signal.md` — that path is wrong).
+- Run `bd ready` for open work items (GitHub Issues retired in favour of Beads — see [AGENTS.md § Beads](AGENTS.md#beads)).
 
 ## Model/effort guidance
 
@@ -20,12 +21,18 @@ The port from the original repos is done. If you ever need to trace original log
 
 ## Automated worker vs interactive session
 
+Work items live in Beads (`bd`), not GitHub Issues — see [AGENTS.md § Beads](AGENTS.md#beads) for the general model. PRs still live on GitHub; only issue tracking moved.
+
 ### If you are the scheduled worker routine
 
-You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `polish` issues and open PRs.
+You are a Sonnet worker running as a **scheduled remote Claude Code routine** (see [docs/automation.md](docs/automation.md)) — a fresh checkout each run, not this persistent interactive session. The Dolt database under `.beads/` does not travel via ordinary git commits, so every run must sync explicitly with `bd dolt pull`/`bd dolt push`. (Before this routine is next enabled, the auto-configured Dolt remote — `git+ssh://git@github.com/edwinsteele/fuel-price-signal.git` — needs deploy-key or HTTPS-token auth reachable from the routine's environment; it currently relies on the owner's personal 1Password-gated SSH key, which that environment won't have.)
+
+Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
 
 **Pickup rules:**
-1. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers:
+0. `bd dolt pull` — first action, every run.
+1. Close out bd issues resolved by your own merged PRs since the last run: `gh pr list --label claude-authored --state merged --json number,body,mergedAt` (recent ones), pull the `Resolves: <id>` line out of each body, `bd close <id>` for each, then `bd dolt push`.
+2. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers:
    ```bash
    gh pr list --label claude-authored --state open --json number | jq -r '.[].number'
    ```
@@ -34,15 +41,18 @@ You are a Sonnet worker. You run hourly. Your job is to pick up `chore` and `pol
    - `gh pr view N --json reviews | jq '[.reviews[] | select(.body | length > 20)] | length'` is >0 **and** `gh pr view N --json comments | jq '[.comments[] | select(.body | startswith("[worker]"))] | length'` is 0 (reviews exist but worker hasn't replied yet).
 
    If any PR qualifies, perform maintenance (see **PR maintenance** below), then exit.
-2. Check for open `claude-authored` PRs (any). If any exist, **exit immediately** — one at a time.
-3. Query `gh issue list --label "chore,polish" --state open --no-assignee --json number,title,labels,createdAt` ordered by label (`chore` before `polish`), then by age (oldest first). Take 1.
-4. Create a branch `worker/issue-<N>-<slug>` for the issue.
+3. Check for open `claude-authored` PRs (any). If any exist, **exit immediately** — one at a time.
+4. Query `bd ready --label chore --unassigned --sort oldest -n 1`; if empty, `bd ready --label polish --unassigned --sort oldest -n 1`. Take the first result.
+5. `bd update <id> --claim` to mark it in_progress, then `bd dolt push`.
+6. Create a branch `worker/<id>-<slug>` for the issue.
 
 **For each PR:**
 1. Implement the minimal change — do not scope-creep.
 2. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
-3. Open PR titled `fix: <issue title> (closes #N)` targeting `main` (`--base main`) with labels `claude-authored` + the issue's original label. PR body must include a 3–5 bullet plan (what changed, what didn't, what test was added).
-4. After opening the PR, do other useful sequenced work (update memory, file any follow-up issues). Once ≈270s of real elapsed time has passed, run `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` to check for reviews. If there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available in `/loop` mode — do not attempt it here.) Act on any actionable comments found in `reviews[].body`. If CodeRabbit is rate-limited or absent, skip and move on — do not reschedule. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
+3. Open PR titled `fix: <issue title> (bd-<id>)` targeting `main` (`--base main`) with labels `claude-authored` + the issue's original label. PR body must include a 3–5 bullet plan (what changed, what didn't, what test was added) **and a `Resolves: <id>` line** — pickup rule 1 of the *next* run depends on finding it.
+4. After opening the PR, do other useful sequenced work (update memory, file any follow-up issues via `bd create`). Once ≈270s of real elapsed time has passed, run `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` to check for reviews. If there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available in `/loop` mode — do not attempt it here.) Act on any actionable comments found in `reviews[].body`. If CodeRabbit is rate-limited or absent, skip and move on — do not reschedule. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
+
+Note: this run does **not** close the bd issue — merging is gated by the separate `auto-merge.yml` workflow (≥900s age + green checks), which this run doesn't wait for. Closure happens in pickup rule 1 of a later run, once the PR shows up as merged.
 
 **PR maintenance:**
 When pickup rule 1 triggers, for each qualifying PR:
@@ -66,22 +76,22 @@ Handle conflicts first, then review threads, in a single pass per PR.
 
 ### If you are an interactive session
 
-- **Do not pick up `chore` or `polish` issues yourself.** File a `gh issue create` instead.
-- **`design` issues are fair game** for interactive work.
+- **Do not pick up `chore` or `polish` issues yourself.** File a `bd create` instead (see below).
+- **`design` issues are fair game** for interactive work. `bd update <id> --claim` when you start, `bd close <id>` when done, `bd dolt push` after either.
 - Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
 - After each commit + push, open a PR immediately without asking.
 - After submitting a PR, wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, push, repeat until no actionable comments remain.
 - **`experiments/**` is exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs) and `experiments/INDEX.md` may be committed directly to `main` without a PR. This is the only path that bypasses review; all other paths still require one.
 
-## spawn_task → gh issue create redirect
+## spawn_task → bd create redirect
 
 When `mcp__ccd_session__spawn_task` would normally be the right call (you noticed an out-of-scope issue while working), **do not spawn a session**. Instead:
 
 ```bash
-gh issue create \
+bd create \
   --title "Short imperative title" \
-  --label "chore"  # or polish or design \
-  --body "$(cat <<'EOF'
+  --labels "chore" \
+  --description "$(cat <<'EOF'
 ## What
 <what needs doing>
 
@@ -95,4 +105,7 @@ gh issue create \
 - [ ] ...
 EOF
 )"
+bd dolt push
 ```
+
+Use `--labels "polish"` or `--labels "design"` in place of `"chore"` as appropriate.

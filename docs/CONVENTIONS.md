@@ -96,7 +96,7 @@ Two cheap pre-screens (no retrain) before committing to a feature-regen → retr
 
 Before considering a change complete, in this order:
 
-1. **Re-read the issue** if the change closes one. Walk through the acceptance criteria / deliverables list and confirm each item is covered by the diff. Scope often drifts during implementation; the issue is the source of truth for what was promised, and the check catches gaps before review does. If something in the issue is no longer the right thing to build, say so in the PR body rather than silently dropping it.
+1. **Re-read the issue** if the change closes one (`bd show <id>` — see [AGENTS.md § Beads](../AGENTS.md#beads)). Walk through the acceptance criteria / deliverables list and confirm each item is covered by the diff. Scope often drifts during implementation; the issue is the source of truth for what was promised, and the check catches gaps before review does. If something in the issue is no longer the right thing to build, say so in the PR body rather than silently dropping it. Once merged, `bd close <id>` explicitly — there is no GitHub auto-close for a bd issue — then `bd dolt push`.
 2. **Run pre-commit checks locally:** `uv run ruff check . && uv run pytest -q`. The pre-commit hook runs the same pair, so a failing commit otherwise costs a fix-then-recommit cycle.
 3. **Update README** if a user-facing command, flag, or invocation changed. The README is the first place a user looks; a stale one is actively misleading.
 4. **Update tracking docs** if a module shipped or a project phase completed:
