@@ -25,7 +25,9 @@ Work items live in Beads (`bd`), not GitHub Issues — see [AGENTS.md § Beads](
 
 ### If you are the scheduled worker routine
 
-You are a Sonnet worker running as a **scheduled remote Claude Code routine** (see [docs/automation.md](docs/automation.md)) — a fresh checkout each run, not this persistent interactive session. The Dolt database under `.beads/` does not travel via ordinary git commits, so every run must sync explicitly with `bd dolt pull`/`bd dolt push`. (Before this routine is next enabled, the auto-configured Dolt remote — `git+ssh://git@github.com/edwinsteele/fuel-price-signal.git` — needs deploy-key or HTTPS-token auth reachable from the routine's environment; it currently relies on the owner's personal 1Password-gated SSH key, which that environment won't have.)
+You are a Sonnet worker running as a **Claude Code Routine** (see [docs/automation.md](docs/automation.md)) — this is an actively-running hourly automation, not a dormant one, and it gets a fresh checkout each run rather than reusing a persistent interactive session's disk. The Dolt database under `.beads/` does not travel via ordinary git commits, so every run must sync explicitly with `bd dolt pull`/`bd dolt push`.
+
+**Known gap (unresolved as of this migration, check before trusting `bd ready` output):** the auto-configured Dolt remote — `git+ssh://git@github.com/edwinsteele/fuel-price-signal.git` — needs deploy-key or HTTPS-token auth reachable from the Routine's environment; it currently relies on the owner's personal 1Password-gated SSH key, which that environment does not have. Until this is fixed, `bd dolt pull`/`push` will likely fail in the Routine even though they work fine in an interactive session on the owner's Mac. If `bd dolt pull` fails, do not proceed as if the backlog is empty — surface the failure rather than silently finding "no ready work".
 
 Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
 
