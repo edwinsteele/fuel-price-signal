@@ -83,6 +83,17 @@ average_price_series(conn, fuel_code: str = "E10", councils: frozenset[str] | No
 
 `SYDNEY_METRO_COUNCILS` in `postcode_council.py` is the frozenset of valid council names for the `councils=` parameter.
 
+## Backfill (`--start-date`) paths: load once, slice in memory
+
+Any `*_range` backfill that walks snapshots over a trailing window **must not** re-query per snapshot. Successive windows overlap ~98%, so the re-query is the from-scratch rebuild's dominant cost — measured at 59% of `classify.py` and **99%** of `lga_leadership.py`. Keep the single-snapshot path (what `daily-db-update.yml` runs daily) querying directly; only the range path preloads.
+
+Which shape depends on how far SQL has already aggregated — memory is the binding constraint on Viking:
+
+- **Aggregated output (≲100k rows for the decade)** → load the full range once, bucket by `date_int`, `searchsorted` per snapshot. `_load_lga_sums` is 30 MB for all history.
+- **Raw per-station rows (~2.2M for the decade)** → a naive full load is 540 MB resident / 881 MB peak, which will OOM Viking. Use one `ORDER BY price_date` scan (free — `daily_prices_fuel_date` already delivers that order, no sort step in the plan) feeding a `deque` of per-day buckets: append day `D-1`, evict day `D-window`. ~7 MB resident. Yield the buckets, not a flattened row list — flattening rebuilds every window's rows and eats most of the win.
+
+Backfills also commit per snapshot; batch commits in range mode only, where the fsync cost is disproportionate on Viking's storage.
+
 ## Test patterns
 
 Standard fixture for DB-backed tests:
