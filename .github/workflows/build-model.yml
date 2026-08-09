@@ -5,6 +5,11 @@ name: Build model
 # model-latest release (public, no auth needed to download — that's the
 # point, Viking pulls from this over plain HTTPS). Manual/rare: models don't
 # need rebuilding on the same cadence as the DB.
+#
+# --no-brand-features reproduces the locked RAC_full baseline (docs/STATUS.md)
+# — train_lgbm's own default is brand-inclusive (Phase 4b), which this
+# project evaluated and walked away from. Without the flag, this workflow
+# would silently ship a different schema than the one documented as current.
 on:
   workflow_dispatch:
 
@@ -42,7 +47,7 @@ jobs:
       - name: Train and calibrate
         run: |
           uv run python -m fuel_signal.features
-          uv run python -m fuel_signal.train_lgbm
+          uv run python -m fuel_signal.train_lgbm --no-brand-features
           uv run python -m fuel_signal.calibrate --skip-results-csv
 
       - name: Publish model release
