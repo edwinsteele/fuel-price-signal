@@ -21,43 +21,23 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Get month (cache key component)
-        id: month
-        run: echo "month=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Compute cache key
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Restore raw CSV cache
-        uses: actions/cache@v4
-        with:
-          path: data/raw
-          key: fuel-raw-${{ runner.os }}-${{ steps.month.outputs.month }}
-          restore-keys: |
-            fuel-raw-${{ runner.os }}-
-
-      - name: Restore cleaned CSV cache
-        uses: actions/cache@v4
-        with:
-          path: data/cleaned
-          key: fuel-cleaned-${{ runner.os }}-${{ steps.month.outputs.month }}
-          restore-keys: |
-            fuel-cleaned-${{ runner.os }}-
-
-      - name: Restore DB cache
-        uses: actions/cache@v4
+      - name: Restore latest DB
+        uses: actions/cache/restore@v4
         with:
           path: fuel_signal.db
-          key: fuel-db-${{ runner.os }}-${{ steps.month.outputs.month }}
-          restore-keys: |
-            fuel-db-${{ runner.os }}-
+          key: db-${{ steps.date.outputs.today }}
+          restore-keys: db-
 
-      - name: Download and clean (if needed)
+      - name: Fail if no prior DB found
         run: |
-          if [ ! -d data/cleaned ] || [ -z "$(ls -A data/cleaned 2>/dev/null)" ]; then
-            uv run python -m fuel_signal.history
-          fi
-
-      - name: Build DB (if needed)
-        run: |
-          [ -f fuel_signal.db ] || uv run python -m fuel_signal.db
+          test -f fuel_signal.db || {
+            echo "::error::No db-* cache entry restored — run 'Seed / reset DB' to bootstrap one, or check that 'Daily DB update' is running."
+            exit 1
+          }
 
       - name: Run signal on PR branch
         run: |
