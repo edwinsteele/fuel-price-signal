@@ -16,6 +16,7 @@ import logging
 import pathlib
 import re
 import sqlite3
+from collections import defaultdict
 from datetime import date, timedelta
 
 import click
@@ -184,6 +185,38 @@ def _load_lga_sums(
     }
 
 
+def _lga_sums_slicer(conn: sqlite3.Connection, fid: int):
+    """Load lga sums for the full history once; return a callable that slices
+    [start_date, end_date] windows out of the preload, matching the shape of
+    _load_lga_sums(conn, fid, start_date=..., end_date=...).
+
+    Safe to hold the whole history in memory: the SQL has already aggregated
+    to (date, LGA) — ~30 MB for a decade, vs 513 s of re-query across 523
+    weekly snapshots each covering a 730d window that overlaps ~98% of the
+    previous one (see AGENTS.md § "Backfill (--start-date) paths").
+
+    Parity with per-snapshot _load_lga_sums is structural, not just tested:
+    its HAVING clause groups on (price_date, council), so every group lives
+    entirely within one date and a window filter can only choose which dates
+    are included, never split a group.
+    """
+    by_date: dict[int, dict[str, tuple[float, int]]] = defaultdict(dict)
+    for (date_int, lga), value in _load_lga_sums(conn, fid).items():
+        by_date[date_int][lga] = value
+    dates = np.array(sorted(by_date), dtype=int)
+
+    def slice_window(start_date: str, end_date: str) -> dict[tuple[int, str], tuple[float, int]]:
+        lo = int(np.searchsorted(dates, _date_to_int(start_date), side="left"))
+        hi = int(np.searchsorted(dates, _date_to_int(end_date), side="right"))
+        return {
+            (int(di), lga): v
+            for di in dates[lo:hi]
+            for lga, v in by_date[int(di)].items()
+        }
+
+    return slice_window
+
+
 # ---------------------------------------------------------------------------
 # Feature lookup builder (for features.py)
 # ---------------------------------------------------------------------------
@@ -324,10 +357,23 @@ def score_leadership_snapshot(
     fid = fuel_type_id(conn, fuel_code)
     sums = _load_lga_sums(conn, fid, start_date=start, end_date=end)
 
+    return _write_leadership_snapshot(conn, snapshot_date, sums)
+
+
+def _write_leadership_snapshot(
+    conn: sqlite3.Connection,
+    snapshot_date: str,
+    sums: dict[tuple[int, str], tuple[float, int]],
+) -> int:
+    """Compute leadership rows from a pre-fetched sums window and store them.
+
+    Shared by score_leadership_snapshot (direct query) and score_leadership_range
+    (preloaded + sliced query) so both paths compute and write identically.
+    """
     delete_lga_leadership_for_date(conn, snapshot_date)
 
     if not sums:
-        logger.warning("score_leadership_snapshot %s: no data in window [%s, %s]", snapshot_date, start, end)
+        logger.warning("score_leadership_snapshot %s: no data in window", snapshot_date)
         conn.commit()
         return 0
 
@@ -414,7 +460,14 @@ def score_leadership_range(
     fuel_code: str = "E10",
     window_days: int = LEADERSHIP_WINDOW_DAYS,
 ) -> int:
-    """Run score_leadership_snapshot for weekly snapshots in [start_date, end_date].
+    """Run leadership scoring for weekly snapshots in [start_date, end_date].
+
+    Produces the same rows as calling score_leadership_snapshot per snapshot,
+    but loads _load_lga_sums exactly once for the whole run and slices each
+    snapshot's window out of that preload in memory (see AGENTS.md §
+    "Backfill (--start-date) paths: load once, slice in memory"). Successive
+    weekly windows overlap ~98%, so the direct per-snapshot query is the
+    dominant cost of a from-scratch rebuild.
 
     Returns total LGA rows written.
     """
@@ -422,12 +475,18 @@ def score_leadership_range(
     end = date.fromisoformat(end_date)
     if d > end:
         raise ValueError(f"start_date {start_date} must not exceed end_date {end_date}")
+    if window_days <= 0:
+        raise ValueError("window_days must be positive")
+
+    fid = fuel_type_id(conn, fuel_code)
+    slice_window = _lga_sums_slicer(conn, fid)
 
     total = 0
     while d <= end:
-        total += score_leadership_snapshot(
-            conn, d.isoformat(), fuel_code=fuel_code, window_days=window_days
-        )
+        start = (d - timedelta(days=window_days)).isoformat()
+        end_window = (d - timedelta(days=1)).isoformat()
+        sums = slice_window(start, end_window)
+        total += _write_leadership_snapshot(conn, d.isoformat(), sums)
         d += timedelta(days=step_days)
     return total
 
