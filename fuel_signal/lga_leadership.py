@@ -200,7 +200,7 @@ def _lga_sums_slicer(conn: sqlite3.Connection, fid: int):
     entirely within one date and a window filter can only choose which dates
     are included, never split a group.
     """
-    by_date: dict[int, dict[str, tuple[float, int]]] = defaultdict(dict)
+    by_date: defaultdict[int, dict[str, tuple[float, int]]] = defaultdict(dict)
     for (date_int, lga), value in _load_lga_sums(conn, fid).items():
         by_date[date_int][lga] = value
     dates = np.array(sorted(by_date), dtype=int)
@@ -209,9 +209,9 @@ def _lga_sums_slicer(conn: sqlite3.Connection, fid: int):
         lo = int(np.searchsorted(dates, _date_to_int(start_date), side="left"))
         hi = int(np.searchsorted(dates, _date_to_int(end_date), side="right"))
         return {
-            (int(di), lga): v
-            for di in dates[lo:hi]
-            for lga, v in by_date[int(di)].items()
+            (d, lga): v
+            for d in (int(di) for di in dates[lo:hi])
+            for lga, v in by_date[d].items()
         }
 
     return slice_window
@@ -357,23 +357,28 @@ def score_leadership_snapshot(
     fid = fuel_type_id(conn, fuel_code)
     sums = _load_lga_sums(conn, fid, start_date=start, end_date=end)
 
-    return _write_leadership_snapshot(conn, snapshot_date, sums)
+    return _write_leadership_snapshot(conn, snapshot_date, sums, window=(start, end))
 
 
 def _write_leadership_snapshot(
     conn: sqlite3.Connection,
     snapshot_date: str,
     sums: dict[tuple[int, str], tuple[float, int]],
+    window: tuple[str, str],
 ) -> int:
     """Compute leadership rows from a pre-fetched sums window and store them.
 
     Shared by score_leadership_snapshot (direct query) and score_leadership_range
     (preloaded + sliced query) so both paths compute and write identically.
+    `window` is (start_date, end_date), used only for the empty-window log.
     """
     delete_lga_leadership_for_date(conn, snapshot_date)
 
     if not sums:
-        logger.warning("score_leadership_snapshot %s: no data in window", snapshot_date)
+        logger.warning(
+            "score_leadership_snapshot %s: no data in window [%s, %s]",
+            snapshot_date, window[0], window[1],
+        )
         conn.commit()
         return 0
 
@@ -477,6 +482,8 @@ def score_leadership_range(
         raise ValueError(f"start_date {start_date} must not exceed end_date {end_date}")
     if window_days <= 0:
         raise ValueError("window_days must be positive")
+    if step_days <= 0:
+        raise ValueError("step_days must be positive")
 
     fid = fuel_type_id(conn, fuel_code)
     slice_window = _lga_sums_slicer(conn, fid)
@@ -486,7 +493,7 @@ def score_leadership_range(
         start = (d - timedelta(days=window_days)).isoformat()
         end_window = (d - timedelta(days=1)).isoformat()
         sums = slice_window(start, end_window)
-        total += _write_leadership_snapshot(conn, d.isoformat(), sums)
+        total += _write_leadership_snapshot(conn, d.isoformat(), sums, window=(start, end_window))
         d += timedelta(days=step_days)
     return total
 

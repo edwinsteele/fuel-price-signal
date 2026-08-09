@@ -266,6 +266,18 @@ def test_score_leadership_range_matches_per_snapshot(conn):
     assert per_snapshot_rows == range_rows
 
 
+@pytest.mark.parametrize("window_days", [0, -1])
+def test_score_leadership_range_rejects_non_positive_window(conn, window_days):
+    with pytest.raises(ValueError, match="window_days must be positive"):
+        score_leadership_range(conn, "2022-01-01", "2022-01-22", window_days=window_days)
+
+
+@pytest.mark.parametrize("step_days", [0, -1])
+def test_score_leadership_range_rejects_non_positive_step(conn, step_days):
+    with pytest.raises(ValueError, match="step_days must be positive"):
+        score_leadership_range(conn, "2022-01-01", "2022-01-22", step_days=step_days)
+
+
 def test_latest_lga_leadership_date(conn):
     _build_two_lga_db(conn)
     assert latest_lga_leadership_date(conn) is None
