@@ -653,12 +653,12 @@ def _load_model_metadata(model_path: pathlib.Path) -> dict | None:
         return None
     try:
         loaded = joblib.load(model_path)
+        return {
+            "git_sha": loaded.get("git_sha"),
+            "feature_count": len(loaded.get("feature_columns", [])),
+        }
     except Exception:
         return None
-    return {
-        "git_sha": loaded.get("git_sha"),
-        "feature_count": len(loaded.get("feature_columns", [])),
-    }
 
 
 def _sort_shap_rows(rows: list[dict], sort_by: str) -> list[dict]:

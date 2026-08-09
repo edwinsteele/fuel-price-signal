@@ -285,11 +285,15 @@ def main(
 
     model_path = pathlib.Path(model_out)
     model_path.parent.mkdir(parents=True, exist_ok=True)
+    git_sha = _git_sha()
+    if git_sha is None:
+        click.echo("Warning: could not determine git_sha (not a git checkout, or git not installed) — "
+                    "model will ship without provenance.", err=True)
     joblib.dump(
         {
             "pipeline": result["pipeline"],
             "feature_columns": result["feature_columns"],
-            "git_sha": _git_sha(),
+            "git_sha": git_sha,
         },
         model_path,
     )

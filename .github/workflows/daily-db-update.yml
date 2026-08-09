@@ -57,6 +57,7 @@ jobs:
           key: db-${{ steps.date.outputs.today }}
 
       - name: Prune older db cache entries
+        continue-on-error: true # best-effort cleanup; don't fail the run over it
         run: |
           gh cache list --key db- --json id,key --jq \
             '.[] | select(.key != "db-${{ steps.date.outputs.today }}") | .id' \
