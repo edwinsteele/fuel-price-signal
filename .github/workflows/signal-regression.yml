@@ -21,17 +21,21 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Compute cache key
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Restore latest DB
         uses: actions/cache/restore@v4
         with:
           path: fuel_signal.db
-          key: db-${{ github.run_id }}
+          key: db-${{ steps.date.outputs.today }}
           restore-keys: db-
 
       - name: Fail if no prior DB found
         run: |
           test -f fuel_signal.db || {
-            echo "::error::No db-* cache entry restored — run the 'Seed / reset DB' workflow first."
+            echo "::error::No db-* cache entry restored — run 'Seed / reset DB' to bootstrap one, or check that 'Daily DB update' is running."
             exit 1
           }
 
