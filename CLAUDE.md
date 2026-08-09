@@ -9,6 +9,7 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — code & workflow rules (the changeable how-we-do-things layer)
 - `PLAN_ml_signal.md` — active ML-signal plan. **Lives at repo root and is gitignored** (despite some docs saying `docs/PLAN_ml_signal.md` — that path is wrong).
 - Run `bd ready` for open work items (GitHub Issues retired in favour of Beads — see [AGENTS.md § Beads](AGENTS.md#beads)).
+- Run `bd memories` for this repo's atomic technical gotchas (git discipline, DB-write timing, environment traps). These are short, load-bearing, and cheap to read — several are rules you will otherwise break before noticing.
 
 ## Model/effort guidance
 
