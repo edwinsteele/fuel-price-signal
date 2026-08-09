@@ -1,0 +1,69 @@
+name: Daily DB update
+
+# Restores the most recent db-* cache entry, loads whatever's newly landed
+# in data/snapshots/ (fuel_signal.db is incremental via its loaded_files
+# table — this is cheap even on 10 years of history), re-scores today's
+# station classification and LGA leadership snapshot, and saves the result
+# as a fresh db-<date>-<run_id> cache entry (run_id makes the key unique even
+# if this runs more than once on the same day, e.g. a manual re-trigger for
+# testing — exact-key cache saves can't overwrite). Sequenced after "Daily
+# E10 snapshot" so today's snapshot CSV is already committed by the time
+# this runs.
+on:
+  workflow_run:
+    workflows: ["Daily E10 snapshot"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  update:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # cache save + prune
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Compute cache key
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore latest DB
+        uses: actions/cache/restore@v4
+        with:
+          path: fuel_signal.db
+          key: db-${{ steps.date.outputs.today }}
+          restore-keys: db-
+
+      - name: Fail if no prior DB found
+        run: |
+          test -f fuel_signal.db || {
+            echo "::error::No db-* cache entry restored — run the 'Seed / reset DB' workflow first."
+            exit 1
+          }
+
+      - name: Load new snapshot + flow-on steps
+        run: |
+          uv run python -m fuel_signal.db
+          uv run python -m fuel_signal.fill
+          uv run python -m fuel_signal.classify
+          uv run python -m fuel_signal.lga_leadership
+
+      - uses: actions/cache/save@v4
+        with:
+          path: fuel_signal.db
+          key: db-${{ steps.date.outputs.today }}-${{ github.run_id }}
+
+      - name: Prune older db cache entries
+        continue-on-error: true # best-effort cleanup; don't fail the run over it
+        run: |
+          gh cache list --key db- --json id,key --jq \
+            '.[] | select(.key != "db-${{ steps.date.outputs.today }}-${{ github.run_id }}") | .id' \
+            | xargs -r -n1 gh cache delete
+        env:
+          GH_TOKEN: ${{ github.token }}
