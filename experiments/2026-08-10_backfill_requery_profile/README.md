@@ -44,6 +44,10 @@ comparison points are from PR #279, `gh run 31300192738`.
 - `proto_backfill.py` — reference implementations of both fixes plus parity checks against
   the current queries. **This is the file to lift from.**
 
+`run.log` is gitignored (`*.log`, repo-wide) — it exists only in the dir where the run
+happened. Every number it held is transcribed into the Results tables below, so re-run the
+scripts rather than looking for it.
+
 ## Results
 
 Hypothesis confirmed, and more lopsided than expected — SQL is 79% of classify's
