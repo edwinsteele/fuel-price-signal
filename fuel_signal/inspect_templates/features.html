@@ -3,6 +3,9 @@
 {% block content %}
 <h1>Feature SHAP Analysis</h1>
 <p class="meta">Per-feature mean|SHAP| ranked from <code>{{ shap_dir_str }}/summary.csv</code> &mdash; {{ now }}</p>
+{% if model_git_sha %}
+<p class="meta">Model <code>{{ model_path_str }}</code>: {{ model_feature_count }} features, trained from <code>{{ model_git_sha[:12] }}</code></p>
+{% endif %}
 
 {% if shap_stale %}
 <div class="banner banner-warn">

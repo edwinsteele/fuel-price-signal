@@ -18,6 +18,7 @@ import sqlite3
 import webbrowser
 
 import click
+import joblib
 import matplotlib
 
 matplotlib.use("Agg")
@@ -641,6 +642,25 @@ def _load_shap_arrays(
     return xv, sv, fc
 
 
+def _load_model_metadata(model_path: pathlib.Path) -> dict | None:
+    """git_sha + feature count from a model .joblib, for the /features provenance line.
+
+    Best-effort: model_path may point at a non-joblib placeholder (tests use
+    one for mtime-only staleness checks), so a load failure here just means
+    no provenance line, not a broken page.
+    """
+    if not model_path.exists():
+        return None
+    try:
+        loaded = joblib.load(model_path)
+    except Exception:
+        return None
+    return {
+        "git_sha": loaded.get("git_sha"),
+        "feature_count": len(loaded.get("feature_columns", [])),
+    }
+
+
 def _sort_shap_rows(rows: list[dict], sort_by: str) -> list[dict]:
     if sort_by == "alpha":
         return sorted(rows, key=lambda r: r["feature"])
@@ -675,6 +695,7 @@ def _create_app(
     _resolved_shap_dir = shap_dir or pathlib.Path("experiments/shap_phase4")
     _resolved_model_path = model_path or pathlib.Path("data/models/lgbm.joblib")
     _xv, _sv, _fc = _load_shap_arrays(_resolved_shap_dir)
+    _model_meta = _load_model_metadata(_resolved_model_path)
 
     app.jinja_env.filters["gradient_color"] = _gradient_color
     app.jinja_env.filters["coverage_color"] = _coverage_color
@@ -962,6 +983,8 @@ def _create_app(
             selected_interaction=selected_interaction,
             shap_dir_str=str(_resolved_shap_dir),
             model_path_str=str(_resolved_model_path),
+            model_git_sha=(_model_meta or {}).get("git_sha"),
+            model_feature_count=(_model_meta or {}).get("feature_count"),
             partner_map=partner_map,
             interaction_budget_ranks=interaction_budget_ranks,
         )

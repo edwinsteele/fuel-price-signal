@@ -230,6 +230,18 @@ Combined: BUY (mean signal +1.00)
 
 GitHub Actions commits one snapshot CSV per day to `data/snapshots/`. To enable it, add `FUELAPI_API_KEY` and `FUELAPI_API_SECRET` as repository secrets under **Settings → Secrets and variables → Actions**.
 
+## CI: DB and model pipeline
+
+Three workflows keep a `fuel_signal.db` current in CI and publish trained models, decoupled from each other since retraining doesn't need to happen on the same cadence as data ingest:
+
+- **`Seed / reset DB`** (`workflow_dispatch` only) — full from-scratch rebuild (`history` → `db --force` → `fill` → `classify --start-date 2016-08-01` → `lga_leadership --start-date 2016-08-01`), saved as a `db-<date>` cache entry. Rare/manual — run once to bootstrap, or again for a clean reset.
+- **`Daily DB update`** (runs after `Daily E10 snapshot` succeeds) — restores the most recent `db-*` cache entry, incrementally loads today's newly-landed snapshot (`db.py` skips already-loaded files via its `loaded_files` table), re-runs `fill`/`classify`/`lga_leadership` for today only, saves a fresh `db-<date>` entry, and prunes older ones.
+- **`Build model`** (`workflow_dispatch` only) — restores the latest `db-*` cache entry and runs `features` → `train_lgbm` → `calibrate --skip-results-csv`, then publishes `data/models/lgbm.joblib` and `lgbm_calibrated.joblib` as assets on the `model-latest` GitHub Release (`--clobber`'d each run).
+
+The DB uses a cache (not a release) because it's only ever consumed by other Actions workflows, which already have `GITHUB_TOKEN` for free — no need for a stable public URL. The model uses a release because its real consumer is an external, unattended box (deploy target) that isn't running inside Actions and needs a plain-HTTPS download with no stored credential.
+
+Each `.joblib` embeds `git_sha` (the commit it was trained from) and `feature_columns` alongside the fitted pipeline. `calibrate.py` checks the loaded model's `feature_columns` against the features CSV before using them and fails with a clear error on mismatch, rather than a raw `KeyError` partway through calibration — this is the automated version of the "check `feature_columns` before trusting a model on disk" rule from the on-disk model paths note. `inspect.py`'s `/features` page shows the deployed model's `git_sha` and feature count when available, for eyeballing whether it looks current.
+
 ## Generating ML training labels
 
 Assemble a training table with one row per (station, date) that has a computable label:

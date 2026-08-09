@@ -1,0 +1,63 @@
+name: Build model
+
+# Trains + calibrates against whatever db-* cache entry Daily DB update.yml
+# last saved, and publishes the resulting .joblib files as assets on the
+# model-latest release (public, no auth needed to download — that's the
+# point, Viking pulls from this over plain HTTPS). Manual/rare: models don't
+# need rebuilding on the same cadence as the DB.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create/upload/edit
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Compute cache key
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore latest DB
+        uses: actions/cache/restore@v4
+        with:
+          path: fuel_signal.db
+          key: db-${{ steps.date.outputs.today }}
+          restore-keys: db-
+
+      - name: Fail if no DB found
+        run: |
+          test -f fuel_signal.db || {
+            echo "::error::No db-* cache entry found — run 'Daily DB update' or 'Seed / reset DB' first."
+            exit 1
+          }
+
+      - name: Train and calibrate
+        run: |
+          uv run python -m fuel_signal.features
+          uv run python -m fuel_signal.train_lgbm
+          uv run python -m fuel_signal.calibrate --skip-results-csv
+
+      - name: Publish model release
+        run: |
+          sha=$(git rev-parse --short HEAD)
+          title="model: $(date -u +%Y-%m-%d)"
+          notes="trained from $sha"
+          if gh release view model-latest >/dev/null 2>&1; then
+            gh release upload model-latest \
+              data/models/lgbm.joblib data/models/lgbm_calibrated.joblib --clobber
+            gh release edit model-latest --title "$title" --notes "$notes"
+          else
+            gh release create model-latest \
+              data/models/lgbm.joblib data/models/lgbm_calibrated.joblib \
+              --title "$title" --notes "$notes"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

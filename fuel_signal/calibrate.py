@@ -465,6 +465,17 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
         )
     raw_pipe = loaded["pipeline"]
     feature_columns = loaded.get("feature_columns", FEATURE_COLUMNS)
+    git_sha = loaded.get("git_sha")
+
+    missing = [c for c in feature_columns if c not in df.columns]
+    if missing:
+        trained_from = f" (trained from {git_sha})" if git_sha else ""
+        raise click.ClickException(
+            f"Model at {model_in!r}{trained_from} expects {len(missing)} column(s) "
+            f"not present in {features_csv!r}: {missing}. "
+            "The model and the features CSV are from different schema versions — "
+            "re-run 'uv run python -m fuel_signal.features' or use a matching model."
+        )
 
     # --- CV-based calibration comparison ---
     click.echo("Running walk-forward CV over train to pool OOF predictions …")
@@ -491,7 +502,15 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
     out_path = pathlib.Path(model_out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if best_name == "raw":
-        joblib.dump({"pipeline": raw_pipe, "feature_columns": feature_columns, "calibrated": False}, out_path)
+        joblib.dump(
+            {
+                "pipeline": raw_pipe,
+                "feature_columns": feature_columns,
+                "calibrated": False,
+                "git_sha": git_sha,
+            },
+            out_path,
+        )
         click.echo(f"Calibration decision: raw pipeline is sufficient — saved as-is to {out_path}")
     else:
         joblib.dump(
@@ -501,6 +520,7 @@ def main(features_csv: str, model_in: str, model_out: str, model_name: str, skip
                 "calibration_method": best_name,
                 "feature_columns": feature_columns,
                 "calibrated": True,
+                "git_sha": git_sha,
             },
             out_path,
         )

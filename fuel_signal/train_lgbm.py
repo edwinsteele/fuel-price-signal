@@ -17,6 +17,7 @@ Same quantile-bin format as train_logreg.py — see that module for semantics.
 from __future__ import annotations
 
 import pathlib
+import subprocess
 
 import click
 import joblib
@@ -41,6 +42,16 @@ from fuel_signal.train_logreg import save_reliability_plot  # noqa: E402
 
 DEFAULT_MODEL_OUT = pathlib.Path("data/models/lgbm.joblib")
 DEFAULT_RELIABILITY_PNG = pathlib.Path("experiments/reliability_lgbm_val.png")
+
+
+def _git_sha() -> str | None:
+    """Current commit, for model provenance. None outside a git checkout."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 def build_pipeline(random_state: int = 42) -> LGBMClassifier:
@@ -278,6 +289,7 @@ def main(
         {
             "pipeline": result["pipeline"],
             "feature_columns": result["feature_columns"],
+            "git_sha": _git_sha(),
         },
         model_path,
     )
