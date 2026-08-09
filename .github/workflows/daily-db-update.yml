@@ -4,8 +4,11 @@ name: Daily DB update
 # in data/snapshots/ (fuel_signal.db is incremental via its loaded_files
 # table — this is cheap even on 10 years of history), re-scores today's
 # station classification and LGA leadership snapshot, and saves the result
-# as a fresh db-<date> cache entry. Sequenced after "Daily E10 snapshot" so
-# today's snapshot CSV is already committed by the time this runs.
+# as a fresh db-<date>-<run_id> cache entry (run_id makes the key unique even
+# if this runs more than once on the same day, e.g. a manual re-trigger for
+# testing — exact-key cache saves can't overwrite). Sequenced after "Daily
+# E10 snapshot" so today's snapshot CSV is already committed by the time
+# this runs.
 on:
   workflow_run:
     workflows: ["Daily E10 snapshot"]
@@ -54,13 +57,13 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: fuel_signal.db
-          key: db-${{ steps.date.outputs.today }}
+          key: db-${{ steps.date.outputs.today }}-${{ github.run_id }}
 
       - name: Prune older db cache entries
         continue-on-error: true # best-effort cleanup; don't fail the run over it
         run: |
           gh cache list --key db- --json id,key --jq \
-            '.[] | select(.key != "db-${{ steps.date.outputs.today }}") | .id' \
+            '.[] | select(.key != "db-${{ steps.date.outputs.today }}-${{ github.run_id }}") | .id' \
             | xargs -r -n1 gh cache delete
         env:
           GH_TOKEN: ${{ github.token }}

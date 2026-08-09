@@ -1,11 +1,13 @@
 name: Seed / reset DB
 
 # Rebuilds fuel_signal.db from scratch from committed inputs (bulk history +
-# tracked data/snapshots/**/*.csv) and publishes it as a db-<date> cache
-# entry. Manual/rare: run this once to bootstrap, or again if the cached DB
-# ever needs a clean reset. Daily DB update.yml restores from whatever this
-# (or a prior run of it) last saved and applies incremental updates on top —
-# it does not rebuild from scratch itself.
+# tracked data/snapshots/**/*.csv) and publishes it as a db-<date>-<run_id>
+# cache entry (run_id makes the key unique even across same-day re-runs —
+# exact-key cache saves can't overwrite). Manual/rare: run this once to
+# bootstrap, or again if the cached DB ever needs a clean reset. Daily DB
+# update.yml restores from whatever this (or a prior run of it) last saved
+# and applies incremental updates on top — it does not rebuild from scratch
+# itself.
 on:
   workflow_dispatch:
 
@@ -37,13 +39,13 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: fuel_signal.db
-          key: db-${{ steps.date.outputs.today }}
+          key: db-${{ steps.date.outputs.today }}-${{ github.run_id }}
 
       - name: Prune older db cache entries
         continue-on-error: true # best-effort cleanup; don't fail the run over it
         run: |
           gh cache list --key db- --json id,key --jq \
-            '.[] | select(.key != "db-${{ steps.date.outputs.today }}") | .id' \
+            '.[] | select(.key != "db-${{ steps.date.outputs.today }}-${{ github.run_id }}") | .id' \
             | xargs -r -n1 gh cache delete
         env:
           GH_TOKEN: ${{ github.token }}
