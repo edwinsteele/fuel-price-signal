@@ -79,8 +79,9 @@ Handle conflicts first, then review threads, in a single pass per PR.
 
 ### If you are an interactive session
 
-- **Do not pick up `chore` or `polish` issues yourself.** File a `bd create` instead (see below).
+- **Do not pick up `chore` or `polish` issues yourself.** File a `bd create` instead (see below). If the user explicitly directs you to work one anyway, it's yours to finish — including closing it (next bullet) — don't leave it for the worker.
 - **`design` issues are fair game** for interactive work. `bd update <id> --claim` when you start, `bd close <id>` when done, `bd dolt push` after either.
+- **Close any bd issue yourself once you have direct confirmation it's resolved** — i.e. you ran `gh pr merge` (or the user told you it merged) for a PR whose body has a `Resolves: <id>` line. Do this regardless of the issue's label (`design`, `chore`, `polish`) and regardless of whether the worker routine is currently running. The worker's pickup-rule-1 auto-closure (`gh pr list --label claude-authored --state merged`) **only scans `claude-authored` PRs** — a label interactive sessions never use — so it structurally cannot see a PR you opened, merged or not. Deferring closure "to the next worker run" only makes sense for the worker itself, which opens a PR and moves on without waiting for the async `auto-merge.yml` gate; you don't have that excuse once you've confirmed the merge synchronously. `bd close <id>` + `bd dolt push` in the same session.
 - Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
 - After each commit + push, open a PR immediately without asking.
 - After submitting a PR, wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, push, repeat until no actionable comments remain.
