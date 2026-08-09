@@ -5,8 +5,10 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
+import fuel_signal.lga_leadership as lga_leadership_module
 from fuel_signal.db import (
     create_schema,
+    delete_lga_leadership_for_date,
     get_lga_leadership_board,
     latest_lga_leadership_date,
     open_db,
@@ -223,6 +225,57 @@ def test_score_leadership_range(conn):
     n = score_leadership_range(conn, "2022-01-01", "2022-01-22", step_days=7)
     # Four snapshots: Jan 1, Jan 8, Jan 15, Jan 22 (end_date inclusive)
     assert n >= 8  # at least 2 LGAs × 4 snapshots
+
+
+def test_score_leadership_range_calls_load_lga_sums_once(conn, monkeypatch):
+    """fps-53j: range mode must preload once and slice, not re-query per snapshot."""
+    _build_two_lga_db(conn)
+    calls = []
+    original = lga_leadership_module._load_lga_sums
+
+    def counting_load(conn_, fid, start_date=None, end_date=None):
+        calls.append((start_date, end_date))
+        return original(conn_, fid, start_date=start_date, end_date=end_date)
+
+    monkeypatch.setattr(lga_leadership_module, "_load_lga_sums", counting_load)
+    score_leadership_range(conn, "2022-01-01", "2022-01-22", step_days=7)
+    # Exactly one full-range call (start_date=end_date=None), regardless of snapshot count.
+    assert calls == [(None, None)]
+
+
+def test_score_leadership_range_matches_per_snapshot(conn):
+    """Range mode and repeated per-snapshot calls must produce identical rows."""
+    _build_two_lga_db(conn)
+    snapshots = ["2022-01-01", "2022-01-08", "2022-01-15", "2022-01-22"]
+
+    for snap in snapshots:
+        score_leadership_snapshot(conn, snap)
+    per_snapshot_rows = {
+        snap: sorted(get_lga_leadership_board(conn, snap)) for snap in snapshots
+    }
+
+    # Wipe and re-run via the range path.
+    for snap in snapshots:
+        delete_lga_leadership_for_date(conn, snap)
+    conn.commit()
+    score_leadership_range(conn, "2022-01-01", "2022-01-22", step_days=7)
+    range_rows = {
+        snap: sorted(get_lga_leadership_board(conn, snap)) for snap in snapshots
+    }
+
+    assert per_snapshot_rows == range_rows
+
+
+@pytest.mark.parametrize("window_days", [0, -1])
+def test_score_leadership_range_rejects_non_positive_window(conn, window_days):
+    with pytest.raises(ValueError, match="window_days must be positive"):
+        score_leadership_range(conn, "2022-01-01", "2022-01-22", window_days=window_days)
+
+
+@pytest.mark.parametrize("step_days", [0, -1])
+def test_score_leadership_range_rejects_non_positive_step(conn, step_days):
+    with pytest.raises(ValueError, match="step_days must be positive"):
+        score_leadership_range(conn, "2022-01-01", "2022-01-22", step_days=step_days)
 
 
 def test_latest_lga_leadership_date(conn):
