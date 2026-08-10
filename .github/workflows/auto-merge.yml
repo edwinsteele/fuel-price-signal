@@ -33,11 +33,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           # Worker-authored chore PRs: must carry all three required labels.
+          # --limit above the default 30 so a backlog can't hide PRs from the sweep.
           worker_prs=$(gh pr list \
             --label "claude-authored" \
             --label "chore" \
             --label "auto-merge-ok" \
             --state open \
+            --limit 100 \
             --json number \
             --jq '.[].number')
 
@@ -46,10 +48,11 @@ jobs:
             --author "app/dependabot" \
             --label "dependencies" \
             --state open \
+            --limit 100 \
             --json number \
             --jq '.[].number')
 
-          prs=$(printf '%s\n%s\n' "$worker_prs" "$dependabot_prs" | grep -v '^$' | sort -un)
+          prs=$(printf '%s\n%s\n' "$worker_prs" "$dependabot_prs" | awk 'NF' | sort -un)
 
           if [ -z "$prs" ]; then
             echo "No eligible PRs found."
