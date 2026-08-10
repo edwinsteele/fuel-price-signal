@@ -13,18 +13,20 @@ daily_prices rows in [D-45, D-1].
 import logging
 import pathlib
 import sqlite3
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import date, timedelta
 from statistics import median
 
 import click
 
+from fuel_signal.dates import date_from_int, date_to_int
 from fuel_signal.db import (
     DEFAULT_DB_PATH,
     create_schema,
     daily_prices_in_window,
     delete_classification_summary_for_date,
     delete_station_class_for_date,
+    fuel_type_id,
     open_db,
     upsert_classification_summary_rows,
     upsert_station_class_rows,
@@ -110,47 +112,32 @@ def _classify_lga(
     return iter2_classes, premiums_2
 
 
-def classify_snapshot(
+def _write_classify_snapshot(
     conn: sqlite3.Connection,
     snapshot_date: str,
-    fuel_code: str = "E10",
-    window_days: int = WINDOW_DAYS,
+    by_lga: dict[str, dict[int, dict[str, float]]],
+    window: tuple[str, str],
+    commit: bool = True,
 ) -> tuple[int, int]:
-    """Classify all stations as of snapshot_date and persist results.
+    """Classify and persist rows from a pre-grouped by_lga dict.
 
-    Window: [snapshot_date - window_days, snapshot_date - 1] inclusive.
-    Existing rows for snapshot_date are removed before the new ones are written
-    (idempotent re-runs).
-
-    Returns (n_station_class_rows_written, n_summary_rows_written).
+    Shared by classify_snapshot (direct query) and classify_range (streamed
+    sliding-window query) so both paths compute and write identically.
+    `window` is (start_date, end_date), used only for the empty-window log.
+    `commit` is False in classify_range, which batches commits across the
+    whole range instead of once per snapshot.
     """
-    if window_days <= 0:
-        raise ValueError("window_days must be positive")
-
-    snap = date.fromisoformat(snapshot_date)
-    start = (snap - timedelta(days=window_days)).isoformat()
-    end = (snap - timedelta(days=1)).isoformat()
-
-    rows = daily_prices_in_window(conn, start, end, fuel_code=fuel_code)
-
-    # Idempotent: wipe previous rows for this date even if window is empty.
     delete_station_class_for_date(conn, snapshot_date)
     delete_classification_summary_for_date(conn, snapshot_date)
 
-    if not rows:
+    if not by_lga:
         logger.warning(
             "classify_snapshot %s: no daily_prices in window [%s, %s]",
-            snapshot_date, start, end,
+            snapshot_date, window[0], window[1],
         )
-        conn.commit()
+        if commit:
+            conn.commit()
         return 0, 0
-
-    # by_lga[lga][station_code][date_str] = price_cents
-    by_lga: defaultdict[str, defaultdict[int, dict[str, float]]] = defaultdict(
-        lambda: defaultdict(dict)
-    )
-    for station_code, lga, d, price in rows:
-        by_lga[lga][station_code][d] = price
 
     class_rows: list[tuple[int, str, str, int]] = []
     summary_rows: list[tuple[str, str, int, int, int]] = []
@@ -174,13 +161,100 @@ def classify_snapshot(
 
     upsert_station_class_rows(conn, class_rows)
     upsert_classification_summary_rows(conn, summary_rows)
-    conn.commit()
+    if commit:
+        conn.commit()
 
     logger.info(
         "classify_snapshot %s: %d station_class rows across %d LGAs (%d summary rows)",
         snapshot_date, len(class_rows), len(by_lga), len(summary_rows),
     )
     return len(class_rows), len(summary_rows)
+
+
+def classify_snapshot(
+    conn: sqlite3.Connection,
+    snapshot_date: str,
+    fuel_code: str = "E10",
+    window_days: int = WINDOW_DAYS,
+) -> tuple[int, int]:
+    """Classify all stations as of snapshot_date and persist results.
+
+    Window: [snapshot_date - window_days, snapshot_date - 1] inclusive.
+    Existing rows for snapshot_date are removed before the new ones are written
+    (idempotent re-runs).
+
+    Returns (n_station_class_rows_written, n_summary_rows_written).
+    """
+    if window_days <= 0:
+        raise ValueError("window_days must be positive")
+
+    snap = date.fromisoformat(snapshot_date)
+    start = (snap - timedelta(days=window_days)).isoformat()
+    end = (snap - timedelta(days=1)).isoformat()
+
+    rows = daily_prices_in_window(conn, start, end, fuel_code=fuel_code)
+
+    # by_lga[lga][station_code][date_str] = price_cents
+    by_lga: defaultdict[str, defaultdict[int, dict[str, float]]] = defaultdict(
+        lambda: defaultdict(dict)
+    )
+    for station_code, lga, d, price in rows:
+        by_lga[lga][station_code][d] = price
+
+    return _write_classify_snapshot(conn, snapshot_date, by_lga, window=(start, end))
+
+
+def _day_bucket_stream(
+    conn: sqlite3.Connection,
+    start_date: str,
+    end_date: str,
+    fuel_code: str = "E10",
+    window_days: int = WINDOW_DAYS,
+):
+    """Yield (snapshot_date, deque of (date_int, date_str, [(station_code, lga,
+    price_cents)])) for each date in [start_date, end_date], sliding a
+    window_days window across a single ORDER BY price_date scan.
+
+    Resident set is O(window_days) day-buckets, not O(history): a naive
+    full-range load via daily_prices_in_window is 540 MB resident / 881 MB
+    peak for a decade of E10 rows, which would OOM Viking (see AGENTS.md §
+    "Backfill (--start-date) paths: load once, slice in memory"). Yields the
+    deque itself rather than a flattened row list — flattening rebuilds
+    ~31k tuples per snapshot and gives back most of the win, so consumers
+    must iterate the buckets directly.
+    """
+    fid = fuel_type_id(conn, fuel_code)
+    scan_lo = date_to_int(
+        (date.fromisoformat(start_date) - timedelta(days=window_days)).isoformat()
+    )
+    scan_hi = date_to_int((date.fromisoformat(end_date) - timedelta(days=1)).isoformat())
+    cur = conn.execute(
+        "SELECT dp.price_date, dp.station_code, s.council, dp.price_decicents"
+        " FROM daily_prices dp JOIN stations s USING(station_code)"
+        " WHERE dp.fuel_type_id = ? AND s.council IS NOT NULL"
+        "   AND dp.price_date >= ? AND dp.price_date <= ?"
+        " ORDER BY dp.price_date",
+        (fid, scan_lo, scan_hi),
+    )
+
+    buf: deque[tuple[int, str, list[tuple[int, str, float]]]] = deque()
+    pending = cur.fetchone()
+    d, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+    while d <= end:
+        hi = date_to_int((d - timedelta(days=1)).isoformat())
+        lo = date_to_int((d - timedelta(days=window_days)).isoformat())
+        while pending is not None and pending[0] <= hi:
+            day_int = pending[0]
+            day_str = date_from_int(day_int)
+            day: list[tuple[int, str, float]] = []
+            while pending is not None and pending[0] == day_int:
+                day.append((pending[1], pending[2], pending[3] / 10))
+                pending = cur.fetchone()
+            buf.append((day_int, day_str, day))
+        while buf and buf[0][0] < lo:
+            buf.popleft()
+        yield d.isoformat(), buf
+        d += timedelta(days=1)
 
 
 def classify_range(
@@ -190,7 +264,15 @@ def classify_range(
     fuel_code: str = "E10",
     window_days: int = WINDOW_DAYS,
 ) -> tuple[int, int]:
-    """Run classify_snapshot for every date in [start_date, end_date] inclusive.
+    """Run classification for every date in [start_date, end_date] inclusive.
+
+    Produces the same rows as calling classify_snapshot per snapshot, but
+    scans daily_prices once in the ORDER BY price_date order the schema
+    already delivers and slides a deque of day-buckets across it, instead of
+    re-querying the ~98%-overlapping window per snapshot (see AGENTS.md §
+    "Backfill (--start-date) paths: load once, slice in memory").
+    classify_snapshot (the daily path) is unchanged. Commits are batched
+    across the whole range rather than once per snapshot.
 
     Iterates chronologically so that a future feature pass reading station_class
     in date order sees only PIT-consistent rows.
@@ -199,15 +281,31 @@ def classify_range(
     end = date.fromisoformat(end_date)
     if d > end:
         raise ValueError(f"start_date {start_date} must not exceed end_date {end_date}")
+    if window_days <= 0:
+        raise ValueError("window_days must be positive")
 
     total_class = total_summary = 0
-    while d <= end:
-        n_c, n_s = classify_snapshot(
-            conn, d.isoformat(), fuel_code=fuel_code, window_days=window_days,
+    for snapshot_date, buf in _day_bucket_stream(
+        conn, start_date, end_date, fuel_code=fuel_code, window_days=window_days
+    ):
+        snap = date.fromisoformat(snapshot_date)
+        start = (snap - timedelta(days=window_days)).isoformat()
+        window_end = (snap - timedelta(days=1)).isoformat()
+
+        by_lga: defaultdict[str, defaultdict[int, dict[str, float]]] = defaultdict(
+            lambda: defaultdict(dict)
+        )
+        for _date_int, day_str, day in buf:
+            for station_code, lga, price in day:
+                by_lga[lga][station_code][day_str] = price
+
+        n_c, n_s = _write_classify_snapshot(
+            conn, snapshot_date, by_lga, window=(start, window_end), commit=False
         )
         total_class += n_c
         total_summary += n_s
-        d += timedelta(days=1)
+
+    conn.commit()
     return total_class, total_summary
 
 
