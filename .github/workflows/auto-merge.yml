@@ -1,4 +1,4 @@
-name: Auto-merge chore PRs
+name: Auto-merge eligible PRs
 
 # Auto-merges two independent PR sets, both gated by the same min-age +
 # all-checks-green rules below: worker-authored chore PRs (labeled
