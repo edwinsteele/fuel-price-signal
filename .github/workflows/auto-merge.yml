@@ -1,5 +1,12 @@
-name: Auto-merge chore PRs
+name: Auto-merge eligible PRs
 
+# Auto-merges two independent PR sets, both gated by the same min-age +
+# all-checks-green rules below: worker-authored chore PRs (labeled
+# claude-authored + chore + auto-merge-ok) and Dependabot PRs (labeled
+# dependencies). See fps-cku — Dependabot PRs never carry the worker's three
+# labels, so without this second set they sit open forever no matter how
+# green or old, including security patches (PR #277 sat green for a month).
+#
 # Fires when auto-merge-ok is applied, when CI finishes, and on a schedule.
 # The schedule is needed because the min-age gate below typically rejects the
 # label-time and CI-completion invocations (both happen too early), so we need
@@ -25,14 +32,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Find all open PRs that carry all three required labels.
-          prs=$(gh pr list \
+          # Worker-authored chore PRs: must carry all three required labels.
+          # --limit above the default 30 so a backlog can't hide PRs from the sweep.
+          worker_prs=$(gh pr list \
             --label "claude-authored" \
             --label "chore" \
             --label "auto-merge-ok" \
             --state open \
+            --limit 100 \
             --json number \
             --jq '.[].number')
+
+          # Dependabot PRs: identified by author, not by the worker's labels.
+          dependabot_prs=$(gh pr list \
+            --author "app/dependabot" \
+            --label "dependencies" \
+            --state open \
+            --limit 100 \
+            --json number \
+            --jq '.[].number')
+
+          prs=$(printf '%s\n%s\n' "$worker_prs" "$dependabot_prs" | awk 'NF' | sort -un)
 
           if [ -z "$prs" ]; then
             echo "No eligible PRs found."
