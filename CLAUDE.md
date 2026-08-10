@@ -45,9 +45,14 @@ Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
 
    If any PR qualifies, perform maintenance (see **PR maintenance** below), then exit.
 3. Check for open `claude-authored` PRs (any). If any exist, **exit immediately** — one at a time.
-4. Query `bd ready --label chore --unassigned --sort oldest -n 1`; if empty, `bd ready --label polish --unassigned --sort oldest -n 1`. Take the first result.
-5. `bd update <id> --claim` to mark it in_progress, then `bd dolt push`.
-6. Create a branch `worker/<id>-<slug>` for the issue.
+4. **Recover stale claims.** A prior run can crash between claiming an issue (rule 6) and opening its PR (rule 3 of "For each PR"), leaving it `in_progress` forever and invisible to `bd ready`. This rule runs sequentially, before any new claim is made in *this* run, so there's no race with rule 6 below — a "fresh" claim is always at least one full rule-4-pass old by the time rule 6 runs again next hour.
+   1. List candidates: `bd list --status in_progress --label-any chore,polish --json`.
+   2. For each issue, check whether it has a live branch (`git ls-remote --heads origin 'worker/<id>-*'`) or an open PR referencing it (`gh pr list --label claude-authored --state open --json number,body` and grep bodies for `Resolves: <id>`).
+   3. If neither exists **and** the issue's `updated_at` is more than 90 minutes old (long enough to cover a normal claim→PR cycle within one hourly run, short enough that a crash isn't lost for days), the claim is orphaned.
+   4. Release each orphaned issue found: `bd assign <id> ""`, `bd update <id> --status open`, then `bd dolt push`.
+5. Query `bd ready --label chore --unassigned --sort oldest -n 1`; if empty, `bd ready --label polish --unassigned --sort oldest -n 1`. Take the first result.
+6. `bd update <id> --claim` to mark it in_progress, then `bd dolt push`.
+7. Create a branch `worker/<id>-<slug>` for the issue.
 
 **For each PR:**
 1. Implement the minimal change — do not scope-creep.
