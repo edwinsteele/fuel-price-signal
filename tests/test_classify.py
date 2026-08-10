@@ -8,6 +8,7 @@ from datetime import date, timedelta
 
 import pytest
 
+import fuel_signal.classify as classify_module
 from fuel_signal.classify import (
     CLASS_COMPETITIVE,
     CLASS_DISCOUNT,
@@ -393,6 +394,107 @@ class TestClassifyRange:
     def test_rejects_inverted_range(self, conn):
         with pytest.raises(ValueError, match="must not exceed"):
             classify_range(conn, "2024-03-05", "2024-03-01")
+
+    @pytest.mark.parametrize("window_days", [0, -1])
+    def test_rejects_non_positive_window(self, conn, window_days):
+        with pytest.raises(ValueError, match="window_days must be positive"):
+            classify_range(conn, "2024-03-01", "2024-03-03", window_days=window_days)
+
+    def test_matches_per_snapshot(self, conn):
+        """fps-2us: range mode and repeated per-snapshot calls must produce
+        identical station_class + classification_summary rows."""
+        snap_start = "2024-03-01"
+        snap_end = "2024-03-04"
+        seed_start = (date.fromisoformat(snap_start) - timedelta(days=WINDOW_DAYS)).isoformat()
+        seed_days = WINDOW_DAYS + 4  # covers windows through snap_end's D-1
+
+        upsert_stations(conn, [
+            _station(c, postcode=PC_PARRAMATTA) for c in (2001, 2002, 2003, 2004)
+        ] + [
+            _station(c, postcode=PC_LIVERPOOL) for c in (2101, 2102, 2103)
+        ])
+        for code, p in [(2001, 150.0), (2002, 152.0), (2003, 200.0), (2004, 120.0)]:
+            _seed_daily_prices(conn, code, seed_start, seed_days, [p])
+        for code, p in [(2101, 150.0), (2102, 152.0), (2103, 153.0)]:
+            _seed_daily_prices(conn, code, seed_start, seed_days, [p])
+
+        snapshots = [
+            (date.fromisoformat(snap_start) + timedelta(days=i)).isoformat()
+            for i in range((date.fromisoformat(snap_end) - date.fromisoformat(snap_start)).days + 1)
+        ]
+
+        for snap in snapshots:
+            classify_snapshot(conn, snap)
+
+        def _rows_for(snap):
+            summary = conn.execute(
+                "SELECT lga, n_competitive, n_sticky, n_discount"
+                " FROM classification_summary WHERE snapshot_date = ? ORDER BY lga",
+                (int(snap.replace("-", "")),),
+            ).fetchall()
+            classes = conn.execute(
+                "SELECT station_code, class, median_premium_decicents"
+                " FROM station_class WHERE snapshot_date = ? ORDER BY station_code",
+                (int(snap.replace("-", "")),),
+            ).fetchall()
+            return summary, classes
+
+        per_snapshot_rows = {snap: _rows_for(snap) for snap in snapshots}
+
+        classify_range(conn, snap_start, snap_end)
+        range_rows = {snap: _rows_for(snap) for snap in snapshots}
+
+        assert per_snapshot_rows == range_rows
+
+    def test_scans_daily_prices_once_not_per_snapshot(self, conn, monkeypatch):
+        """fps-2us: range mode must not re-query per snapshot via
+        daily_prices_in_window — that's the direct-query helper classify_snapshot
+        uses, and its elimination from the range path is the whole point."""
+        snap_start = "2024-03-01"
+        snap_end = "2024-03-05"
+        seed_start = (date.fromisoformat(snap_start) - timedelta(days=WINDOW_DAYS)).isoformat()
+        upsert_stations(conn, [_station(c) for c in (2201, 2202, 2203)])
+        for code, p in [(2201, 150.0), (2202, 152.0), (2203, 154.0)]:
+            _seed_daily_prices(conn, code, seed_start, WINDOW_DAYS + 5, [p])
+
+        calls = []
+        original = classify_module.daily_prices_in_window
+
+        def counting(conn_, start, end, fuel_code="E10"):
+            calls.append((start, end))
+            return original(conn_, start, end, fuel_code=fuel_code)
+
+        monkeypatch.setattr(classify_module, "daily_prices_in_window", counting)
+        classify_range(conn, snap_start, snap_end)
+        assert calls == []
+
+    def test_batches_commits_across_range(self, conn):
+        """fps-2us: commits are batched in range mode, not once per snapshot."""
+        snap_start = "2024-03-01"
+        snap_end = "2024-03-05"
+        seed_start = (date.fromisoformat(snap_start) - timedelta(days=WINDOW_DAYS)).isoformat()
+        upsert_stations(conn, [_station(c) for c in (2301, 2302, 2303)])
+        for code, p in [(2301, 150.0), (2302, 152.0), (2303, 154.0)]:
+            _seed_daily_prices(conn, code, seed_start, WINDOW_DAYS + 5, [p])
+
+        # sqlite3.Connection is an immutable C type — neither instance attributes
+        # nor the class method can be patched. Count commits via a forwarding
+        # proxy instead.
+        class _CommitCounter:
+            def __init__(self, wrapped):
+                self._wrapped = wrapped
+                self.commits: list[int] = []
+
+            def commit(self):
+                self.commits.append(1)
+                return self._wrapped.commit()
+
+            def __getattr__(self, name):
+                return getattr(self._wrapped, name)
+
+        counter = _CommitCounter(conn)
+        classify_range(counter, snap_start, snap_end)
+        assert counter.commits == [1]
 
 
 class TestClassifyEdgeCases:
