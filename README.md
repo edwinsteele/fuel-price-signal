@@ -90,10 +90,14 @@ Loads all snapshot CSVs (from `data/snapshots/`) then all historical cleaned CSV
 ### 4. Forward-fill daily price gaps
 
 ```bash
+# Full rebuild (use this for first-time setup):
 uv run python -m fuel_signal.fill
+
+# Incremental — only recompute recent days (cheap, cost doesn't scale with total history):
+uv run python -m fuel_signal.fill --since-date 2026-08-01
 ```
 
-Rebuilds the `daily_prices` table by forward-filling gaps between observations. Required after `db` — analysis commands read from `daily_prices`, not from the raw observations.
+Rebuilds the `daily_prices` table by forward-filling gaps between observations. Required after `db` — analysis commands read from `daily_prices`, not from the raw observations. `--since-date` limits the rebuild to that date onward, using each station's most recent prior observation as the forward-fill anchor so gaps straddling the boundary still resolve correctly; earlier `daily_prices` rows are left untouched. Omit it for a full rebuild.
 
 ### 5. Classify stations (required before assembling features)
 
