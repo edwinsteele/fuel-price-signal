@@ -300,6 +300,12 @@ class TestFillAllSinceDate:
         rows = get_daily_prices(conn, 1001)
         assert len(rows) == 1  # only the original observation; boundary gap too wide
 
+    def test_since_date_after_end_date_raises(self, conn):
+        upsert_stations(conn, [_station(1001)])
+        insert_prices(conn, [_price(1001, "2024-01-01", 150.0)])
+        with pytest.raises(ValueError, match="must not exceed"):
+            fill_all(conn, end_date="2024-01-05", since_date="2024-01-06")
+
     def test_two_stations_independent_incremental_fill(self, conn):
         upsert_stations(conn, [_station(1001), _station(1002)])
         insert_prices(conn, [

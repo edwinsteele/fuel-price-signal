@@ -80,6 +80,27 @@ def find_daily_gaps(
     return gaps
 
 
+def _anchor_price_date(
+    conn: sqlite3.Connection,
+    station_code: int,
+    fid: int,
+    since_date: str,
+) -> str | None:
+    """Return the station's most recent price_date at or before since_date, if any.
+
+    Used to seed the forward-fill window for an incremental run: the anchor's
+    price is the "last_price" find_daily_gaps would have carried into since_date
+    had it scanned the station's full history.
+    """
+    row = conn.execute(
+        "SELECT price_date FROM prices"
+        " WHERE station_code = ? AND fuel_type_id = ? AND price_date <= ?"
+        " ORDER BY price_date DESC LIMIT 1",
+        (station_code, fid, date_to_int(since_date)),
+    ).fetchone()
+    return date_from_int(row[0]) if row else None
+
+
 def fill_all(
     conn: sqlite3.Connection,
     fuel_code: str = "E10",
@@ -105,6 +126,8 @@ def fill_all(
         raise ValueError("max_gap_days must be non-negative")
     if end_date is None:
         end_date = date.today().isoformat()
+    if since_date is not None and since_date > end_date:
+        raise ValueError(f"since_date {since_date} must not exceed end_date {end_date}")
 
     fid = fuel_type_id(conn, fuel_code)
 
@@ -129,13 +152,8 @@ def fill_all(
         if since_date is None:
             raw = station_price_series(conn, station_code, fuel_code)
         else:
-            anchor = conn.execute(
-                "SELECT price_date FROM prices"
-                " WHERE station_code = ? AND fuel_type_id = ? AND price_date <= ?"
-                " ORDER BY price_date DESC LIMIT 1",
-                (station_code, fid, date_to_int(since_date)),
-            ).fetchone()
-            window_start = date_from_int(anchor[0]) if anchor else since_date
+            anchor_date = _anchor_price_date(conn, station_code, fid, since_date)
+            window_start = anchor_date or since_date
             raw = station_price_series(conn, station_code, fuel_code, start_date=window_start)
         if not raw:
             continue
