@@ -7,6 +7,7 @@ from datetime import date, timedelta
 
 import click
 
+from fuel_signal.dates import date_from_int, date_to_int
 from fuel_signal.db import (
     DEFAULT_DB_PATH,
     create_schema,
@@ -84,6 +85,7 @@ def fill_all(
     fuel_code: str = "E10",
     end_date: str | None = None,
     max_gap_days: int = MAX_GAP_FILL_DAYS,
+    since_date: str | None = None,
 ) -> int:
     """Rebuild daily_prices for all stations that have prices in fuel_code.
 
@@ -91,7 +93,13 @@ def fill_all(
     observations and from the last observation to end_date (default: today).
     Gaps wider than max_gap_days are left unfilled.
 
-    Returns the total number of rows written to daily_prices.
+    since_date: if given, only dates >= since_date are recomputed — daily_prices
+    rows before since_date are left as-is. Each station's forward-fill picks up
+    from its most recent observation at or before since_date (if any), so gaps
+    straddling the boundary still resolve correctly. Omit for a full rebuild.
+
+    Returns the number of daily_prices rows written (all of them for a full
+    rebuild, or just those from since_date onward for an incremental run).
     """
     if max_gap_days < 0:
         raise ValueError("max_gap_days must be non-negative")
@@ -99,7 +107,14 @@ def fill_all(
         end_date = date.today().isoformat()
 
     fid = fuel_type_id(conn, fuel_code)
-    conn.execute("DELETE FROM daily_prices WHERE fuel_type_id = ?", (fid,))
+
+    if since_date is None:
+        conn.execute("DELETE FROM daily_prices WHERE fuel_type_id = ?", (fid,))
+    else:
+        conn.execute(
+            "DELETE FROM daily_prices WHERE fuel_type_id = ? AND price_date >= ?",
+            (fid, date_to_int(since_date)),
+        )
 
     station_codes: list[int] = [
         r[0]
@@ -111,19 +126,31 @@ def fill_all(
 
     total = 0
     for station_code in station_codes:
-        raw = station_price_series(conn, station_code, fuel_code)
+        if since_date is None:
+            raw = station_price_series(conn, station_code, fuel_code)
+        else:
+            anchor = conn.execute(
+                "SELECT price_date FROM prices"
+                " WHERE station_code = ? AND fuel_type_id = ? AND price_date <= ?"
+                " ORDER BY price_date DESC LIMIT 1",
+                (station_code, fid, date_to_int(since_date)),
+            ).fetchone()
+            window_start = date_from_int(anchor[0]) if anchor else since_date
+            raw = station_price_series(conn, station_code, fuel_code, start_date=window_start)
         if not raw:
             continue
 
         gaps = find_daily_gaps(raw, end_date, max_gap_days=max_gap_days)
         all_rows = [(station_code, fuel_code, d, p) for d, p in raw + gaps]
+        if since_date is not None:
+            all_rows = [r for r in all_rows if r[2] >= since_date]
         upsert_daily_prices(conn, all_rows)
         total += len(all_rows)
 
     conn.commit()
     logger.info(
-        "fill_all: %d stations, %d total daily_prices rows written (%s, up to %s)",
-        len(station_codes), total, fuel_code, end_date,
+        "fill_all: %d stations, %d daily_prices rows written (%s, %s to %s)",
+        len(station_codes), total, fuel_code, since_date or "full history", end_date,
     )
     return total
 
@@ -142,12 +169,18 @@ def fill_all(
     show_default=True,
     help="Gaps wider than this many days are left unfilled (station likely closed).",
 )
-def main(db_path: str, max_gap_days: int) -> None:
+@click.option(
+    "--since-date",
+    default=None,
+    help="Only recompute daily_prices from this date onward (YYYY-MM-DD). "
+    "Omit for a full rebuild of the whole table.",
+)
+def main(db_path: str, max_gap_days: int, since_date: str | None) -> None:
     """Forward-fill daily price gaps and rebuild the daily_prices table."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     conn = open_db(pathlib.Path(db_path))
     create_schema(conn)
-    fill_all(conn, max_gap_days=max_gap_days)
+    fill_all(conn, max_gap_days=max_gap_days, since_date=since_date)
     conn.close()
 
 

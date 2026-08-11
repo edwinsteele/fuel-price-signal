@@ -245,6 +245,78 @@ class TestFillAll:
         assert len(rows) == 1  # only the observed date
 
 
+class TestFillAllSinceDate:
+    def test_earlier_days_untouched(self, conn):
+        upsert_stations(conn, [_station(1001)])
+        insert_prices(conn, [_price(1001, "2024-01-01", 150.0)])
+        fill_all(conn, end_date="2024-01-05")
+        before = get_daily_prices(conn, 1001)
+
+        insert_prices(conn, [_price(1001, "2024-01-06", 160.0)])
+        fill_all(conn, end_date="2024-01-06", since_date="2024-01-05")
+
+        after = get_daily_prices(conn, 1001)
+        assert after[:5] == before  # Jan 1-5 rows byte-for-byte unchanged
+
+    def test_boundary_gap_resolved_via_anchor_price(self, conn):
+        # Last real observation is well before since_date — the incremental
+        # run must still forward-fill the boundary from that anchor price.
+        upsert_stations(conn, [_station(1001)])
+        insert_prices(conn, [_price(1001, "2024-01-01", 150.0)])
+        fill_all(conn, end_date="2024-01-03")
+
+        fill_all(conn, end_date="2024-01-06", since_date="2024-01-04")
+
+        rows = dict(get_daily_prices(conn, 1001))
+        assert rows["2024-01-04"] == 150.0
+        assert rows["2024-01-05"] == 150.0
+        assert rows["2024-01-06"] == 150.0
+
+    def test_station_with_no_data_before_boundary(self, conn):
+        # Station's only observations start after since_date — no anchor exists.
+        upsert_stations(conn, [_station(1001)])
+        insert_prices(conn, [_price(1001, "2024-01-10", 150.0)])
+        fill_all(conn, end_date="2024-01-12", since_date="2024-01-05")
+        rows = dict(get_daily_prices(conn, 1001))
+        assert rows["2024-01-10"] == 150.0
+        assert rows["2024-01-11"] == 150.0
+        assert rows["2024-01-12"] == 150.0
+        assert "2024-01-05" not in rows
+
+    def test_returns_only_tail_row_count(self, conn):
+        upsert_stations(conn, [_station(1001)])
+        insert_prices(conn, [_price(1001, "2024-01-01", 150.0)])
+        fill_all(conn, end_date="2024-01-05")
+
+        total = fill_all(conn, end_date="2024-01-07", since_date="2024-01-06")
+        assert total == 2  # Jan 6-7 only, not the full Jan 1-7 history
+
+    def test_anchor_gap_exceeding_threshold_not_filled(self, conn):
+        upsert_stations(conn, [_station(1001)])
+        insert_prices(conn, [_price(1001, "2024-01-01", 150.0)])
+        fill_all(conn, end_date="2024-01-01")
+
+        fill_all(conn, end_date="2024-04-01", since_date="2024-03-01", max_gap_days=28)
+        rows = get_daily_prices(conn, 1001)
+        assert len(rows) == 1  # only the original observation; boundary gap too wide
+
+    def test_two_stations_independent_incremental_fill(self, conn):
+        upsert_stations(conn, [_station(1001), _station(1002)])
+        insert_prices(conn, [
+            _price(1001, "2024-01-01", 150.0),
+            _price(1002, "2024-01-01", 160.0),
+        ])
+        fill_all(conn, end_date="2024-01-01")
+
+        insert_prices(conn, [_price(1002, "2024-01-05", 165.0)])
+        fill_all(conn, end_date="2024-01-05", since_date="2024-01-02")
+
+        s1 = dict(get_daily_prices(conn, 1001))
+        s2 = dict(get_daily_prices(conn, 1002))
+        assert s1["2024-01-05"] == 150.0  # forward-filled from its own anchor
+        assert s2["2024-01-05"] == 165.0  # its own new observation
+
+
 # ---------------------------------------------------------------------------
 # average_price_series
 # ---------------------------------------------------------------------------
