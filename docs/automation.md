@@ -19,7 +19,7 @@ Issues referenced below live in Beads (`bd`), not GitHub Issues — see [AGENTS.
 Issue filed (chore/polish)
         │
         ▼
-Worker picks up (next hourly run, no open claude-authored PRs)
+Worker picks up (next scheduled run, no open claude-authored PRs)
         │
         ├─ Implements minimal change
         ├─ Runs ruff + pytest locally
@@ -40,7 +40,7 @@ Worker picks up (next hourly run, no open claude-authored PRs)
            Comments left         No comments
                  │                    │
          Worker addresses        Owner merges
-         on next hourly run
+         on next scheduled run
                  │
          [worker] Done / Needs owner input
          reply per thread + push
@@ -60,7 +60,7 @@ Worker discovers design work needed
 
 ## Review response
 
-On each hourly run the worker checks open `claude-authored` PRs for unresolved review threads before looking for new issues. A thread needs a response if it is unresolved and has no comment starting with `[worker]`.
+On each scheduled run the worker checks open `claude-authored` PRs for unresolved review threads before looking for new issues. A thread needs a response if it is unresolved and has no comment starting with `[worker]`.
 
 The worker reads all actionable threads together, makes the changes in one pass, pushes, then replies to each thread:
 - `[worker] Done — <one sentence>` for addressed threads
@@ -82,7 +82,7 @@ The worker is a scheduled remote Claude Code routine. To pause it:
 
 ## Spend monitoring
 
-Each worker run (hourly) uses Sonnet. The WIP cap of 3 issues per batch limits spend. Each run that finds no work exits in seconds (cheap). Implement sessions with actual work are estimated at ~$0.10–0.30 per issue depending on complexity.
+Each worker run (twice daily — `0 9,20 * * *` UTC) uses Sonnet. The WIP cap of 3 issues per batch limits spend. Each run that finds no work exits in seconds (cheap). Implement sessions with actual work are estimated at ~$0.10–0.30 per issue depending on complexity.
 
 Monitor spend in the Anthropic console. If costs are unexpectedly high, check whether the worker is getting stuck in retry loops (visible in the routine's run history).
 
