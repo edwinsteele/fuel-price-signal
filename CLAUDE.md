@@ -30,10 +30,12 @@ You are a Sonnet worker running as a **Claude Code Routine** (see [docs/automati
 
 **Known gap (unresolved as of this migration, check before trusting `bd ready` output):** the auto-configured Dolt remote — `git+ssh://git@github.com/edwinsteele/fuel-price-signal.git` — needs deploy-key or HTTPS-token auth reachable from the Routine's environment; it currently relies on the owner's personal 1Password-gated SSH key, which that environment does not have. Until this is fixed, `bd dolt pull`/`push` will likely fail in the Routine even though they work fine in an interactive session on the owner's Mac. If `bd dolt pull` fails, do not proceed as if the backlog is empty — surface the failure rather than silently finding "no ready work".
 
+**Known gap 2 (bd binary itself, not just its Dolt remote, can be absent):** the Routine's `environment_id` (see [docs/automation.md](docs/automation.md)) is a fixed Anthropic-managed environment — the routine-scheduling API has no field for a custom base image or a setup script, so there is no durable place to pre-bake `bd` into the container. Treat the binary as something you may have to install fresh every run rather than something the environment guarantees. That's what pickup rule 0 below does — do not skip it, and do not try to work around a missing `bd` by falling back to `gh issue` (that workflow was retired with the Beads migration; GitHub Issues are no longer the source of truth).
+
 Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
 
 **Pickup rules:**
-0. `bd dolt pull` — first action, every run.
+0. Ensure `bd` is usable before anything else: `command -v bd >/dev/null 2>&1 || (curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash)`. Then re-check `command -v bd`; if it's still missing, surface that clearly and stop — do not proceed as if there were no work. Once `bd` is confirmed present, run `bd dolt pull`.
 1. Close out bd issues resolved by your own merged PRs since the last run: `gh pr list --label claude-authored --state merged --json number,body,mergedAt` (recent ones), pull the `Resolves: <id>` line out of each body, `bd close <id>` for each, then `bd dolt push`.
 2. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers:
    ```bash
