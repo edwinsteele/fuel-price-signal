@@ -1,5 +1,7 @@
 # Automation workflow
 
+> **Status (2026-08-15): the Cloud Routine is disabled.** `bd dolt push` from inside a Routine sandbox hits an HTTP 403 pushing to Dolt's git-ref namespace — a Claude Code Routines platform limitation (sandboxed git credentials can't push non-standard refs), not something fixable from this repo. Root cause, live reproduction, and an upstream report are documented in bd issue `fps-sk0` (status `blocked`, P3). The mechanics below remain accurate and this doc doesn't need rewriting if the Routine is re-enabled later — check `fps-sk0` first to see if the upstream blocker has moved.
+
 This document describes how `chore` and `polish` issues flow from filing to merged PR with minimal owner involvement, while `design` issues stay manual.
 
 Issues referenced below live in Beads (`bd`), not GitHub Issues — see [AGENTS.md § Beads](../AGENTS.md#beads). PRs, CI, and review threads are still on GitHub; only issue tracking moved.
@@ -85,6 +87,8 @@ This means: review (or merge) the open PR before the worker will pick up anythin
 The worker is a scheduled remote Claude Code routine. To pause it:
 1. Go to the Claude Code scheduled tasks and disable the routine, **or**
 2. Open a PR manually with the `claude-authored` label — the WIP cap will stop the worker from picking up anything.
+
+(Currently disabled via option 1 — see the status note at the top of this doc.)
 
 ## Spend monitoring
 
