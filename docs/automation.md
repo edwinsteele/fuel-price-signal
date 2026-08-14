@@ -12,10 +12,11 @@ Each scheduled routine's *stored* prompt (a Claude Code Routine's `job_config`, 
 
 | Label | Who files | Who works it | Merge path |
 |-------|-----------|--------------|------------|
-| `chore` | Owner or worker (via spawn_task redirect) | Worker routine | Owner review required |
+| `chore` | Owner or worker (via spawn_task redirect) | Worker routine | Auto-merged once CI green + `auto-merge-ok` applied (see below) |
 | `polish` | Owner or worker | Worker routine | Owner review required |
 | `design` | Owner | Owner (interactive) | Normal PR review |
 | `claude-authored` | Applied by worker automatically | — | Identifies worker-opened PRs |
+| `auto-merge-ok` | Applied by worker to `chore` PRs on open | — | Triggers `.github/workflows/auto-merge.yml` |
 
 ## State machine
 
@@ -27,8 +28,8 @@ Worker picks up (next scheduled run, no open claude-authored PRs)
         │
         ├─ Implements minimal change
         ├─ Runs ruff + pytest locally
-        └─ Opens PR ready-for-review (claude-authored + chore|polish);
-           3–5 bullet plan in the PR body
+        └─ Opens PR ready-for-review (claude-authored + chore|polish;
+           chore PRs also get auto-merge-ok); 3–5 bullet plan in the PR body
                 │
                 ▼
         CI runs (lint, test, signal-regression)
@@ -36,20 +37,21 @@ Worker picks up (next scheduled run, no open claude-authored PRs)
           ┌─────┴──────┐
         fail           pass
           │               │
-        Worker         Owner reviews
-        fixes &            │
-        pushes             │
+        Worker    ┌───────┴────────┐
+        fixes &  chore            polish
+        pushes     │                │
+             auto-merge.yml    Owner reviews
+             sweep merges           │
+             once PR age  ┌─────────┴──────────┐
+             ≥900s   Comments left         No comments
+                           │                    │
+                   Worker addresses        Owner merges
+                   on next scheduled run
                            │
-                 ┌─────────┴──────────┐
-           Comments left         No comments
-                 │                    │
-         Worker addresses        Owner merges
-         on next scheduled run
-                 │
-         [worker] Done / Needs owner input
-         reply per thread + push
-                 │
-         Owner resolves threads + merges
+                   [worker] Done / Needs owner input
+                   reply per thread + push
+                           │
+                   Owner resolves threads + merges
 ```
 
 For `polish` issues that turn out to need design work:
