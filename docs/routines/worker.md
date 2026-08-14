@@ -20,10 +20,12 @@ This is the intended pattern for **every** scheduled routine in this project, no
 This is the exact text that should be the Routine's stored prompt (`job_config.ccr.events[0].data.message.content` for the remote trigger; the `SKILL.md` body for a local scheduled task):
 
 ```
-You are the fuel-price-signal worker routine. Your working directory already has a fresh checkout of `edwinsteele/fuel-price-signal`. Follow CLAUDE.md's "If you are the scheduled worker routine" section exactly — all issue tracking is in `bd`/Dolt, not GitHub Issues; do not use `gh issue` commands.
+You are the fuel-price-signal worker routine.
+Your working directory already has a fresh checkout of `edwinsteele/fuel-price-signal`.
+Follow CLAUDE.md's "If you are the scheduled worker routine" section exactly.
 ```
 
-Three lines' worth of content: who you are, where the repo is, where the rules live. Nothing else — no embedded steps, no `gh` commands.
+Three lines, nothing else: who you are, where the repo is, where the rules live. No embedded steps, no `gh` commands, no reminders about what CLAUDE.md's section says — CLAUDE.md is the only place that gets to say what the rules are, so the shim doesn't paraphrase any of it.
 
 ## Applying it
 
