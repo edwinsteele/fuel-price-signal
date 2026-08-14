@@ -17,7 +17,7 @@
 > example where a high-SHAP-correlation pair looked great on one window
 > (Δ −0.018) but failed walk-forward CV (fold 9: **+0.103**, abandoned).
 >
-> Tracked: design issue [#195](../../../../issues/195).
+> Tracked: design issue [#195](https://github.com/edwinsteele/fuel-price-signal/issues/195).
 
 ## Hypothesis
 The 50-feature Phase 4b set has redundant SHAP-correlated features. At the **default cluster threshold (0.5)**, surface the loosest grouping to motivate either removing dupes or decomposing combined features into independent components.
