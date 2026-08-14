@@ -4,6 +4,10 @@ This document describes how `chore` and `polish` issues flow from filing to merg
 
 Issues referenced below live in Beads (`bd`), not GitHub Issues — see [AGENTS.md § Beads](../AGENTS.md#beads). PRs, CI, and review threads are still on GitHub; only issue tracking moved.
 
+## Routine prompts live in `docs/routines/`, not in the scheduler
+
+Each scheduled routine's *stored* prompt (a Claude Code Routine's `job_config`, or a local scheduled-task `SKILL.md`) is a three-line shim — who the routine is, where the repo checkout is, and which repo doc to follow. The actual rules live in a tracked `docs/routines/<name>.md` (or, for this worker, directly in CLAUDE.md's ["If you are the scheduled worker routine"](../CLAUDE.md#if-you-are-the-scheduled-worker-routine) section, which `docs/routines/worker.md` points to). This is deliberate: instructions duplicated into the scheduler are instructions nobody remembers to update when the workflow changes — see `docs/routines/worker.md` for the incident that motivated it.
+
 ## Issue labels
 
 | Label | Who files | Who works it | Merge path |
