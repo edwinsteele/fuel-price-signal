@@ -156,7 +156,7 @@ treat the per-config std as a *secondary* diagnostic.
   with "redundant globally". The phase4b sweep used only the most recent val
   window; the redundancy pairs it surfaced should be revalidated against
   earlier folds before any are proposed for dropping. Filed as design issue
-  [#195](../../../../issues/195).
+  [#195](https://github.com/edwinsteele/fuel-price-signal/issues/195).
 - Cross-reference with [[project_lga_feature_mechanisms]]:
   `station_minus_last_max_cents` may flip mechanism (mean-reversion vs
   cycle-decoder) across regimes, which would explain the fold-by-fold sign
@@ -167,21 +167,21 @@ Friction surfaced by this run that we should fix before the next ablation
 sweep. All filed as GitHub issues:
 
 1. **No `--drop-feature` / `--seed` flags on `train_lgbm.py`** — had to write
-   a custom `run.py`. Issue [#191](../../../../issues/191).
+   a custom `run.py`. Issue [#191](https://github.com/edwinsteele/fuel-price-signal/issues/191).
 2. **`PYTHONPATH=.` required** to import `fuel_signal` from
    `experiments/<dir>/run.py`. Bundled with #4 below. Issue
-   [#194](../../../../issues/194).
+   [#194](https://github.com/edwinsteele/fuel-price-signal/issues/194).
 3. **sklearn `UserWarning: X does not have valid feature names`** fires every
    `predict_proba` call. Bundled with #2 above. Issue
-   [#194](../../../../issues/194).
+   [#194](https://github.com/edwinsteele/fuel-price-signal/issues/194).
 4. **Loading 683 MB CSV** dominates wall time (~30 s). Parquet cache.
-   Issue [#193](../../../../issues/193).
+   Issue [#193](https://github.com/edwinsteele/fuel-price-signal/issues/193).
 5. **No multi-seed mode by default** — quick ablations should report std so
    we can immediately judge whether Δ exceeds seed noise. Folded into the
-   `--seed` work in [#191](../../../../issues/191).
+   `--seed` work in [#191](https://github.com/edwinsteele/fuel-price-signal/issues/191).
 6. **Single val window → paired walk-forward CV** requires trained joblib
    artifacts. A `cv_report --drop-feature X` mode would close the loop.
-   Issue [#192](../../../../issues/192).
+   Issue [#192](https://github.com/edwinsteele/fuel-price-signal/issues/192).
 
 Surfaced *during* step 1 (added as I worked):
 
