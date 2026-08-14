@@ -41,17 +41,21 @@ Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
 **Pickup rules:**
 0. Ensure `bd` is usable and version-pinned before anything else: `command -v bd >/dev/null 2>&1 || npm install -g @beads/bd@1.1.2`. npm's presence in this environment is confirmed (verified live 2026-08-11 — `bd` installed and pinned at 1.1.2 correctly on the first real run of this rule), so **do not fall back to the unpinned curl install script if the npm install fails** — that would silently run an unvalidated `@latest` `bd` against the shared Dolt database. Fail hard instead: surface the npm failure clearly and stop, do not proceed as if there were no work.
 
+   **CI-env-var gotcha (found 2026-08-15, not yet live-verified):** `@beads/bd`'s npm postinstall skips downloading the native binary entirely when `process.env.CI` is set (`if (!process.env.CI) { install() } else { console.log('Skipping binary download in CI environment') }`), and its `bin/bd.js` wrapper has no fallback — it just prints "bd binary not found" and exits 1 on first real invocation. `command -v bd` only checks that the npm shim file exists, not that the binary actually downloaded, so it cannot catch this. After install, verify with a real invocation (`bd --version`), not just `command -v`. If that fails and `$CI` is set in this environment, retry with `env -u CI npm install -g @beads/bd@1.1.2 --force` before treating it as a hard npm failure.
+
    Then ensure `gh` is present too — install it if missing (this environment doesn't always have it pre-installed, unlike `bd`):
    ```
    command -v gh >/dev/null 2>&1 || {
-     GH_LATEST="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | head -1 | cut -d'"' -f4 | sed 's/^v//')"
-     curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_LATEST}/gh_${GH_LATEST}_linux_amd64.tar.gz" \
+     GH_VERSION="2.97.0"
+     curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
        && tar -xzf /tmp/gh.tar.gz -C /tmp \
-       && cp "/tmp/gh_${GH_LATEST}_linux_amd64/bin/gh" /usr/local/bin/gh \
+       && cp "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
        && chmod +x /usr/local/bin/gh
    }
    command -v gh >/dev/null 2>&1 || echo "gh install failed — TOKEN below will fall back to \$GH_TOKEN/\$GITHUB_TOKEN, which may be a proxy placeholder, not a real credential (fps-sk0)." >&2
    ```
+   Pin `GH_VERSION` the same way `bd` is pinned below — bump it by hand when the owner confirms a newer `gh` works, never chase `@latest` here. **Deliberately not `curl`ing `api.github.com/.../releases/latest` to discover the version** (2026-08-15 revision, not yet live-verified): fps-sk0 found `api.github.com` returning 403 in this sandbox while `github.com/.../releases/download/...` — the exact domain+path `@beads/bd`'s own postinstall.js successfully downloads its binary from — was never actually confirmed blocked. The old two-step version showed a 404 on the *download*, but that's the predictable result of the *version-lookup* step against `api.github.com` failing silently and feeding an empty version into the download URL (`.../download/v/gh__linux_amd64.tar.gz`), not evidence that release downloads themselves are blocked. Pinning the version removes the `api.github.com` call entirely, sidestepping that failure mode regardless of which diagnosis is right.
+
    This matters because of fps-sk0 (root-caused 2026-08-14): Dolt has a documented upstream bug where its internal git push can't complete an interactive-style (STDIN/askpass) credential prompt — https://www.dolthub.com/blog/2026-02-13-announcing-git-remote-support-in-dolt/ says plainly "there is a bug in Dolt ... which prevents using Git remotes as Dolt remotes if your Git binary requires username and password credential inputs via STDIN, so you must use a Git authentication method that does not require these." This environment's ambient git auth uses exactly that interactive-style mechanism (`GIT_ASKPASS`) — which is why plain `git push` works fine but `bd dolt push` 403s regardless of network/proxy state. The only way around Dolt's bug is a token embedded directly in the URL, which needs `gh auth token` to actually resolve a real credential — hence installing `gh` here rather than treating its absence as tolerable.
 
    Once `bd` and `gh` are confirmed present, reconstruct the Dolt remote with a live token so `bd dolt push` can authenticate (see "Dolt remote auth" above — this is required every run, not a one-time setup step):
