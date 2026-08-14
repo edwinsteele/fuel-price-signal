@@ -42,14 +42,19 @@ Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
 0. Ensure `bd` is usable and version-pinned before anything else: `command -v bd >/dev/null 2>&1 || npm install -g @beads/bd@1.1.2`. npm's presence in this environment is confirmed (verified live 2026-08-11 — `bd` installed and pinned at 1.1.2 correctly on the first real run of this rule), so **do not fall back to the unpinned curl install script if the npm install fails** — that would silently run an unvalidated `@latest` `bd` against the shared Dolt database. Fail hard instead: surface the npm failure clearly and stop, do not proceed as if there were no work. Once `bd` is confirmed present (`command -v bd`), reconstruct the Dolt remote with a live token so `bd dolt push` can authenticate (see "Dolt remote auth" above — this is required every run, not a one-time setup step):
    ```
    TOKEN="$(gh auth token 2>/dev/null || echo "${GH_TOKEN:-$GITHUB_TOKEN}")"
+   case "$TOKEN" in
+     gho_*|ghp_*|ghs_*|ghu_*|github_pat_*) ;;
+     *)
+       echo "Token doesn't look like a real GitHub token (got '${TOKEN}', length ${#TOKEN}) — likely a proxy placeholder (fps-sk0: this environment's gh CLI is sometimes absent, and \$GH_TOKEN/\$GITHUB_TOKEN can hold the literal sentinel value the egress proxy is meant to swap for real credentials, not a usable secret). Skipping explicit Dolt remote reconfiguration rather than embedding a bogus credential — falling back to whatever ambient credential handling already lets plain git operations (e.g. git ls-remote) succeed." >&2
+       TOKEN=""
+       ;;
+   esac
    if [ -n "$TOKEN" ]; then
      bd dolt remote remove origin >/dev/null 2>&1 || true
      bd dolt remote add origin "https://x-access-token:${TOKEN}@github.com/edwinsteele/fuel-price-signal.git"
-   else
-     echo "No GitHub token available (gh auth token / GH_TOKEN / GITHUB_TOKEN all empty) — cannot authenticate bd dolt push this run" >&2
    fi
    ```
-   Then run `bd dolt pull`.
+   Then run `bd dolt pull`. If `bd dolt push` later in this run still fails with a 403 even with a real-looking token, that's the deeper, still-open half of fps-sk0 — report it, don't retry in a loop.
 1. Close out bd issues resolved by your own merged PRs since the last run: `gh pr list --label claude-authored --state merged --json number,body,mergedAt` (recent ones), pull the `Resolves: <id>` line out of each body, `bd close <id>` for each, then `bd dolt push`.
 2. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers:
    ```bash
