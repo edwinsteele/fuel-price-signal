@@ -34,3 +34,4 @@
 {"id":"int-84b681a6525b9104432a30fa8ca03f7a","kind":"field_change","created_at":"2026-08-14T09:19:24.542751329Z","actor":"Claude","issue_id":"fps-axu","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Resolved by merged PR #293"}}
 {"id":"int-7dad64472ce1a6778f9bef315512ef33","kind":"field_change","created_at":"2026-08-14T22:55:14.907378Z","actor":"Edwin Steele","issue_id":"fps-sk0","extra":{"field":"status","new_value":"blocked","old_value":"open"}}
 {"id":"int-f12839078340654ac3756420caba6b17","kind":"field_change","created_at":"2026-08-14T22:55:14.907986Z","actor":"Edwin Steele","issue_id":"fps-sk0","extra":{"field":"priority","new_value":"3","old_value":"1"}}
+{"id":"int-a917fbbce5fe292404306122bd317f50","kind":"field_change","created_at":"2026-08-16T22:23:47.09543Z","actor":"Edwin Steele","issue_id":"fps-3jj","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
