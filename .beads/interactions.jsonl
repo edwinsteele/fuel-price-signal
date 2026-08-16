@@ -32,3 +32,5 @@
 {"id":"int-372df2275dd1cc56e0e4fb30ea235730","kind":"field_change","created_at":"2026-08-14T07:10:36.682133Z","actor":"Edwin Steele","issue_id":"fps-hg7","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-8583ce144546fe45acd589afc82e953d","kind":"field_change","created_at":"2026-08-14T07:19:10.327004Z","actor":"Edwin Steele","issue_id":"fps-sk0","extra":{"field":"status","new_value":"open","old_value":"in_progress"}}
 {"id":"int-84b681a6525b9104432a30fa8ca03f7a","kind":"field_change","created_at":"2026-08-14T09:19:24.542751329Z","actor":"Claude","issue_id":"fps-axu","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Resolved by merged PR #293"}}
+{"id":"int-7dad64472ce1a6778f9bef315512ef33","kind":"field_change","created_at":"2026-08-14T22:55:14.907378Z","actor":"Edwin Steele","issue_id":"fps-sk0","extra":{"field":"status","new_value":"blocked","old_value":"open"}}
+{"id":"int-f12839078340654ac3756420caba6b17","kind":"field_change","created_at":"2026-08-14T22:55:14.907986Z","actor":"Edwin Steele","issue_id":"fps-sk0","extra":{"field":"priority","new_value":"3","old_value":"1"}}
