@@ -1,0 +1,328 @@
+# Negative-results ledger
+#
+# Machine-readable residue of every candidate feature this project has tested.
+# Consumed by the generator session (fps-3jj.7) so it does not re-propose dead
+# ground and can see where room remains.
+#
+# Newest-first, matching experiments/INDEX.md. INDEX.md remains the prose lab
+# book; this file is the structured claim record. Neither is derived from the
+# other — the dossier routine writes both in the same pass.
+#
+# KEYED ON THE CLAIM, NOT THE FEATURE NAME. `inputs` (what data) is held
+# separately from `claim` (what was asserted), because a rejected claim over a
+# data source does not condemn the source: station_minus_tgp_cents was rejected
+# but tgp_delta_7d graduated off the same TGP series.
+#
+# Fields:
+#   candidate   - the column(s) or change under test
+#   inputs      - what data it reads
+#   claim       - the mechanism asserted, in price-formation terms
+#   falsified   - what the run actually showed (empty for graduates)
+#   not_tested  - adjacent ground this run did NOT rule out. The field that
+#                 stops the generator being timid. Requires real judgement.
+#   outcome     - graduated | rejected | disqualified | aborted_candidate
+#                 | aborted_environment
+#   evidence    - experiment dir
+#
+# Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
+# analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
+
+- candidate: tgp_delta_7d
+  inputs: [AIP Sydney ULP terminal gate price, price_date]
+  claim: >-
+    The 7-day velocity of the wholesale floor leads retail: when the floor is
+    moving up fast, buy before the pump follows.
+  falsified: ""
+  not_tested: >-
+    MA-smoothing of the velocity (parked — 7d point-to-point already beat 3d, so
+    smoothing was never run). Horizons between 7 and 14 days. Whether velocity of
+    a *different* upstream series (crude, Singapore Mogas) carries the same signal
+    with more lead in shocks.
+  outcome: graduated
+  evidence: experiments/2026-06-20_leading_indicators/
+
+- candidate: station_minus_tgp_cents
+  inputs: [AIP Sydney ULP terminal gate price, station price]
+  claim: >-
+    Distance to the wholesale floor predicts remaining descent — troughs "kiss"
+    TGP, so a large gap means more fall to come.
+  falsified: >-
+    Helps calm (Dll_all -0.012) but HURTS shock (+0.011) — inverse of the
+    hypothesis. Today's TGP is accurate when the floor is stable and misleading
+    when it is moving. On the realised arbiter it pools better than vel7 alone
+    (-0.136 vs -0.039) but by the WRONG TRADE: it rescues low-headroom calm folds
+    while zeroing vel7's biggest gains in the expensive 200+ c/L folds, where the
+    #262 headroom actually lives. The floor-proximity brake cancels velocity's
+    pre-spike buy.
+  not_tested: >-
+    Velocity/acceleration of the floor — became tgp_delta_7d, which graduated.
+    A gap measured against a *forward-looking* floor rather than today's. Whether
+    the gap is usable when explicitly gated OFF during shock regimes rather than
+    tamed by an interaction.
+  outcome: rejected
+  evidence: experiments/2026-06-20_leading_indicators/
+
+- candidate: gap_x_vel7 (explicit interaction of TGP gap and TGP velocity)
+  inputs: [AIP Sydney ULP terminal gate price, station price]
+  claim: >-
+    An explicit product column lets the tree tame the raw gap's shock drag,
+    recovering the gap's calm-regime value without paying its shock cost.
+  falsified: >-
+    It does tame the drag (shock -0.009 vs gap-alone +0.011) but the pooled gain
+    is marginal (+0.003) and seed-unstable (fold 11 at 30.6x the cohort-median
+    seed std). Dropped — not enough signal to survive its own variance.
+  not_tested: >-
+    A regime-gated switch (use gap only when |tgp_delta_7d| is below a threshold)
+    rather than a multiplicative interaction. The interaction was tested at one
+    parameterisation only.
+  outcome: rejected
+  evidence: experiments/2026-06-20_leading_indicators/
+
+- candidate: cycle_mean_length (regime-local break-floored shrunk median denominator)
+  inputs: [cycle peak/trough history, price_date]
+  claim: >-
+    cycle_mean_length is an expanding all-history mean that averages across the
+    COVID structural break (~28d -> ~41d at 2020-03), inflating cycle_pct_through
+    ~13%. A regime-local denominator corrects the phase axis and should improve
+    normal-fold log-loss without regressing fold 7.
+  falsified: >-
+    The denominator IS genuinely more accurate (~27d -> 38d, PIT-monotone, removes
+    the ~1.15x fold-7-era inflation) but buys no realised value: at the held
+    tau=0.25 it is 0.51 c/L WORSE (185.83 vs lock 185.32). The apparent +0.29pp
+    win was the operating-point move (tau 0.25 -> 0.20 buys ~1.08 c/L), not the
+    feature — operating point dominates the feature ~2x. Deeper finding: accuracy
+    != objective. The model wants a decision variable, not a ruler, and the
+    expanding mean's errors are economically informative. A follow-up tau-sweep
+    over saved row predictions showed the two rulers are near decision-twins (both
+    peak at tau ~0.21; fold 7, where they diverge most in value, has the LOWEST
+    decision disagreement of all 14 folds at 1.3%) — the effect is not hiding in
+    any regime.
+  not_tested: >-
+    Whether tau itself should be regime-dependent — the operating point was worth
+    ~2x the feature effect and was never explored on its own. Designing a phase
+    feature against the CPL objective directly rather than against estimator
+    accuracy. (The dual-denominator idea — hand the model both rulers, whose
+    difference is the elongation signal — was explicitly considered and rejected:
+    it presumes an uncaptured clock signal the tau-sweep showed is already
+    captured by the expanding mean's drift.)
+  outcome: rejected
+  evidence: experiments/2026-06-16_regime_cycle_length/
+
+- candidate: is_post_covid (regime dummy)
+  inputs: [price_date]
+  claim: >-
+    Handing the tree an explicit post-break flag substitutes for fixing the
+    cycle-length denominator — the model can learn the regime split itself.
+  falsified: >-
+    Inert. Normal-fold median Dh25 ~0, Dall ~0, fold 7 +0.0054. The tree gains
+    nothing from being told the break exists.
+  not_tested: >-
+    A continuous regime clock rather than a binary flag. Note the sibling finding
+    that cycle_mean_length's own slow drift (24d -> 38d) already acts as a
+    calendar/regime covariate, which likely explains the dummy's inertness.
+  outcome: rejected
+  evidence: experiments/2026-06-16_regime_cycle_length/
+
+- candidate: A_x_shallow_elong, A_x_other, A_x_smooth
+  inputs: [network_px_std, elongation_ratio, cycle_descent_slope_so_far]
+  claim: >-
+    A (network_px_std) misreads in the shallow-elongated corner. The tree has the
+    ingredients but cannot assemble the conditional through three nested splits on
+    ~8% of train data, so handing it the product explicitly should close the fold-7
+    regression in one split.
+  falsified: >-
+    All three columns fail gates 1 and 2, and fold 7 got WORSE (+0.018 to +0.040),
+    not flat. That is the decisive read: a noise signal would be ignored and stay
+    flat; a MISLEADING signal gets used and backfires. So the failure is
+    signal-availability in its strong form — A's reading in the corner is actively
+    misleading, not merely absent. Rules out the representation hypothesis and
+    confirms the #214 oracle diagnostic's pessimistic read. Not a seed artifact
+    (fold 7's seed_std unflagged; median worse than mean, so most seeds agree).
+  not_tested: >-
+    Whether any OTHER intra-series signal carries the shallow-vs-steep-within-
+    elongated distinction — the oracle diagnostic tested A specifically and is
+    silent about trough-proximity, cross-LGA/brand late-descent consensus, or the
+    triplet's B and C re-examined in this corner. (The sweep that would have
+    answered this was PARKED with invalid results — see
+    experiments/2026-06-14_corner_oracle_sweep/ — so this ground is genuinely
+    open, not merely unexplored.) LightGBM monotone constraints on A conditional
+    on regime, considered and not run.
+  outcome: rejected
+  evidence: experiments/2026-06-11_interaction_column/
+
+- candidate: elongation_ratio + cycle_descent_slope_so_far (R_raw)
+  inputs: [cycle_days_since_peak, cycle_mean_length, station_price_cents, cycle_last_max_cents]
+  claim: >-
+    Giving the model the two axes that define the shallow-elongated corner lets it
+    carve out the regime and condition A's contribution there, closing fold 7.
+  falsified: >-
+    Fails gates 1 and 2 (fold 7 +0.0092, worst fold +0.034). The oracle diagnostic
+    on the train-only segment explains why: A's level DOES separate elongated from
+    normal from phase 0.2 onward (~2c gap), but shallow vs steep WITHIN elongated
+    is invisible in A until phase > 1.4 — and phase >1.4 is far too late to be
+    useful for prediction. R_raw's aggregate "help" comes from the
+    elongated-vs-normal distinction, which is the wrong target: steep-elongated
+    rows do not need different treatment, so R_raw suppresses A on all elongated
+    rows, helping shallow and hurting steep by roughly the same amount.
+  not_tested: >-
+    A phase-conditional residual construction, A_residual = A - E[A | phase]
+    ("is A unusual for its phase?" rather than "is A high?"), noted in the analysis
+    as constructible PIT-safely from a rolling per-phase median but never run. It
+    would surface elongated-vs-normal cleanly, though the analysis predicts it does
+    not solve shallow-vs-steep. Only 8 shallow cycles exist in train, so the deep
+    elongation tail is noisy — a larger training span might change the read.
+  outcome: rejected
+  evidence: experiments/2026-06-09_shallow_elongated/
+
+- candidate: is_extended_shallow_descent (R_composite, single binary regime flag)
+  inputs: [elongation_ratio, cycle_descent_slope_so_far]
+  claim: >-
+    A single binary corner indicator is enough — the model just needs to know the
+    regime exists.
+  falsified: >-
+    Null result. Net population Dll ~-0.0001, no fold-7 movement at all. Rules out
+    "model doesn't know the regime exists" as the explanation, and reframes the gap
+    as "model doesn't know how to use A differently inside it".
+  not_tested: >-
+    Nothing adjacent survives this — the follow-up (explicit interaction column)
+    was run and also failed, and worse. See the A_x_shallow_elong entry.
+  outcome: rejected
+  evidence: experiments/2026-06-09_shallow_elongated/
+
+- candidate: network_px_std computed over the canonical Competitive cohort (+/-10c) instead of +/-5c
+  inputs: [station prices, station stickiness class]
+  claim: >-
+    The +/-5c band was an unablated magic constant inherited from an earlier
+    script. The canonical Competitive cohort should be at least as good.
+  falsified: ""
+  not_tested: >-
+    A shock-conditional cohort refinement — R2 wins big on normal folds (-0.0146)
+    but LOSES on shock folds (+0.0059), so the canonical cohort is not strictly
+    Pareto and a narrower cohort during regime transitions was flagged as
+    out-of-scope but plausible. Also untested: why the outer ring helps at all
+    (the 5-10c band is only 17% more rows and should naively be noisier — the
+    recorded hypothesis is that mid-band stations diverge more in extended descent,
+    but this is explicitly logged as a hypothesis, not a finding).
+  outcome: graduated
+  evidence: experiments/2026-06-08_dispersion_cohort_band/
+
+- candidate: network_px_std, network_px_std_delta_3d (family A)
+  inputs: [station prices within the competitive cohort, price_date]
+  claim: >-
+    Cross-station price dispersion decodes cycle phase: dispersion compresses as
+    the network converges on a trough, so a network-wide dispersion statistic
+    reads trough proximity.
+  falsified: ""
+  not_tested: >-
+    A's per-row effect is OPPOSITE-SIGNED on extended-descent rows (+0.017 mean)
+    vs normal-descent rows (-0.009) — the two nearly cancel in aggregate. The
+    corner is a known live defect, not a solved problem, and two attempts to fix
+    it from A itself (#214 raw axes, #231 interaction column) both failed, the
+    second backwards. Also: fold 3 is a clean counterexample where A HELPS
+    extended-descent rows strongly (-0.26), which rules out blanket suppression
+    and means the missing axis is descent shape, not elongation alone.
+  outcome: graduated
+  evidence: experiments/2026-06-07_a_c_ablation/
+
+- candidate: lga_phase_std, lga_phase_std_delta_3d (family C)
+  inputs: [LGA-level station prices, price_date]
+  claim: >-
+    LGA-level leader divergence carries an increment over network-wide dispersion
+    — local cohorts turn before the network does.
+  falsified: ""
+  not_tested: >-
+    Whether C's increment survives once A's shallow-elongated defect is fixed
+    (they were only ever measured together, RAC_full vs RA_level). Whether a
+    leader-WEIGHTED consensus beats an unweighted LGA std — the lead/lag roles are
+    known (Penrith leads falls; Blue Mountains and Randwick lead rises) but were
+    never used to weight this statistic.
+  outcome: graduated
+  evidence: experiments/2026-06-07_a_c_ablation/
+
+- candidate: discount-cohort gap (family B)
+  inputs: [station prices by discount cohort, price_date]
+  claim: >-
+    The gap between discount-brand and mainstream station prices leads the
+    late-descent turn — discounters move first.
+  falsified: >-
+    Flat on the step-2 screen (median-across-seeds), against A's +0.030 hard25 and
+    C's +0.014. Dropped for parsimony; no mechanism-level defect identified, it
+    simply carried nothing.
+  not_tested: >-
+    B was screened at one cohort definition only. Whether the discount cohort is
+    the wrong cut (brand-level chronic pricing strategy as a level statistic was
+    later flagged as a separate candidate). Whether B's signal lives in its
+    VELOCITY rather than its level — the same redesign that rescued the TGP series.
+  outcome: rejected
+  evidence: experiments/2026-06-06_late_descent_triplet/
+
+- candidate: non-parametric phase lookup, E[norm_price | phase] per fold
+  inputs: [cycle_pct_through, station_price_cents, cycle_last_min_cents, cycle_last_max_cents]
+  claim: >-
+    Replacing the linear-interp diagonal projection with a learned per-fold
+    empirical shape fixes the predecessor's shock-fold fragility — the problem was
+    shape misspecification, not the concept.
+  falsified: >-
+    Shape correction was REAL but did not flip the verdict (fold 9 improved +0.101
+    -> +0.066). Two separate failures: additive (51 feat) is EXACTLY neutral
+    (normal-fold median +0.0004), meaning the residual adds nothing the sibling
+    features do not already carry — trees were already building phase-residual-like
+    splits. And ablationA (drop siblings, add lookup) regresses badly, because the
+    siblings are pct-invariant anchors ("n cents above the recent trough" regardless
+    of whether the cycle ran 25 or 50 days) and the lookup is not. Mechanism is a
+    triple-stack that only aligns in fold-9-like windows: late descent is the
+    model's hardest zone, the lookup is structurally noisy in the pct>1 tail, and
+    cycle elongation pushes trough-proximity INTO that tail. The tail is also
+    selection-biased — rows with pct>1.5 exist only for cycles that ran 1.5x
+    without re-peaking, i.e. prior shock episodes, which do not generalise to new
+    ones.
+  not_tested: >-
+    Nothing on the diagonal-projection axis is worth retesting — the track is
+    closed, including clip-point sensitivity. The durable constraint for anything
+    downstream: no phase-residual variant should be pursued without an architecture
+    that PRESERVES the absolute anchors. Left genuinely open: the
+    stickiness x cycle_pct_through opposite-orientation saddle, surfaced
+    unexpectedly in step 1 and never pursued.
+  outcome: rejected
+  evidence: experiments/2026-06-05_phase_lookup_nonparametric/
+
+- candidate: station_price_cents minus interp(trough, peak, cycle_pct_through)
+  inputs: [cycle_pct_through, station_price_cents, cycle_last_min_cents, cycle_last_max_cents]
+  claim: >-
+    cycle_pct_through x cents features show a ~10% partner-score plateau and clean
+    SHAP saddles, so engineering the implicit interaction explicitly should absorb
+    it and let the sibling features be dropped.
+  falsified: >-
+    Additive neutral; ablationA regresses 10/14 folds (mean +0.018, worst +0.101 in
+    fold 1 late-2021 surge and +0.097 in fold 9 Israel-Gaza onset). The diagonal
+    projection drops absolute-anchor information the siblings preserve via per-anchor
+    distances. Passed on a single val window and reversed under paired CV —
+    a sign-flip precedent worth remembering.
+  not_tested: >-
+    station_minus_sydney_avg_cents as a redundancy-drop candidate: step 1 found it
+    had the HIGHEST partner score but the LOWEST true SHAP interaction, making it a
+    cleaner drop candidate than the engineered feature ever was. Same protocol,
+    ~2 min compute, never run.
+  outcome: rejected
+  evidence: experiments/2026-06-04_cycle_pct_through_interaction/
+
+- candidate: drop station_price_cents or station_minus_last_max_cents (SHAP-redundant pair)
+  inputs: [station_price_cents, cycle_last_max_cents]
+  claim: >-
+    The pair is SHAP-redundant, so removing either should be neutral and buy a
+    smaller feature set.
+  falsified: >-
+    drop_price is out immediately (sign flips across seeds). drop_minus_max looked
+    real on a single window (paired D -0.011 +/- 0.004) but under 14-fold CV wins
+    only 7/14 with mean +0.010 and two folds regressing >+0.05 (fold 4 +0.066,
+    fold 9 +0.103). Regime-sensitive, not safe to drop. The general lesson: SHAP
+    correlation measured on ONE training run conflates "redundant in this regime"
+    with "redundant globally".
+  not_tested: >-
+    What station_minus_last_max_cents provides specifically in fold 9
+    (2023-10 -> 2024-01) that the other 49 features cannot reconstruct — a +0.103
+    regression on 60k rows was never diagnosed. Whether the feature flips MECHANISM
+    across regimes (mean-reversion vs cycle-decoder), which would explain the
+    fold-by-fold sign flip.
+  outcome: rejected
+  evidence: experiments/2026-06-03_drop_redundant_pair/
