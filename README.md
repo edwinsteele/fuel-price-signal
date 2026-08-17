@@ -230,6 +230,19 @@ Combined: BUY (mean signal +1.00)
   FavouriteServiceStationPriceGradientSignal: NEUTRAL — no preferred stations raising sharply
 ```
 
+## Makefile shortcuts
+
+A `Makefile` wraps the local daily routine so you don't have to remember the step order:
+
+```bash
+make daily      # update local DB with today's data, then print the signal
+make dashboard  # update local DB with today's data, then open the inspect workbench
+make update     # just the DB refresh (pull + db + fill + classify + lga-leadership)
+make help       # list all targets, including the individual steps
+```
+
+`update` mirrors the `Daily DB update` GitHub Actions workflow below, run locally against `fuel_signal.db`: `git pull` (to fetch today's committed snapshot CSV, if the daily snapshot workflow has already run), then `db` → `fill` → `classify` → `lga_leadership`, all with no-arg (today) defaults.
+
 ## Daily snapshots
 
 GitHub Actions commits one snapshot CSV per day to `data/snapshots/`. To enable it, add `FUELAPI_API_KEY` and `FUELAPI_API_SECRET` as repository secrets under **Settings → Secrets and variables → Actions**.
