@@ -47,8 +47,22 @@ instructions nobody remembers to update.
    - `[launch] <id>: aborted — <reason>` — the candidate failed validation (PIT leak, missing
      columns, bad `INPUTS`/`COLUMNS` declaration, etc.). The claim was already released and
      commented on the bead; nothing further to do.
-   - `[launch] recovered stale claim <id>` — a prior night's run crashed mid-flight; the claim was
-     released and the traceback posted to the bead.
+   - `[launch] recovered stale claim <id>` — a claim went back on the queue. Two causes, both
+     commented on the bead with the reason (fps-g31):
+     - the run crashed mid-flight (no `results.json`, `run.log` ends in a traceback, claimed
+       more than 12h ago), or
+     - the run **finished** in a retryable status — `aborted_pipeline` (the pipeline itself was
+       misconfigured) or `aborted_environment` (DB/disk/OOM). No age gate on this one: a
+       `results.json` existing is proof the run is over. The candidate was never actually
+       tested, so it is re-queued rather than written up; the dossier routine skips these too.
+
+     **Watch for a candidate that keeps reappearing here (fps-rtd, P1, open).** There is no
+     retry budget yet, and `claim_next_candidate` claims with `bd ready --sort oldest`, so a
+     released bead — which keeps its original creation date — is always re-claimed ahead of
+     everything else. A *persistent* fault therefore starves the whole queue: the same doomed
+     candidate consumes the nightly slot indefinitely and nothing else runs. If you see the same
+     id released on consecutive nights, fix the underlying fault or park the bead by hand; don't
+     wait for the routine to move on, because it won't.
 3. On an unexpected non-zero exit (a genuine bug, not one of the above), surface the traceback —
    don't retry blindly, and don't fall back to running `bd`/`git` commands by hand to route around
    it. This routine's only job is a 10-minute burst; if it's broken, report it and stop.
