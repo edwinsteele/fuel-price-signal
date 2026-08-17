@@ -367,6 +367,22 @@ def test_post_bd_comment_invokes_bd_with_stdin(monkeypatch):
     assert captured["input"] == "hello"
 
 
+def test_post_bd_comment_does_not_raise_when_bd_cli_fails(monkeypatch):
+    def fake_run(cmd, input, text, check):  # noqa: A002 - matches subprocess.run's kwarg name
+        raise subprocess.CalledProcessError(returncode=1, cmd=cmd)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    post_bd_comment("fps-3jj.4", "hello")  # must not raise — best-effort reporting
+
+
+def test_post_bd_comment_does_not_raise_when_bd_missing(monkeypatch):
+    def fake_run(cmd, input, text, check):  # noqa: A002 - matches subprocess.run's kwarg name
+        raise FileNotFoundError("bd not found")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    post_bd_comment("fps-3jj.4", "hello")  # must not raise — best-effort reporting
+
+
 # ── batch-1 pass criterion ────────────────────────────────────────────────────
 
 def test_record_and_read_pass_criterion_roundtrip(tmp_path):

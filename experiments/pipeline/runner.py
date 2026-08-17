@@ -213,7 +213,15 @@ def run_candidate(
             candidate_frame, baseline_columns, candidate_cols,
             seeds=seeds, axis_series=axis_series, outer_fold_params=outer_fold_params, verbose=verbose,
         )
-    except Exception as exc:  # noqa: BLE001 — candidate-driven fit failure, not our bug
+    except Exception as exc:  # noqa: BLE001 — deliberately broad, see outcome taxonomy below
+        # Nothing here except LightGBM fits on the candidate's own columns; any
+        # exception (bad dtype, inf from a degenerate transform, etc.) is
+        # candidate-caused by construction. The outcome taxonomy (module
+        # docstring) is explicit that aborted_candidate covers "add_columns
+        # threw" generically, not a fixed exception allowlist — an unattended
+        # pipeline running unreviewed LLM-authored code can't predict every
+        # failure shape in advance. The exception isn't swallowed: repr(exc) is
+        # preserved in results.json's error field and RunResult.error.
         return _finish(
             STATUS_ABORTED_CANDIDATE, name, t0, out_dir,
             error=f"WFCV screen raised: {exc!r}",
@@ -239,7 +247,11 @@ def run_candidate(
             outer_fold_params=outer_fold_params, inner_fold_params=inner_fold_params,
             fold_subset=fold_subset, db_path=db_path, collect_fills=True, verbose=verbose,
         )
-    except Exception as exc:  # noqa: BLE001 — DB/environment failure, not the candidate's fault
+    except Exception as exc:  # noqa: BLE001 — deliberately broad, see outcome taxonomy below
+        # By this point the candidate's own columns already passed validation
+        # AND the WFCV screen, so a failure here is DB/disk/interrupted — the
+        # aborted_environment outcome (retry once), not a candidate defect.
+        # As above, repr(exc) is preserved in results.json, not swallowed.
         return _finish(STATUS_ABORTED_ENVIRONMENT, name, t0, out_dir, error=f"realised backtest raised: {exc!r}")
 
     effect_resolved, effect_delta = _resolve_effect(realised.aggregate, BASELINE_ARM, CANDIDATE_ARM)
@@ -480,8 +492,16 @@ def _finish(
 
 
 def post_bd_comment(issue_id: str, text: str) -> None:
-    """Self-reported bd comment — `bd comment <id> --stdin`."""
-    subprocess.run(["bd", "comment", issue_id, "--stdin"], input=text, text=True, check=True)
+    """Self-reported bd comment — `bd comment <id> --stdin`.
+
+    Best-effort: called after results.json/rowpreds/fills are already written,
+    so a `bd` CLI hiccup (missing binary, network) must not raise past a
+    successful run and lose the artifacts' return value. Prints instead.
+    """
+    try:
+        subprocess.run(["bd", "comment", issue_id, "--stdin"], input=text, text=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        print(f"[runner] post_bd_comment({issue_id!r}) failed, continuing: {exc}", flush=True)
 
 
 def _summarise_for_comment(results: dict) -> str:
