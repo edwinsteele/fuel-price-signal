@@ -44,6 +44,7 @@ from experiments.pipeline.validate import (
 from fuel_signal.features import load_features
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+EXPERIMENTS_ROOT = REPO_ROOT / "experiments"
 EXPERIMENT_LABEL = "experiment"
 STALE_AFTER = timedelta(hours=12)
 RUN_LOG_FILENAME = "run.log"
@@ -60,7 +61,11 @@ class CandidateRefError(ValueError):
 def parse_candidate_ref(description: str) -> tuple[pathlib.Path, pathlib.Path]:
     """Extract (batch_dir, candidate_path) from an experiment bead's description.
 
-    Paths are repo-root-relative in the bead text; returned as absolute paths.
+    Paths are repo-root-relative in the bead text; returned as resolved absolute
+    paths. Both must resolve inside EXPERIMENTS_ROOT — an unattended nightly
+    routine that `exec_module`s whatever `Module:` points at (validate.py's
+    load_candidate_module) must not follow a `..` traversal or an absolute path
+    out of experiments/, however that string ended up in a bead description.
     """
     batch_match = _BATCH_RE.search(description or "")
     module_match = _MODULE_RE.search(description or "")
@@ -68,7 +73,12 @@ def parse_candidate_ref(description: str) -> tuple[pathlib.Path, pathlib.Path]:
         raise CandidateRefError(
             "description must contain a 'Batch: <path>' line and a 'Module: <path>' line"
         )
-    return REPO_ROOT / batch_match.group(1), REPO_ROOT / module_match.group(1)
+    batch_dir = (REPO_ROOT / batch_match.group(1)).resolve()
+    candidate_path = (REPO_ROOT / module_match.group(1)).resolve()
+    for path, label in ((batch_dir, "Batch"), (candidate_path, "Module")):
+        if not path.is_relative_to(EXPERIMENTS_ROOT):
+            raise CandidateRefError(f"{label} path resolves outside experiments/: {path}")
+    return batch_dir, candidate_path
 
 
 def sync_pull() -> None:
@@ -227,7 +237,15 @@ def main() -> None:
         return
 
     cmd = build_runner_cmd(batch_dir, candidate_path, issue_id)
-    pid = launch_detached(cmd, candidate_path.parent)
+    try:
+        pid = launch_detached(cmd, candidate_path.parent)
+    except OSError as exc:
+        # A validated candidate that fails to actually launch (missing `uv`,
+        # permission error creating out_dir, etc.) must not leave the bead
+        # claimed forever -- same "release rather than strand" rule as a
+        # validation failure above.
+        _abort_claim(issue_id, f"failed to launch detached runner: {exc!r}")
+        return
     log_path = candidate_path.parent / RUN_LOG_FILENAME
     subprocess.run(
         ["bd", "comment", issue_id, f"[launch] validated, launched detached pid={pid}, log={log_path}"],

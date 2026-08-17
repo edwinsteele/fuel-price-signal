@@ -18,7 +18,7 @@ would mean one un-merged chore PR silently stops every experiment for days.
 
 This is the exact text that should be the scheduled task's stored prompt (the `SKILL.md` body):
 
-```
+```text
 You are the fuel-price-signal launch routine.
 Your working directory is /Users/esteele/Documents/Claude/fuel-price-signal (the
 fuel-price-signal repo, primary worktree — this is a persistent local checkout, not
@@ -59,12 +59,14 @@ instructions nobody remembers to update.
 generator session (fps-3jj.7, not yet written) is the producer and must file beads this way. An
 issue's **description** must contain two lines, parsed by `parse_candidate_ref()`:
 
-```
+```text
 Batch: experiments/batches/<batch-name>
 Module: experiments/candidates/<batch-name>/<candidate-name>.py
 ```
 
-Paths are repo-root-relative. The runner's output directory is always `Module`'s parent dir — that
+Paths are repo-root-relative, and both must resolve inside `experiments/` — `parse_candidate_ref()`
+rejects a `..` traversal or an absolute path pointing anywhere else, since `Module` gets
+`exec_module`'d unattended. The runner's output directory is always `Module`'s parent dir — that
 is where `run.log`, `results.json`, `rowpreds.parquet`, and `fills.parquet` land, and where
 stale-claim recovery looks for them.
 
