@@ -18,7 +18,9 @@ from click.testing import CliRunner
 
 import experiments.pipeline.launch as launch_module
 from experiments.pipeline.launch import (
+    MAX_RETRIES,
     RESULTS_FILENAME,
+    RETRY_COUNT_METADATA_KEY,
     RUN_LOG_FILENAME,
     STALE_AFTER,
     CandidateRefError,
@@ -28,6 +30,7 @@ from experiments.pipeline.launch import (
     launch_detached,
     main,
     parse_candidate_ref,
+    recover_stale_claims,
     release_stale_claim,
 )
 from experiments.pipeline.runner import RETRYABLE_STATUSES, default_out_dir
@@ -97,8 +100,11 @@ def test_default_out_dir_gives_distinct_dirs_for_two_candidates_in_one_batch():
 
 # ── find_stale_claims (fault injection) ──────────────────────────────────────
 
-def _issue(description: str, started_at: str) -> dict:
-    return {"id": "fps-exp-1", "description": description, "started_at": started_at, "status": "in_progress"}
+def _issue(description: str, started_at: str, *, metadata: dict | None = None) -> dict:
+    issue = {"id": "fps-exp-1", "description": description, "started_at": started_at, "status": "in_progress"}
+    if metadata is not None:
+        issue["metadata"] = metadata
+    return issue
 
 
 def _description_for(batch_rel: str, module_rel: str) -> str:
@@ -185,6 +191,35 @@ def test_find_stale_claims_reclaims_retryable_abort(tmp_path, monkeypatch, statu
     stale = find_stale_claims()
     assert len(stale) == 1
     assert status in stale[0]["traceback_tail"]
+    assert stale[0]["action"] == "release"
+    assert stale[0]["retry_count"] == 1
+
+
+def test_find_stale_claims_blocks_once_retry_budget_exhausted(tmp_path, monkeypatch):
+    """fps-rtd: a second retryable abort of the same claim must block, not release.
+
+    A released-but-unassigned issue keeps its original bd creation date, so an
+    unbounded release always wins `bd ready --sort oldest` and starves the rest
+    of the queue forever. MAX_RETRIES bounds this.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "aborted_pipeline", "error": "bad config"}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    recent_claim = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, recent_claim, metadata={RETRY_COUNT_METADATA_KEY: MAX_RETRIES})
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    stale = find_stale_claims()
+    assert len(stale) == 1
+    assert stale[0]["action"] == "block"
+    assert "budget" in stale[0]["traceback_tail"]
+    assert "retry_count" not in stale[0]
 
 
 @pytest.mark.parametrize("status", ["rejected", "disqualified", "aborted_candidate"])
@@ -282,6 +317,131 @@ def test_release_stale_claim_comments_unassigns_and_reopens(monkeypatch):
     assert "boom" in calls[0][1]["input"]
     assert commands[1] == ["bd", "assign", "fps-exp-1", ""]
     assert commands[2] == ["bd", "update", "fps-exp-1", "--status", "open"]
+    assert len(commands) == 3  # no --set-metadata call when retry_count isn't given
+
+
+def test_release_stale_claim_records_retry_count_metadata(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    release_stale_claim({"id": "fps-exp-1"}, "retryable abort", retry_count=1)
+
+    assert calls[-1] == ["bd", "update", "fps-exp-1", "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}=1"]
+
+
+def test_block_exhausted_claim_comments_unassigns_and_blocks(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    launch_module.block_exhausted_claim({"id": "fps-exp-1"}, "retry budget exhausted")
+
+    commands = [c[0] for c in calls]
+    assert commands[0][:2] == ["bd", "comment"]
+    assert "exhausted" in calls[0][1]["input"]
+    assert commands[1] == ["bd", "assign", "fps-exp-1", ""]
+    assert commands[2] == ["bd", "update", "fps-exp-1", "--status", "blocked"]
+
+
+# ── recover_stale_claims: retry budget end-to-end (fps-rtd) ──────────────────
+
+def test_recover_stale_claims_second_consecutive_retryable_completion_does_not_release(
+    tmp_path, monkeypatch,
+):
+    """Acceptance criterion: two consecutive retryable completions of the same
+    claim; the second does not release.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "aborted_pipeline", "error": "bad config"}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    recent_claim = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+
+    # First completion: fresh claim, no prior retries.
+    issue_round_1 = _issue(description, recent_claim)
+    calls = []
+
+    def fake_run_round_1(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:2] == ["bd", "list"]:
+            return _completed_process(json.dumps([issue_round_1]))
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run_round_1)
+    recover_stale_claims()
+    assert ["bd", "update", "fps-exp-1", "--status", "open"] in calls
+    assert ["bd", "update", "fps-exp-1", "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}=1"] in calls
+
+    # Second completion: the claim now carries retry_count=1 (budget spent).
+    issue_round_2 = _issue(description, recent_claim, metadata={RETRY_COUNT_METADATA_KEY: 1})
+    calls.clear()
+
+    def fake_run_round_2(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:2] == ["bd", "list"]:
+            return _completed_process(json.dumps([issue_round_2]))
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run_round_2)
+    recover_stale_claims()
+
+    assert ["bd", "update", "fps-exp-1", "--status", "open"] not in calls
+    assert ["bd", "update", "fps-exp-1", "--status", "blocked"] in calls
+
+
+def test_exhausted_candidate_does_not_prevent_a_second_candidate_from_being_claimed(
+    tmp_path, monkeypatch,
+):
+    """Acceptance criterion: a retryably-failing candidate does not prevent a
+    second queued candidate from being claimed.
+
+    Once fps-exp-1's retry budget is spent, recover_stale_claims blocks it
+    (status=blocked) rather than reopening it -- it never issues the
+    `--status open` call that would put it back in front of fps-exp-2 in
+    `bd ready`'s oldest-first ordering. claim_next_candidate then goes on to
+    claim fps-exp-2, as it would once bd's own `ready` query stops returning
+    the blocked issue.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "aborted_environment", "error": "disk full"}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    recent_claim = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    exhausted_issue = _issue(description, recent_claim, metadata={RETRY_COUNT_METADATA_KEY: MAX_RETRIES})
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:2] == ["bd", "list"]:
+            return _completed_process(json.dumps([exhausted_issue]))
+        if cmd[:2] == ["bd", "ready"]:
+            return _completed_process(json.dumps([{"id": "fps-exp-2"}]))
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    recover_stale_claims()
+    assert ["bd", "update", "fps-exp-1", "--status", "open"] not in calls
+    assert ["bd", "update", "fps-exp-1", "--status", "blocked"] in calls
+
+    claimed = claim_next_candidate()
+    assert claimed == {"id": "fps-exp-2"}
 
 
 # ── claim_next_candidate ──────────────────────────────────────────────────────
