@@ -144,6 +144,11 @@ Before filing an issue from an agent-driven logic review:
 - **Check the docstring** for stated design intent before claiming inconsistency. `series.py`'s `brand:` resolver was wrongly flagged for using exact match — the docstring said exact was the intent.
 - **Distrust prose numbers when verifying a code constant.** CodeRabbit flagged `snapshot_retire.py`'s `DEFAULT_TOLERANCE = 0.05` as "should be 5.0 cents", citing nearby AGENTS.md prose that loosely said "agrees within 5c". The prose was the imprecise one (the actual check used `<0.05`, effectively an exact-match test since prices are 0.1c-quantized) — the constant was correct. Verify against what the code actually does, not how a nearby doc rounds it off in words.
 
+When a review's findings come back reported as fixed, re-verify against the diff rather than closing on the report:
+
+- **Re-read the diff, don't accept the summary.** In the fps-hvi review of PR #299, the fixer reported one finding as "already fixed before your review ran, stale" and cited a commit that had only touched `pit_test.py`/`validate.py` — the finding was live when raised and was fixed by a later commit. Cheap to check with `git show --stat`; the conclusion happened to be right, but the reasoning would have discredited a valid finding.
+- **Re-review the fix itself for regressions.** The same round's fix for "write artifacts before grading" made `_grade_run` return `effect_delta = None` on failure, which `_summarise_for_comment` then fed to a `:+.4f` format spec — a `TypeError` on exactly the path the fix existed to survive. A full green suite (1038 passed, ruff clean) did not catch it, because the new test didn't exercise the one argument that triggers it. A fix lands in code that the original review already mapped; re-run that map over it.
+
 ## Experiment scripts
 
 Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. This includes `paired_wfcv.py` harnesses, step-level ablation scripts (`step*.py`), and oracle/diagnostic scripts that call `fit_score`. Import with `PYTHONPATH=.`.
