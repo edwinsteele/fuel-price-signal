@@ -181,6 +181,26 @@ def test_main_reports_and_applies_deletion(tmp_path, monkeypatch):
     assert not snap_file.exists()
 
 
+def test_main_rejects_out_of_range_min_agreement(monkeypatch):
+    monkeypatch.setattr(
+        "fuel_signal.snapshot_retire.find_candidate_months",
+        lambda raw_dir, cleaned_dir, snapshots_dir: [],
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["--min-agreement", "-1"])
+    assert result.exit_code != 0
+
+
+def test_main_rejects_negative_tolerance(monkeypatch):
+    monkeypatch.setattr(
+        "fuel_signal.snapshot_retire.find_candidate_months",
+        lambda raw_dir, cleaned_dir, snapshots_dir: [],
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["--tolerance", "-1"])
+    assert result.exit_code != 0
+
+
 def test_main_no_candidates(monkeypatch):
     monkeypatch.setattr(
         "fuel_signal.snapshot_retire.find_candidate_months",

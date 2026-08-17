@@ -169,8 +169,10 @@ def find_candidate_months(
 @click.option("--cleaned-dir", default="data/cleaned", show_default=True)
 @click.option("--snapshots-dir", default="data/snapshots", show_default=True)
 @click.option("--tolerance", default=DEFAULT_TOLERANCE, show_default=True,
+              type=click.FloatRange(min=0.0),
               help="Cents; snapshot and historical prices within this are 'the same'.")
 @click.option("--min-agreement", default=DEFAULT_MIN_AGREEMENT, show_default=True,
+              type=click.FloatRange(min=0.0, max=1.0),
               help="Fraction of comparable rows that must agree for a month to be eligible.")
 @click.option("--show-diverging", default=5, show_default=True,
               help="Number of diverging example rows to print per month.")
