@@ -146,6 +146,37 @@ def test_find_stale_claims_flags_old_traceback_with_no_results(tmp_path, monkeyp
     assert len(stale) == 1
     assert stale[0]["issue"]["id"] == "fps-exp-1"
     assert "ValueError: boom" in stale[0]["traceback_tail"]
+    assert stale[0]["action"] == "release"
+    assert stale[0]["retry_count"] == 1
+
+
+def test_find_stale_claims_blocks_crashed_run_once_retry_budget_exhausted(tmp_path, monkeypatch):
+    """fps-rtd PR #304 review finding #1: the crashed-mid-run (traceback) shape
+    must be budgeted too, not just the RETRYABLE_STATUSES shape.
+
+    STALE_AFTER only delays the FIRST release (it re-satisfies itself between
+    any two nightly runs), so without this a candidate that crashes the same
+    deterministic way every attempt re-wins `bd ready --sort oldest` forever
+    -- the exact starvation fps-rtd was filed about, just reached through a
+    traceback instead of a RETRYABLE_STATUSES result.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RUN_LOG_FILENAME).write_text("Traceback (most recent call last):\nValueError: boom\n")
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    old_claim = (datetime.now(timezone.utc) - STALE_AFTER - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, old_claim, metadata={RETRY_COUNT_METADATA_KEY: MAX_RETRIES})
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    stale = find_stale_claims()
+    assert len(stale) == 1
+    assert stale[0]["action"] == "block"
+    assert "retry_count" not in stale[0]
 
 
 def test_find_stale_claims_ignores_recent_claim(tmp_path, monkeypatch):
@@ -228,6 +259,30 @@ def test_find_stale_claims_treats_malformed_metadata_as_zero_retries(tmp_path, m
     assert stale[0]["retry_count"] == 1
 
 
+def test_find_stale_claims_honours_numeric_string_retry_count(tmp_path, monkeypatch):
+    """fps-rtd PR #304 review finding #5: a retry_count stored as a numeric
+    STRING (possible via the `--metadata` JSON form, unlike `--set-metadata`
+    which always writes a real int) must be honoured as its int value, not
+    zeroed like a genuinely non-numeric value -- see _retry_count's docstring.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "aborted_pipeline", "error": "bad config"}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    recent_claim = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, recent_claim, metadata={RETRY_COUNT_METADATA_KEY: str(MAX_RETRIES)})
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    stale = find_stale_claims()
+    assert len(stale) == 1
+    assert stale[0]["action"] == "block"  # "1" parses to 1, same budget outcome as int 1
+
+
 def test_find_stale_claims_blocks_once_retry_budget_exhausted(tmp_path, monkeypatch):
     """fps-rtd: a second retryable abort of the same claim must block, not release.
 
@@ -272,6 +327,35 @@ def test_find_stale_claims_leaves_terminal_status_alone(tmp_path, monkeypatch, s
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
 
     assert find_stale_claims() == []
+
+
+@pytest.mark.parametrize("status", ["rejected", "disqualified", "aborted_candidate"])
+def test_find_stale_claims_resets_retry_metadata_on_terminal_verdict_with_spent_budget(
+    tmp_path, monkeypatch, status,
+):
+    """fps-rtd PR #304 review finding #3: a spent retry_count must not outlive
+    its cycle. Without this, a candidate that spent its one retry and then
+    eventually succeeded would be born already at budget the next time a
+    human manually re-queues this SAME bead (e.g. against a re-frozen batch)
+    -- its first retryable abort in that later, unrelated cycle would block
+    immediately instead of getting the one retry the docstring promises.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": status}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    old_claim = (datetime.now(timezone.utc) - STALE_AFTER - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, old_claim, metadata={RETRY_COUNT_METADATA_KEY: 1})
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    stale = find_stale_claims()
+    assert len(stale) == 1
+    assert stale[0]["action"] == "reset_retry"
 
 
 @pytest.mark.parametrize("written", ["{ truncated mid-write", "[]", "null", '"a bare string"'])
@@ -363,7 +447,33 @@ def test_release_stale_claim_records_retry_count_metadata(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     release_stale_claim({"id": "fps-exp-1"}, "retryable abort", retry_count=1)
 
-    assert calls[-1] == ["bd", "update", "fps-exp-1", "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}=1"]
+    assert calls == [
+        ["bd", "comment", "fps-exp-1", "--stdin"],
+        ["bd", "assign", "fps-exp-1", ""],
+        ["bd", "update", "fps-exp-1", "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}=1"],
+        ["bd", "update", "fps-exp-1", "--status", "open"],
+    ]
+
+
+def test_release_stale_claim_writes_metadata_before_status_open(monkeypatch):
+    """fps-rtd PR #304 review finding #2: if a `bd` call partway through this
+    sequence fails, the safer stuck state is "looks already-retried" (blocks
+    one cycle early) rather than "counter never advanced" (the same fault
+    gets released and retried forever) -- so --set-metadata must land before
+    --status open, not after.
+    """
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    release_stale_claim({"id": "fps-exp-1"}, "retryable abort", retry_count=1)
+
+    metadata_idx = calls.index(["bd", "update", "fps-exp-1", "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}=1"])
+    status_idx = calls.index(["bd", "update", "fps-exp-1", "--status", "open"])
+    assert metadata_idx < status_idx
 
 
 def test_block_exhausted_claim_comments_unassigns_and_blocks(monkeypatch):
@@ -381,6 +491,61 @@ def test_block_exhausted_claim_comments_unassigns_and_blocks(monkeypatch):
     assert "exhausted" in calls[0][1]["input"]
     assert commands[1] == ["bd", "assign", "fps-exp-1", ""]
     assert commands[2] == ["bd", "update", "fps-exp-1", "--status", "blocked"]
+
+
+def test_clear_retry_metadata_unsets_metadata_without_touching_status(monkeypatch):
+    """fps-rtd PR #304 review finding #3."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    launch_module.clear_retry_metadata({"id": "fps-exp-1"}, "terminal verdict, spent retry")
+
+    commands = [c[0] for c in calls]
+    assert commands[0][:2] == ["bd", "comment"]
+    assert commands[1] == ["bd", "update", "fps-exp-1", "--unset-metadata", RETRY_COUNT_METADATA_KEY]
+    assert not any(cmd[:2] == ["bd", "assign"] or "--status" in cmd for cmd in commands)
+
+
+# ── _abort_claim: pre-launch validation failures share the budget (fps-rtd PR #304 review finding #4) ──
+
+def test_abort_claim_releases_with_retry_count_on_first_failure(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    launch_module._abort_claim({"id": "fps-exp-9"}, "malformed candidate reference: boom")
+
+    assert ["bd", "update", "fps-exp-9", "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}=1"] in calls
+    assert ["bd", "update", "fps-exp-9", "--status", "open"] in calls
+    assert ["bd", "update", "fps-exp-9", "--status", "blocked"] not in calls
+    assert ["bd", "dolt", "push"] in calls
+
+
+def test_abort_claim_blocks_once_retry_budget_exhausted(monkeypatch):
+    """A candidate whose description/module is broken in a way that will never
+    self-correct must not burn the nightly slot forever either -- same
+    starvation shape as the runtime abort paths, just reached through
+    pre-launch validation.
+    """
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    issue = {"id": "fps-exp-9", "metadata": {RETRY_COUNT_METADATA_KEY: MAX_RETRIES}}
+    launch_module._abort_claim(issue, "malformed candidate reference: boom")
+
+    assert ["bd", "update", "fps-exp-9", "--status", "open"] not in calls
+    assert ["bd", "update", "fps-exp-9", "--status", "blocked"] in calls
 
 
 # ── recover_stale_claims: retry budget end-to-end (fps-rtd) ──────────────────
@@ -475,6 +640,36 @@ def test_exhausted_candidate_does_not_prevent_a_second_candidate_from_being_clai
 
     claimed = claim_next_candidate()
     assert claimed == {"id": "fps-exp-2"}
+
+
+def test_recover_stale_claims_dispatches_reset_retry_action(tmp_path, monkeypatch):
+    """fps-rtd PR #304 review finding #3, end to end through recover_stale_claims."""
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "rejected"}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    old_claim = (datetime.now(timezone.utc) - STALE_AFTER - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, old_claim, metadata={RETRY_COUNT_METADATA_KEY: 1})
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:2] == ["bd", "list"]:
+            return _completed_process(json.dumps([issue]))
+        return _completed_process("")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    recover_stale_claims()
+    assert ["bd", "update", "fps-exp-1", "--unset-metadata", RETRY_COUNT_METADATA_KEY] in calls
+    assert not any(
+        cmd[:2] == ["bd", "assign"] or (cmd[:2] == ["bd", "update"] and "--status" in cmd) for cmd in calls
+    )
 
 
 # ── claim_next_candidate ──────────────────────────────────────────────────────

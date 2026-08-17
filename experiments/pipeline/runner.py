@@ -119,6 +119,14 @@ STATUS_ABORTED_CANDIDATE = "aborted_candidate"
 STATUS_ABORTED_PIPELINE = "aborted_pipeline"
 STATUS_ABORTED_ENVIRONMENT = "aborted_environment"
 
+# The candidate got a fair, complete hearing and the claim was legitimately
+# consumed -- the complement of RETRYABLE_STATUSES. Read by
+# launch.find_stale_claims to reset a claim's spent retry-budget counter once
+# it reaches one of these, so a LATER, unrelated re-run of the same bead (e.g.
+# manually re-queued against a re-frozen batch) isn't born already at budget
+# (fps-rtd PR #304 review finding #3).
+TERMINAL_STATUSES = frozenset({STATUS_REJECTED, STATUS_DISQUALIFIED, STATUS_ABORTED_CANDIDATE})
+
 # Statuses where the candidate never got a fair hearing, so its claim must go
 # back on the queue rather than be consumed. Read by launch.find_stale_claims.
 RETRYABLE_STATUSES = frozenset({STATUS_ABORTED_PIPELINE, STATUS_ABORTED_ENVIRONMENT})
