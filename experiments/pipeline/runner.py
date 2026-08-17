@@ -62,6 +62,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+import click
 import numpy as np
 import pandas as pd
 
@@ -669,3 +670,24 @@ def _summarise_for_comment(results: dict) -> str:
         f"windows={meta.get('n_windows')}  seeds={meta.get('seeds')}"
     )
     return "\n".join(lines)
+
+
+@click.command("runner")
+@click.option(
+    "--batch-dir", required=True, type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path),
+    help="Frozen batch directory (see experiments/pipeline/batch_freeze.py).",
+)
+@click.option(
+    "--candidate", "candidate_path", required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path),
+    help="Candidate module .py file.",
+)
+@click.option("--bead-id", default=None, help="bd issue ID to post the self-reported comment to.")
+def main(batch_dir: pathlib.Path, candidate_path: pathlib.Path, bead_id: str | None) -> None:
+    """Entry point for the launch routine (fps-3jj.5) to invoke this as a detached subprocess."""
+    result = run_candidate(batch_dir, candidate_path, bead_id=bead_id)
+    click.echo(f"{result.candidate_name}: {result.status} (wall={result.wall_seconds:.1f}s)")
+
+
+if __name__ == "__main__":
+    main()
