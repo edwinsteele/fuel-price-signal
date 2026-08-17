@@ -23,7 +23,10 @@ from experiments.pipeline.runner import (
     STATUS_ABORTED_ENVIRONMENT,
     STATUS_DISQUALIFIED,
     RunResult,
+    _build_axis_lookup,
+    _check_provider_health,
     _finish,
+    _grade_run,
     _make_lookup_provider,
     _read_pass_criterion,
     _resolve_effect,
@@ -107,6 +110,26 @@ def add_columns(df):
     return out
 '''
 
+RAISING_ADD_COLUMNS_CANDIDATE = '''
+NAME = "cand"
+INPUTS = ["price_date"]
+COLUMNS = ["cand_col"]
+def add_columns(df):
+    raise ValueError("candidate bug: deliberately broken add_columns")
+'''
+
+RAISING_ADD_AXIS_CANDIDATE = '''
+NAME = "cand"
+INPUTS = ["price_date"]
+COLUMNS = ["cand_col"]
+def add_columns(df):
+    out = df.copy()
+    out["cand_col"] = df["price_date"] % 2
+    return out
+def add_axis(df):
+    raise ValueError("candidate bug: deliberately broken add_axis")
+'''
+
 
 # ── run_candidate short-circuits (no DB access reached) ─────────────────────
 
@@ -168,6 +191,148 @@ def test_run_candidate_aborted_candidate_on_columns_overlap_baseline(tmp_path):
     assert "overlaps" in result.error
 
 
+def test_run_candidate_aborted_candidate_on_add_columns_non_pit_exception(tmp_path):
+    """A candidate raising ValueError (not KeyError/PitLeakError) must still
+    resolve to a status code, not an uncaught traceback with no results.json
+    (fps-hvi finding #2)."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, RAISING_ADD_COLUMNS_CANDIDATE)
+
+    result = run_candidate(batch_dir, candidate_path, out_dir=tmp_path / "out")
+
+    assert result.status == STATUS_ABORTED_CANDIDATE
+    assert result.results_path.exists()
+    assert "candidate bug" in result.error
+
+
+def test_run_candidate_aborted_candidate_on_add_axis_non_pit_exception(tmp_path):
+    """Same as above but for add_axis (fps-hvi finding #2)."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, RAISING_ADD_AXIS_CANDIDATE)
+
+    result = run_candidate(batch_dir, candidate_path, out_dir=tmp_path / "out")
+
+    assert result.status == STATUS_ABORTED_CANDIDATE
+    assert result.results_path.exists()
+    assert "candidate bug" in result.error
+
+
+# ── axis lookup (fps-hvi finding #1: must align by index label, not position) ─
+
+def test_build_axis_lookup_aligns_by_index_when_axis_series_is_reordered():
+    frame = pd.DataFrame({
+        "station_code": [10, 20, 30, 40],
+        "price_date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+    })
+    # A PIT-safe candidate is allowed to return add_axis's Series in a
+    # different row order than frame (pit_test.py's docstring blesses
+    # sort_values-style transforms) as long as the index labels are preserved.
+    axis_series = pd.Series(
+        ["D", "C", "B", "A"], index=[3, 2, 1, 0], name="axis",
+    )  # reverse order, same index labels
+
+    lookup = _build_axis_lookup(frame, axis_series)
+
+    # Row 0 (station 10, 2026-01-01) must get axis_series's label at index 0
+    # ("A"), not the label at its own row position 0 in axis_series ("D").
+    by_station = lookup.set_index("station_code")["axis"]
+    assert by_station.loc[10] == "A"
+    assert by_station.loc[20] == "B"
+    assert by_station.loc[30] == "C"
+    assert by_station.loc[40] == "D"
+
+
+def test_build_axis_lookup_matches_unreordered_axis_series():
+    frame = pd.DataFrame({
+        "station_code": [10, 20],
+        "price_date": ["2026-01-01", "2026-01-02"],
+    })
+    axis_series = pd.Series(["A", "B"], index=[0, 1], name="axis")
+
+    lookup = _build_axis_lookup(frame, axis_series)
+
+    assert lookup["axis"].tolist() == ["A", "B"]
+
+
+# ── provider health check (fps-hvi finding #6) ────────────────────────────────
+
+def test_check_provider_health_flags_total_miss():
+    frame = pd.DataFrame({
+        "station_code": [1], "price_date": ["2026-01-01"], "cand_col": [1.0],
+    })
+    provider = _make_lookup_provider(frame, ["cand_col"])
+    provider("2026-02-01", 1, 100.0)  # miss: wrong date
+    provider("2026-03-01", 1, 100.0)  # miss
+
+    error = _check_provider_health(provider)
+    assert error is not None
+    assert "2" in error  # miss count
+
+
+def test_check_provider_health_passes_with_any_hit():
+    frame = pd.DataFrame({
+        "station_code": [1], "price_date": ["2026-01-01"], "cand_col": [1.0],
+    })
+    provider = _make_lookup_provider(frame, ["cand_col"])
+    provider("2026-01-01", 1, 100.0)  # hit
+    provider("2026-02-01", 1, 100.0)  # miss
+
+    assert _check_provider_health(provider) is None
+
+
+def test_check_provider_health_passes_with_no_calls():
+    frame = pd.DataFrame({
+        "station_code": [1], "price_date": ["2026-01-01"], "cand_col": [1.0],
+    })
+    provider = _make_lookup_provider(frame, ["cand_col"])
+    assert _check_provider_health(provider) is None
+
+
+# ── grading isolation (fps-hvi finding #7) ────────────────────────────────────
+
+class _FakeRealised:
+    def __init__(self, aggregate, fills):
+        self.aggregate = aggregate
+        self.fills = fills
+
+
+def test_grade_run_succeeds_normally():
+    aggregate = pd.DataFrame([
+        {"arm": "R0", "cpl_held": 200.0},
+        {"arm": "candidate", "cpl_held": 195.0},
+    ])
+    realised = _FakeRealised(aggregate, pd.DataFrame())
+
+    effect_resolved, effect_delta, zone, grading_error = _grade_run(
+        realised, target=None, axis_lookup=None, min_row_cell_n=30
+    )
+
+    assert effect_resolved is True
+    assert effect_delta == pytest.approx(-5.0)
+    assert zone == {"resolved": None, "reason": "candidate declared no TARGET"}
+    assert grading_error is None
+
+
+def test_grade_run_catches_exception_and_reports_it_instead_of_raising():
+    """A grading bug (e.g. a malformed aggregate frame) must not raise past
+    already-written artifacts — it should be recorded, not propagated
+    (fps-hvi finding #7)."""
+    aggregate = pd.DataFrame([{"arm": "R0"}])  # missing 'cpl_held' -> KeyError inside _resolve_effect
+    realised = _FakeRealised(aggregate, pd.DataFrame())
+
+    effect_resolved, effect_delta, zone, grading_error = _grade_run(
+        realised, target=None, axis_lookup=None, min_row_cell_n=30
+    )
+
+    assert effect_resolved is None
+    assert effect_delta is None
+    assert zone["resolved"] is None
+    assert grading_error is not None
+    assert "grading raised" in zone["reason"]
+
+
 # ── the WFCV screen (real small LightGBM fits, no DB) ────────────────────────
 
 def _synth_panel(n_days: int = 200, n_stations: int = 3, seed: int = 0) -> pd.DataFrame:
@@ -205,6 +370,81 @@ def test_run_wfcv_screen_produces_rows_for_both_runs_and_seeds_and_axis(tmp_path
     combined = collector.to_parquet(tmp_path / "rowpreds.parquet")
     assert "axis" in combined.columns
     assert set(combined["axis"].unique()) <= {"A", "B"}
+
+
+# ── run_candidate reaching the realised backtest (fps-hvi findings #3, #4) ────
+
+def _full_baseline_df(n_days: int = 90, n_stations: int = 2, seed: int = 3) -> pd.DataFrame:
+    """A baseline-contract-compliant frame (every FEATURE_COLUMNS/LGA/NETWORK
+    column present) big enough for real (small) WFCV folds — for tests where
+    run_candidate must reach _run_wfcv_screen / run_paired_realised_backtest.
+    """
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2017-01-01", periods=n_days, freq="D").strftime("%Y-%m-%d")
+    rows = []
+    for station in range(n_stations):
+        for i, d in enumerate(dates):
+            row = {"price_date": d, "station_code": station, "label": int(rng.uniform() < 0.5)}
+            for c in FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS:
+                row[c] = float(rng.normal())
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+PIT_SAFE_STRING_DATE_CANDIDATE = '''
+NAME = "cand"
+INPUTS = ["price_date"]
+COLUMNS = ["cand_col"]
+def add_columns(df):
+    out = df.copy()
+    out["cand_col"] = df["price_date"].str[-2:].astype(int) % 2
+    return out
+'''
+
+
+def test_run_candidate_realised_config_error_maps_to_aborted_candidate(tmp_path):
+    """fold_subset excluding every fold makes run_paired_realised_backtest
+    raise ValueError('no folds planned') BEFORE touching the DB — a
+    deterministic config error, not a DB/environment failure (fps-hvi finding
+    #3: these must not both map to aborted_environment). Also exercises a
+    single-seed run (fps-hvi finding #4): with seeds=(1,), the seed-variance
+    gate must be skipped rather than raising its own aborted_candidate first
+    — the assertion on the error message proves it got past that stage.
+    """
+    df = _full_baseline_df(n_days=90, n_stations=2)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out",
+        seeds=(1,), outer_fold_params={"train_min_days": 30, "val_days": 15, "step_days": 15},
+        fold_subset={999},  # no real batch has fold 999 -> realised sees zero plans
+        verbose=False,
+    )
+
+    assert result.status == STATUS_ABORTED_CANDIDATE
+    assert "config error" in result.error
+    assert "seed-variance" not in result.error
+
+
+def test_run_candidate_aborted_environment_when_db_is_unreadable(tmp_path):
+    """Without the fold_subset trick, run_paired_realised_backtest gets past
+    its pre-DB checks and hits the batch's (deliberately fake) DB file — a
+    genuine DB-shaped failure, correctly mapped to aborted_environment. Guards
+    against the ValueError/Exception split (finding #3's fix) over-classifying
+    real DB failures as candidate config errors.
+    """
+    df = _full_baseline_df(n_days=90, n_stations=2)
+    batch_dir = _write_batch_dir(tmp_path, df)  # fuel_signal.db is fake bytes
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out",
+        seeds=(1, 2), outer_fold_params={"train_min_days": 30, "val_days": 15, "step_days": 15},
+        verbose=False,
+    )
+
+    assert result.status == STATUS_ABORTED_ENVIRONMENT
 
 
 # ── lookup provider ───────────────────────────────────────────────────────────

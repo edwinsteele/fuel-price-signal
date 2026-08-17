@@ -183,6 +183,14 @@ def run_candidate(
         AllNaNColumnError,
     ) as exc:
         return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — any other add_columns/add_axis failure is candidate-caused
+        # validate_candidate calls add_columns/add_axis several times internally
+        # (restricted-frame check, differential PIT truncations); the two
+        # excepts above only cover the failure modes those calls are DESIGNED
+        # to raise. Anything else (a ValueError/TypeError from the candidate's
+        # own arithmetic) must still resolve to a status code, not an
+        # uncaught traceback with no results.json.
+        return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=f"validation raised: {exc!r}")
 
     overlap = set(candidate.COLUMNS) & set(baseline_columns)
     if overlap:
@@ -191,22 +199,24 @@ def run_candidate(
             error=f"{name}: COLUMNS overlaps the baseline contract: {sorted(overlap)}",
         )
 
-    candidate_output = candidate.add_columns(frame)
-    candidate_frame = frame.copy()
-    for col in candidate.COLUMNS:
-        candidate_frame[col] = candidate_output[col]
+    try:
+        candidate_output = candidate.add_columns(frame)
+        candidate_frame = frame.copy()
+        for col in candidate.COLUMNS:
+            candidate_frame[col] = candidate_output[col]
+    except Exception as exc:  # noqa: BLE001 — candidate-caused, see outcome taxonomy
+        return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=f"add_columns raised: {exc!r}")
     candidate_cols = list(baseline_columns) + list(candidate.COLUMNS)
 
     add_axis = getattr(candidate, "add_axis", None)
     axis_series = None
     axis_lookup = None
     if add_axis is not None:
-        axis_series = add_axis(frame).rename("axis")
-        axis_lookup = pd.DataFrame({
-            "station_code": frame["station_code"].to_numpy(),
-            "date": pd.to_datetime(frame["price_date"]).dt.strftime("%Y-%m-%d"),
-            "axis": axis_series.to_numpy(),
-        })
+        try:
+            axis_series = add_axis(frame).rename("axis")
+        except Exception as exc:  # noqa: BLE001 — candidate-caused, see outcome taxonomy
+            return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=f"add_axis raised: {exc!r}")
+        axis_lookup = _build_axis_lookup(frame, axis_series)
 
     try:
         df_rows, collector = _run_wfcv_screen(
@@ -227,13 +237,30 @@ def run_candidate(
             error=f"WFCV screen raised: {exc!r}",
         )
 
+    if len(seeds) < 2:
+        # seed_variance_gate needs >=2 samples per (fold, run) cell to compute
+        # a std (ddof=1 on n=1 divides by zero -> NaN cohort median -> raises).
+        # `seeds` is an exposed parameter and a single-seed smoke run is a
+        # natural use case; that should skip the gate, not deterministically
+        # abort as aborted_candidate for a reason that has nothing to do with
+        # the candidate.
+        seed_var_summary, seed_var_flags = {}, []
+        if verbose:
+            print(f"[runner] seeds={seeds}: seed-variance gate skipped (needs >=2 seeds)", flush=True)
+    else:
+        try:
+            seed_var_summary, seed_var_flags = seed_variance_gate(
+                df_rows, {"all": "ll_all", "hard25": "ll_hard25"}
+            )
+        except ValueError as exc:
+            return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=f"seed-variance gate: {exc}")
+
     try:
-        seed_var_summary, seed_var_flags = seed_variance_gate(
-            df_rows, {"all": "ll_all", "hard25": "ll_hard25"}
+        fold_run = aggregate_with_deltas(
+            df_rows, {"all": "ll_all", "hard25": "ll_hard25"}, baseline_run=BASELINE_ARM
         )
     except ValueError as exc:
-        return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=f"seed-variance gate: {exc}")
-    fold_run = aggregate_with_deltas(df_rows, {"all": "ll_all", "hard25": "ll_hard25"}, baseline_run=BASELINE_ARM)
+        return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=f"WFCV aggregation: {exc}")
 
     provider = _make_lookup_provider(candidate_frame, list(candidate.COLUMNS))
     arms = [
@@ -247,30 +274,46 @@ def run_candidate(
             outer_fold_params=outer_fold_params, inner_fold_params=inner_fold_params,
             fold_subset=fold_subset, db_path=db_path, collect_fills=True, verbose=verbose,
         )
-    except Exception as exc:  # noqa: BLE001 — deliberately broad, see outcome taxonomy below
+    except ValueError as exc:
+        # experiments/lib/realised.py's own explicit ValueErrors are all
+        # config-shaped (duplicate/reserved arm names, mismatched arm index,
+        # empty feature_columns, or inner_fold_params too large for this
+        # batch's date range to yield any OOF fold) — deterministic and NOT a
+        # DB/disk/environment failure, so aborted_environment's "retry once"
+        # would just fail identically on the same batch. It usually isn't the
+        # CANDIDATE's fault either (a bad inner_fold_params default would hit
+        # every candidate run against this batch the same way), but
+        # aborted_candidate's "repeatable, don't retry" behaviour is the
+        # closer match of the two available codes.
+        return _finish(
+            STATUS_ABORTED_CANDIDATE, name, t0, out_dir,
+            error=f"realised backtest config error (not a DB/environment failure): {exc!r}",
+        )
+    except Exception as exc:  # noqa: BLE001 — genuinely unexpected: DB/disk/OOM/interrupted
         # By this point the candidate's own columns already passed validation
-        # AND the WFCV screen, so a failure here is DB/disk/interrupted — the
-        # aborted_environment outcome (retry once), not a candidate defect.
-        # As above, repr(exc) is preserved in results.json, not swallowed.
+        # AND the WFCV screen, and the ValueError branch above has already
+        # peeled off realised.py's known config-shaped failures — anything
+        # left really is DB/disk/interrupted, the aborted_environment outcome
+        # (retry once). repr(exc) is preserved in results.json, not swallowed.
         return _finish(STATUS_ABORTED_ENVIRONMENT, name, t0, out_dir, error=f"realised backtest raised: {exc!r}")
 
-    effect_resolved, effect_delta = _resolve_effect(realised.aggregate, BASELINE_ARM, CANDIDATE_ARM)
+    provider_health_error = _check_provider_health(provider)
+    if provider_health_error is not None:
+        return _finish(STATUS_ABORTED_ENVIRONMENT, name, t0, out_dir, error=provider_health_error)
 
-    target = getattr(candidate, "TARGET", None)
-    if not target:
-        zone = {"resolved": None, "reason": "candidate declared no TARGET"}
-    elif not effect_resolved:
-        zone = {"resolved": None, "reason": "CONFIDENCE_EFFECT did not resolve true — scored conditionally"}
-    else:
-        zone = _resolve_zone(
-            target, realised.fills, BASELINE_ARM, CANDIDATE_ARM, axis_lookup, min_row_cell_n=min_row_cell_n
-        )
-
+    # Write the expensive artifacts BEFORE grading: a bug in the grading step
+    # (which is comparatively cheap — DataFrame groupbys over already-computed
+    # results) must not discard a completed multi-hour backtest.
     out_dir.mkdir(parents=True, exist_ok=True)
     rowpreds_path = out_dir / "rowpreds.parquet"
     collector.to_parquet(rowpreds_path)
     fills_path = out_dir / "fills.parquet"
     realised.fills.to_parquet(fills_path, index=False)
+
+    target = getattr(candidate, "TARGET", None)
+    effect_resolved, effect_delta, zone, grading_error = _grade_run(
+        realised, target, axis_lookup, min_row_cell_n=min_row_cell_n
+    )
 
     wall_seconds = time.perf_counter() - t0
     results = {
@@ -289,6 +332,7 @@ def run_candidate(
         "effect_resolved": effect_resolved,
         "effect_delta_cpl_held": effect_delta,
         "zone": zone,
+        "grading_error": grading_error,
         "aggregate": realised.aggregate.to_dict(orient="records"),
         "fold_run_deltas": fold_run[
             ["fold", "regime", "run", "delta_ll_all_median", "delta_ll_hard25_median"]
@@ -303,6 +347,8 @@ def run_candidate(
             "realised_wall_seconds": realised.meta["total_wall_seconds"],
             "wall_seconds": wall_seconds,
             "pass_criterion": _read_pass_criterion(batch_dir),
+            "extra_feature_provider_hits": provider.stats["hits"],
+            "extra_feature_provider_misses": provider.stats["misses"],
         },
     }
     results_path = out_dir / "results.json"
@@ -376,6 +422,26 @@ def _run_wfcv_screen(
     return pd.DataFrame(rows), collector
 
 
+def _build_axis_lookup(frame: pd.DataFrame, axis_series: pd.Series) -> pd.DataFrame:
+    """(station_code, date, axis) lookup table for _resolve_zone's fills merge.
+
+    reindex, not to_numpy() straight off axis_series: add_axis is allowed to
+    return its Series in a different row order than frame
+    (differential_pit_test compares by index label, not position — see
+    pit_test.py's docstring), so a candidate that sorts internally would
+    otherwise pair frame's row i with axis_series's row i, silently
+    mismatching station_code/date to the wrong axis label. This must align by
+    index label, matching every other use of axis_series in this module
+    (candidate_frame[col] assignment in run_candidate, and
+    axis_series.loc[val_df.index] in _run_wfcv_screen).
+    """
+    return pd.DataFrame({
+        "station_code": frame["station_code"].to_numpy(),
+        "date": pd.to_datetime(frame["price_date"]).dt.strftime("%Y-%m-%d"),
+        "axis": axis_series.reindex(frame.index).to_numpy(),
+    })
+
+
 def _read_pass_criterion(batch_dir: pathlib.Path) -> dict | None:
     path = pathlib.Path(batch_dir) / PASS_CRITERION_FILENAME
     return json.loads(path.read_text()) if path.exists() else None
@@ -389,21 +455,77 @@ def _make_lookup_provider(candidate_frame: pd.DataFrame, columns: list[str], dat
     the first (the #270 "two sites must agree" hazard doesn't apply here, since
     add_columns runs exactly once, offline, and this is a pure lookup over its
     output).
+
+    The returned function carries a `.stats` dict ({"hits": int, "misses":
+    int}), mutated in place on every call — the caller inspects it after the
+    backtest to catch a systemic key-format mismatch (see run_candidate's
+    post-backtest check) rather than silently reporting "no effect".
     """
     keyed = candidate_frame[["station_code", date_column, *columns]].copy()
     keyed["_date_key"] = pd.to_datetime(keyed[date_column]).dt.strftime("%Y-%m-%d")
     lookup = keyed.set_index(["station_code", "_date_key"])[columns]
+    stats = {"hits": 0, "misses": 0}
 
     def provider(as_of: str, station_code: int, station_price: float) -> dict[str, float | None]:
         try:
             row = lookup.loc[(station_code, as_of)]
         except KeyError:
+            stats["misses"] += 1
             return dict.fromkeys(columns)
+        stats["hits"] += 1
         if isinstance(row, pd.DataFrame):
             row = row.iloc[-1]
         return {c: (None if pd.isna(row[c]) else float(row[c])) for c in columns}
 
+    provider.stats = stats
     return provider
+
+
+def _check_provider_health(provider) -> str | None:
+    """None if the extra_feature_provider looked healthy during the replay it
+    just ran through; an error message if every lookup missed.
+
+    A 100% miss means the candidate arm was scored with its added column(s)
+    silently NaN for the entire backtest — that reads as a legitimate
+    effect_resolved: false ("the feature does nothing") when it's actually a
+    (station_code, date) key-format mismatch (features.csv's price_date
+    representation has already varied between INTEGER YYYYMMDD and ISO
+    strings — batch_freeze.py's _snapshot_date handles both for exactly this
+    reason). Fail loudly instead of reporting a false negative.
+    """
+    if provider.stats["misses"] > 0 and provider.stats["hits"] == 0:
+        return (
+            f"extra_feature_provider missed on all {provider.stats['misses']} lookups "
+            "during the realised backtest replay — likely a (station_code, date) "
+            "key-format mismatch between the frozen batch and the runner's lookup, "
+            "not a legitimate 'no effect' result."
+        )
+    return None
+
+
+def _grade_run(
+    realised, target: dict | None, axis_lookup: pd.DataFrame | None, *, min_row_cell_n: int,
+) -> tuple[bool | None, float | None, dict, str | None]:
+    """CONFIDENCE_EFFECT / CONFIDENCE_ZONE grading, isolated so a bug here
+    can't discard an already-completed (and already artifact-written)
+    backtest. Returns (effect_resolved, effect_delta, zone, grading_error);
+    on failure the first three are None/a "not resolved" zone dict and
+    grading_error carries repr(exc).
+    """
+    try:
+        effect_resolved, effect_delta = _resolve_effect(realised.aggregate, BASELINE_ARM, CANDIDATE_ARM)
+        if not target:
+            zone = {"resolved": None, "reason": "candidate declared no TARGET"}
+        elif not effect_resolved:
+            zone = {"resolved": None, "reason": "CONFIDENCE_EFFECT did not resolve true — scored conditionally"}
+        else:
+            zone = _resolve_zone(
+                target, realised.fills, BASELINE_ARM, CANDIDATE_ARM, axis_lookup, min_row_cell_n=min_row_cell_n
+            )
+        return effect_resolved, effect_delta, zone, None
+    except Exception as exc:  # noqa: BLE001 — a grading bug must not discard a completed backtest
+        grading_error = repr(exc)
+        return None, None, {"resolved": None, "reason": f"grading raised: {grading_error}"}, grading_error
 
 
 def _resolve_effect(aggregate: pd.DataFrame, baseline_name: str, candidate_name: str) -> tuple[bool, float]:
