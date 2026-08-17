@@ -628,10 +628,20 @@ def post_bd_comment(issue_id: str, text: str) -> None:
 
 def _summarise_for_comment(results: dict) -> str:
     c = results["candidate"]
-    effect = "moved the arbiter" if results["effect_resolved"] else "did not move the arbiter"
+    effect_resolved = results["effect_resolved"]
+    if effect_resolved is None:
+        # _grade_run's exception path: effect_resolved/effect_delta_cpl_held
+        # are None, not False — "did not move the arbiter" would misreport a
+        # grading failure as a real (negative) finding.
+        grading_error = results.get("grading_error")
+        effect = f"grading failed — {grading_error}" if grading_error else "effect not resolved"
+    else:
+        effect = "moved the arbiter" if effect_resolved else "did not move the arbiter"
+    delta = results["effect_delta_cpl_held"]
+    delta_str = f"{delta:+.4f}" if delta is not None else "n/a"
     lines = [
         f"[pipeline] {c['name']}: {results['status']} — {effect} "
-        f"(delta_cpl_held={results['effect_delta_cpl_held']:+.4f})",
+        f"(delta_cpl_held={delta_str})",
     ]
     zone = results["zone"]
     if zone.get("resolved") is not None:

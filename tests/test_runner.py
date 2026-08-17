@@ -593,6 +593,65 @@ def test_summarise_for_comment_reports_effect_and_zone():
     assert "wall=12.3s" in text
 
 
+def test_summarise_for_comment_handles_grade_run_failure_shape():
+    """_grade_run's exception path returns effect_resolved/effect_delta_cpl_held
+    as None (not False/0.0) — _summarise_for_comment must not crash formatting
+    that, and must not misreport a grading failure as "did not move the
+    arbiter" (a real, negative finding). Regression test for a bug the fps-hvi
+    review caught: this exact shape raised TypeError on `f"{None:+.4f}"`,
+    which escaped run_candidate uncaught since it's evaluated as an argument
+    to post_bd_comment, outside that function's own try/except.
+    """
+    results = {
+        "candidate": {"name": "cand"},
+        "status": "rejected",
+        "effect_resolved": None,
+        "effect_delta_cpl_held": None,
+        "grading_error": "KeyError('cpl_held')",
+        "zone": {"resolved": None, "reason": "grading raised: KeyError('cpl_held')"},
+        "meta": {"wall_seconds": 12.3, "n_windows": 4, "seeds": [1, 2]},
+    }
+    text = _summarise_for_comment(results)  # must not raise
+    assert "grading failed" in text
+    assert "n/a" in text
+    assert "did not move the arbiter" not in text
+
+
+def test_run_candidate_posts_bd_comment_even_when_grading_failed(monkeypatch):
+    """End-to-end version of the regression above: post_bd_comment must still
+    fire (and run_candidate must still return a RunResult) when a run
+    completes but _grade_run's except branch fired, with bead_id set —
+    exactly the path the TypeError escaped through.
+    """
+    captured = {}
+
+    def fake_run(cmd, input, text, check):  # noqa: A002 - matches subprocess.run's kwarg name
+        captured["cmd"] = cmd
+        captured["input"] = input
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    aggregate = pd.DataFrame([{"arm": "R0"}])  # missing cpl_held -> _resolve_effect raises
+    realised = _FakeRealised(aggregate, pd.DataFrame())
+    effect_resolved, effect_delta, zone, grading_error = _grade_run(
+        realised, target=None, axis_lookup=None, min_row_cell_n=30
+    )
+    results = {
+        "candidate": {"name": "cand"},
+        "status": "rejected",
+        "effect_resolved": effect_resolved,
+        "effect_delta_cpl_held": effect_delta,
+        "grading_error": grading_error,
+        "zone": zone,
+        "meta": {"wall_seconds": 1.0, "n_windows": 1, "seeds": [1]},
+    }
+
+    post_bd_comment("fps-3jj.4", _summarise_for_comment(results))  # must not raise
+
+    assert captured["cmd"] == ["bd", "comment", "fps-3jj.4", "--stdin"]
+    assert "grading failed" in captured["input"]
+
+
 def test_post_bd_comment_invokes_bd_with_stdin(monkeypatch):
     captured = {}
 
