@@ -36,8 +36,24 @@ class RestrictedFrameViolation(RuntimeError):
     """A candidate's add_columns/add_axis read a column outside its declared INPUTS."""
 
 
+class MissingInputColumnsError(RuntimeError):
+    """A candidate declares an INPUTS column that doesn't exist in the features frame.
+
+    Distinct from RestrictedFrameViolation: this is a bad declaration, not an
+    undeclared read.
+    """
+
+
+class MissingOutputColumnError(RuntimeError):
+    """A candidate's add_columns didn't produce a column it declared in COLUMNS."""
+
+
 class AllNaNColumnError(RuntimeError):
     """A candidate's declared output column is entirely NaN — it computed nothing."""
+
+
+class CandidateImportError(RuntimeError):
+    """A candidate module file could not be imported."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,8 +67,13 @@ def load_candidate_module(path: pathlib.Path):
     """Import a candidate module by file path, e.g. experiments/candidates/<batch>/<name>.py."""
     path = pathlib.Path(path)
     spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise CandidateImportError(f"Could not create an import spec for {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise CandidateImportError(f"Failed to import candidate module {path}: {exc}") from exc
     return module
 
 
@@ -62,13 +83,23 @@ def validate_candidate(candidate, frame: pd.DataFrame, *, date_column: str = "pr
     Raises on the first failure. Never fits a model.
     """
     inputs = list(candidate.INPUTS)
-    restricted = frame[inputs].copy()
+    try:
+        restricted = frame[inputs].copy()
+    except KeyError as exc:
+        missing = [col for col in inputs if col not in frame.columns]
+        raise MissingInputColumnsError(
+            f"{candidate.NAME}: INPUTS declares columns not present in the features frame: {missing}"
+        ) from exc
 
     _check_restricted_frame(candidate.add_columns, restricted, candidate_name=candidate.NAME, fn_label="add_columns")
     columns_result = differential_pit_test(candidate.add_columns, frame, date_column=date_column)
 
     nan_rates = {}
     for col in candidate.COLUMNS:
+        if col not in columns_result.columns:
+            raise MissingOutputColumnError(
+                f"{candidate.NAME}: declared output column '{col}' was not produced by add_columns"
+            )
         rate = float(columns_result[col].isna().mean())
         if rate >= 1.0:
             raise AllNaNColumnError(f"{candidate.NAME}: column '{col}' is entirely NaN — add_columns computed nothing")

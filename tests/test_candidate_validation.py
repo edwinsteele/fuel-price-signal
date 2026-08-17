@@ -9,6 +9,9 @@ import pytest
 
 from experiments.pipeline.validate import (
     AllNaNColumnError,
+    CandidateImportError,
+    MissingInputColumnsError,
+    MissingOutputColumnError,
     RestrictedFrameViolation,
     load_candidate_module,
     validate_candidate,
@@ -181,3 +184,33 @@ def test_load_candidate_module_imports_by_path(tmp_path: pathlib.Path):
     candidate = load_candidate_module(module_path)
     assert candidate.NAME == "my_candidate"
     assert candidate.INPUTS == ["price_date"]
+
+
+def test_load_candidate_module_wraps_import_errors(tmp_path: pathlib.Path):
+    module_path = tmp_path / "broken_candidate.py"
+    module_path.write_text("raise RuntimeError('boom')\n")
+    with pytest.raises(CandidateImportError):
+        load_candidate_module(module_path)
+
+
+def test_declared_input_missing_from_frame_raises_clear_error():
+    frame = _panel_frame()
+    candidate = _make_candidate(
+        _pit_safe_add_columns, inputs=["station_code", "price_date", "tgp_delta_7d", "no_such_column"]
+    )
+
+    with pytest.raises(MissingInputColumnsError) as exc_info:
+        validate_candidate(candidate, frame)
+    assert "no_such_column" in str(exc_info.value)
+
+
+def test_declared_output_column_not_produced_raises_clear_error():
+    frame = _panel_frame()
+
+    def add_columns(df: pd.DataFrame) -> pd.DataFrame:
+        return df.copy()  # never adds 'candidate_col'
+
+    candidate = _make_candidate(add_columns, inputs=["station_code", "price_date", "tgp_delta_7d"])
+
+    with pytest.raises(MissingOutputColumnError):
+        validate_candidate(candidate, frame)

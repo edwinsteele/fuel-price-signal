@@ -67,6 +67,22 @@ def test_pit_safe_series_valued_function_passes():
     assert result.name == "axis"
 
 
+def test_pit_safe_function_passes_even_when_row_order_differs():
+    """Comparison is by index label, not row position (docstring caveat) — a PIT-safe
+    function that reorders rows (but keeps their original index labels) must still pass.
+    """
+    frame = _panel_frame()
+
+    def reordered_rolling_mean(df: pd.DataFrame) -> pd.DataFrame:
+        # Interleave by date instead of _pit_safe_rolling_mean's station-major order —
+        # a different row order, same index labels.
+        return _pit_safe_rolling_mean(df).sort_values(["price_date", "station_code"])
+
+    result = differential_pit_test(reordered_rolling_mean, frame)
+    assert list(result.index) != list(frame.sort_values(["station_code", "price_date"]).index)
+    assert "candidate_col" in result.columns
+
+
 def test_requires_at_least_two_distinct_dates():
     frame = _panel_frame()
     frame["price_date"] = 20260801

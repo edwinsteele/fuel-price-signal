@@ -43,6 +43,11 @@ def differential_pit_test(
 
     Returns the full-frame result so callers (e.g. the validation harness's NaN-rate
     check) can reuse it instead of recomputing.
+
+    Comparison is by index label, not row position: `compute_fn`'s output only needs to
+    preserve `frame`'s row index (any `df.copy()`/`sort_values()`-style transform is
+    fine); a `reset_index(drop=True)` that discards it would produce false-positive
+    leaks here, since aligned rows would no longer line up.
     """
     full_result = compute_fn(frame)
     dates = frame[date_column]
