@@ -111,8 +111,8 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      `station_minus_tgp_cents` in the file for the contrast).
    - `not_tested`: the same judgement you wrote into the README — reuse it verbatim, don't redo it.
    - `outcome`: the pipeline's own status code — `rejected` / `disqualified` /
-     `aborted_candidate` / `aborted_environment` (`facts["provenance"]["status"]`). **Never write
-     `graduated` here.** Per the parent design's decision boundary, this pipeline never touches
+     `aborted_candidate` / `aborted_pipeline` / `aborted_environment`
+     (`facts["provenance"]["status"]`). **Never write `graduated` here.** Per the parent design's decision boundary, this pipeline never touches
      `fuel_signal/features.py`; graduation is a separate, human-initiated PR, and a human updates
      this same ledger entry's `outcome` to `graduated` by hand when that PR lands (see how the
      `tgp_delta_7d` entry already reads `graduated` even though every pipeline run of it would have
@@ -124,6 +124,9 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    Hypothesis / Result / Status, `Status` = `open` while the pipeline still has follow-ups queued
    for this candidate's series, `done` otherwise, `abandoned` for `disqualified` /
    `aborted_candidate` (never `graduated` — same human-edit-later rule as the ledger).
+   `aborted_pipeline` / `aborted_environment` runs get **no ledger or INDEX row at all**: the
+   candidate was never tested, its claim goes back on the queue, and a row would record a
+   falsification that never happened.
 
 6. **Commit `README.md` + the run's updated `facts.json` (`grading` filled in) + the PNGs +
    `experiments/ledger.yaml` + `experiments/INDEX.md` together, straight to `main`** —

@@ -30,7 +30,7 @@ from experiments.pipeline.launch import (
     parse_candidate_ref,
     release_stale_claim,
 )
-from experiments.pipeline.runner import default_out_dir
+from experiments.pipeline.runner import RETRYABLE_STATUSES, default_out_dir
 
 # ── parse_candidate_ref ──────────────────────────────────────────────────────
 
@@ -153,6 +153,71 @@ def test_find_stale_claims_ignores_recent_claim(tmp_path, monkeypatch):
     )
     recent_claim = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
     issue = _issue(description, recent_claim)
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    assert find_stale_claims() == []
+
+
+@pytest.mark.parametrize("status", sorted(RETRYABLE_STATUSES))
+def test_find_stale_claims_reclaims_retryable_abort(tmp_path, monkeypatch, status):
+    """fps-g31: an aborted run leaves a results.json, which used to read as "done".
+
+    fps-32p aborted with aborted_candidate at 22:07 and stayed in_progress
+    indefinitely: results.json existing short-circuited the sweep, and there was
+    no traceback for the fallback path to find either. A retryable status must
+    release the claim, and must do so with no age gate -- results.json existing
+    is proof the run is over.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": status, "error": "bad config"}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    recent_claim = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, recent_claim)
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    stale = find_stale_claims()
+    assert len(stale) == 1
+    assert status in stale[0]["traceback_tail"]
+
+
+@pytest.mark.parametrize("status", ["rejected", "disqualified", "aborted_candidate"])
+def test_find_stale_claims_leaves_terminal_status_alone(tmp_path, monkeypatch, status):
+    """A verdict legitimately consumes the claim -- only retryable aborts come back."""
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": status}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    old_claim = (datetime.now(timezone.utc) - STALE_AFTER - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, old_claim)
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    assert find_stale_claims() == []
+
+
+def test_find_stale_claims_ignores_unparseable_results_json(tmp_path, monkeypatch):
+    """Releasing a claim on the strength of a file we couldn't read is the worse guess."""
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text("{ truncated mid-write")
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    old_claim = (datetime.now(timezone.utc) - STALE_AFTER - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, old_claim)
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
 
