@@ -33,17 +33,17 @@ weaker, parallel stale-claim mechanism keyed on a `claim.json` file nothing ever
 once launch.py's real implementation was confirmed to already cover this correctly. Don't
 reintroduce it here.
 
-**CONFIRMED BROKEN — run-directory convention (fps-icv, not yet fixed).** This routine's queue
-model (`find_pending_runs`: a directory with `results.json` and no `README.md`) assumes one
-subdirectory per candidate. That does **not** hold against the merged launch.py/runner.py: both
-default a candidate's `out_dir` to `candidate_path.parent`, which is the whole **batch** directory
-shared by every candidate module filed against it. Consequence: candidate 2+ in any batch
-overwrites candidate 1's `results.json`/`rowpreds.parquet`/`fills.parquet` in place, and once this
-routine has written a `README.md` into that shared directory for candidate 1, the directory is
-permanently excluded from the queue — candidate 2+ are **silently never dossiered**. Batch 1 (a
-single candidate) does not exercise this; batch 2 (5 candidates) will. Check `bd show fps-icv`
-before trusting `--scan`'s output on any batch with more than one candidate, and don't paper over
-missing dossiers by writing them by hand — that's this bug resurfacing, not a one-off.
+**FIXED — run-directory convention (fps-icv).** This routine's queue model (`find_pending_runs`: a
+directory with `results.json` and no `README.md`) assumes one subdirectory per candidate. That now
+holds: launch.py's `launch_detached` and runner.py's `run_candidate` both default a candidate's
+`out_dir` to `runner.default_out_dir(candidate_path)` (candidate_path with its `.py` suffix
+stripped), not `candidate_path.parent` (the whole **batch** directory shared by every candidate
+module filed against it). Before this fix, candidate 2+ in any batch would overwrite candidate 1's
+`results.json`/`rowpreds.parquet`/`fills.parquet` in place, and once this routine had written a
+`README.md` into that shared directory for candidate 1, the directory would be permanently
+excluded from the queue — candidate 2+ silently never dossiered. `find_pending_runs`'s
+`root.rglob(RESULTS_FILENAME)` already recurses into per-candidate subdirectories, so batch 2
+(5 candidates) is expected to dossier correctly.
 
 If `--scan` reports nothing to process, **exit quietly** — this mirrors the launch routine's "if
 the run is still going" case, just one step later in the pipeline.

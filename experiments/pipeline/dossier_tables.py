@@ -28,17 +28,18 @@ One artifact this module reads that doesn't exist yet, an intentional forward-co
     facts["noise_band"]["available"] is False — the slot exists now so the schema doesn't change
     once fps-3jj.9 lands.
 
-KNOWN GAP (confirmed against merged code, not just a design assumption — see fps-icv): the
-run-directory convention this module assumes (one subdirectory per candidate) does NOT hold.
-launch.py's `launch_detached(cmd, candidate_path.parent)` and runner.py's CLI both default
-`out_dir` to the candidate module's parent directory, which is the whole BATCH directory shared
-by every candidate module filed against it (`experiments/candidates/<batch>/<name>.py` are flat
-siblings — see generator.md's Filing section). Consequence: candidate 2+ in any batch overwrites
-candidate 1's results.json/rowpreds.parquet/fills.parquet/run.log in place, and once this
-module's `find_pending_runs` has written a README.md into that shared directory for candidate 1,
-the directory is permanently excluded from the queue — candidate 2+ are silently never dossiered.
-Fixing this requires changing launch.py/runner.py's out_dir, outside this module's own diff; see
-the tracking bd issue.
+FIXED (fps-icv, was a KNOWN GAP): the run-directory convention this module assumes (one
+subdirectory per candidate) now holds. launch.py's `launch_detached` and runner.py's
+`run_candidate` both default `out_dir` to `runner.default_out_dir(candidate_path)` —
+candidate_path with its .py suffix stripped — not the candidate module's parent directory
+(which is the whole BATCH directory, shared by every candidate module filed against it, since
+`experiments/candidates/<batch>/<name>.py` are flat siblings — see generator.md's Filing
+section). Before this fix, candidate 2+ in any batch would overwrite candidate 1's
+results.json/rowpreds.parquet/fills.parquet/run.log in place, and once this module's
+`find_pending_runs` had written a README.md into that shared directory for candidate 1, the
+directory would be permanently excluded from the queue — candidate 2+ silently never
+dossiered. `find_pending_runs`'s `root.rglob(RESULTS_FILENAME)` already recurses, so no change
+was needed in this module itself.
 
 Usage:
   PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables <run_dir>       # one run

@@ -33,6 +33,7 @@ from experiments.pipeline.runner import (
     _resolve_zone,
     _run_wfcv_screen,
     _summarise_for_comment,
+    default_out_dir,
     post_bd_comment,
     record_pass_criterion,
     run_candidate,
@@ -143,6 +144,31 @@ def test_run_candidate_aborted_candidate_on_import_error(tmp_path):
     assert result.status == STATUS_ABORTED_CANDIDATE
     assert result.results_path.exists()
     assert json.loads(result.results_path.read_text())["status"] == STATUS_ABORTED_CANDIDATE
+
+
+def test_run_candidate_default_out_dir_keeps_two_batch_siblings_separate(tmp_path):
+    """fps-icv: two candidates filed against the same batch must not share out_dir.
+
+    Before the fix, run_candidate's default out_dir was candidate_path.parent —
+    the whole batch directory — so candidate B's results.json here would
+    overwrite candidate A's in place. Both must now land in their own
+    subdirectory, keyed off each candidate's own module name.
+    """
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_a_path = _write_candidate(batch_dir, "raise RuntimeError('boom a')\n", name="cand_a.py")
+    candidate_b_path = _write_candidate(batch_dir, "raise RuntimeError('boom b')\n", name="cand_b.py")
+
+    result_a = run_candidate(batch_dir, candidate_a_path)
+    result_b = run_candidate(batch_dir, candidate_b_path)
+
+    assert result_a.results_path == default_out_dir(candidate_a_path) / "results.json"
+    assert result_b.results_path == default_out_dir(candidate_b_path) / "results.json"
+    assert result_a.results_path != result_b.results_path
+    assert result_a.results_path.exists()
+    assert result_b.results_path.exists()
+    assert "boom a" in json.loads(result_a.results_path.read_text())["error"]
+    assert "boom b" in json.loads(result_b.results_path.read_text())["error"]
 
 
 def test_run_candidate_aborted_environment_on_baseline_drift(tmp_path):

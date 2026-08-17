@@ -30,6 +30,7 @@ from experiments.pipeline.launch import (
     parse_candidate_ref,
     release_stale_claim,
 )
+from experiments.pipeline.runner import default_out_dir
 
 # ── parse_candidate_ref ──────────────────────────────────────────────────────
 
@@ -77,6 +78,23 @@ def test_build_runner_cmd():
     ]
 
 
+# ── default_out_dir (fps-icv regression) ───────────────────────────────────────
+
+def test_default_out_dir_gives_distinct_dirs_for_two_candidates_in_one_batch():
+    batch_dir = pathlib.Path("experiments/candidates/batch1")
+    candidate_a = batch_dir / "tgp_delta_7d.py"
+    candidate_b = batch_dir / "another_candidate.py"
+
+    out_dir_a = default_out_dir(candidate_a)
+    out_dir_b = default_out_dir(candidate_b)
+
+    assert out_dir_a != out_dir_b
+    assert out_dir_a.parent == batch_dir
+    assert out_dir_b.parent == batch_dir
+    assert out_dir_a.name == "tgp_delta_7d"
+    assert out_dir_b.name == "another_candidate"
+
+
 # ── find_stale_claims (fault injection) ──────────────────────────────────────
 
 def _issue(description: str, started_at: str) -> dict:
@@ -102,12 +120,14 @@ def _fake_repo_root(tmp_path, monkeypatch) -> pathlib.Path:
 
 def test_find_stale_claims_flags_old_traceback_with_no_results(tmp_path, monkeypatch):
     repo_root = _fake_repo_root(tmp_path, monkeypatch)
-    out_dir = repo_root / "experiments" / "candidates" / "batch1"
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    candidate_path.parent.mkdir(parents=True)
+    candidate_path.write_text("NAME = 'x'")
+    out_dir = default_out_dir(candidate_path)
     out_dir.mkdir(parents=True)
     (out_dir / RUN_LOG_FILENAME).write_text(
         "some output\nTraceback (most recent call last):\n  File \"x.py\", line 1\nValueError: boom\n"
     )
-    (out_dir / "tgp_delta_7d.py").write_text("NAME = 'x'")
     description = _description_for(
         "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
     )
@@ -124,7 +144,8 @@ def test_find_stale_claims_flags_old_traceback_with_no_results(tmp_path, monkeyp
 
 def test_find_stale_claims_ignores_recent_claim(tmp_path, monkeypatch):
     repo_root = _fake_repo_root(tmp_path, monkeypatch)
-    out_dir = repo_root / "experiments" / "candidates" / "batch1"
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
     out_dir.mkdir(parents=True)
     (out_dir / RUN_LOG_FILENAME).write_text("Traceback (most recent call last):\nValueError: boom\n")
     description = _description_for(
@@ -140,7 +161,8 @@ def test_find_stale_claims_ignores_recent_claim(tmp_path, monkeypatch):
 
 def test_find_stale_claims_ignores_completed_run(tmp_path, monkeypatch):
     repo_root = _fake_repo_root(tmp_path, monkeypatch)
-    out_dir = repo_root / "experiments" / "candidates" / "batch1"
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
     out_dir.mkdir(parents=True)
     (out_dir / RUN_LOG_FILENAME).write_text("Traceback (most recent call last):\nValueError: boom\n")
     (out_dir / RESULTS_FILENAME).write_text("{}")
@@ -157,7 +179,8 @@ def test_find_stale_claims_ignores_completed_run(tmp_path, monkeypatch):
 
 def test_find_stale_claims_ignores_non_traceback_log(tmp_path, monkeypatch):
     repo_root = _fake_repo_root(tmp_path, monkeypatch)
-    out_dir = repo_root / "experiments" / "candidates" / "batch1"
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
     out_dir.mkdir(parents=True)
     (out_dir / RUN_LOG_FILENAME).write_text("still fitting fold 7...\n")
     description = _description_for(

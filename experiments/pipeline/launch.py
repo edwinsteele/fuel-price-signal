@@ -17,9 +17,11 @@ must contain two lines,
     Batch: experiments/batches/<batch-name>
     Module: experiments/candidates/<batch-name>/<candidate-name>.py
 
-parsed by parse_candidate_ref(). The runner's out_dir is candidate_path.parent (see
-experiments/pipeline/runner.py's run_candidate default), so run.log and results.json
-land next to the candidate module — that's also where stale-claim recovery looks.
+parsed by parse_candidate_ref(). The runner's out_dir is
+default_out_dir(candidate_path) — candidate_path with its .py suffix stripped
+(see experiments/pipeline/runner.py) — so run.log and results.json land in a
+per-candidate subdirectory, not the shared batch directory (fps-icv). That's
+also where stale-claim recovery looks.
 
 Stale-claim recovery mirrors CLAUDE.md's worker-routine pickup rule 4, adapted to the
 experiment queue: dir exists, run.log ends in a traceback, no results.json, claimed
@@ -36,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 
 import click
 
+from experiments.pipeline.runner import default_out_dir
 from experiments.pipeline.validate import (
     CandidateImportError,
     load_candidate_module,
@@ -118,7 +121,7 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
             _, candidate_path = parse_candidate_ref(issue.get("description", ""))
         except CandidateRefError:
             continue
-        out_dir = candidate_path.parent
+        out_dir = default_out_dir(candidate_path)
         if (out_dir / RESULTS_FILENAME).exists():
             continue
         traceback_tail = _looks_like_traceback_tail(out_dir / RUN_LOG_FILENAME)
@@ -237,8 +240,9 @@ def main() -> None:
         return
 
     cmd = build_runner_cmd(batch_dir, candidate_path, issue_id)
+    out_dir = default_out_dir(candidate_path)
     try:
-        pid = launch_detached(cmd, candidate_path.parent)
+        pid = launch_detached(cmd, out_dir)
     except OSError as exc:
         # A validated candidate that fails to actually launch (missing `uv`,
         # permission error creating out_dir, etc.) must not leave the bead
@@ -246,7 +250,7 @@ def main() -> None:
         # validation failure above.
         _abort_claim(issue_id, f"failed to launch detached runner: {exc!r}")
         return
-    log_path = candidate_path.parent / RUN_LOG_FILENAME
+    log_path = out_dir / RUN_LOG_FILENAME
     subprocess.run(
         ["bd", "comment", issue_id, f"[launch] validated, launched detached pid={pid}, log={log_path}"],
         check=True,
