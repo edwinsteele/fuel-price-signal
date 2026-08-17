@@ -103,6 +103,16 @@ def _make_fills(*, low_n_fold: int | None = None, n_per_cell: int = 40) -> pd.Da
 def _make_rowpreds(*, with_axis: bool = False, with_cycle: bool = False,
                     candidate_col: str | None = "cand_col") -> pd.DataFrame:
     rng = np.random.default_rng(1)
+    # label is a property of (fold, station_code, price_date) alone — fixed at labelling time,
+    # not re-drawn per (run, seed) — same invariant the real runner's ident_base encodes (one
+    # label per validation row, reused across every run/seed in that fold). Drawing it once per
+    # key here (rather than inside the run/seed loop) keeps the fixture honest for
+    # _plot_tau_sweep's "label=first" aggregation, which relies on exactly this invariant.
+    label_by_key = {
+        (fold, station, i): int(rng.uniform() < 0.5)
+        for fold in FOLDS for station in range(4) for i in range(N_DATES)
+    }
+    axis_by_station = {station: ("A" if station % 2 == 0 else "B") for station in range(4)}
     rows = []
     for fold in FOLDS:
         for run in (BASELINE_ARM, CANDIDATE_ARM):
@@ -111,12 +121,12 @@ def _make_rowpreds(*, with_axis: bool = False, with_cycle: bool = False,
                     for station in range(4):
                         row = {
                             "fold": fold, "station_code": station, "price_date": DATES[i],
-                            "label": int(rng.uniform() < 0.5), "is_hard25": int(i % 4 == 0),
+                            "label": label_by_key[(fold, station, i)], "is_hard25": int(i % 4 == 0),
                             "run": run, "seed": seed,
                             "proba": float(np.clip(rng.uniform(), 0.01, 0.99)),
                         }
                         if with_axis:
-                            row["axis"] = "A" if station % 2 == 0 else "B"
+                            row["axis"] = axis_by_station[station]
                         if with_cycle:
                             row["cycle_pct_through"] = float(rng.uniform(0, 1.3))
                         if candidate_col:
@@ -321,7 +331,7 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
 
 # ── plots ─────────────────────────────────────────────────────────────────────
 
-def test_make_plots_writes_four_always_plots(tmp_path):
+def test_make_plots_writes_four_always_plots(tmp_path, capsys):
     run_dir, batch_dir = _write_run(tmp_path)
     facts = dt.build_facts(run_dir)
 
@@ -336,6 +346,23 @@ def test_make_plots_writes_four_always_plots(tmp_path):
     assert "axis_breakdown.png" not in written
     assert "cycle_phase_breakdown.png" not in written
     assert "external_series_overlay.png" not in written
+    assert "inconsistent labels" not in capsys.readouterr().out  # clean fixture, no false alarm
+
+
+def test_plot_tau_sweep_warns_on_inconsistent_label_per_key(tmp_path, capsys):
+    run_dir, batch_dir = _write_run(tmp_path)
+    facts = dt.build_facts(run_dir)
+    rowpreds = pd.read_parquet(run_dir / dt.ROWPREDS_FILENAME)
+    # Flip the label on exactly one row of an otherwise-duplicated (fold, station_code,
+    # price_date) key for the candidate arm, so that key now disagrees with itself.
+    cand_mask = rowpreds["run"] == dt.CANDIDATE_ARM
+    first_idx = rowpreds[cand_mask].index[0]
+    rowpreds.loc[first_idx, "label"] = 1 - rowpreds.loc[first_idx, "label"]
+
+    written = dt._plot_tau_sweep(run_dir, rowpreds, facts["candidate"]["name"])
+
+    assert written == "tau_sweep.png"
+    assert "inconsistent labels" in capsys.readouterr().out
 
 
 def test_make_plots_conditional_plots_route_off_declared_metadata(tmp_path):

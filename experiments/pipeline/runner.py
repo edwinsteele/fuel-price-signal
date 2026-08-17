@@ -71,7 +71,7 @@ from experiments.lib.constants import SEEDS, SHOCK_FOLDS
 from experiments.lib.fit import fit_score, per_row_log_loss
 from experiments.lib.folds import iter_folds_with_baseline_fit
 from experiments.lib.gates import seed_variance_gate
-from experiments.lib.io import to_jsonable
+from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.pit_test import PitLeakError
 from experiments.lib.realised import ArmSpec, run_paired_realised_backtest
 from experiments.lib.rowpreds import RowPredCollector
@@ -101,6 +101,12 @@ STATUS_ABORTED_ENVIRONMENT = "aborted_environment"
 BASELINE_ARM = "R0"
 CANDIDATE_ARM = "candidate"
 PASS_CRITERION_FILENAME = "pass_criterion.json"
+
+# The identity columns _run_wfcv_screen always writes into rowpreds' ident_base, before any
+# optional axis/cycle_pct_through/persist_columns additions — single-sourced so a downstream
+# reader (dossier_tables.py, fps-3jj.6) can tell "always present" apart from "candidate-specific"
+# without hardcoding its own copy of this list.
+IDENT_BASE_COLUMNS = ("fold", "station_code", "price_date", "label", "is_hard25")
 
 # Below this many fills, a target/other cell is excluded from zone grading
 # rather than reported as a finding (fps-3jj slicing-axes decision).
@@ -358,7 +364,7 @@ def run_candidate(
             "pass_criterion": _read_pass_criterion(batch_dir),
             "extra_feature_provider_hits": provider.stats["hits"],
             "extra_feature_provider_misses": provider.stats["misses"],
-            "git_sha": _current_git_sha(),
+            "git_sha": current_git_sha(),
             "bead_id": bead_id,
         },
     }
@@ -470,17 +476,6 @@ def _build_axis_lookup(frame: pd.DataFrame, axis_series: pd.Series) -> pd.DataFr
 def _read_pass_criterion(batch_dir: pathlib.Path) -> dict | None:
     path = pathlib.Path(batch_dir) / PASS_CRITERION_FILENAME
     return json.loads(path.read_text()) if path.exists() else None
-
-
-def _current_git_sha() -> str | None:
-    """The runner's own checkout SHA at run time — provenance for the dossier (fps-3jj.6)."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
 
 
 def _make_lookup_provider(candidate_frame: pd.DataFrame, columns: list[str], date_column: str = "price_date"):

@@ -47,8 +47,14 @@ import numpy as np
 import pandas as pd
 
 from experiments.lib.constants import SHOCK_FOLDS
+from experiments.lib.io import current_git_sha
 from experiments.lib.zones import assign_regime, pooled_cpl
-from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM, DEFAULT_MIN_ROW_CELL_N
+from experiments.pipeline.runner import (
+    BASELINE_ARM,
+    CANDIDATE_ARM,
+    DEFAULT_MIN_ROW_CELL_N,
+    IDENT_BASE_COLUMNS,
+)
 from fuel_signal.score_phase2 import threshold_sweep
 
 RESULTS_FILENAME = "results.json"
@@ -68,9 +74,12 @@ SEED_STD_FLAG_RATIO = 5.0
 
 # rowpreds columns that are never a persisted candidate/context column — everything else on a
 # rowpreds row is either an identity column baked in by the runner or a value fps-3jj.6 asked the
-# runner to persist (candidate.COLUMNS, cycle_pct_through). See runner.py's
+# runner to persist (candidate.COLUMNS, cycle_pct_through). IDENT_BASE_COLUMNS is single-sourced
+# from runner.py (the module that actually constructs rowpreds' ident_base); "axis" is the one
+# further ident column the runner adds conditionally (add_axis declared); "run"/"seed"/"proba"
+# are added by RowPredCollector.add(), not the ident dict itself. See runner.py's
 # `_run_wfcv_screen(..., persist_columns=...)`.
-_IDENT_COLUMNS = {"fold", "station_code", "price_date", "label", "is_hard25", "axis", "run", "seed", "proba"}
+_IDENT_COLUMNS = set(IDENT_BASE_COLUMNS) | {"axis", "run", "seed", "proba"}
 
 # Row-level cycle-phase columns (experiments/lib/zones.py assign_regime() operates on the first).
 # "candidate touches cycle phase" (Plots spec, fps-3jj.6) triggers off a candidate's declared
@@ -216,14 +225,6 @@ def build_facts(run_dir: pathlib.Path) -> dict:
     return facts
 
 
-def _current_git_sha() -> str | None:
-    try:
-        result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-
 def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
     meta = results.get("meta", {})
     batch_name, snapshot_date = None, None
@@ -237,7 +238,7 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
     if git_sha is None:
         # Older results.json (pre fps-3jj.6) didn't persist this — fall back to the current
         # checkout's SHA, which is the *dossier build's* SHA, not necessarily the run's.
-        git_sha = _current_git_sha()
+        git_sha = current_git_sha()
     return {
         "candidate": results.get("candidate", {}).get("name"),
         "batch": batch_name,
@@ -506,6 +507,19 @@ def _plot_tau_sweep(run_dir: pathlib.Path, rowpreds: pd.DataFrame, name: str) ->
         sub = rowpreds[rowpreds["run"] == run_name]
         if sub.empty:
             continue
+        label_nunique = sub.groupby(["fold", "station_code", "price_date"], observed=True)["label"].nunique()
+        if (label_nunique > 1).any():
+            # label is a property of (station_code, price_date), fixed at labelling time — not of
+            # (run, seed). More than one distinct label per key means the ident_base rows for this
+            # (fold, station_code, price_date) disagree, which "label=first" would silently paper
+            # over and skew the tau curve. Warn loudly rather than plot a number nobody can trust.
+            n_bad = int((label_nunique > 1).sum())
+            print(
+                f"[dossier_tables] {name}/{run_name}: {n_bad} (fold, station_code, price_date) "
+                "keys have inconsistent labels across rows — tau-sweep plot uses an arbitrary one "
+                "per key; treat this plot as suspect and investigate rowpreds.parquet.",
+                flush=True,
+            )
         g = sub.groupby(["fold", "station_code", "price_date"], observed=True).agg(
             proba=("proba", "mean"), label=("label", "first")
         )
