@@ -22,6 +22,12 @@ Not every file under `docs/routines/` has a scheduler entry, though — `docs/ro
 | `claude-authored` | Applied by worker automatically | — | Identifies worker-opened PRs |
 | `auto-merge-ok` | Applied by worker to `chore` PRs on open | — | Triggers `.github/workflows/auto-merge.yml` |
 
+`experiment` doesn't fit the table above — it's a bd-issue label only, with no PR path (the
+runner it triggers never opens a PR). It marks a candidate-feature bead for the separate local
+launch routine (fps-3jj.5, [docs/routines/launch.md](routines/launch.md)) and exists so the
+chore/polish worker's `bd ready --label chore`/`--label polish` queries never claim one and try to
+implement it in a cloud container with no data.
+
 ## State machine
 
 ```
