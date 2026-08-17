@@ -142,6 +142,7 @@ Before filing an issue from an agent-driven logic review:
 
 - **Trace a concrete example** end-to-end, especially for format-handling code. The `history.py` YYYY-DD-MM date-swap condition was wrongly flagged because the agent didn't walk through a case where `raw_day == true_month`.
 - **Check the docstring** for stated design intent before claiming inconsistency. `series.py`'s `brand:` resolver was wrongly flagged for using exact match — the docstring said exact was the intent.
+- **Distrust prose numbers when verifying a code constant.** CodeRabbit flagged `snapshot_retire.py`'s `DEFAULT_TOLERANCE = 0.05` as "should be 5.0 cents", citing nearby AGENTS.md prose that loosely said "agrees within 5c". The prose was the imprecise one (the actual check used `<0.05`, effectively an exact-match test since prices are 0.1c-quantized) — the constant was correct. Verify against what the code actually does, not how a nearby doc rounds it off in words.
 
 ## Experiment scripts
 
