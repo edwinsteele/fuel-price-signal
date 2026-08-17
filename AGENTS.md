@@ -19,6 +19,7 @@ See [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for code style, test patterns, de
 fuel_signal/
 ├── config.py          # API key, preferred station list, postcode
 ├── history.py         # Download + clean bulk CSVs; dynamic resource discovery
+├── snapshot_retire.py # Report/delete committed snapshots now covered by bulk CSVs
 ├── db.py              # SQLite schema + read/write helpers
 ├── fill.py            # Forward-fill daily price gaps → daily_prices table
 ├── live.py            # FuelCheck API snapshot → append to DB
@@ -129,7 +130,7 @@ fuel_signal.db                        # .gitignored; SQLite, rebuilt from raw + 
 ```
 
 - `data/raw/` and `fuel_signal.db` are local derived artifacts — not committed
-- Snapshot scope: **E10 only, Sydney metro stations** — filtered at collection time in GH Actions
+- Snapshot files themselves are **unfiltered** — all NSW stations, all fuel types, captured by `fuel_signal/live.py`. Filtering to **E10, Sydney metro** happens at DB-load time (`db.py`'s `load_snapshot_csv`/`load_all_snapshots` `postcodes`/`fuel_codes` params, defaulted from `SYDNEY_METRO_POSTCODES` + `{"E10"}`), not at collection time.
 - Other fuel types (diesel, U91, etc.) available in historical CSVs if ever needed
 - SQLite is rebuilt by running `history.py` (downloads raw CSVs) then `db.py` (assembles DB)
 - GitHub Actions runs daily, commits one snapshot file per day
@@ -137,9 +138,11 @@ fuel_signal.db                        # .gitignored; SQLite, rebuilt from raw + 
 ### Snapshot retirement
 Snapshots are a bridge until historical CSVs cover the same period — keep the committed count as small as possible.
 
-When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verify snapshot prices ≡ historical prices per station/date; (2) if they agree, delete the retired snapshot CSVs; (3) if they diverge, investigate before retiring — divergence reveals something about the data.
+When a new bulk CSV is released that overlaps `data/snapshots/` dates, run `uv run python -m fuel_signal.snapshot_retire` (report only) and review the agreement numbers; re-run with `--apply` to delete eligible months, then commit the deletion via a PR. If a month diverges below the agreement threshold, investigate before retiring — divergence reveals something about the data. See [README.md § Snapshot retirement](README.md#snapshot-retirement) for usage.
 
-`db.py` loads snapshots before historical CSVs and uses `INSERT OR IGNORE`, so snapshot prices win silently on conflict. When the first overlap occurs, compare per-station prices to decide whether snapshot-wins is the right policy. Also check whether the GH Actions cron time (currently 10:00 UTC = 8pm AEST / 9pm AEDT) aligns with the historical CSV rollup time.
+**Validated 2026-08-17 (first overlap, gh#4 / fps-1785999730823-12-2fd8326a):** the bulk historical CSV is an **event log**, not a daily census — a station only gets a row on a day its price changed, not every day. This is exactly what `fill.py`'s forward-fill already exists to reconstruct (same mechanism used for all pre-2026 history with no snapshots at all). Comparing April–July 2026 snapshots against the newly-published bulk CSVs for the same months, using as-of forward-fill: **99.3% of snapshot rows exactly match the historical-derived price** (prices are recorded to 0.1c precision; the `snapshot_retire.py` tolerance default of 0.05c only absorbs floating-point rounding, not real divergence). Remaining divergence is small (median ~2c) and one-directional in a way consistent with the historical file recording each day's *last* price update while the snapshot is taken once ~9pm — i.e. explained by intraday timing, not a data-quality problem.
+
+**Conclusion: `db.py` loads snapshots before historical CSVs and uses `INSERT OR IGNORE`, so snapshot prices win silently on conflict — confirmed to be a reasonable default**, since the two sources agree closely and no systematic bias was found. April–July 2026 snapshots were retired (deleted) on this basis; August 2026 stays committed until a bulk CSV covering it is published.
 
 ### Aggregation
 `sydney_average_series` / `average_price_series` is a temporary convenience for cycle detection. Future analyses will need flexible groupings — by region, corridor, LGA cluster, etc. Don't treat it as permanent infrastructure; don't patch it when new groupings are needed, design a proper aggregation layer instead.
@@ -204,13 +207,14 @@ CREATE TABLE station_class (
 ### Snapshot CSV schema
 
 ```
-station_code, name, address, suburb, postcode, brand, price, date
+station_code, name, address, suburb, postcode, brand, fuel_code, price, date
 ```
 
 - `station_code`: FuelCheck API station ID (stable across rebrands)
 - `name`/`brand`: current at time of snapshot — included for human readability and to keep `stations` table current
 - `address`: included for self-contained matching with historical CSVs
-- `price`: E10 cents
+- `fuel_code`: all fuel types are captured (E10, U91, P95, P98, PDL, DL, LPG, etc.) — filtering to E10 happens at DB-load time, not here (see § Data strategy)
+- `price`: cents, for the fuel type in `fuel_code`
 - `date`: YYYY-MM-DD
 
 ### SQLite schema
