@@ -13,19 +13,32 @@ cannot be checked short of a re-run; if the Claude step dies mid-session the fac
 on disk, so the work queue (any dir with results.json and no README.md) stays correct and
 re-runnable; and it keeps the overnight Claude burst short.
 
-Two artifacts this module reads that don't exist yet, both intentional forward-compatible slots:
+Stale-claim recovery is deliberately NOT implemented here. fps-3jj.5 (launch routine) merged
+after this module's first version was written with its own claim.json-based recovery — that
+turned out to be dead code (nothing ever wrote claim.json) duplicating a weaker version of what
+launch.py's `find_stale_claims`/`release_stale_claim` (bd `in_progress` + a required traceback
+tail in run.log, not just "no results.json after 12h") already does correctly. Removed rather
+than fixed in place — one true stale-claim path, not two.
 
-  claim.json (`CLAIM_FILENAME`) — contract the launch routine (fps-3jj.5, in progress) must
-    satisfy: write `{"bead_id": ..., "candidate": ..., "started_at": <ISO8601 UTC>}` into the run
-    directory the moment it claims a candidate bead, before launching the runner detached. This
-    module never writes it, only reads it, to detect and recover a crashed launch (parent design's
-    "dir exists, run.log ends in a traceback, no results.json, started >12h ago" case).
+One artifact this module reads that doesn't exist yet, an intentional forward-compatible slot:
 
   noise_floor.json (`NOISE_FLOOR_FILENAME`) — contract fps-3jj.9 (P3, not yet built) must satisfy:
     write `{"deltas_cpl_held": [<float>, ...]}` into the batch dir at batch-setup time (10-20
     uninformative draws through the same fit + realised-backtest path). Until that file exists,
     facts["noise_band"]["available"] is False — the slot exists now so the schema doesn't change
     once fps-3jj.9 lands.
+
+KNOWN GAP (confirmed against merged code, not just a design assumption — see fps-icv): the
+run-directory convention this module assumes (one subdirectory per candidate) does NOT hold.
+launch.py's `launch_detached(cmd, candidate_path.parent)` and runner.py's CLI both default
+`out_dir` to the candidate module's parent directory, which is the whole BATCH directory shared
+by every candidate module filed against it (`experiments/candidates/<batch>/<name>.py` are flat
+siblings — see generator.md's Filing section). Consequence: candidate 2+ in any batch overwrites
+candidate 1's results.json/rowpreds.parquet/fills.parquet/run.log in place, and once this
+module's `find_pending_runs` has written a README.md into that shared directory for candidate 1,
+the directory is permanently excluded from the queue — candidate 2+ are silently never dossiered.
+Fixing this requires changing launch.py/runner.py's out_dir, outside this module's own diff; see
+the tracking bd issue.
 
 Usage:
   PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables <run_dir>       # one run
@@ -35,8 +48,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import subprocess
-from datetime import datetime, timedelta, timezone
 
 import click
 import matplotlib
@@ -47,14 +58,10 @@ import numpy as np
 import pandas as pd
 
 from experiments.lib.constants import SHOCK_FOLDS
-from experiments.lib.io import current_git_sha
+from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
-from experiments.pipeline.runner import (
-    BASELINE_ARM,
-    CANDIDATE_ARM,
-    DEFAULT_MIN_ROW_CELL_N,
-    IDENT_BASE_COLUMNS,
-)
+from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM, DEFAULT_MIN_ROW_CELL_N
+from fuel_signal.dates import date_from_int
 from fuel_signal.score_phase2 import threshold_sweep
 
 RESULTS_FILENAME = "results.json"
@@ -62,24 +69,12 @@ FACTS_FILENAME = "facts.json"
 README_FILENAME = "README.md"
 ROWPREDS_FILENAME = "rowpreds.parquet"
 FILLS_FILENAME = "fills.parquet"
-RUN_LOG_FILENAME = "run.log"
-CLAIM_FILENAME = "claim.json"
 NOISE_FLOOR_FILENAME = "noise_floor.json"
 BASELINE_COLUMNS_FILENAME = "baseline_columns.json"
 FREEZE_MANIFEST_FILENAME = "freeze.json"
 FROZEN_FEATURES_FILENAME = "features.parquet"
 
-STALE_AFTER_HOURS = 12
 SEED_STD_FLAG_RATIO = 5.0
-
-# rowpreds columns that are never a persisted candidate/context column — everything else on a
-# rowpreds row is either an identity column baked in by the runner or a value fps-3jj.6 asked the
-# runner to persist (candidate.COLUMNS, cycle_pct_through). IDENT_BASE_COLUMNS is single-sourced
-# from runner.py (the module that actually constructs rowpreds' ident_base); "axis" is the one
-# further ident column the runner adds conditionally (add_axis declared); "run"/"seed"/"proba"
-# are added by RowPredCollector.add(), not the ident dict itself. See runner.py's
-# `_run_wfcv_screen(..., persist_columns=...)`.
-_IDENT_COLUMNS = set(IDENT_BASE_COLUMNS) | {"axis", "run", "seed", "proba"}
 
 # Row-level cycle-phase columns (experiments/lib/zones.py assign_regime() operates on the first).
 # "candidate touches cycle phase" (Plots spec, fps-3jj.6) triggers off a candidate's declared
@@ -102,78 +97,6 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
     )
 
 
-def find_stale_claims(
-    root: pathlib.Path, *, stale_after_hours: float = STALE_AFTER_HOURS, now: datetime | None = None
-) -> list[dict]:
-    """Directories with a claim.json but no results.json, past the crash-recovery window.
-
-    See the module docstring's `claim.json` contract. A run still legitimately in flight (started
-    recently) is not stale; this only flags a claim old enough that a normal claim-to-results cycle
-    should have finished.
-    """
-    root = pathlib.Path(root)
-    now = now or datetime.now(timezone.utc)
-    stale: list[dict] = []
-    for claim_path in root.rglob(CLAIM_FILENAME):
-        run_dir = claim_path.parent
-        if (run_dir / RESULTS_FILENAME).exists():
-            continue
-        try:
-            claim = json.loads(claim_path.read_text())
-            started_at = datetime.fromisoformat(claim["started_at"])
-        except (json.JSONDecodeError, KeyError, ValueError):
-            continue
-        if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
-        age = now - started_at
-        if age < timedelta(hours=stale_after_hours):
-            continue
-        run_log = run_dir / RUN_LOG_FILENAME
-        traceback_tail = None
-        if run_log.exists():
-            lines = run_log.read_text(errors="replace").strip().splitlines()
-            traceback_tail = "\n".join(lines[-40:]) if lines else None
-        stale.append({
-            "run_dir": run_dir,
-            "bead_id": claim.get("bead_id"),
-            "candidate": claim.get("candidate"),
-            "started_at": claim["started_at"],
-            "age_hours": age.total_seconds() / 3600,
-            "traceback_tail": traceback_tail,
-        })
-    return stale
-
-
-def release_stale_claim(entry: dict, *, dry_run: bool = False) -> None:
-    """bd-side half of stale-claim recovery: post the traceback tail, release the claim.
-
-    Deterministic bookkeeping (no judgement about *why* it failed), so it belongs here rather
-    than in the Claude step, same reasoning as facts.json itself.
-    """
-    bead_id = entry.get("bead_id")
-    if not bead_id:
-        print(f"[dossier_tables] {entry['run_dir']}: claim.json has no bead_id, skipping bd release", flush=True)
-        return
-    body = (
-        f"Tail of {RUN_LOG_FILENAME}:\n```\n{entry['traceback_tail']}\n```"
-        if entry.get("traceback_tail")
-        else f"{RUN_LOG_FILENAME} missing or empty."
-    )
-    message = (
-        f"[dossier] stale claim released — no {RESULTS_FILENAME} after "
-        f"{entry['age_hours']:.1f}h (started {entry['started_at']}).\n\n{body}"
-    )
-    if dry_run:
-        print(f"[dossier_tables] DRY RUN — would release {bead_id}:\n{message}", flush=True)
-        return
-    try:
-        subprocess.run(["bd", "comment", bead_id, "--stdin"], input=message, text=True, check=True)
-        subprocess.run(["bd", "assign", bead_id, ""], check=True)
-        subprocess.run(["bd", "update", bead_id, "--status", "open"], check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        print(f"[dossier_tables] releasing {bead_id} failed, continuing: {exc}", flush=True)
-
-
 # ── facts.json ────────────────────────────────────────────────────────────────
 
 def build_facts(run_dir: pathlib.Path) -> dict:
@@ -184,6 +107,23 @@ def build_facts(run_dir: pathlib.Path) -> dict:
     meta = results.get("meta", {})
     candidate = results.get("candidate", {})
     batch_dir = pathlib.Path(meta["batch_dir"]) if meta.get("batch_dir") else None
+
+    rowpreds, fills = None, None
+    if status == "rejected":
+        for filename in (ROWPREDS_FILENAME, FILLS_FILENAME):
+            if not (run_dir / filename).exists():
+                # status=="rejected" means runner.py's success path ran, which writes both
+                # parquet artifacts BEFORE results.json (see runner.py's "write artifacts before
+                # grading" comment) — so this means something removed them after the fact (a
+                # manual `git clean`, disk issue, etc.), not a normal in-progress race. Fail with
+                # a message that says so, rather than a bare pyarrow FileNotFoundError the --scan
+                # loop just logs.
+                raise FileNotFoundError(
+                    f"{run_dir}: status=='rejected' but {filename} is missing — "
+                    "expected artifact was removed after the run completed."
+                )
+        rowpreds = pd.read_parquet(run_dir / ROWPREDS_FILENAME)
+        fills = pd.read_parquet(run_dir / FILLS_FILENAME)
 
     facts: dict = {
         "candidate": {
@@ -201,7 +141,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
         "headline": None,
         "breakdowns": None,
         "seed_flags": results.get("seed_variance", {}).get("flags", []),
-        "validation": _validation(results, run_dir),
+        "validation": _validation(results, rowpreds),
         "grading": {
             "predicted_signature": candidate.get("predicted_signature"),
             "verdict": None,
@@ -218,8 +158,6 @@ def build_facts(run_dir: pathlib.Path) -> dict:
         )
         return facts
 
-    rowpreds = pd.read_parquet(run_dir / ROWPREDS_FILENAME)
-    fills = pd.read_parquet(run_dir / FILLS_FILENAME)
     facts["headline"] = _headline(results)
     facts["breakdowns"] = _breakdowns(results, rowpreds, fills)
     return facts
@@ -242,6 +180,7 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
     return {
         "candidate": results.get("candidate", {}).get("name"),
         "batch": batch_name,
+        "batch_dir": str(batch_dir) if batch_dir is not None else None,
         "snapshot_date": snapshot_date,
         "git_sha": git_sha,
         "git_sha_is_run_time": git_sha_is_run_time,
@@ -252,7 +191,7 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
     }
 
 
-def _validation(results: dict, run_dir: pathlib.Path) -> dict:
+def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
     status = results["status"]
     if status == "rejected":
         pit_test = "passed — reached the WFCV/realised stages, so the differential PIT truncation test found no leak"
@@ -265,12 +204,17 @@ def _validation(results: dict, run_dir: pathlib.Path) -> dict:
         inputs_check = results.get("error") if status == "aborted_candidate" else f"not reached (status={status})"
 
     nan_rates = None
-    rowpreds_path = run_dir / ROWPREDS_FILENAME
-    if status == "rejected" and rowpreds_path.exists():
-        rp = pd.read_parquet(rowpreds_path)
-        candidate_cols = [c for c in rp.columns if c not in _IDENT_COLUMNS and c != "cycle_pct_through"]
+    if rowpreds is not None:
+        # The candidate's own columns are results.json's own declaration (candidate.COLUMNS,
+        # runner.py's authoritative record of what add_columns actually produced) — not
+        # reverse-engineered by diffing rowpreds' schema against a hardcoded ident-column set.
+        # The latter would silently misclassify the next ident column the runner starts
+        # persisting (exactly what this PR did by adding cycle_pct_through) as a "candidate
+        # feature" here, with no test catching it.
+        declared_cols = results.get("candidate", {}).get("columns") or []
+        candidate_cols = [c for c in declared_cols if c in rowpreds.columns]
         if candidate_cols:
-            nan_rates = {c: float(rp[c].isna().mean()) for c in candidate_cols}
+            nan_rates = {c: float(rowpreds[c].isna().mean()) for c in candidate_cols}
 
     return {"pit_test": pit_test, "inputs_check": inputs_check, "candidate_column_nan_rate": nan_rates}
 
@@ -293,7 +237,11 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None) -> dict:
         "band_mean_delta_cpl_held": band_mean,
         "band_std_delta_cpl_held": band_std,
         "candidate_delta_cpl_held": delta,
-        "candidate_percentile_in_band": float((deltas < delta).mean() * 100),
+        # delta_cpl_held is a COST: more negative = better. "Better than N% of noise" therefore
+        # means N% of the noise-floor draws were WORSE (higher/less-negative) than this candidate
+        # — (deltas > delta), not (deltas < delta). A candidate with a strong negative delta
+        # against a noise band centred near zero must read as a HIGH percentile here, not near 0.
+        "candidate_percentile_better_than_noise": float((deltas > delta).mean() * 100),
         "candidate_z_vs_band": (delta - band_mean) / band_std if np.isfinite(band_std) and band_std > 0 else None,
     }
 
@@ -372,6 +320,7 @@ def _breakdowns(
         per_regime.append({"regime": regime_name, "n_fills": n, "suppressed": suppressed, "delta_cpl_own": delta})
 
     per_axis = None
+    per_axis_coverage_note = None
     if "axis" in rowpreds.columns:
         axis_lookup = (
             rowpreds[["station_code", "price_date", "axis"]]
@@ -379,13 +328,29 @@ def _breakdowns(
             .assign(date=lambda d: pd.to_datetime(d["price_date"]).dt.strftime("%Y-%m-%d"))
             [["station_code", "date", "axis"]]
         )
-        tagged = fills.merge(axis_lookup, on=["station_code", "date"], how="left")
+        # many_to_one, not a bare left join: axis is supposed to be a function of (station_code,
+        # date) alone (same invariant the tau-sweep label check relies on) — if add_axis ever
+        # produces two different labels for the same key, this must raise loudly (mirroring
+        # runner.py's _resolve_zone, which does the same merge with the same guard) rather than
+        # silently fan out and inflate n_fills / skew pooled_cpl.
+        tagged = fills.merge(axis_lookup, on=["station_code", "date"], how="left", validate="many_to_one")
+        n_unmatched = int(tagged["axis"].isna().sum())
+        per_axis_coverage_note = (
+            f"axis_lookup is built from rowpreds.parquet, which only carries WFCV "
+            f"validation-window rows — not the full candidate frame results.json's own `zone` "
+            f"grading uses. {n_unmatched} of {len(tagged)} fills had no axis match and are "
+            f"excluded from every per_axis cell below; per_axis deltas may not fully agree with "
+            f"`headline.zone`."
+        )
         per_axis = []
         for axis_value in sorted(tagged["axis"].dropna().unique(), key=str):
             delta, n, suppressed = _cell_delta(tagged, tagged["axis"] == axis_value, min_row_cell_n=min_row_cell_n)
             per_axis.append({"axis": axis_value, "n_fills": n, "suppressed": suppressed, "delta_cpl_own": delta})
 
-    return {"per_fold": per_fold, "per_regime": per_regime, "per_axis": per_axis, "min_row_cell_n": min_row_cell_n}
+    return {
+        "per_fold": per_fold, "per_regime": per_regime, "per_axis": per_axis,
+        "per_axis_coverage_note": per_axis_coverage_note, "min_row_cell_n": min_row_cell_n,
+    }
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────
@@ -406,15 +371,17 @@ def make_plots(run_dir: pathlib.Path, facts: dict, batch_dir: pathlib.Path | Non
     fills = pd.read_parquet(run_dir / FILLS_FILENAME)
     name = facts["candidate"]["name"]
 
+    candidate_cols = [c for c in (facts["candidate"].get("columns") or []) if c in rowpreds.columns]
+
     written = []
     for fn in (
         lambda: _plot_per_fold_delta_bars(run_dir, facts, name),
         lambda: _plot_seed_mean_vs_median(run_dir, rowpreds, name),
         lambda: _plot_realised_cpl_by_fold(run_dir, fills, name),
         lambda: _plot_tau_sweep(run_dir, rowpreds, name),
-        lambda: _plot_candidate_over_time(run_dir, rowpreds, name),
+        lambda: _plot_candidate_over_time(run_dir, rowpreds, candidate_cols, name),
         lambda: _plot_axis_breakdown(run_dir, facts, name),
-        lambda: _plot_cycle_phase(run_dir, rowpreds, facts, name),
+        lambda: _plot_cycle_phase(run_dir, rowpreds, facts, candidate_cols, name),
         lambda: _plot_external_overlay(run_dir, facts, batch_dir, name),
     ):
         path = fn()
@@ -431,9 +398,16 @@ def _plot_per_fold_delta_bars(run_dir: pathlib.Path, facts: dict, name: str) -> 
     if "delta_ll_all_median" not in df.columns:
         return None
     fig, ax = plt.subplots(figsize=(10, 5))
-    colours = ["#c0392b" if v > 0 else "#2980b9" for v in df["delta_ll_all_median"]]
+    # pd.notna guard: an NaN here (aggregate_with_deltas' median over an unexpectedly empty/all-NaN
+    # cohort) must render as visibly unresolved, not fall through "not > 0" into the "candidate
+    # better" blue — a silent misread in an unattended pipeline.
+    colours = [
+        "#bdc3c7" if pd.isna(v) else ("#c0392b" if v > 0 else "#2980b9")
+        for v in df["delta_ll_all_median"]
+    ]
+    heights = df["delta_ll_all_median"].fillna(0.0)
     edgecolours = ["#f1c40f" if r == "shock" else "black" for r in df["regime"]]
-    ax.bar(df["fold"], df["delta_ll_all_median"], color=colours, edgecolor=edgecolours, linewidth=2)
+    ax.bar(df["fold"], heights, color=colours, edgecolor=edgecolours, linewidth=2)
     ax.axhline(0, color="black", lw=0.6)
     ax.set_xlabel("fold")
     ax.set_ylabel("Δ WFCV log-loss, all rows, median across seeds\n(positive = candidate worse)")
@@ -546,8 +520,9 @@ def _plot_tau_sweep(run_dir: pathlib.Path, rowpreds: pd.DataFrame, name: str) ->
     return path.name
 
 
-def _plot_candidate_over_time(run_dir: pathlib.Path, rowpreds: pd.DataFrame, name: str) -> str | None:
-    cand_cols = [c for c in rowpreds.columns if c not in _IDENT_COLUMNS and c != "cycle_pct_through"]
+def _plot_candidate_over_time(
+    run_dir: pathlib.Path, rowpreds: pd.DataFrame, cand_cols: list[str], name: str,
+) -> str | None:
     if not cand_cols:
         return None
     df = rowpreds[rowpreds["run"] == CANDIDATE_ARM].drop_duplicates(subset=["station_code", "price_date"])
@@ -581,17 +556,27 @@ def _plot_axis_breakdown(run_dir: pathlib.Path, facts: dict, name: str) -> str |
         return None
     df = pd.DataFrame(per_axis)
     fig, ax = plt.subplots(figsize=(max(8, 0.8 * len(df)), 5))
+    # `d` is None for a suppressed cell (by _cell_delta's construction) but can still be a real
+    # NaN for a non-suppressed one (pooled_cpl on a zero-litre arm) — `(d or 0) > 0` treats NaN as
+    # falsy-via-or here (NaN is truthy in Python, so `NaN or 0` returns NaN, and `NaN > 0` is
+    # False), silently rendering a degenerate cell as a confident "candidate better" blue bar.
+    # pd.isna covers both None and NaN explicitly, rendered the same grey as a suppressed cell.
     colours = [
-        "#bdc3c7" if s else ("#c0392b" if (d or 0) > 0 else "#2980b9")
+        "#bdc3c7" if s or pd.isna(d) else ("#c0392b" if d > 0 else "#2980b9")
         for s, d in zip(df["suppressed"], df["delta_cpl_own"])
     ]
-    heights = [0.0 if v is None else v for v in df["delta_cpl_own"]]
+    heights = [0.0 if pd.isna(v) else v for v in df["delta_cpl_own"]]
     ax.bar(df["axis"].astype(str), heights, color=colours, edgecolor="black", linewidth=0.5)
     ax.axhline(0, color="black", lw=0.6)
-    for i, (n, suppressed) in enumerate(zip(df["n_fills"], df["suppressed"])):
-        label = f"n={n}" + (" (suppressed)" if suppressed else "")
+    for i, (n, suppressed, d) in enumerate(zip(df["n_fills"], df["suppressed"], df["delta_cpl_own"])):
+        if suppressed:
+            tag = " (suppressed)"
+        elif pd.isna(d):
+            tag = " (degenerate: zero-litre cell)"
+        else:
+            tag = ""
         ax.annotate(
-            label, (i, 0), textcoords="offset points", xytext=(0, 4), ha="center",
+            f"n={n}{tag}", (i, 0), textcoords="offset points", xytext=(0, 4), ha="center",
             fontsize=8, rotation=90 if len(df) > 8 else 0,
         )
     ax.set_ylabel("Δ realised CPL, own τ (positive = candidate worse)")
@@ -603,34 +588,51 @@ def _plot_axis_breakdown(run_dir: pathlib.Path, facts: dict, name: str) -> str |
     return path.name
 
 
-def _plot_cycle_phase(run_dir: pathlib.Path, rowpreds: pd.DataFrame, facts: dict, name: str) -> str | None:
+def _plot_cycle_phase(
+    run_dir: pathlib.Path, rowpreds: pd.DataFrame, facts: dict, cand_cols: list[str], name: str,
+) -> str | None:
     """Trigger: candidate's INPUTS/COLUMNS touch cycle phase (CYCLE_PHASE_COLUMNS)."""
     declared = set(facts["candidate"].get("inputs") or []) | set(facts["candidate"].get("columns") or [])
     if not (declared & CYCLE_PHASE_COLUMNS):
         return None
-    if "cycle_pct_through" not in rowpreds.columns:
-        return None
-    cand_cols = [c for c in rowpreds.columns if c not in _IDENT_COLUMNS and c != "cycle_pct_through"]
-    if not cand_cols:
+    if "cycle_pct_through" not in rowpreds.columns or not cand_cols:
         return None
     df = rowpreds[rowpreds["run"] == CANDIDATE_ARM].drop_duplicates(subset=["station_code", "price_date"]).copy()
     if df.empty:
         return None
     df["regime"] = df["cycle_pct_through"].map(assign_regime)
-    col = cand_cols[0]
-    fig, ax = plt.subplots(figsize=(9, 5))
     colours = {"normal": "#2980b9", "late_descent": "#e67e22", "overdue": "#c0392b", "unmatched": "#888"}
-    for regime, sub in df.groupby("regime", observed=True):
-        ax.scatter(sub["cycle_pct_through"], sub[col], s=6, alpha=0.4, color=colours.get(regime, "#888"), label=regime)
-    ax.set_xlabel("cycle_pct_through")
-    ax.set_ylabel(col)
-    ax.set_title(f"{name}: {col} vs cycle_pct_through, by regime")
-    ax.legend(markerscale=3)
+    # One subplot per declared candidate column — a multi-column candidate must not silently lose
+    # every column past the first (candidate_over_time.png already does this correctly; this plot
+    # used to just pick cand_cols[0]).
+    fig, axes = plt.subplots(len(cand_cols), 1, figsize=(9, 4.5 * len(cand_cols)), squeeze=False)
+    for i, col in enumerate(cand_cols):
+        ax = axes[i][0]
+        for regime, sub in df.groupby("regime", observed=True):
+            ax.scatter(
+                sub["cycle_pct_through"], sub[col], s=6, alpha=0.4,
+                color=colours.get(regime, "#888"), label=regime,
+            )
+        ax.set_ylabel(col)
+        ax.set_title(f"{col} vs cycle_pct_through, by regime")
+        ax.legend(markerscale=3)
+    axes[-1][0].set_xlabel("cycle_pct_through")
+    fig.suptitle(f"{name}: candidate columns vs cycle phase")
     fig.tight_layout()
     path = run_dir / "cycle_phase_breakdown.png"
     fig.savefig(path, dpi=110, bbox_inches="tight")
     plt.close(fig)
     return path.name
+
+
+def _parse_price_date(s: pd.Series) -> pd.Series:
+    """Normalise a raw features-frame price_date column to datetime64, handling both on-disk
+    forms this codebase produces (batch_freeze.py's `_snapshot_date` documents the same split):
+    INTEGER YYYYMMDD, or an ISO date string already parseable by pd.to_datetime.
+    """
+    if pd.api.types.is_integer_dtype(s):
+        return pd.to_datetime(s.map(date_from_int))
+    return pd.to_datetime(s)
 
 
 def _plot_external_overlay(run_dir: pathlib.Path, facts: dict, batch_dir: pathlib.Path | None, name: str) -> str | None:
@@ -657,6 +659,13 @@ def _plot_external_overlay(run_dir: pathlib.Path, facts: dict, batch_dir: pathli
     external = [c for c in external if c in frame.columns]
     if not external:
         return None
+    # Unlike rowpreds.parquet's price_date (normalised to datetime64 by the runner before
+    # writing), this is the batch's raw frozen features.parquet, read the same way
+    # fuel_signal.features.load_features() reads its parquet path — no date parsing applied.
+    # price_date there is INTEGER YYYYMMDD or an ISO string depending on how it was produced
+    # (batch_freeze.py's own _snapshot_date documents both forms) — plotted directly, either
+    # renders as an unreadable smear (a string axis is categorical: one x-tick per unique value).
+    frame = frame.assign(price_date=_parse_price_date(frame["price_date"]))
     daily = frame.groupby("price_date")[external].mean().reset_index()
     fig, ax = plt.subplots(figsize=(10, 5))
     for col in external:
@@ -677,11 +686,16 @@ def process_run(run_dir: pathlib.Path) -> pathlib.Path:
     """Build facts.json + plots for one run directory. Returns the facts.json path."""
     run_dir = pathlib.Path(run_dir)
     facts = build_facts(run_dir)
-    results = json.loads((run_dir / RESULTS_FILENAME).read_text())
-    batch_dir = pathlib.Path(results["meta"]["batch_dir"]) if results.get("meta", {}).get("batch_dir") else None
+    batch_dir_str = facts["provenance"].get("batch_dir")
+    batch_dir = pathlib.Path(batch_dir_str) if batch_dir_str else None
     facts["plots"] = make_plots(run_dir, facts, batch_dir)
     facts_path = run_dir / FACTS_FILENAME
-    facts_path.write_text(json.dumps(facts, indent=2, default=str))
+    # to_jsonable, not raw json.dumps: a noise-floor draw of n=1 (band_std=nan) or a zero-litre
+    # fill cell (pooled_cpl=nan) both reach a facts.json field with no other guard, and Python's
+    # json.dumps happily emits the literal (invalid, non-RFC-8259) `NaN` token by default. This
+    # file is the sole input to the downstream Claude session and to any external reader (jq
+    # included) — the same reason runner.py's results.json already goes through this helper.
+    facts_path.write_text(json.dumps(to_jsonable(facts), indent=2, default=str))
     return facts_path
 
 
@@ -691,17 +705,24 @@ def process_run(run_dir: pathlib.Path) -> pathlib.Path:
     "--scan", "scan_root", default=None,
     help="Process every pending run under this root instead of one run_dir.",
 )
-@click.option("--release-stale/--no-release-stale", default=True, help="Also recover stale claims found under --scan.")
-def main(target: str | None, scan_root: str | None, release_stale: bool) -> None:
-    """Build facts.json + PNGs for a completed run, or every pending run under --scan."""
+def main(target: str | None, scan_root: str | None) -> None:
+    """Build facts.json + PNGs for a completed run, or every pending run under --scan.
+
+    Stale-claim recovery is NOT this module's job — launch.py's own `recover_stale_claims`
+    (bd `in_progress` + a required traceback in run.log) already runs at the start of every
+    nightly launch cycle. See the module docstring.
+    """
     if scan_root:
         root = pathlib.Path(scan_root)
-        if release_stale:
-            for entry in find_stale_claims(root):
-                release_stale_claim(entry)
         for run_dir in find_pending_runs(root):
             click.echo(f"[dossier_tables] processing {run_dir}")
-            process_run(run_dir)
+            try:
+                process_run(run_dir)
+            except Exception as exc:  # noqa: BLE001 — one malformed/partial run must not stop the queue
+                # A run killed mid-write (e.g. between results.json and rowpreds.parquet landing)
+                # is exactly the unattended-pipeline case this scan runs unsupervised overnight —
+                # every other pending run in the batch must still get its dossier.
+                click.echo(f"[dossier_tables] {run_dir}: failed, skipping — {exc!r}", err=True)
         return
     if not target:
         raise click.UsageError("pass a run_dir, or --scan <root>")

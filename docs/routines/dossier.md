@@ -16,31 +16,37 @@ Run the whole queue through the code-only step first:
 PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables --scan experiments/candidates
 ```
 
-This single command does two things, both mechanical (`experiments/pipeline/dossier_tables.py`,
-fps-3jj.6):
+This does one thing, mechanically (`experiments/pipeline/dossier_tables.py`, fps-3jj.6): **facts.json
++ PNGs for every completed, undossiered run.** For every directory with a `results.json` and no
+`README.md` yet, it writes `facts.json` (the only source of numbers you are allowed to use below)
+and the applicable plots (always: `per_fold_delta_bars.png`, `seed_mean_vs_median.png`,
+`realised_cpl_by_fold.png`, `tau_sweep.png`, `candidate_over_time.png`; conditional:
+`axis_breakdown.png`, `cycle_phase_breakdown.png`, `external_series_overlay.png`). One bad/partial
+run doesn't stop the rest of the scan — it's logged and skipped; check the command's own output
+for any `failed, skipping` lines and flag them rather than silently ignoring.
 
-1. **Stale-claim recovery.** Any run directory with a `claim.json` (written by the launch routine,
-   `fps-3jj.5`, the moment it claims a candidate bead) but no `results.json` after 12 hours is
-   treated as a crashed launch: the tail of `run.log` is posted to the bead as a comment, the claim
-   is released (`bd assign "" ` + `bd update --status open`), and the bead becomes visible to
-   `bd ready` again. You do not need to do anything else for these — just note them in your final
-   summary.
-2. **facts.json + PNGs for every completed, undossiered run.** For every directory with a
-   `results.json` and no `README.md` yet, it writes `facts.json` (the only source of numbers you
-   are allowed to use below) and the applicable plots (always: `per_fold_delta_bars.png`,
-   `seed_mean_vs_median.png`, `realised_cpl_by_fold.png`, `tau_sweep.png`,
-   `candidate_over_time.png`; conditional: `axis_breakdown.png`, `cycle_phase_breakdown.png`,
-   `external_series_overlay.png`).
+**Stale-claim recovery is NOT this routine's job.** It runs entirely inside the launch routine
+(`fps-3jj.5`, merged) as part of every nightly `launch` invocation — `recover_stale_claims()`
+checks `bd list --status in_progress --label experiment` for issues whose `run.log` ends in a
+traceback and releases them. An earlier version of `dossier_tables.py` had its own,
+weaker, parallel stale-claim mechanism keyed on a `claim.json` file nothing ever wrote — removed
+once launch.py's real implementation was confirmed to already cover this correctly. Don't
+reintroduce it here.
 
-**Assumed run-directory convention (flag if it doesn't hold):** one subdirectory per candidate
-under `experiments/candidates/<batch>/<candidate-name>/`, holding `results.json`,
-`rowpreds.parquet`, `fills.parquet`, `run.log`, and (once step 0 has run) `facts.json`. If the
-launch routine (`fps-3jj.5`) ended up using a different layout, pass that root to `--scan` instead
-and update this file with the real path.
+**CONFIRMED BROKEN — run-directory convention (fps-icv, not yet fixed).** This routine's queue
+model (`find_pending_runs`: a directory with `results.json` and no `README.md`) assumes one
+subdirectory per candidate. That does **not** hold against the merged launch.py/runner.py: both
+default a candidate's `out_dir` to `candidate_path.parent`, which is the whole **batch** directory
+shared by every candidate module filed against it. Consequence: candidate 2+ in any batch
+overwrites candidate 1's `results.json`/`rowpreds.parquet`/`fills.parquet` in place, and once this
+routine has written a `README.md` into that shared directory for candidate 1, the directory is
+permanently excluded from the queue — candidate 2+ are **silently never dossiered**. Batch 1 (a
+single candidate) does not exercise this; batch 2 (5 candidates) will. Check `bd show fps-icv`
+before trusting `--scan`'s output on any batch with more than one candidate, and don't paper over
+missing dossiers by writing them by hand — that's this bug resurfacing, not a one-off.
 
-If `--scan` reports nothing to process (no facts.json written, no stale claims), **exit quietly**
-— this mirrors the launch routine's "if the run is still going" case, just one step later in the
-pipeline.
+If `--scan` reports nothing to process, **exit quietly** — this mirrors the launch routine's "if
+the run is still going" case, just one step later in the pipeline.
 
 ### Step 1 — for each run with a fresh facts.json and no README.md yet
 
@@ -69,11 +75,16 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      provenance (candidate, batch, snapshot date, git SHA, seeds, bead), the headline realised-CPL
      delta and its `effect_resolved` verdict, the WFCV log-loss delta labelled as descriptive
      colour, the per-fold / per-regime / per-axis breakdown tables (mark suppressed cells plainly —
-     "n=18, below the min-cell-n guard, not a finding"), the `seed_flags` list (if empty, say so —
-     "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating), validation
-     (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
+     "n=18, below the min-cell-n guard, not a finding"; if `per_axis` is present, also carry
+     `breakdowns["per_axis_coverage_note"]` verbatim — the axis lookup is built from
+     `rowpreds.parquet`'s WFCV-validation-window rows, not the full frame, so it can under-cover
+     relative to `headline.zone` and the note says by how much), the `seed_flags` list (if empty,
+     say so — "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating),
+     validation (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
      (`facts["noise_band"]`) — if `available: false`, say plainly "noise-floor band: not available
-     yet (fps-3jj.9)" rather than omitting the line.
+     yet (fps-3jj.9)" rather than omitting the line; if available, report
+     `candidate_percentile_better_than_noise` as-is (already oriented so higher = better —
+     don't re-derive or re-sign it).
    - **Judgement** (your reasoning, visibly separated — a `## Judgement` heading is enough):
      - The `PREDICTED_SIGNATURE` grading verdict + explanation you just wrote.
      - **`not_tested`** — adjacent ground this run does *not* rule out. This is the highest-value
@@ -124,23 +135,19 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
 ### Step 2 — summary
 
 Print one line per run processed (candidate name, outcome, one-clause verdict) and one line per
-stale claim released. No PR, no further action — the next thing that touches this candidate is
-either a human reading the README, or the retrospective bead (`fps-3jj.8`) once the whole batch is
-in.
+run the deterministic scan logged as `failed, skipping`. No PR, no further action — the next thing
+that touches this candidate is either a human reading the README, or the retrospective bead
+(`fps-3jj.8`) once the whole batch is in.
 
 ## Known gaps to flag, not silently work around
 
-- **`claim.json` contract.** `dossier_tables.py`'s stale-claim recovery depends on the launch
-  routine (`fps-3jj.5`, in progress at the time this file was written) writing
-  `<run_dir>/claim.json = {"bead_id", "candidate", "started_at"}` at claim time. If a run
-  directory has no `claim.json` at all, stale-claim recovery silently can't see it — that's a gap
-  in `fps-3jj.5`, not something to paper over here.
+- **Run-directory model (fps-icv, CONFIRMED BROKEN, not a hypothetical).** See Step 0 above — every
+  candidate after the first in a multi-candidate batch is silently never dossiered until this is
+  fixed in `launch.py`/`runner.py`. Do not hand-write a dossier to compensate; surface it instead.
 - **`noise_floor.json` contract.** `facts["noise_band"]["available"]` will read `false` for every
   run until `fps-3jj.9` (P3, not yet built) writes `<batch_dir>/noise_floor.json =
   {"deltas_cpl_held": [...]}` at batch-setup time. Report this plainly in the README (see Step 1
   above) rather than inventing a noise estimate.
-- **Run-directory root.** See "Assumed run-directory convention" above — confirm it matches what
-  `fps-3jj.5` actually does, and update this file (not just your own memory) if it doesn't.
 
 ## The shim
 

@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import json
 import pathlib
-import subprocess
-from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
 from experiments.pipeline import dossier_tables as dt
 from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM
@@ -178,71 +177,10 @@ def test_find_pending_runs_skips_in_progress_and_already_dossiered(tmp_path):
     assert pending == [run_dir]
 
 
-def test_find_stale_claims_flags_old_claim_without_results(tmp_path):
-    run_dir = tmp_path / "stale_run"
-    run_dir.mkdir()
-    started = datetime.now(timezone.utc) - timedelta(hours=20)
-    (run_dir / dt.CLAIM_FILENAME).write_text(
-        json.dumps({"bead_id": "fps-x.1", "candidate": "cand", "started_at": started.isoformat()})
-    )
-    (run_dir / dt.RUN_LOG_FILENAME).write_text("...\nTraceback (most recent call last):\nValueError: boom\n")
-
-    fresh_dir = tmp_path / "fresh_run"
-    fresh_dir.mkdir()
-    (fresh_dir / dt.CLAIM_FILENAME).write_text(
-        json.dumps({"bead_id": "fps-x.2", "candidate": "cand2",
-                    "started_at": datetime.now(timezone.utc).isoformat()})
-    )
-
-    done_dir = tmp_path / "done_run"
-    done_dir.mkdir()
-    (done_dir / dt.CLAIM_FILENAME).write_text(
-        json.dumps({"bead_id": "fps-x.3", "candidate": "cand3", "started_at": started.isoformat()})
-    )
-    (done_dir / dt.RESULTS_FILENAME).write_text("{}")
-
-    stale = dt.find_stale_claims(tmp_path)
-
-    assert len(stale) == 1
-    assert stale[0]["run_dir"] == run_dir
-    assert stale[0]["bead_id"] == "fps-x.1"
-    assert "ValueError" in stale[0]["traceback_tail"]
-
-
-def test_release_stale_claim_invokes_bd_comment_assign_update(monkeypatch):
-    calls = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    entry = {
-        "run_dir": pathlib.Path("/tmp/x"), "bead_id": "fps-x.1", "candidate": "cand",
-        "started_at": "2026-08-15T00:00:00+00:00", "age_hours": 20.0, "traceback_tail": "boom",
-    }
-
-    dt.release_stale_claim(entry)
-
-    assert calls[0][:2] == ["bd", "comment"]
-    assert calls[1] == ["bd", "assign", "fps-x.1", ""]
-    assert calls[2] == ["bd", "update", "fps-x.1", "--status", "open"]
-
-
-def test_release_stale_claim_skips_when_no_bead_id(monkeypatch, capsys):
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not shell out"))
-    dt.release_stale_claim({"run_dir": pathlib.Path("/tmp/x"), "bead_id": None, "age_hours": 1, "started_at": "x"})
-    assert "no bead_id" in capsys.readouterr().out
-
-
-def test_release_stale_claim_dry_run_does_not_shell_out(monkeypatch, capsys):
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not shell out"))
-    dt.release_stale_claim(
-        {"run_dir": pathlib.Path("/tmp/x"), "bead_id": "fps-x.1", "age_hours": 20.0,
-         "started_at": "2026-08-15T00:00:00+00:00", "traceback_tail": "boom"},
-        dry_run=True,
-    )
-    assert "DRY RUN" in capsys.readouterr().out
+# Stale-claim recovery is NOT this module's job — see the module docstring. It used to be
+# (find_stale_claims/release_stale_claim, backed by a claim.json contract nothing ever wrote),
+# removed once launch.py (fps-3jj.5, merged) turned out to already own this correctly via
+# bd `in_progress` + a required traceback tail — tested in tests/test_launch.py, not here.
 
 
 # ── facts.json ────────────────────────────────────────────────────────────────
@@ -315,9 +253,10 @@ def test_build_facts_non_rejected_status_sets_status_note_and_no_breakdowns(tmp_
 
 
 def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
+    noise_deltas = list(np.random.default_rng(2).normal(0, 0.02, size=20))
+
     def add_noise_floor(batch_dir):
-        deltas = list(np.random.default_rng(2).normal(0, 0.02, size=20))
-        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": deltas}))
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": noise_deltas}))
 
     run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
 
@@ -327,6 +266,12 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     assert band["available"] is True
     assert band["n_draws"] == 20
     assert band["candidate_delta_cpl_held"] == -0.05
+    # -0.05 is a strong (cheaper) result against a noise band centred on 0 with std 0.02 — nearly
+    # every noise draw should be worse (higher/less-negative) than the candidate, so this must
+    # read as a HIGH percentile, not near 0 (the pre-fix, inverted, sign gave ~0 for this case).
+    expected_percentile = sum(d > -0.05 for d in noise_deltas) / len(noise_deltas) * 100
+    assert band["candidate_percentile_better_than_noise"] == pytest.approx(expected_percentile)
+    assert band["candidate_percentile_better_than_noise"] > 90
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────
@@ -390,6 +335,46 @@ def test_make_plots_conditional_plots_route_off_declared_metadata(tmp_path):
         assert (run_dir / name).exists()
 
 
+def test_parse_price_date_handles_iso_strings():
+    s = pd.Series(["2026-01-01", "2026-01-02"])
+    parsed = dt._parse_price_date(s)
+    assert pd.api.types.is_datetime64_any_dtype(parsed)
+    assert list(parsed.dt.strftime("%Y-%m-%d")) == ["2026-01-01", "2026-01-02"]
+
+
+def test_parse_price_date_handles_integer_yyyymmdd():
+    # batch_freeze.py's own _snapshot_date docstring documents this as the DB-native form —
+    # features.parquet's price_date is not guaranteed to be an ISO string.
+    s = pd.Series([20260101, 20260102])
+    parsed = dt._parse_price_date(s)
+    assert pd.api.types.is_datetime64_any_dtype(parsed)
+    assert list(parsed.dt.strftime("%Y-%m-%d")) == ["2026-01-01", "2026-01-02"]
+
+
+def test_plot_external_overlay_handles_integer_price_date(tmp_path):
+    # Regression: the plot used to pass a raw features.parquet price_date column straight to
+    # ax.plot with no datetime conversion — fine by luck when the fixture used ISO strings
+    # (matplotlib still renders, just badly), but an INTEGER YYYYMMDD column (the DB-native form)
+    # would plot as a numeric axis with no date semantics at all. Assert the function still runs
+    # and produces the plot either way.
+    def add_features_parquet(batch_dir):
+        frame = pd.DataFrame({
+            "price_date": [int(d.strftime("%Y%m%d")) for d in DATES],
+            "tgp_delta_7d": np.linspace(-0.5, 0.5, N_DATES),
+        })
+        frame.to_parquet(batch_dir / dt.FROZEN_FEATURES_FILENAME)
+
+    run_dir, batch_dir = _write_run(
+        tmp_path, inputs=["tgp_delta_7d"], batch_extras=add_features_parquet,
+    )
+    facts = dt.build_facts(run_dir)
+
+    written = dt._plot_external_overlay(run_dir, facts, batch_dir, facts["candidate"]["name"])
+
+    assert written == "external_series_overlay.png"
+    assert (run_dir / "external_series_overlay.png").exists()
+
+
 def test_make_plots_returns_empty_when_run_did_not_score(tmp_path):
     run_dir, batch_dir = _write_run(tmp_path, status="aborted_candidate")
     facts = dt.build_facts(run_dir)
@@ -407,3 +392,83 @@ def test_process_run_writes_facts_json_with_plots_list(tmp_path):
     assert facts_path == run_dir / dt.FACTS_FILENAME
     facts = json.loads(facts_path.read_text())
     assert "per_fold_delta_bars.png" in facts["plots"]
+
+
+def _strict_json_loads(text: str):
+    """json.loads with the NaN/Infinity extension disabled — Python's default is permissive on
+    both dumps AND loads, so a plain round-trip through json.loads would NOT catch a bare `NaN`
+    token; this is what an RFC-8259-strict reader (jq, most non-Python consumers) actually sees.
+    """
+    def _reject(token):
+        raise ValueError(f"non-finite JSON constant {token!r} — invalid per RFC 8259")
+
+    return json.loads(text, parse_constant=_reject)
+
+
+def test_process_run_facts_json_is_strictly_valid_even_with_a_single_draw_noise_band(tmp_path):
+    # Regression: a noise_floor.json with exactly one draw takes _noise_band's `deltas.size == 1`
+    # branch, where band_std is float("nan") — process_run used to write that straight through
+    # raw json.dumps, which happily emits the literal `NaN` token (not valid JSON per RFC 8259).
+    # facts.json is the sole input to the downstream Claude session and to any non-Python reader.
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": [0.01]}))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
+
+    facts_path = dt.process_run(run_dir)
+    raw_text = facts_path.read_text()
+
+    facts = _strict_json_loads(raw_text)  # must not raise
+    assert facts["noise_band"]["available"] is True
+    assert facts["noise_band"]["band_std_delta_cpl_held"] is None  # to_jsonable maps NaN -> null
+
+
+# ── CLI robustness ────────────────────────────────────────────────────────────
+
+def test_main_scan_isolates_one_broken_run_from_the_rest(tmp_path):
+    # Regression: process_run used to be called with no per-run guard in the --scan loop, so one
+    # malformed run (e.g. a results.json without the fields build_facts expects) would raise past
+    # the loop and skip every other pending run in the same unattended overnight pass.
+    good_root = tmp_path / "good"
+    good_root.mkdir()
+    good_dir, _ = _write_run(good_root)
+    bad_dir = tmp_path / "bad"
+    bad_dir.mkdir()
+    (bad_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "rejected"}))  # missing "candidate" etc
+
+    result = CliRunner().invoke(dt.main, ["--scan", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert (good_dir / dt.FACTS_FILENAME).exists()
+    assert not (bad_dir / dt.FACTS_FILENAME).exists()
+    assert "bad" in result.output and "failed" in result.output
+
+
+# ── per-axis merge safety ────────────────────────────────────────────────────
+
+def test_breakdowns_per_axis_raises_on_duplicate_station_date_key_with_conflicting_axis(tmp_path):
+    # Regression: the fills<->axis_lookup merge had no `validate="many_to_one"` — a candidate
+    # whose add_axis produced two different labels for the same (station_code, date) key would
+    # silently fan out the merge (inflating n_fills and skewing pooled_cpl) instead of raising.
+    run_dir, _ = _write_run(tmp_path, with_axis=True)
+    results = json.loads((run_dir / dt.RESULTS_FILENAME).read_text())
+    rowpreds = pd.read_parquet(run_dir / dt.ROWPREDS_FILENAME)
+    fills = pd.read_parquet(run_dir / dt.FILLS_FILENAME)
+
+    # Inject a genuine conflict: duplicate one axis row for an existing (station_code, price_date)
+    # key with the opposite label.
+    dup = rowpreds.iloc[[0]].copy()
+    dup["axis"] = "B" if rowpreds.iloc[0]["axis"] == "A" else "A"
+    rowpreds = pd.concat([rowpreds, dup], ignore_index=True)
+
+    with pytest.raises(Exception, match="many_to_one|Merge"):
+        dt._breakdowns(results, rowpreds, fills)
+
+
+def test_breakdowns_per_axis_reports_coverage_note_and_unmatched_count(tmp_path):
+    run_dir, _ = _write_run(tmp_path, with_axis=True)
+    facts = dt.build_facts(run_dir)
+
+    note = facts["breakdowns"]["per_axis_coverage_note"]
+    assert note is not None
+    assert "WFCV validation-window" in note

@@ -102,12 +102,6 @@ BASELINE_ARM = "R0"
 CANDIDATE_ARM = "candidate"
 PASS_CRITERION_FILENAME = "pass_criterion.json"
 
-# The identity columns _run_wfcv_screen always writes into rowpreds' ident_base, before any
-# optional axis/cycle_pct_through/persist_columns additions — single-sourced so a downstream
-# reader (dossier_tables.py, fps-3jj.6) can tell "always present" apart from "candidate-specific"
-# without hardcoding its own copy of this list.
-IDENT_BASE_COLUMNS = ("fold", "station_code", "price_date", "label", "is_hard25")
-
 # Below this many fills, a target/other cell is excluded from zone grading
 # rather than reported as a finding (fps-3jj slicing-axes decision).
 DEFAULT_MIN_ROW_CELL_N = 30
