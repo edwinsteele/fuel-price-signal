@@ -26,6 +26,18 @@ also where stale-claim recovery looks.
 Stale-claim recovery mirrors CLAUDE.md's worker-routine pickup rule 4, adapted to the
 experiment queue: dir exists, run.log ends in a traceback, no results.json, claimed
 >12h ago -> post the traceback to the bead and release the claim.
+
+Retry budget (fps-rtd): a RETRYABLE_STATUSES abort releases the claim so the next
+sweep can re-claim it -- but a released bead keeps its original creation date, so an
+unbounded retry is always the oldest unassigned issue and starves everything else in
+the queue forever. MAX_RETRIES caps this at one retry (matching runner.py's outcome-
+taxonomy docstring): the retry count lives in bd metadata (`retry_count`), the one
+place claim state already lives, rather than in results.json (deleted at the start
+of every run_candidate() call, so it can't survive across attempts). Once the budget
+is spent, the claim is blocked instead of released -- blocked issues drop out of
+`bd ready` entirely, so this is what actually stops the starvation, not just slows
+it. A human clears it by fixing the underlying fault, then
+`bd update <id> --status open --unset-metadata retry_count`.
 """
 from __future__ import annotations
 
@@ -52,6 +64,11 @@ EXPERIMENT_LABEL = "experiment"
 STALE_AFTER = timedelta(hours=12)
 RUN_LOG_FILENAME = "run.log"
 RESULTS_FILENAME = "results.json"
+
+# fps-rtd: one automatic retry per claim (see module docstring), tracked in bd
+# metadata since results.json can't survive across run_candidate() attempts.
+RETRY_COUNT_METADATA_KEY = "retry_count"
+MAX_RETRIES = 1
 
 _BATCH_RE = re.compile(r"^Batch:\s*(\S+)\s*$", re.MULTILINE)
 _MODULE_RE = re.compile(r"^Module:\s*(\S+)\s*$", re.MULTILINE)
@@ -116,8 +133,31 @@ def _retryable_status(out_dir: pathlib.Path) -> str | None:
     return status if status in RETRYABLE_STATUSES else None
 
 
+def _retry_count(issue: dict) -> int:
+    """Retries already spent on this claim (fps-rtd), from bd metadata.
+
+    bd metadata survives the assign/status changes release_stale_claim makes
+    (results.json does not -- it's deleted at the start of every
+    run_candidate() call), so it's where a counter that must outlive one
+    attempt has to live. Anything that isn't a clean, non-negative int
+    (missing, hand-edited, a stray string, a non-dict `metadata`, a negative
+    number) reads as 0 -- the safer misread here is "budget not yet spent",
+    not an early block on a candidate that never actually retried, or extra
+    retries from a negative count offsetting the `+ 1` in find_stale_claims.
+    """
+    metadata = issue.get("metadata")
+    if not isinstance(metadata, dict):
+        return 0
+    value = metadata.get(RETRY_COUNT_METADATA_KEY, 0)
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def find_stale_claims(now: datetime | None = None) -> list[dict]:
-    """Read-only: which in_progress experiment issues need their claim released.
+    """Read-only: which in_progress experiment issues need their claim released
+    or blocked.
 
     Two shapes, and the second is the one fps-g31 was missing:
 
@@ -128,13 +168,19 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
     2. Finished with a RETRYABLE_STATUSES status (aborted_pipeline /
        aborted_environment): the candidate never got a fair hearing, so its
        claim must go back on the queue. No age gate -- results.json existing is
-       proof the run is over, so there is nothing to wait for.
+       proof the run is over, so there is nothing to wait for. Bounded by
+       MAX_RETRIES (fps-rtd): once a claim has already burned its retry and
+       aborts retryably again, action is "block" instead of "release" -- see
+       module docstring for why an unbounded release starves the whole queue.
 
     A completed run (rejected / disqualified / aborted_candidate) is left alone:
     those are verdicts, and the claim was legitimately consumed. An issue whose
     description doesn't parse, or that has no run.log yet (still validating, or
     launch crashed before ever writing one), is left alone too -- not this
     function's job to guess at those.
+
+    Each returned entry carries an "action" ("release" or "block"); "release"
+    entries also carry the "retry_count" to record on the bead.
     """
     now = now or datetime.now(timezone.utc)
     stale: list[dict] = []
@@ -147,13 +193,31 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
 
         retryable = _retryable_status(out_dir)
         if retryable is not None:
-            stale.append({
-                "issue": issue,
-                "traceback_tail": (
-                    f"run finished with retryable status {retryable!r} -- a pipeline/"
-                    f"environment fault, not a verdict on the candidate. Releasing for re-run."
-                ),
-            })
+            retry_count = _retry_count(issue)
+            if retry_count >= MAX_RETRIES:
+                stale.append({
+                    "issue": issue,
+                    "action": "block",
+                    "traceback_tail": (
+                        f"run finished with retryable status {retryable!r} again after "
+                        f"{retry_count} retry/retries -- retry budget (MAX_RETRIES="
+                        f"{MAX_RETRIES}) exhausted. Blocking instead of releasing so this "
+                        f"stops starving the rest of the queue (fps-rtd). Fix the underlying "
+                        f"fault, then `bd update {issue['id']} --status open "
+                        f"--unset-metadata {RETRY_COUNT_METADATA_KEY}` to re-queue it."
+                    ),
+                })
+            else:
+                stale.append({
+                    "issue": issue,
+                    "action": "release",
+                    "retry_count": retry_count + 1,
+                    "traceback_tail": (
+                        f"run finished with retryable status {retryable!r} -- a pipeline/"
+                        f"environment fault, not a verdict on the candidate. Releasing for "
+                        f"re-run ({retry_count + 1}/{MAX_RETRIES})."
+                    ),
+                })
             continue
         if (out_dir / RESULTS_FILENAME).exists():
             continue
@@ -167,16 +231,21 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
         claimed_at = datetime.fromisoformat(claimed_at_raw.replace("Z", "+00:00"))
         if now - claimed_at < STALE_AFTER:
             continue
-        stale.append({"issue": issue, "traceback_tail": traceback_tail})
+        stale.append({"issue": issue, "action": "release", "traceback_tail": traceback_tail})
     return stale
 
 
-def release_stale_claim(issue: dict, traceback_tail: str) -> None:
+def release_stale_claim(issue: dict, traceback_tail: str, *, retry_count: int | None = None) -> None:
     """Post the reason, unassign, and reopen one stale-claimed experiment issue.
 
     `traceback_tail` carries whichever evidence find_stale_claims found -- a
     traceback tail for a crashed run, or a one-line explanation for a run that
     finished in a retryable status -- so the bead records WHY it was released.
+
+    `retry_count`, when given (find_stale_claims's "release" action for a
+    RETRYABLE_STATUSES abort), is recorded on the bead as the retries already
+    spent on this claim -- see MAX_RETRIES / fps-rtd. Left unset for the
+    crashed-mid-run shape, which isn't budgeted.
     """
     issue_id = issue["id"]
     subprocess.run(
@@ -187,12 +256,43 @@ def release_stale_claim(issue: dict, traceback_tail: str) -> None:
     )
     subprocess.run(["bd", "assign", issue_id, ""], check=True)
     subprocess.run(["bd", "update", issue_id, "--status", "open"], check=True)
+    if retry_count is not None:
+        subprocess.run(
+            ["bd", "update", issue_id, "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}={retry_count}"],
+            check=True,
+        )
+
+
+def block_exhausted_claim(issue: dict, reason: str) -> None:
+    """Retry budget spent (fps-rtd): block the claim instead of releasing it.
+
+    A released-but-unassigned issue keeps its original creation date, so it's
+    always the oldest `bd ready` result and would be re-claimed ahead of
+    everything else, forever -- the exact starvation this issue is about.
+    `blocked` status drops it out of `bd ready` entirely while keeping it
+    visible for triage (not silently dropped -- module docstring covers the
+    human recovery step).
+    """
+    issue_id = issue["id"]
+    subprocess.run(
+        ["bd", "comment", issue_id, "--stdin"],
+        input=f"[launch] retry budget exhausted -- blocking, not releasing.\n\n{reason}",
+        text=True,
+        check=True,
+    )
+    subprocess.run(["bd", "assign", issue_id, ""], check=True)
+    subprocess.run(["bd", "update", issue_id, "--status", "blocked"], check=True)
 
 
 def recover_stale_claims(now: datetime | None = None) -> list[dict]:
     stale = find_stale_claims(now=now)
     for entry in stale:
-        release_stale_claim(entry["issue"], entry["traceback_tail"])
+        if entry.get("action") == "block":
+            block_exhausted_claim(entry["issue"], entry["traceback_tail"])
+        else:
+            release_stale_claim(
+                entry["issue"], entry["traceback_tail"], retry_count=entry.get("retry_count")
+            )
     if stale:
         sync_push()
     return stale
@@ -250,7 +350,8 @@ def main() -> None:
 
     recovered = recover_stale_claims()
     for entry in recovered:
-        click.echo(f"[launch] recovered stale claim {entry['issue']['id']}")
+        verb = "blocked" if entry.get("action") == "block" else "recovered"
+        click.echo(f"[launch] {verb} stale claim {entry['issue']['id']}")
 
     issue = claim_next_candidate()
     if issue is None:

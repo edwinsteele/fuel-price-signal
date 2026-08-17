@@ -39,14 +39,18 @@ Outcome taxonomy (five codes — see fps-3jj):
                          so the candidate is NOT to blame and must go back on
                          the queue once the config is fixed (fps-g31). Retrying
                          unchanged is pointless; retrying after a fix is the
-                         whole point.
+                         whole point. Retry once.
   aborted_environment — the frozen batch's baseline contract drifted underneath
                          it, or the DB-backed realised backtest raised something
                          genuinely unexpected (DB/disk/OOM/interrupted). Retry
                          once.
 
 aborted_pipeline and aborted_environment are RETRYABLE_STATUSES: the claim goes
-back to the queue (launch.py's stale sweep). Every terminal status posts a bd
+back to the queue once (launch.py's stale sweep, MAX_RETRIES=1). A second
+retryable abort of the same claim blocks it instead of releasing it again —
+a released-but-unassigned claim keeps its original creation date and would
+otherwise win `bd ready`'s oldest-first ordering forever, starving every
+other queued candidate (fps-rtd). Every terminal status posts a bd
 comment — an abort that says nothing on the bead is indistinguishable from a run
 that never happened, which is exactly how fps-32p sat stuck for a day (fps-g31).
 
