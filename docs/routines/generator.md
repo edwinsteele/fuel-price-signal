@@ -255,10 +255,20 @@ For each candidate that clears the diversity gate and the redundancy checks:
 
 1. Write `experiments/candidates/<batch>/<NAME>.py` in the format above; commit
    straight to `main` (`experiments/**` is PR-exempt).
-2. `bd create` one issue per candidate — title from `NAME`, description carrying
-   `HYPOTHESIS`, `TARGET`, `PREDICTED_SIGNATURE`, both `CONFIDENCE` fields,
-   `MECHANISM_FAMILY`, `PRIOR_ART`, and the path to the module file — so the launch
-   routine has everything it needs without re-reading this session's reasoning.
+2. `bd create` one issue per candidate, labelled `experiment` — the launch routine
+   (fps-3jj.5, `experiments/pipeline/launch.py`) queries `bd ready --label experiment`
+   and is structurally invisible to the chore/polish worker without this label.
+   Description must carry `HYPOTHESIS`, `TARGET`, `PREDICTED_SIGNATURE`, both
+   `CONFIDENCE` fields, `MECHANISM_FAMILY`, `PRIOR_ART`, and **exactly** two
+   machine-parsed lines (`parse_candidate_ref()` in `launch.py` regex-matches these,
+   line-anchored — any other shape fails to parse and the bead gets immediately
+   aborted the first time the launch routine claims it):
+   ```text
+   Batch: experiments/batches/<batch>
+   Module: experiments/candidates/<batch>/<NAME>.py
+   ```
+   Both paths must resolve inside `experiments/` (`<batch>` matching the batch dir
+   this candidate's module was just written under is what makes that true).
 3. `bd dolt push` after filing the batch.
 
 ## Batch record
