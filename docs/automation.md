@@ -8,7 +8,9 @@ Issues referenced below live in Beads (`bd`), not GitHub Issues — see [AGENTS.
 
 ## Routine prompts live in `docs/routines/`, not in the scheduler
 
-Each scheduled routine's *stored* prompt (a Claude Code Routine's `job_config`, or a local scheduled-task `SKILL.md`) is a three-line shim — who the routine is, where the repo checkout is, and which repo doc to follow. The actual rules live in a tracked `docs/routines/<name>.md` (or, for this worker, directly in CLAUDE.md's ["If you are the scheduled worker routine"](../CLAUDE.md#if-you-are-the-scheduled-worker-routine) section, which `docs/routines/worker.md` points to). This is deliberate: instructions duplicated into the scheduler are instructions nobody remembers to update when the workflow changes — see `docs/routines/worker.md` for the incident that motivated it.
+Each *scheduled* routine's stored prompt (a Claude Code Routine's `job_config`, or a local scheduled-task `SKILL.md`) is a three-line shim — who the routine is, where the repo checkout is, and which repo doc to follow. The actual rules live in a tracked `docs/routines/<name>.md` (or, for this worker, directly in CLAUDE.md's ["If you are the scheduled worker routine"](../CLAUDE.md#if-you-are-the-scheduled-worker-routine) section, which `docs/routines/worker.md` points to). This is deliberate: instructions duplicated into the scheduler are instructions nobody remembers to update when the workflow changes — see `docs/routines/worker.md` for the incident that motivated it.
+
+Not every file under `docs/routines/` has a scheduler entry, though — `docs/routines/generator.md` (fps-3jj.7, the AI-sourced feature pipeline's candidate generator) is invoked interactively by the owner at batch setup, not on a schedule, so there is no shim for it anywhere. It's still tracked here rather than typed fresh each time, for the same reason as the shimmed ones.
 
 ## Issue labels
 
