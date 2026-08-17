@@ -110,6 +110,22 @@ DEFAULT_MIN_ROW_CELL_N = 30
 _WFCV_KWARGS = ("train_min_days", "val_days", "step_days")
 
 
+def default_out_dir(candidate_path: pathlib.Path) -> pathlib.Path:
+    """Per-candidate run directory: candidate_path with its .py suffix stripped.
+
+    Candidate modules are flat siblings within a batch dir
+    (experiments/candidates/<batch>/<name>.py — see generator.md's Filing
+    section), so candidate_path.parent is the whole BATCH directory, shared by
+    every candidate filed against it. Using that as out_dir meant candidate
+    2+ in a batch overwrote candidate 1's run.log/results.json/rowpreds.parquet/
+    fills.parquet in place, and dossier_tables.py's find_pending_runs (any dir
+    with results.json and no README.md) would then treat the directory as
+    already-dossiered and never surface the overwriting candidate (fps-icv).
+    Stripping .py gives each candidate its own subdirectory instead.
+    """
+    return candidate_path.with_suffix("")
+
+
 @dataclass
 class RunResult:
     status: str
@@ -158,7 +174,7 @@ def run_candidate(
     t0 = time.perf_counter()
     batch_dir = pathlib.Path(batch_dir)
     candidate_path = pathlib.Path(candidate_path)
-    out_dir = pathlib.Path(out_dir) if out_dir is not None else candidate_path.parent
+    out_dir = pathlib.Path(out_dir) if out_dir is not None else default_out_dir(candidate_path)
     outer_fold_params = dict(outer_fold_params or {})
     inner_fold_params = dict(inner_fold_params or {})
 

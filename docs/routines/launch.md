@@ -66,8 +66,13 @@ Module: experiments/candidates/<batch-name>/<candidate-name>.py
 
 Paths are repo-root-relative, and both must resolve inside `experiments/` — `parse_candidate_ref()`
 rejects a `..` traversal or an absolute path pointing anywhere else, since `Module` gets
-`exec_module`'d unattended. The runner's output directory is always `Module`'s parent dir — that
-is where `run.log`, `results.json`, `rowpreds.parquet`, and `fills.parquet` land, and where
+`exec_module`'d unattended. The runner's output directory is `default_out_dir(Module)` —
+`Module`'s path with its `.py` suffix stripped, a per-candidate subdirectory (e.g.
+`experiments/candidates/<batch-name>/<candidate-name>.py` ->
+`experiments/candidates/<batch-name>/<candidate-name>/`) — **not** `Module`'s parent dir, which
+is the whole batch directory shared by every candidate filed against it (fps-icv: candidate 2+
+in a batch used to overwrite candidate 1's artifacts there). That per-candidate directory is
+where `run.log`, `results.json`, `rowpreds.parquet`, and `fills.parquet` land, and where
 stale-claim recovery looks for them.
 
 ## Queue isolation
@@ -82,7 +87,7 @@ only `experiment` is structurally invisible to it. `launch.py` queries
 
 Mirrors CLAUDE.md's chore/polish worker pickup rule 4, adapted to the experiment queue. For every
 `in_progress` `experiment` bead: resolve its `(batch_dir, candidate_path)`, look at
-`candidate_path.parent`. It's stale iff `results.json` is absent, `run.log` exists and its tail
+`default_out_dir(candidate_path)`. It's stale iff `results.json` is absent, `run.log` exists and its tail
 looks like a Python traceback, and the bead was claimed more than 12 hours ago (long enough to
 cover a real multi-hour run; short enough that a crash isn't lost for days). Recovery posts the
 traceback to the bead, unassigns it, and reopens it — the next night's launch (or a manual
