@@ -151,6 +151,29 @@ _WFCV_KWARGS = ("train_min_days", "val_days", "step_days")
 DEFAULT_INNER_FOLD_PARAMS = {"train_min_days": 1095, "val_days": 90, "step_days": 90}
 
 
+def read_run_status(out_dir: pathlib.Path) -> str | None:
+    """The status recorded in out_dir/results.json, or None if it can't be read.
+
+    Shared by launch.py (should this claim go back on the queue?) and
+    dossier_tables.py (is this run finished enough to write up?) so the two
+    can't drift on what counts as a finished run.
+
+    Deliberately total: a missing file, a truncated write, or a results.json
+    that isn't a JSON object all read as "no status". Both callers run
+    unattended overnight, and an AttributeError here would take down the whole
+    nightly sweep on the strength of one malformed file.
+    """
+    results_path = pathlib.Path(out_dir) / "results.json"
+    try:
+        parsed = json.loads(results_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    status = parsed.get("status")
+    return status if isinstance(status, str) else None
+
+
 def default_out_dir(candidate_path: pathlib.Path) -> pathlib.Path:
     """Per-candidate run directory: candidate_path with its .py suffix stripped.
 

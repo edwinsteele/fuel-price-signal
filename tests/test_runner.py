@@ -39,6 +39,7 @@ from experiments.pipeline.runner import (
     _summarise_for_comment,
     default_out_dir,
     post_bd_comment,
+    read_run_status,
     record_pass_criterion,
     run_candidate,
 )
@@ -655,6 +656,36 @@ def test_finish_without_bead_id_posts_nothing(tmp_path, monkeypatch):
     _finish(STATUS_ABORTED_CANDIDATE, "cand", 0.0, tmp_path, error="boom")
 
     assert posted == []
+
+
+# ── read_run_status (fps-g31) ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ('{"status": "rejected"}', "rejected"),
+        ('{"status": "aborted_pipeline"}', "aborted_pipeline"),
+        ('{"error": "no status key"}', None),
+        ('{ truncated mid-write', None),          # JSONDecodeError
+        ('[]', None),                             # valid JSON, not an object
+        ('null', None),
+        ('"a bare string"', None),
+        ('{"status": 42}', None),                 # present but not a string
+    ],
+)
+def test_read_run_status_is_total(tmp_path, written, expected):
+    """Both nightly routines call this unattended — it must never raise.
+
+    A results.json that is valid JSON but not an object (a list, null, a bare
+    string) would make a bare .get() raise AttributeError and take down the
+    whole sweep on the strength of one malformed file.
+    """
+    (tmp_path / "results.json").write_text(written)
+    assert read_run_status(tmp_path) == expected
+
+
+def test_read_run_status_returns_none_when_file_absent(tmp_path):
+    assert read_run_status(tmp_path) is None
 
 
 # ── inner fold params (fps-g31) ───────────────────────────────────────────────

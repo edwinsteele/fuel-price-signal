@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 
 import click
 
-from experiments.pipeline.runner import RETRYABLE_STATUSES, default_out_dir
+from experiments.pipeline.runner import RETRYABLE_STATUSES, default_out_dir, read_run_status
 from experiments.pipeline.validate import (
     CandidateImportError,
     load_candidate_module,
@@ -108,17 +108,11 @@ def _looks_like_traceback_tail(log_path: pathlib.Path, tail_lines: int = 40) -> 
 def _retryable_status(out_dir: pathlib.Path) -> str | None:
     """The run's status if it finished in a RETRYABLE_STATUSES state, else None.
 
-    A malformed/unreadable results.json reads as "not retryable" -- releasing a
-    claim on the strength of a file we couldn't parse is the more dangerous
-    guess of the two.
+    A malformed/unreadable results.json reads as "not retryable" (read_run_status
+    returns None) -- releasing a claim on the strength of a file we couldn't
+    parse is the more dangerous guess of the two.
     """
-    results_path = out_dir / RESULTS_FILENAME
-    if not results_path.exists():
-        return None
-    try:
-        status = json.loads(results_path.read_text()).get("status")
-    except (json.JSONDecodeError, OSError):
-        return None
+    status = read_run_status(out_dir)
     return status if status in RETRYABLE_STATUSES else None
 
 

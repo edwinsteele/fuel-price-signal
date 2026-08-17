@@ -206,13 +206,19 @@ def test_find_stale_claims_leaves_terminal_status_alone(tmp_path, monkeypatch, s
     assert find_stale_claims() == []
 
 
-def test_find_stale_claims_ignores_unparseable_results_json(tmp_path, monkeypatch):
-    """Releasing a claim on the strength of a file we couldn't read is the worse guess."""
+@pytest.mark.parametrize("written", ["{ truncated mid-write", "[]", "null", '"a bare string"'])
+def test_find_stale_claims_ignores_unparseable_results_json(tmp_path, monkeypatch, written):
+    """Releasing a claim on the strength of a file we couldn't read is the worse guess.
+
+    The non-object cases are valid JSON: a bare `.get("status")` on them raises
+    AttributeError, which is uncaught and would take down the entire nightly
+    sweep rather than skipping one bad run.
+    """
     repo_root = _fake_repo_root(tmp_path, monkeypatch)
     candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
     out_dir = default_out_dir(candidate_path)
     out_dir.mkdir(parents=True)
-    (out_dir / RESULTS_FILENAME).write_text("{ truncated mid-write")
+    (out_dir / RESULTS_FILENAME).write_text(written)
     description = _description_for(
         "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
     )
