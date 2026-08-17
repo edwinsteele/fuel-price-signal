@@ -129,7 +129,7 @@ fuel_signal.db                        # .gitignored; SQLite, rebuilt from raw + 
 ```
 
 - `data/raw/` and `fuel_signal.db` are local derived artifacts — not committed
-- Snapshot scope: **E10 only, Sydney metro stations** — filtered at collection time in GH Actions
+- Snapshot files themselves are **unfiltered** — all NSW stations, all fuel types, captured by `fuel_signal/live.py`. Filtering to **E10, Sydney metro** happens at DB-load time (`db.py`'s `load_snapshot_csv`/`load_all_snapshots` `postcodes`/`fuel_codes` params, defaulted from `SYDNEY_METRO_POSTCODES` + `{"E10"}`), not at collection time.
 - Other fuel types (diesel, U91, etc.) available in historical CSVs if ever needed
 - SQLite is rebuilt by running `history.py` (downloads raw CSVs) then `db.py` (assembles DB)
 - GitHub Actions runs daily, commits one snapshot file per day
@@ -139,7 +139,9 @@ Snapshots are a bridge until historical CSVs cover the same period — keep the 
 
 When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verify snapshot prices ≡ historical prices per station/date; (2) if they agree, delete the retired snapshot CSVs; (3) if they diverge, investigate before retiring — divergence reveals something about the data.
 
-`db.py` loads snapshots before historical CSVs and uses `INSERT OR IGNORE`, so snapshot prices win silently on conflict. When the first overlap occurs, compare per-station prices to decide whether snapshot-wins is the right policy. Also check whether the GH Actions cron time (currently 10:00 UTC = 8pm AEST / 9pm AEDT) aligns with the historical CSV rollup time.
+**Validated 2026-08-17 (first overlap, gh#4 / fps-1785999730823-12-2fd8326a):** the bulk historical CSV is an **event log**, not a daily census — a station only gets a row on a day its price changed, not every day. This is exactly what `fill.py`'s forward-fill already exists to reconstruct (same mechanism used for all pre-2026 history with no snapshots at all). Comparing April–July 2026 snapshots against the newly-published bulk CSVs for the same months, using as-of forward-fill: **99.3% of snapshot rows agree with the historical-derived price within 5c**. Remaining divergence is small (median ~2c) and one-directional in a way consistent with the historical file recording each day's *last* price update while the snapshot is taken once ~9pm — i.e. explained by intraday timing, not a data-quality problem.
+
+**Conclusion: `db.py` loads snapshots before historical CSVs and uses `INSERT OR IGNORE`, so snapshot prices win silently on conflict — confirmed to be a reasonable default**, since the two sources agree closely and no systematic bias was found. April–July 2026 snapshots were retired (deleted) on this basis; August 2026 stays committed until a bulk CSV covering it is published.
 
 ### Aggregation
 `sydney_average_series` / `average_price_series` is a temporary convenience for cycle detection. Future analyses will need flexible groupings — by region, corridor, LGA cluster, etc. Don't treat it as permanent infrastructure; don't patch it when new groupings are needed, design a proper aggregation layer instead.
