@@ -78,7 +78,13 @@ def differential_pit_test(
 
 
 def _assert_equal(expected, actual) -> None:
+    # check_exact=True: these are deterministic recomputations of the SAME
+    # underlying arithmetic, so they should be bit-identical. The default
+    # tolerance-based comparison (rtol=1e-5) silently passed a real leak here
+    # once — a whole-series mean of YYYYMMDD-scale price_date values differed
+    # by ~1.5 out of ~20260812, comfortably inside the default relative
+    # tolerance despite being a genuine, detectable leak.
     if isinstance(expected, pd.Series):
-        pd.testing.assert_series_equal(expected, actual, check_names=False)
+        pd.testing.assert_series_equal(expected, actual, check_names=False, check_exact=True)
     else:
-        pd.testing.assert_frame_equal(expected, actual, check_names=False)
+        pd.testing.assert_frame_equal(expected, actual, check_names=False, check_exact=True)
