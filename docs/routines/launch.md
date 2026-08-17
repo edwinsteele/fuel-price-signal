@@ -20,7 +20,7 @@ This is the exact text that should be the scheduled task's stored prompt (the `S
 
 ```text
 You are the fuel-price-signal launch routine.
-Your working directory is /Users/esteele/Documents/Claude/fuel-price-signal (the
+Your working directory is /Users/esteele/Code/fuel-price-signal (the
 fuel-price-signal repo, primary worktree — this is a persistent local checkout, not
 a fresh clone).
 Follow docs/routines/launch.md exactly.
