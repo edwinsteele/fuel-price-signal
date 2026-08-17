@@ -27,11 +27,15 @@ Outcome taxonomy (four codes — see fps-3jj):
   aborted_candidate   — add_columns/add_axis raised, an INPUTS/COLUMNS
                          declaration was wrong, all-NaN output, a COLUMNS/
                          baseline name collision, a degenerate zero-variance
-                         fit, or the WFCV screen itself raised. Repeatable; do
-                         not retry.
+                         fit, the WFCV screen itself raised, a realised-backtest
+                         config error (bad ArmSpec/fold_subset/inner_fold_params
+                         for this batch), or a total extra_feature_provider
+                         (station_code, date) key-format miss. All deterministic
+                         — repeatable; do not retry.
   aborted_environment — the frozen batch's baseline contract drifted underneath
-                         it, or the DB-backed realised backtest raised (DB/disk/
-                         interrupted). Retry once.
+                         it, or the DB-backed realised backtest raised something
+                         genuinely unexpected (DB/disk/OOM/interrupted). Retry
+                         once.
 
 Two CONFIDENCE fields (fps-3jj.4 DECIDED 2026-08-17):
   CONFIDENCE_EFFECT resolves mechanically as pooled delta_cpl_held < 0 (does it
@@ -299,7 +303,11 @@ def run_candidate(
 
     provider_health_error = _check_provider_health(provider)
     if provider_health_error is not None:
-        return _finish(STATUS_ABORTED_ENVIRONMENT, name, t0, out_dir, error=provider_health_error)
+        # A (station_code, date) key-format mismatch is deterministic — same
+        # reasoning as the ValueError split above (finding #3): aborted_candidate
+        # ("repeatable, don't retry"), not aborted_environment ("retry once",
+        # which would just fail identically on this same batch).
+        return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=provider_health_error)
 
     # Write the expensive artifacts BEFORE grading: a bug in the grading step
     # (which is comparatively cheap — DataFrame groupbys over already-computed
@@ -491,7 +499,10 @@ def _check_provider_health(provider) -> str | None:
     (station_code, date) key-format mismatch (features.csv's price_date
     representation has already varied between INTEGER YYYYMMDD and ISO
     strings — batch_freeze.py's _snapshot_date handles both for exactly this
-    reason). Fail loudly instead of reporting a false negative.
+    reason). Fail loudly instead of reporting a false negative. The caller
+    maps this to aborted_candidate, not aborted_environment: the mismatch is
+    deterministic for this (batch, candidate) pair, so a retry fails
+    identically — same reasoning as the realised-backtest ValueError split.
     """
     if provider.stats["misses"] > 0 and provider.stats["hits"] == 0:
         return (
