@@ -247,6 +247,17 @@ make help       # list all targets, including the individual steps
 
 GitHub Actions commits one snapshot CSV per day to `data/snapshots/`. To enable it, add `FUELAPI_API_KEY` and `FUELAPI_API_SECRET` as repository secrets under **Settings → Secrets and variables → Actions**.
 
+### Snapshot retirement
+
+`data/snapshots/` is a bridge until NSW's bulk historical CSVs cover the same period — see AGENTS.md § Data strategy for why. This is a manual, human-run check (not scheduled): run it whenever you notice a new bulk CSV has been published that might overlap committed snapshot months.
+
+```bash
+uv run python -m fuel_signal.snapshot_retire                  # report only — no files touched
+uv run python -m fuel_signal.snapshot_retire --apply           # delete months that met the agreement threshold
+```
+
+For each committed snapshot month that a published bulk CSV now covers, it downloads + cleans that CSV (cached under `data/raw`/`data/cleaned`, same as `history.py`), compares snapshot prices against the historical series using as-of forward-fill (the bulk CSV is a price-change event log, not a daily census — matches `fill.py`'s gap-filling logic), and reports the agreement rate. A month is `ELIGIBLE` for retirement once its agreement rate clears `--min-agreement` (default 95%, within `--tolerance` cents, default 0.05). `--apply` deletes only the eligible months' files — review `git status` and open a PR for the deletion as usual, it isn't committed automatically. A month with low agreement is left alone; investigate the divergence before retiring it.
+
 ## CI: DB and model pipeline
 
 Three workflows keep a `fuel_signal.db` current in CI and publish trained models, decoupled from each other since retraining doesn't need to happen on the same cadence as data ingest:

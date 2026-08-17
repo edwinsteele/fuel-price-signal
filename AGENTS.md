@@ -19,6 +19,7 @@ See [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for code style, test patterns, de
 fuel_signal/
 ├── config.py          # API key, preferred station list, postcode
 ├── history.py         # Download + clean bulk CSVs; dynamic resource discovery
+├── snapshot_retire.py # Report/delete committed snapshots now covered by bulk CSVs
 ├── db.py              # SQLite schema + read/write helpers
 ├── fill.py            # Forward-fill daily price gaps → daily_prices table
 ├── live.py            # FuelCheck API snapshot → append to DB
@@ -137,7 +138,7 @@ fuel_signal.db                        # .gitignored; SQLite, rebuilt from raw + 
 ### Snapshot retirement
 Snapshots are a bridge until historical CSVs cover the same period — keep the committed count as small as possible.
 
-When a new bulk CSV is released that overlaps `data/snapshots/` dates: (1) verify snapshot prices ≡ historical prices per station/date; (2) if they agree, delete the retired snapshot CSVs; (3) if they diverge, investigate before retiring — divergence reveals something about the data.
+When a new bulk CSV is released that overlaps `data/snapshots/` dates, run `uv run python -m fuel_signal.snapshot_retire` (report only) and review the agreement numbers; re-run with `--apply` to delete eligible months, then commit the deletion via a PR. If a month diverges below the agreement threshold, investigate before retiring — divergence reveals something about the data. See [README.md § Snapshot retirement](README.md#snapshot-retirement) for usage.
 
 **Validated 2026-08-17 (first overlap, gh#4 / fps-1785999730823-12-2fd8326a):** the bulk historical CSV is an **event log**, not a daily census — a station only gets a row on a day its price changed, not every day. This is exactly what `fill.py`'s forward-fill already exists to reconstruct (same mechanism used for all pre-2026 history with no snapshots at all). Comparing April–July 2026 snapshots against the newly-published bulk CSVs for the same months, using as-of forward-fill: **99.3% of snapshot rows agree with the historical-derived price within 5c**. Remaining divergence is small (median ~2c) and one-directional in a way consistent with the historical file recording each day's *last* price update while the snapshot is taken once ~9pm — i.e. explained by intraday timing, not a data-quality problem.
 
