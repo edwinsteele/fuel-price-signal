@@ -226,6 +226,7 @@ def run_candidate(
         df_rows, collector = _run_wfcv_screen(
             candidate_frame, baseline_columns, candidate_cols,
             seeds=seeds, axis_series=axis_series, outer_fold_params=outer_fold_params, verbose=verbose,
+            persist_columns=list(candidate.COLUMNS),
         )
     except Exception as exc:  # noqa: BLE001 — deliberately broad, see outcome taxonomy below
         # Nothing here except LightGBM fits on the candidate's own columns; any
@@ -357,6 +358,8 @@ def run_candidate(
             "pass_criterion": _read_pass_criterion(batch_dir),
             "extra_feature_provider_hits": provider.stats["hits"],
             "extra_feature_provider_misses": provider.stats["misses"],
+            "git_sha": _current_git_sha(),
+            "bead_id": bead_id,
         },
     }
     results_path = out_dir / "results.json"
@@ -380,6 +383,7 @@ def _run_wfcv_screen(
     axis_series: pd.Series | None,
     outer_fold_params: dict,
     verbose: bool,
+    persist_columns: list[str] | None = None,
 ) -> tuple[pd.DataFrame, RowPredCollector]:
     """The WFCV log-loss screen (descriptive colour) — R0 vs candidate, all seeds.
 
@@ -387,6 +391,14 @@ def _run_wfcv_screen(
     R0's SEEDS[0] fit is reused from iter_folds_with_baseline_fit rather than
     refit. Persists the axis column into rowpreds' ident_base when the
     candidate declared one (fps-3jj.4 acceptance criterion).
+
+    persist_columns (fps-3jj.6): the candidate's own engineered COLUMNS, and
+    cycle_pct_through when present, are copied into rowpreds' ident_base too —
+    the dossier routine's "candidate over time with its NaN band" and
+    "feature vs cycle_pct_through" plots have no other artifact to read a raw
+    row-level column value from (rowpreds/fills otherwise carry only
+    probabilities and fill economics). Optional and additive: omitting it
+    reproduces the pre-fps-3jj.6 rowpreds schema exactly.
     """
     wfcv_kwargs = {k: v for k, v in outer_fold_params.items() if k in _WFCV_KWARGS}
     rows: list[dict] = []
@@ -408,6 +420,11 @@ def _run_wfcv_screen(
         }
         if axis_series is not None:
             ident["axis"] = axis_series.loc[val_df.index].to_numpy()
+        if "cycle_pct_through" in val_df.columns:
+            ident["cycle_pct_through"] = val_df["cycle_pct_through"].to_numpy()
+        for col in persist_columns or ():
+            if col in val_df.columns:
+                ident[col] = val_df[col].to_numpy()
         collector.ident_base = pd.DataFrame(ident)
 
         for run_name, cols in ((BASELINE_ARM, baseline_columns), (CANDIDATE_ARM, candidate_cols)):
@@ -453,6 +470,17 @@ def _build_axis_lookup(frame: pd.DataFrame, axis_series: pd.Series) -> pd.DataFr
 def _read_pass_criterion(batch_dir: pathlib.Path) -> dict | None:
     path = pathlib.Path(batch_dir) / PASS_CRITERION_FILENAME
     return json.loads(path.read_text()) if path.exists() else None
+
+
+def _current_git_sha() -> str | None:
+    """The runner's own checkout SHA at run time — provenance for the dossier (fps-3jj.6)."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
 
 def _make_lookup_provider(candidate_frame: pd.DataFrame, columns: list[str], date_column: str = "price_date"):
