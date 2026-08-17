@@ -69,6 +69,7 @@ Two CONFIDENCE fields (fps-3jj.4 DECIDED 2026-08-17):
 """
 from __future__ import annotations
 
+import inspect
 import json
 import pathlib
 import subprocess
@@ -105,6 +106,7 @@ from experiments.pipeline.validate import (
     load_candidate_module,
     validate_candidate,
 )
+from fuel_signal import evaluate as _ev
 from fuel_signal.features import load_features
 
 STATUS_REJECTED = "rejected"
@@ -120,6 +122,15 @@ RETRYABLE_STATUSES = frozenset({STATUS_ABORTED_PIPELINE, STATUS_ABORTED_ENVIRONM
 BASELINE_ARM = "R0"
 CANDIDATE_ARM = "candidate"
 PASS_CRITERION_FILENAME = "pass_criterion.json"
+RESULTS_FILENAME = "results.json"
+
+# walk_forward_folds' own defaults, read off the signature rather than restated,
+# so a change there can't silently invalidate _check_fold_geometry below.
+_WFCV_DEFAULTS = {
+    name: param.default
+    for name, param in inspect.signature(_ev.walk_forward_folds).parameters.items()
+    if param.default is not inspect.Parameter.empty
+}
 
 # Below this many fills, a target/other cell is excluded from zone grading
 # rather than reported as a finding (fps-3jj slicing-axes decision).
@@ -151,6 +162,51 @@ _WFCV_KWARGS = ("train_min_days", "val_days", "step_days")
 DEFAULT_INNER_FOLD_PARAMS = {"train_min_days": 1095, "val_days": 90, "step_days": 90}
 
 
+class FoldGeometryError(ValueError):
+    """The inner walk-forward cannot fit inside outer fold 1's train window.
+
+    Raised BEFORE any fitting, so a misconfigured run fails in a second with a
+    usable message instead of ~9 minutes later inside the arbiter with
+    "realised: no OOF folds over fold-train".
+    """
+
+
+def _check_fold_geometry(outer_fold_params: dict, inner_fold_params: dict) -> None:
+    """Enforce the inner-vs-outer invariant the CLI help only advises about.
+
+    Outer fold 1's train window is exactly `train_min_days` long, and
+    walk_forward_folds needs
+
+        train_min_days + buffer_days + val_days <= span
+
+    to yield even one fold. So the real constraint is not "inner < outer" — at
+    the defaults the boundary is 1095 + 7 + 90 = 1192, and an outer
+    train_min_days of 1100 would pass a naive inner<outer check while still
+    producing zero inner folds. Verified empirically: outer=1192 gives 1 inner
+    fold, outer=1191 gives 0.
+
+    Exposing --outer-train-min-days made this reachable from the CLI, which is
+    what makes the check worth having: getting it wrong reproduces fps-g31
+    exactly, and the resulting abort is now retryable, so it would re-queue
+    nightly rather than fail once loudly.
+    """
+    outer_train = outer_fold_params.get("train_min_days", _WFCV_DEFAULTS["train_min_days"])
+    inner_train = inner_fold_params.get("train_min_days", _WFCV_DEFAULTS["train_min_days"])
+    inner_val = inner_fold_params.get("val_days", _WFCV_DEFAULTS["val_days"])
+    buffer_days = inner_fold_params.get("buffer_days", _WFCV_DEFAULTS["buffer_days"])
+
+    needed = inner_train + buffer_days + inner_val
+    if needed > outer_train:
+        raise FoldGeometryError(
+            f"inner fold params don't fit inside outer fold 1's train window: "
+            f"inner needs train_min_days({inner_train}) + buffer_days({buffer_days}) + "
+            f"val_days({inner_val}) = {needed} days, but outer fold 1's train span is "
+            f"train_min_days({outer_train}). Lower --inner-train-min-days/--inner-val-days "
+            f"or raise --outer-train-min-days; the realised backtest would otherwise abort "
+            f"on fold 1 with 'no OOF folds over fold-train' (fps-g31)."
+        )
+
+
 def read_run_status(out_dir: pathlib.Path) -> str | None:
     """The status recorded in out_dir/results.json, or None if it can't be read.
 
@@ -158,15 +214,22 @@ def read_run_status(out_dir: pathlib.Path) -> str | None:
     dossier_tables.py (is this run finished enough to write up?) so the two
     can't drift on what counts as a finished run.
 
-    Deliberately total: a missing file, a truncated write, or a results.json
-    that isn't a JSON object all read as "no status". Both callers run
-    unattended overnight, and an AttributeError here would take down the whole
-    nightly sweep on the strength of one malformed file.
+    Deliberately total: a missing file, a truncated write, a file that isn't
+    valid UTF-8, or a results.json that isn't a JSON object all read as "no
+    status". Both callers run unattended overnight, and an exception here would
+    take down the whole nightly sweep on the strength of one malformed file.
+
+    `ValueError`, not `json.JSONDecodeError`: read_text() raises
+    UnicodeDecodeError on invalid UTF-8 — a write interrupted by SIGKILL/OOM
+    partway through a multi-byte sequence, or on-disk corruption. That is a
+    ValueError subclass and NOT an OSError, so it would escape a narrower
+    except and defeat the totality this function exists to provide.
+    JSONDecodeError is itself a ValueError subclass, so one clause covers both.
     """
-    results_path = pathlib.Path(out_dir) / "results.json"
+    results_path = pathlib.Path(out_dir) / RESULTS_FILENAME
     try:
         parsed = json.loads(results_path.read_text())
-    except (json.JSONDecodeError, OSError):
+    except (ValueError, OSError):
         return None
     if not isinstance(parsed, dict):
         return None
@@ -244,6 +307,26 @@ def run_candidate(
     # a workable train_min_days rather than silently falling back to the library
     # default that cannot fit inside outer fold 1. See DEFAULT_INNER_FOLD_PARAMS.
     inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
+
+    # Fail in a second, not ~9 minutes in. Raised rather than _finish()'d: a run
+    # this misconfigured shouldn't leave a results.json at all, because that
+    # file is the queue key for both downstream consumers (launch's claim sweep,
+    # dossier's scan) and a caller who got the geometry wrong wants a traceback
+    # they can act on, not a status code buried in an artifact.
+    _check_fold_geometry(outer_fold_params, inner_fold_params)
+
+    # A run dir is keyed on the candidate, so a re-run reuses it — and a
+    # retryable abort now sends candidates back for exactly that (fps-g31).
+    # Nothing else clears this file: run_candidate only ever WRITES results.json
+    # (at _finish, or on completion), so a previous attempt's verdict would sit
+    # on disk for this entire run. launch.find_stale_claims reads it with no age
+    # gate, so an overlapping launch invocation would see the OLD status,
+    # release this in-flight run's claim, and launch a second runner into the
+    # same out_dir — two processes racing on results.json/rowpreds and both
+    # appending to one run.log. Clearing it up front makes an in-flight run look
+    # like what it is: started, no verdict yet.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / RESULTS_FILENAME).unlink(missing_ok=True)
 
     try:
         candidate = load_candidate_module(candidate_path)
@@ -471,7 +554,7 @@ def run_candidate(
             "bead_id": bead_id,
         },
     }
-    results_path = out_dir / "results.json"
+    results_path = out_dir / RESULTS_FILENAME
     results_path.write_text(json.dumps(to_jsonable(results), indent=2, default=str))
 
     if bead_id:
@@ -751,7 +834,7 @@ def _finish(
     results = {"status": status, "candidate": {"name": name}, "error": error, "meta": {"wall_seconds": wall_seconds}}
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    results_path = out_dir / "results.json"
+    results_path = out_dir / RESULTS_FILENAME
     results_path.write_text(json.dumps(to_jsonable(results), indent=2, default=str))
     if bead_id:
         retryable = status in RETRYABLE_STATUSES

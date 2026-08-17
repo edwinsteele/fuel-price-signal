@@ -26,8 +26,10 @@ from experiments.pipeline.runner import (
     STATUS_ABORTED_ENVIRONMENT,
     STATUS_ABORTED_PIPELINE,
     STATUS_DISQUALIFIED,
+    FoldGeometryError,
     RunResult,
     _build_axis_lookup,
+    _check_fold_geometry,
     _check_provider_health,
     _finish,
     _grade_run,
@@ -433,6 +435,13 @@ def add_columns(df):
     return out
 '''
 
+# Outer/inner pair scaled to the 90-day fixtures. The real defaults (outer 1825,
+# inner 1095) can't fit in a 90-day frame, and _check_fold_geometry now enforces
+# that relationship, so a test using a toy outer grid has to supply a toy inner
+# grid too: 15 + 7 buffer + 5 val = 27 <= 30.
+SMALL_OUTER_FOLDS = {"train_min_days": 30, "val_days": 15, "step_days": 15}
+SMALL_INNER_FOLDS = {"train_min_days": 15, "val_days": 5, "step_days": 5}
+
 
 def test_run_candidate_realised_config_error_maps_to_aborted_pipeline(tmp_path):
     """fold_subset excluding every fold makes run_paired_realised_backtest
@@ -454,7 +463,7 @@ def test_run_candidate_realised_config_error_maps_to_aborted_pipeline(tmp_path):
 
     result = run_candidate(
         batch_dir, candidate_path, out_dir=tmp_path / "out",
-        seeds=(1,), outer_fold_params={"train_min_days": 30, "val_days": 15, "step_days": 15},
+        seeds=(1,), outer_fold_params=SMALL_OUTER_FOLDS, inner_fold_params=SMALL_INNER_FOLDS,
         fold_subset={999},  # no real batch has fold 999 -> realised sees zero plans
         verbose=False,
     )
@@ -478,7 +487,7 @@ def test_run_candidate_aborted_environment_when_db_is_unreadable(tmp_path):
 
     result = run_candidate(
         batch_dir, candidate_path, out_dir=tmp_path / "out",
-        seeds=(1, 2), outer_fold_params={"train_min_days": 30, "val_days": 15, "step_days": 15},
+        seeds=(1, 2), outer_fold_params=SMALL_OUTER_FOLDS, inner_fold_params=SMALL_INNER_FOLDS,
         verbose=False,
     )
 
@@ -688,6 +697,102 @@ def test_read_run_status_returns_none_when_file_absent(tmp_path):
     assert read_run_status(tmp_path) is None
 
 
+def test_read_run_status_survives_invalid_utf8(tmp_path):
+    """A write interrupted mid-multi-byte-sequence must not crash the nightly sweep.
+
+    read_text() raises UnicodeDecodeError on invalid UTF-8. It's a ValueError
+    subclass and NOT an OSError, so a narrower `except (JSONDecodeError,
+    OSError)` lets it escape into find_pending_runs / find_stale_claims and take
+    down the whole scan.
+    """
+    (tmp_path / "results.json").write_bytes(b'{"status": "reje\xff\xfecte')
+    assert read_run_status(tmp_path) is None
+
+
+# ── fold geometry guard (fps-g31) ─────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "outer_train,fits",
+    [
+        (1825, True),   # the real default
+        (1192, True),   # exact boundary: 1095 + 7 buffer + 90 val
+        (1191, False),  # one day under
+        (1100, False),  # would pass a naive "inner < outer" check, still yields 0 folds
+        (1000, False),
+    ],
+)
+def test_check_fold_geometry_matches_real_fold_arithmetic(outer_train, fits):
+    """The guard must agree with walk_forward_folds, not approximate it.
+
+    Boundary verified empirically against a real date grid: outer=1192 yields 1
+    inner fold at the defaults, outer=1191 yields 0. A naive `inner < outer`
+    check would wave 1100 through.
+    """
+    outer = {"train_min_days": outer_train}
+    if fits:
+        _check_fold_geometry(outer, DEFAULT_INNER_FOLD_PARAMS)
+    else:
+        with pytest.raises(FoldGeometryError, match="don't fit inside outer fold 1"):
+            _check_fold_geometry(outer, DEFAULT_INNER_FOLD_PARAMS)
+
+    # and confirm the guard's verdict is the truth, not just self-consistent
+    dates = pd.date_range("2016-01-01", periods=outer_train + 400, freq="D")
+    df = pd.DataFrame({
+        "price_date": dates.strftime("%Y-%m-%d"),
+        "label": ([0, 1] * len(dates))[: len(dates)],
+    })
+    fold_one_train = next(iter(_ev.walk_forward_folds(df, train_min_days=outer_train)))[0]
+    n_inner = len(list(_ev.walk_forward_folds(fold_one_train, **DEFAULT_INNER_FOLD_PARAMS)))
+    assert (n_inner >= 1) is fits
+
+
+def test_check_fold_geometry_uses_library_defaults_when_outer_unset():
+    """Outer params left empty means walk_forward_folds' own default, not zero."""
+    _check_fold_geometry({}, DEFAULT_INNER_FOLD_PARAMS)
+    with pytest.raises(FoldGeometryError):
+        _check_fold_geometry({}, {"train_min_days": 5000, "val_days": 90, "step_days": 90})
+
+
+def test_run_candidate_rejects_impossible_fold_geometry(tmp_path):
+    """Raised, not _finish()'d — a run this misconfigured must not leave a results.json,
+    because that file is the queue key for both launch and the dossier scan."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_CANDIDATE)
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(FoldGeometryError):
+        run_candidate(
+            batch_dir, candidate_path, out_dir=out_dir,
+            outer_fold_params={"train_min_days": 1000}, verbose=False,
+        )
+
+    assert not (out_dir / "results.json").exists()
+
+
+# ── stale results.json (fps-g31) ──────────────────────────────────────────────
+
+def test_run_candidate_clears_stale_results_json_before_running(tmp_path):
+    """A re-run reuses the run dir, and nothing else ever clears this file.
+
+    Left in place, launch.find_stale_claims (no age gate) reads the PREVIOUS
+    attempt's retryable status off disk mid-run, releases the in-flight run's
+    claim, and launches a second runner into the same out_dir.
+    """
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "results.json").write_text(json.dumps({"status": STATUS_ABORTED_PIPELINE}))
+
+    # Fails immediately on import, but only AFTER the stale file is cleared.
+    candidate_path = _write_candidate(tmp_path, "raise RuntimeError('boom')\n")
+    result = run_candidate(batch_dir, candidate_path, out_dir=out_dir)
+
+    assert result.status == STATUS_ABORTED_CANDIDATE
+    assert json.loads((out_dir / "results.json").read_text())["status"] == STATUS_ABORTED_CANDIDATE
+
+
 # ── inner fold params (fps-g31) ───────────────────────────────────────────────
 
 def test_default_inner_fold_params_fit_inside_outer_fold_one():
@@ -743,14 +848,15 @@ def test_run_candidate_defaults_inner_fold_params(tmp_path, monkeypatch):
     library default (1825) that cannot fit inside outer fold 1.
     """
     seen = _capture_realised_kwargs(monkeypatch)
-    df = _full_baseline_df(n_days=90, n_stations=2)
+    # Big enough for the REAL outer default (1825 + 7 buffer + 90 val), so this
+    # exercises the production geometry rather than a toy grid — the whole point
+    # is what the defaults resolve to.
+    df = _full_baseline_df(n_days=1930, n_stations=1)
     batch_dir = _write_batch_dir(tmp_path, df)
     candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
 
     run_candidate(
-        batch_dir, candidate_path, out_dir=tmp_path / "out",
-        seeds=(1, 2), outer_fold_params={"train_min_days": 30, "val_days": 15, "step_days": 15},
-        verbose=False,
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
     )
 
     assert seen["inner_fold_params"] == DEFAULT_INNER_FOLD_PARAMS
@@ -763,13 +869,12 @@ def test_run_candidate_merges_partial_inner_fold_params(tmp_path, monkeypatch):
     anyone who passed only val_days.
     """
     seen = _capture_realised_kwargs(monkeypatch)
-    df = _full_baseline_df(n_days=90, n_stations=2)
+    df = _full_baseline_df(n_days=1930, n_stations=1)
     batch_dir = _write_batch_dir(tmp_path, df)
     candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
 
     run_candidate(
-        batch_dir, candidate_path, out_dir=tmp_path / "out",
-        seeds=(1, 2), outer_fold_params={"train_min_days": 30, "val_days": 15, "step_days": 15},
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2),
         inner_fold_params={"val_days": 30}, verbose=False,
     )
 
