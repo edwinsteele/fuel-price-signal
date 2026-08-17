@@ -139,13 +139,18 @@ def _retry_count(issue: dict) -> int:
     bd metadata survives the assign/status changes release_stale_claim makes
     (results.json does not -- it's deleted at the start of every
     run_candidate() call), so it's where a counter that must outlive one
-    attempt has to live. Anything that isn't a clean int (missing, hand-edited,
-    a stray string) reads as 0 -- the safer misread here is "budget not yet
-    spent", not an early block on a candidate that never actually retried.
+    attempt has to live. Anything that isn't a clean, non-negative int
+    (missing, hand-edited, a stray string, a non-dict `metadata`, a negative
+    number) reads as 0 -- the safer misread here is "budget not yet spent",
+    not an early block on a candidate that never actually retried, or extra
+    retries from a negative count offsetting the `+ 1` in find_stale_claims.
     """
-    value = (issue.get("metadata") or {}).get(RETRY_COUNT_METADATA_KEY, 0)
+    metadata = issue.get("metadata")
+    if not isinstance(metadata, dict):
+        return 0
+    value = metadata.get(RETRY_COUNT_METADATA_KEY, 0)
     try:
-        return int(value)
+        return max(0, int(value))
     except (TypeError, ValueError):
         return 0
 

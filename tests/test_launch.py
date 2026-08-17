@@ -195,6 +195,39 @@ def test_find_stale_claims_reclaims_retryable_abort(tmp_path, monkeypatch, statu
     assert stale[0]["retry_count"] == 1
 
 
+@pytest.mark.parametrize("malformed_metadata", [["not", "a", "dict"], "also not a dict", -5])
+def test_find_stale_claims_treats_malformed_metadata_as_zero_retries(tmp_path, monkeypatch, malformed_metadata):
+    """_retry_count must stay total: a non-dict `metadata`, or a hand-edited
+    negative retry_count, reads as 0 rather than raising or granting extra
+    retries via `retry_count + 1` landing back at/below 0.
+    """
+    repo_root = _fake_repo_root(tmp_path, monkeypatch)
+    candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
+    out_dir = default_out_dir(candidate_path)
+    out_dir.mkdir(parents=True)
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "aborted_pipeline", "error": "bad config"}))
+    description = _description_for(
+        "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
+    )
+    recent_claim = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    issue = _issue(description, recent_claim)
+    # metadata isn't always a dict of {key: int} on the wire -- inject the
+    # malformed shape directly rather than through the metadata= kwarg, which
+    # only ever builds well-formed dicts.
+    metadata_value = (
+        {RETRY_COUNT_METADATA_KEY: malformed_metadata} if not isinstance(malformed_metadata, (list, str))
+        else malformed_metadata
+    )
+    issue["metadata"] = metadata_value
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed_process(json.dumps([issue])))
+
+    stale = find_stale_claims()
+    assert len(stale) == 1
+    assert stale[0]["action"] == "release"
+    assert stale[0]["retry_count"] == 1
+
+
 def test_find_stale_claims_blocks_once_retry_budget_exhausted(tmp_path, monkeypatch):
     """fps-rtd: a second retryable abort of the same claim must block, not release.
 
