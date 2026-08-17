@@ -758,6 +758,74 @@ uv run python -m fuel_signal.backtest --preferred --strategy rule_based \
 
 Output is a table per station showing cents-per-litre (CPL), savings vs always-buy, fill events, and total litres for each strategy. Available strategies: `always_buy` (baseline, always included), `rule_based` (four-signal heuristic), `model` (logistic regression at `--threshold`), `all` (all three side-by-side).
 
+## AI-sourced feature pipeline (experiment batches)
+
+`experiments/pipeline/` runs candidate feature columns through a two-arm (R0 vs candidate)
+realised-CPL backtest, mostly unattended. Full design: bd `fps-3jj`; prompts for the two scheduled
+pieces live in `docs/routines/{launch,dossier}.md`; candidate-filing rules in
+`docs/routines/generator.md`.
+
+**One-time per batch — freeze the data (owner-run, not scheduled):**
+
+```bash
+PYTHONPATH=. uv run python experiments/pipeline/batch_freeze.py <batch-name>
+```
+
+Hard-gates a full `make update` (pull, db, fill, classify, lga-leadership) and pins the result —
+`data/features.parquet`, the live SQLite DB, and the resolved baseline feature-column list — into
+`experiments/batches/<batch-name>/`, so every candidate in the batch runs against identical day-0
+data. Aborts loudly on refresh failure rather than freeze stale data. Run this before filing any
+candidate against `<batch-name>`.
+
+**Per candidate — write the module and file the bd issue:**
+
+1. Copy `experiments/candidates/TEMPLATE.py` to `experiments/candidates/<batch-name>/<NAME>.py` and
+   fill in `NAME`, `HYPOTHESIS`, `PREDICTED_SIGNATURE`, `CONFIDENCE_EFFECT`, `CONFIDENCE_ZONE`,
+   `TARGET`, `MECHANISM_FAMILY`, `PRIOR_ART`, `COLUMNS`, `INPUTS`, `add_columns` (and optional
+   `add_axis`). Commit straight to `main` — `experiments/**` is exempt from the PR rule.
+2. File the candidate bead:
+   ```bash
+   bd create --title "<NAME> candidate" --labels experiment --description "$(cat <<'EOF'
+   HYPOTHESIS: ...
+   TARGET: ...
+   PREDICTED_SIGNATURE: ...
+   CONFIDENCE_EFFECT: ...
+   CONFIDENCE_ZONE: ...
+   MECHANISM_FAMILY: ...
+   PRIOR_ART: ...
+
+   Batch: experiments/batches/<batch-name>
+   Module: experiments/candidates/<batch-name>/<NAME>.py
+   EOF
+   )"
+   bd dolt push
+   ```
+   The last two lines are machine-parsed by `launch.py` — line-anchored, exact text, no extra
+   whitespace. The bead needs the `experiment` label so the chore/polish worker can't see it and
+   the launch routine can.
+
+**Running it:** the `fuel-price-signal-launch` scheduled task (nightly, ~9:00 PM local) claims the
+oldest ready `experiment` bead, validates its candidate module (differential PIT test, restricted-
+frame `INPUTS` check, NaN-rate assert), and launches the hours-long runner detached — one candidate
+per night. To run immediately instead of waiting for the schedule:
+
+```bash
+PYTHONPATH=. uv run python -m experiments.pipeline.launch
+```
+
+**Dossier — not yet a scheduled task.** Once a night's run finishes, a Claude session following
+`docs/routines/dossier.md` turns it into a write-up: first the deterministic pass —
+
+```bash
+PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables --scan experiments/candidates
+```
+
+— which writes `facts.json` + plots for every completed, undossiered run (no judgement calls), then
+the session reads `facts.json`, grades the run against its own `PREDICTED_SIGNATURE`, and writes
+`experiments/<batch>/<NAME>/README.md`, an `experiments/INDEX.md` row, and an `experiments/ledger.yaml`
+entry by hand, per the routine doc. Only `fuel-price-signal-launch` is registered as a scheduled
+task so far — this step needs to be invoked manually (or the scheduled task set up) until then.
+
 ## Running tests
 
 ```bash
