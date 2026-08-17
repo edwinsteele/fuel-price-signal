@@ -17,7 +17,7 @@ import pytest
 from click.testing import CliRunner
 
 from experiments.pipeline import dossier_tables as dt
-from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM
+from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM, RETRYABLE_STATUSES
 
 SHOCK = {1, 4}
 FOLDS = [1, 2, 3, 4]
@@ -175,6 +175,43 @@ def test_find_pending_runs_skips_in_progress_and_already_dossiered(tmp_path):
     pending = dt.find_pending_runs(tmp_path)
 
     assert pending == [run_dir]
+
+
+@pytest.mark.parametrize("status", sorted(RETRYABLE_STATUSES))
+def test_find_pending_runs_skips_retryable_aborts(tmp_path, status):
+    """fps-g31: dossiering a retryable abort permanently hides its successful re-run.
+
+    A run dir is keyed on the candidate, so the re-run reuses it. Write a README
+    for the aborted attempt and find_pending_runs (which requires no README)
+    will never surface the re-run that overwrote results.json with a real
+    verdict.
+    """
+    aborted = tmp_path / "aborted"
+    aborted.mkdir()
+    (aborted / dt.RESULTS_FILENAME).write_text(json.dumps({"status": status, "error": "bad config"}))
+
+    assert dt.find_pending_runs(tmp_path) == []
+
+
+@pytest.mark.parametrize("status", ["rejected", "disqualified", "aborted_candidate"])
+def test_find_pending_runs_keeps_terminal_statuses(tmp_path, status):
+    """Only retryable runs are held back — real verdicts still get written up."""
+    run_dir = tmp_path / "terminal"
+    run_dir.mkdir()
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": status}))
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_keeps_unreadable_results_json(tmp_path):
+    """An unparseable results.json stays in the queue: process_run's own try/except
+    logs and skips it, which surfaces the problem. Silently dropping it here would
+    hide a malformed run instead."""
+    run_dir = tmp_path / "truncated"
+    run_dir.mkdir()
+    (run_dir / dt.RESULTS_FILENAME).write_text("{ truncated mid-write")
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
 
 
 # Stale-claim recovery is NOT this module's job — see the module docstring. It used to be

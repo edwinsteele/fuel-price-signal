@@ -61,7 +61,13 @@ import pandas as pd
 from experiments.lib.constants import SHOCK_FOLDS
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
-from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM, DEFAULT_MIN_ROW_CELL_N
+from experiments.pipeline.runner import (
+    BASELINE_ARM,
+    CANDIDATE_ARM,
+    DEFAULT_MIN_ROW_CELL_N,
+    RETRYABLE_STATUSES,
+    read_run_status,
+)
 from fuel_signal.dates import date_from_int
 from fuel_signal.score_phase2 import threshold_sweep
 
@@ -87,15 +93,31 @@ CYCLE_PHASE_COLUMNS = {"cycle_pct_through", "cycle_days_since_peak"}
 # ── work queue ────────────────────────────────────────────────────────────────
 
 def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
-    """Any directory under `root` with results.json and no README.md yet.
+    """Any directory under `root` with results.json, no README.md, and a non-retryable status.
 
-    Matches the parent design's "work queue is self-describing" rule exactly. A run still in
-    progress has neither file and is silently skipped.
+    Matches the parent design's "work queue is self-describing" rule. A run still in progress
+    has neither file and is silently skipped.
+
+    The RETRYABLE_STATUSES exclusion is load-bearing, not tidiness (fps-g31). A run dir is
+    keyed on the candidate, so a re-run REUSES it. Without the exclusion:
+
+      night 1  candidate aborts (aborted_pipeline); results.json written
+               this scan sees results.json + no README -> writes facts.json, session writes README
+      night 2  launch releases the claim, candidate re-runs and SUCCEEDS, overwriting results.json
+      night 2  this scan sees the README from night 1 -> run is not pending -> never dossiered
+
+    The successful run would be silently invisible forever. That failure mode only became
+    reachable when aborts started going back on the queue, which is why the guard lives here
+    rather than in the caller: anything that reuses a run dir has to agree on what "finished"
+    means, so both sides read runner.read_run_status.
     """
     root = pathlib.Path(root)
-    return sorted(
-        {p.parent for p in root.rglob(RESULTS_FILENAME) if not (p.parent / README_FILENAME).exists()}
-    )
+    return sorted({
+        p.parent
+        for p in root.rglob(RESULTS_FILENAME)
+        if not (p.parent / README_FILENAME).exists()
+        and read_run_status(p.parent) not in RETRYABLE_STATUSES
+    })
 
 
 # ── facts.json ────────────────────────────────────────────────────────────────

@@ -25,6 +25,15 @@ and the applicable plots (always: `per_fold_delta_bars.png`, `seed_mean_vs_media
 run doesn't stop the rest of the scan — it's logged and skipped; check the command's own output
 for any `failed, skipping` lines and flag them rather than silently ignoring.
 
+**Retryable aborts are skipped entirely, before anything is written (fps-g31).** `find_pending_runs`
+excludes any run whose `results.json` carries a `RETRYABLE_STATUSES` status (`aborted_pipeline` /
+`aborted_environment`). Those runs never got a fair hearing, their bd claim goes back on the queue,
+and the re-run **reuses the same directory** — so a `README.md` written for the aborted attempt
+would permanently exclude the successful re-run from this queue (`find_pending_runs` requires *no*
+`README.md`). No `facts.json`, no `README.md`, no ledger row, no INDEX row: wait for the re-run.
+`aborted_candidate` and `disqualified` are NOT retryable — those are real verdicts and get written
+up normally.
+
 **Stale-claim recovery is NOT this routine's job.** It runs entirely inside the launch routine
 (`fps-3jj.5`, merged) as part of every nightly `launch` invocation — `recover_stale_claims()`
 checks `bd list --status in_progress --label experiment` for issues whose `run.log` ends in a
@@ -111,8 +120,8 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      `station_minus_tgp_cents` in the file for the contrast).
    - `not_tested`: the same judgement you wrote into the README — reuse it verbatim, don't redo it.
    - `outcome`: the pipeline's own status code — `rejected` / `disqualified` /
-     `aborted_candidate` / `aborted_environment` (`facts["provenance"]["status"]`). **Never write
-     `graduated` here.** Per the parent design's decision boundary, this pipeline never touches
+     `aborted_candidate` (`facts["provenance"]["status"]`). The retryable statuses are filtered
+     out at Step 0 and never reach a ledger entry. **Never write `graduated` here.** Per the parent design's decision boundary, this pipeline never touches
      `fuel_signal/features.py`; graduation is a separate, human-initiated PR, and a human updates
      this same ledger entry's `outcome` to `graduated` by hand when that PR lands (see how the
      `tgp_delta_7d` entry already reads `graduated` even though every pipeline run of it would have
@@ -123,7 +132,8 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    two files must never drift, because neither is derived from the other) — Date / Name /
    Hypothesis / Result / Status, `Status` = `open` while the pipeline still has follow-ups queued
    for this candidate's series, `done` otherwise, `abandoned` for `disqualified` /
-   `aborted_candidate` (never `graduated` — same human-edit-later rule as the ledger).
+   `aborted_candidate` (never `graduated` — same human-edit-later rule as the ledger). Retryable
+   statuses can't reach this step at all — see Step 0.
 
 6. **Commit `README.md` + the run's updated `facts.json` (`grading` filled in) + the PNGs +
    `experiments/ledger.yaml` + `experiments/INDEX.md` together, straight to `main`** —

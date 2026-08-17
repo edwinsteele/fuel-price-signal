@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 
 import click
 
-from experiments.pipeline.runner import default_out_dir
+from experiments.pipeline.runner import RETRYABLE_STATUSES, default_out_dir, read_run_status
 from experiments.pipeline.validate import (
     CandidateImportError,
     load_candidate_module,
@@ -105,14 +105,36 @@ def _looks_like_traceback_tail(log_path: pathlib.Path, tail_lines: int = 40) -> 
     return tail if "Traceback (most recent call last):" in tail else None
 
 
-def find_stale_claims(now: datetime | None = None) -> list[dict]:
-    """Read-only: which in_progress experiment issues look abandoned mid-run.
+def _retryable_status(out_dir: pathlib.Path) -> str | None:
+    """The run's status if it finished in a RETRYABLE_STATUSES state, else None.
 
-    Stale iff: no results.json (run never completed), run.log exists and its tail
-    looks like a Python traceback, and the issue was claimed more than STALE_AFTER
-    ago. An issue whose description doesn't parse, or that has no run.log yet (still
-    validating, or launch crashed before ever writing one), is left alone here --
-    not this function's job to guess at those.
+    A malformed/unreadable results.json reads as "not retryable" (read_run_status
+    returns None) -- releasing a claim on the strength of a file we couldn't
+    parse is the more dangerous guess of the two.
+    """
+    status = read_run_status(out_dir)
+    return status if status in RETRYABLE_STATUSES else None
+
+
+def find_stale_claims(now: datetime | None = None) -> list[dict]:
+    """Read-only: which in_progress experiment issues need their claim released.
+
+    Two shapes, and the second is the one fps-g31 was missing:
+
+    1. Crashed mid-run: no results.json, run.log tail looks like a Python
+       traceback, claimed more than STALE_AFTER ago. The age gate matters here
+       because a run with no results.json may still be in flight.
+
+    2. Finished with a RETRYABLE_STATUSES status (aborted_pipeline /
+       aborted_environment): the candidate never got a fair hearing, so its
+       claim must go back on the queue. No age gate -- results.json existing is
+       proof the run is over, so there is nothing to wait for.
+
+    A completed run (rejected / disqualified / aborted_candidate) is left alone:
+    those are verdicts, and the claim was legitimately consumed. An issue whose
+    description doesn't parse, or that has no run.log yet (still validating, or
+    launch crashed before ever writing one), is left alone too -- not this
+    function's job to guess at those.
     """
     now = now or datetime.now(timezone.utc)
     stale: list[dict] = []
@@ -122,8 +144,20 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
         except CandidateRefError:
             continue
         out_dir = default_out_dir(candidate_path)
+
+        retryable = _retryable_status(out_dir)
+        if retryable is not None:
+            stale.append({
+                "issue": issue,
+                "traceback_tail": (
+                    f"run finished with retryable status {retryable!r} -- a pipeline/"
+                    f"environment fault, not a verdict on the candidate. Releasing for re-run."
+                ),
+            })
+            continue
         if (out_dir / RESULTS_FILENAME).exists():
             continue
+
         traceback_tail = _looks_like_traceback_tail(out_dir / RUN_LOG_FILENAME)
         if traceback_tail is None:
             continue
@@ -138,14 +172,16 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
 
 
 def release_stale_claim(issue: dict, traceback_tail: str) -> None:
-    """Post the traceback, unassign, and reopen one stale-claimed experiment issue."""
+    """Post the reason, unassign, and reopen one stale-claimed experiment issue.
+
+    `traceback_tail` carries whichever evidence find_stale_claims found -- a
+    traceback tail for a crashed run, or a one-line explanation for a run that
+    finished in a retryable status -- so the bead records WHY it was released.
+    """
     issue_id = issue["id"]
     subprocess.run(
         ["bd", "comment", issue_id, "--stdin"],
-        input=(
-            f"[launch] stale claim recovered — run.log ended in a traceback with no "
-            f"results.json, claimed more than {STALE_AFTER} ago. Releasing.\n\n{traceback_tail}"
-        ),
+        input=f"[launch] claim released for re-run.\n\n{traceback_tail}",
         text=True,
         check=True,
     )
