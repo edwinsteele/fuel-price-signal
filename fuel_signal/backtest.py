@@ -30,6 +30,13 @@ import click
 import numpy as np
 
 import fuel_signal.db as db
+from fuel_signal.brand_leadership import (
+    brand_slug,
+    compute_pit_strict_days_since_trough_brand,
+)
+from fuel_signal.brand_leadership import (
+    qualifying_brands as _qualifying_brands,
+)
 from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.dates import date_from_int as _date_from_int
@@ -61,11 +68,12 @@ class PriceHistory:
     entire backtest run without rebuilding the detector per evaluation date.
 
     The optional dicts (station_lga_brand, lga_mean_by_key, brand_mean_by_key,
-    stickiness_by_key, lga_days_since_by_key, network_px_std_by_date,
-    network_px_std_delta_3d_by_date, lga_phase_std_by_date,
-    lga_phase_std_delta_3d_by_date) are populated by load_history and consumed by
-    ModelStrategy.decide to supply Phase 4 features. Tests that construct
-    PriceHistory directly without a DB can leave them empty (default).
+    stickiness_by_key, lga_days_since_by_key, brand_days_since_by_key,
+    qualifying_brands, network_px_std_by_date, network_px_std_delta_3d_by_date,
+    lga_phase_std_by_date, lga_phase_std_delta_3d_by_date) are populated by
+    load_history and consumed by ModelStrategy.decide to supply Phase 4/5
+    features. Tests that construct PriceHistory directly without a DB can
+    leave them empty (default).
     """
 
     avg_series: list[tuple[str, float]]                 # [(date_str, cents), ...] sorted
@@ -75,6 +83,13 @@ class PriceHistory:
     brand_mean_by_key: dict[tuple[str, str], float] = field(default_factory=dict)
     stickiness_by_key: dict[tuple[int, str], float] = field(default_factory=dict)
     lga_days_since_by_key: dict[tuple[str, str], int | None] = field(default_factory=dict)
+    brand_days_since_by_key: dict[tuple[str, str], int | None] = field(default_factory=dict)
+    # Brand names to loop in ModelStrategy.decide when populating
+    # days_since_trough_entry_<brand>. Unlike LGA_FEATURE_COUNCILS (a fixed
+    # module-level constant), qualifying brands are DB-derived (station-count
+    # gated), so this must travel with the PriceHistory instance rather than
+    # be importable as a constant.
+    qualifying_brands: list[str] = field(default_factory=list)
     network_px_std_by_date: dict[str, float] = field(default_factory=dict)
     network_px_std_delta_3d_by_date: dict[str, float] = field(default_factory=dict)
     lga_phase_std_by_date: dict[str, float] = field(default_factory=dict)
@@ -141,6 +156,10 @@ class PriceHistory:
 
     def lga_days_since_at(self, as_of: str, lga: str) -> float | None:
         val = self.lga_days_since_by_key.get((as_of, lga))
+        return float(val) if val is not None else None
+
+    def brand_days_since_at(self, as_of: str, brand: str) -> float | None:
+        val = self.brand_days_since_by_key.get((as_of, brand))
         return float(val) if val is not None else None
 
     def network_px_std_at(self, as_of: str) -> float | None:
@@ -286,6 +305,10 @@ class ModelStrategy:
         for lga in LGA_FEATURE_COUNCILS:
             features[f"days_since_trough_entry_{lga_slug(lga)}"] = (
                 history.lga_days_since_at(as_of, lga)
+            )
+        for brand in history.qualifying_brands:
+            features[f"days_since_trough_entry_{brand_slug(brand)}"] = (
+                history.brand_days_since_at(as_of, brand)
             )
         features["network_px_std"] = history.network_px_std_at(as_of)
         features["network_px_std_delta_3d"] = history.network_px_std_delta_3d_at(as_of)
@@ -738,10 +761,14 @@ def load_history(
     Pass the returned PriceHistory to run_backtest; strategies access it
     in-memory without further DB queries.
 
-    eval_dates: if provided, PIT-strict days_since_trough_entry_<lga> features are
-    pre-computed for exactly those dates (one detect_trough_events call per date×LGA).
-    When None or empty, lga_days_since_by_key is empty and those features default to
-    NaN during ModelStrategy.decide (acceptable for Phase 2 models; degrades Phase 4).
+    eval_dates: if provided, PIT-strict days_since_trough_entry_<lga>/<brand> features
+    are pre-computed for exactly those dates (one detect_trough_events call per
+    date×LGA/brand). When None or empty, lga_days_since_by_key and
+    brand_days_since_by_key are empty and those features default to NaN during
+    ModelStrategy.decide (acceptable for Phase 2 models; degrades Phase 4/5).
+    qualifying_brands(conn) itself is cheap (one aggregate query) and always run,
+    mirroring LGA_FEATURE_COUNCILS being an always-available module constant —
+    only the per-date trough lookup is gated on eval_dates.
     """
     avg_series = db.average_price_series(conn)
     station_prices: dict[int, list[tuple[str, float]]] = {}
@@ -750,10 +777,13 @@ def load_history(
         if prices:
             station_prices[code] = prices
 
+    qualifying_brand_list = _qualifying_brands(conn)
+
     if not station_codes:
         return PriceHistory(
             avg_series=avg_series,
             station_prices=station_prices,
+            qualifying_brands=qualifying_brand_list,
             detector_factory=detector_factory,
         )
 
@@ -817,6 +847,11 @@ def load_history(
         if eval_dates
         else {}
     )
+    brand_days_since_by_key: dict[tuple[str, str], int | None] = (
+        compute_pit_strict_days_since_trough_brand(conn, eval_dates, qualifying_brand_list)
+        if eval_dates
+        else {}
+    )
 
     avg_date_strs: list[str] = [d for d, _ in avg_series]
     network_px_std_by_date = _network_px_std_per_date(conn, fid)
@@ -838,6 +873,8 @@ def load_history(
         brand_mean_by_key=brand_mean_by_key,
         stickiness_by_key=stickiness_by_key,
         lga_days_since_by_key=lga_days_since_by_key,
+        brand_days_since_by_key=brand_days_since_by_key,
+        qualifying_brands=qualifying_brand_list,
         network_px_std_by_date=network_px_std_by_date,
         network_px_std_delta_3d_by_date=network_px_std_delta_3d_by_date,
         lga_phase_std_by_date=lga_phase_std_by_date,
