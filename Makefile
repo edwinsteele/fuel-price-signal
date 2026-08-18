@@ -1,4 +1,4 @@
-.PHONY: help daily dashboard update pull db fill classify lga-leadership signal inspect
+.PHONY: help daily dashboard update pull db fill classify lga-leadership signal inspect features
 
 help:
 	@echo "Targets:"
@@ -12,6 +12,7 @@ help:
 	@echo "  lga-leadership Score LGA leadership for today"
 	@echo "  signal         Print today's buy/wait signal (no DB refresh)"
 	@echo "  inspect        Start the inspect workbench (no DB refresh)"
+	@echo "  features       Regenerate data/features.csv/.parquet from the current DB"
 
 # Mirrors .github/workflows/daily-db-update.yml: same four steps, same
 # no-arg (today) defaults, run locally against fuel_signal.db.
@@ -31,6 +32,9 @@ lga-leadership:
 	uv run python -m fuel_signal.lga_leadership
 
 update: pull db fill classify lga-leadership
+
+features:
+	uv run python -m fuel_signal.features
 
 signal:
 	uv run python -m fuel_signal.signal

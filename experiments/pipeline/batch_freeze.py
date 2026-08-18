@@ -11,10 +11,14 @@ Freezes, once per batch:
   - the resolved baseline feature-column list -> <batch_dir>/baseline_columns.json
   - a freeze manifest (snapshot date, git SHA, source paths) -> <batch_dir>/freeze.json
 
-DB refresh (the `make update` chain: pull, db, fill, classify, lga-leadership) is a
-hard-gated pre-step: refresh_db() raises loudly on failure rather than let freeze_batch()
-pin a stale DB. It moves out of the nightly path entirely — freeze happens once at
-batch setup; nights 2..N deliberately run on day-0 data.
+DB refresh (the `make update` chain: pull, db, fill, classify, lga-leadership), followed
+by a features.csv/.parquet regeneration (`make features`), is a hard-gated pre-step:
+refresh_db() raises loudly if either step fails rather than let freeze_batch() pin a
+stale DB or a features.csv/.parquet that predates it (fps-3vo — previously the DB was
+hard-gated but features.csv/.parquet was a separate, unchecked manual step, so a batch
+could silently freeze months-old features against a freshly-pulled DB). It moves out of
+the nightly path entirely — freeze happens once at batch setup; nights 2..N deliberately
+run on day-0 data.
 
 Usage (batch setup, once, before the launch routine claims candidate 1):
   PYTHONPATH=. uv run python experiments/pipeline/batch_freeze.py <batch-name>
@@ -53,7 +57,8 @@ FROZEN_DB_FILENAME = "fuel_signal.db"
 
 
 class DbRefreshError(RuntimeError):
-    """The hard-gated DB refresh (`make update`) failed; batch setup must abort."""
+    """The hard-gated DB refresh (`make update`) or features regen (`make features`)
+    failed; batch setup must abort."""
 
 
 class BaselineContractMismatch(RuntimeError):
@@ -103,10 +108,11 @@ def _snapshot_date(df: pd.DataFrame) -> str:
 
 
 def refresh_db(repo_root: pathlib.Path = REPO_ROOT) -> None:
-    """Run the `make update` chain (pull, db, fill, classify, lga-leadership).
+    """Run the `make update` chain (pull, db, fill, classify, lga-leadership), then
+    regenerate features.csv/.parquet from the refreshed DB (`make features`).
 
-    Hard-gated: raises DbRefreshError on any non-zero exit rather than let a batch
-    freeze on stale data.
+    Hard-gated: raises DbRefreshError if either step exits non-zero, rather than let a
+    batch freeze on a stale DB or on a features.csv/.parquet that predates it (fps-3vo).
     """
     result = subprocess.run(
         ["make", "update"], cwd=repo_root, capture_output=True, text=True
@@ -115,6 +121,16 @@ def refresh_db(repo_root: pathlib.Path = REPO_ROOT) -> None:
         raise DbRefreshError(
             f"`make update` failed (exit {result.returncode}); aborting batch setup "
             f"rather than freeze stale data.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+    result = subprocess.run(
+        ["make", "features"], cwd=repo_root, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise DbRefreshError(
+            f"`make features` failed (exit {result.returncode}) after a successful DB "
+            f"refresh; aborting batch setup rather than freeze a features.csv/.parquet "
+            f"that predates the refreshed DB.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
 
