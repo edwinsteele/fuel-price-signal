@@ -7,6 +7,7 @@ in CI.
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 from types import SimpleNamespace
 
@@ -26,6 +27,7 @@ from experiments.lib.realised import (
     _train_calibrate_select_tau,
     run_paired_realised_backtest,
 )
+from fuel_signal.backtest import TankParams
 
 
 def _synth_df(n: int = 200, seed: int = 0) -> pd.DataFrame:
@@ -328,8 +330,9 @@ def test_baseline_cache_rejects_fold_window_drift_despite_matching_fingerprint(m
 def test_baseline_cache_fingerprint_covers_the_documented_keys():
     df = _synth_df(n=60)
     arm = ArmSpec("baseline", df)
+    tank = TankParams(tank_size_litres=40.0)
     fp = _baseline_cache_fingerprint(
-        arm, ["f1", "f2"], [1, 2], 42, {"train_min_days": 10}, {"val_days": 5}, {3, 1}, True,
+        arm, ["f1", "f2"], [1, 2], 42, {"train_min_days": 10}, {"val_days": 5}, {3, 1}, True, tank,
     )
     assert fp == {
         "baseline_arm": "baseline",
@@ -340,4 +343,40 @@ def test_baseline_cache_fingerprint_covers_the_documented_keys():
         "inner_fold_params": {"val_days": 5},
         "fold_subset": [1, 3],
         "collect_fills": True,
+        "tank": dataclasses.asdict(tank),
     }
+
+
+def test_baseline_cache_fingerprint_differs_when_tank_differs():
+    """The bug this test guards: without tank in the fingerprint, a cache
+    captured under one TankParams would be silently reused for another —
+    reusing stale spend/litres/cpl economics (fps-e2l review finding)."""
+    df = _synth_df(n=60)
+    arm = ArmSpec("baseline", df)
+    common = (arm, ["f1", "f2"], [1, 2], 42, {}, {}, None, True)
+    fp_default = _baseline_cache_fingerprint(*common, TankParams())
+    fp_custom = _baseline_cache_fingerprint(*common, TankParams(tank_size_litres=30.0))
+    assert fp_default != fp_custom
+
+
+def test_baseline_cache_rejects_tank_mismatch(monkeypatch):
+    """A cache captured under one tank config must not be reused under another
+    — same enforcement path as station_codes/seed/fold-param mismatches."""
+    fit_calls, load_history_calls, agg_calls = [], [], []
+    _install_fakes(monkeypatch, fit_calls=fit_calls, load_history_calls=load_history_calls, agg_calls=agg_calls)
+    arms1, baseline_cols, outer, inner = _cache_test_setup()
+
+    result1 = run_paired_realised_backtest(
+        arms1, baseline_cols, station_codes=[1], seed=42,
+        outer_fold_params=outer, inner_fold_params=inner, collect_fills=True, verbose=False,
+        tank=TankParams(),
+    )
+
+    arms2, _, _, _ = _cache_test_setup()
+    with pytest.raises(BaselineCacheMismatch, match="fingerprint mismatch"):
+        run_paired_realised_backtest(
+            arms2, baseline_cols, station_codes=[1], seed=42,
+            outer_fold_params=outer, inner_fold_params=inner, collect_fills=True, verbose=False,
+            tank=TankParams(tank_size_litres=30.0),
+            baseline_cache=result1.baseline_cache,
+        )

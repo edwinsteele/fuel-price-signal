@@ -36,8 +36,8 @@ Baseline (arms[0]) caching across paired calls (fps-e2l, parent design fps-3jj):
 when ``held_tau`` is ``None`` (the default — baseline's own per-fold τ IS the held
 τ in that mode), every call captures its per-fold baseline fit + economics into
 ``RealisedResult.baseline_cache``. A LATER call against the SAME baseline arm,
-feature_columns, station_codes, seed, and fold geometry can pass that cache back
-in via ``baseline_cache=`` to skip refitting and re-replaying arms[0] entirely —
+feature_columns, station_codes, seed, tank, and fold geometry can pass that cache
+back in via ``baseline_cache=`` to skip refitting and re-replaying arms[0] entirely —
 correct, not an approximation, because within one frozen batch the baseline arm's
 data, columns, and folds are bit-identical across every candidate run against it
 (see fps-3jj.4's runner.py, the caller that actually persists this across nights).
@@ -46,6 +46,7 @@ silently reusing a stale fit.
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import time
 from collections.abc import Callable, Iterable
@@ -130,7 +131,7 @@ class BaselineCache:
     that mode the baseline's own per-fold τ IS the held τ, so nothing about the
     other arms' scoring depends on anything not captured here. Pass a prior
     call's cache back in as ``baseline_cache=`` on a LATER call (same baseline
-    arm, feature_columns, station_codes, seed, and fold geometry) to skip
+    arm, feature_columns, station_codes, seed, tank, and fold geometry) to skip
     refitting and re-replaying ``arms[0]`` entirely. This is exact, not an
     approximation: within one frozen batch the baseline arm's data, columns,
     and fold plan are bit-identical across every candidate run against it, so
@@ -263,16 +264,23 @@ def _baseline_cache_fingerprint(
     inner_fold_params: dict,
     fold_subset: Iterable[int] | None,
     collect_fills: bool,
+    tank: TankParams,
 ) -> dict:
     """The config a baseline_cache must match to be safely reusable.
 
     Everything that feeds arms[0]'s fit, its τ selection, its economics, or the
-    fold grid itself. Doesn't include the baseline arm's actual DataFrame
-    contents (too expensive to hash on every call) — callers are trusted to
-    only pass a cache back in for the SAME frozen batch it was captured
-    against (runner.py does this by keying the cache file to batch_dir); the
-    per-fold val_start/val_end cross-check in run_paired_realised_backtest
-    catches a date-grid drift even so.
+    fold grid itself — including ``tank``: tank_size_litres/daily_consumption_
+    litres/evaluation_interval_days/floor_fraction feed directly into
+    aggregate_backtest's spend/litres/cpl for BOTH the always-buy replay and
+    the model replay, and evaluation_interval_days also drives the PIT
+    lga_days_since eval_dates grid, so a cache captured under one TankParams
+    is not valid economics for another (fps-e2l review finding). Doesn't
+    include the baseline arm's actual DataFrame contents (too expensive to
+    hash on every call) — callers are trusted to only pass a cache back in for
+    the SAME frozen batch it was captured against (runner.py does this by
+    keying the cache file to batch_dir); the per-fold val_start/val_end
+    cross-check in run_paired_realised_backtest catches a date-grid drift even
+    so.
     """
     return {
         "baseline_arm": baseline.name,
@@ -283,6 +291,7 @@ def _baseline_cache_fingerprint(
         "inner_fold_params": inner_fold_params,
         "fold_subset": sorted(fold_subset) if fold_subset is not None else None,
         "collect_fills": collect_fills,
+        "tank": dataclasses.asdict(tank),
     }
 
 
@@ -348,7 +357,7 @@ def run_paired_realised_backtest(
 
     fingerprint = _baseline_cache_fingerprint(
         arms[0], feature_columns, station_codes, seed,
-        outer_fold_params, inner_fold_params, fold_subset, collect_fills,
+        outer_fold_params, inner_fold_params, fold_subset, collect_fills, tank,
     )
     if baseline_cache is not None:
         if held_tau is not None:
