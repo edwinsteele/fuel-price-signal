@@ -271,6 +271,53 @@ def test_baseline_cache_reuse_skips_baseline_refit_and_history_load(monkeypatch)
     )
 
 
+def test_baseline_cache_partial_reuse_only_refits_missing_folds(monkeypatch):
+    """baseline_cache.per_fold covering only SOME of this run's folds must
+    reuse the covered ones and compute the rest fresh — not treat a partial
+    cache as fully invalid nor as fully sufficient (fps-e2l review finding:
+    this branch had no direct regression test)."""
+    fit_calls, load_history_calls, agg_calls = [], [], []
+    _install_fakes(monkeypatch, fit_calls=fit_calls, load_history_calls=load_history_calls, agg_calls=agg_calls)
+    arms1, baseline_cols, outer, inner = _cache_test_setup()
+
+    result1 = run_paired_realised_backtest(
+        arms1, baseline_cols, station_codes=[1], seed=42,
+        outer_fold_params=outer, inner_fold_params=inner, collect_fills=True, verbose=False,
+        fold_subset={1},
+    )
+    assert set(result1.baseline_cache.per_fold) == {1}
+
+    fit_calls.clear()
+    load_history_calls.clear()
+    agg_calls.clear()
+    arms2, _, _, _ = _cache_test_setup()
+    result2 = run_paired_realised_backtest(
+        arms2, baseline_cols, station_codes=[1], seed=42,
+        outer_fold_params=outer, inner_fold_params=inner, collect_fills=True, verbose=False,
+        fold_subset={1, 2},
+        baseline_cache=result1.baseline_cache,
+    )
+
+    assert set(result2.per_window["fold"].unique()) == {1, 2}
+    assert result2.meta["baseline_cache_used"] is True
+    assert result2.meta["baseline_cache_hit_folds"] == [1]  # only fold 1 was covered
+    # Not fully cached (fold 2 missing from the cache) -> both arms' histories
+    # must still be loaded (baseline_fully_cached must be False here).
+    assert len(load_history_calls) == 2
+    # fold 1: only the candidate refits (baseline reused from cache).
+    # fold 2: not cached -> both arms fit fresh. Total 1 + 2 = 3.
+    assert len(fit_calls) == 3
+    # fold 1 (cached): only the candidate's own+held replays (2 — own tau
+    # 0.35 != held/baseline-own tau 0.30). fold 2 (fresh): always-buy (1) +
+    # baseline own (1, held reuses via the math.isclose shortcut) +
+    # candidate own+held (2) = 4. Total 2 + 4 = 6.
+    assert len(agg_calls) == 6
+    assert sum(1 for name, _ in agg_calls if name == "always_buy") == 1
+
+    # The exported cache now covers both folds, ready for a later call.
+    assert set(result2.baseline_cache.per_fold) == {1, 2}
+
+
 def test_baseline_cache_rejects_explicit_held_tau():
     """Caching is only valid when held_tau is None (baseline's own τ IS the
     held τ in that mode) — an explicit override needs the baseline scored at
@@ -332,7 +379,7 @@ def test_baseline_cache_fingerprint_covers_the_documented_keys():
     arm = ArmSpec("baseline", df)
     tank = TankParams(tank_size_litres=40.0)
     fp = _baseline_cache_fingerprint(
-        arm, ["f1", "f2"], [1, 2], 42, {"train_min_days": 10}, {"val_days": 5}, {3, 1}, True, tank,
+        arm, ["f1", "f2"], [1, 2], 42, {"train_min_days": 10}, {"val_days": 5}, True, tank,
     )
     assert fp == {
         "baseline_arm": "baseline",
@@ -341,10 +388,47 @@ def test_baseline_cache_fingerprint_covers_the_documented_keys():
         "seed": 42,
         "outer_fold_params": {"train_min_days": 10},
         "inner_fold_params": {"val_days": 5},
-        "fold_subset": [1, 3],
         "collect_fills": True,
         "tank": dataclasses.asdict(tank),
     }
+
+
+def test_baseline_cache_fingerprint_excludes_fold_subset():
+    """fold_subset must NOT gate cache reuse — a fold's identity/economics are
+    independent of which subset of folds a given call asked for (see the
+    docstring). Including it would defeat BaselineCache.per_fold's whole point:
+    a call with fold_subset={1} and a later call with fold_subset={1, 2}
+    should share fold 1's fit, not be forced into a full mismatch. Enforced by
+    _baseline_cache_fingerprint not even accepting a fold_subset argument."""
+    df = _synth_df(n=60)
+    arm = ArmSpec("baseline", df)
+    fp = _baseline_cache_fingerprint(arm, ["f1", "f2"], [1, 2], 42, {}, {}, True, TankParams())
+    assert "fold_subset" not in fp
+
+
+def test_baseline_cache_fingerprint_is_immune_to_the_caller_mutating_its_dicts_afterward():
+    """The fingerprint must be a frozen snapshot, not a live reference into the
+    caller's outer/inner_fold_params dicts.
+
+    If a caller reuses the SAME dict object across two calls (a realistic
+    pattern — see runner.py's realised_kwargs), mutating it after capture must
+    not retroactively change what an already-captured cache's fingerprint
+    claims to have been fit under, or a stale cache could compare equal to a
+    later call it was never actually valid for."""
+    df = _synth_df(n=60)
+    arm = ArmSpec("baseline", df)
+    outer = {"train_min_days": 10}
+    inner = {"val_days": 5}
+
+    fp = _baseline_cache_fingerprint(arm, ["f1", "f2"], [1, 2], 42, outer, inner, True, TankParams())
+    captured_outer = dict(fp["outer_fold_params"])
+    captured_inner = dict(fp["inner_fold_params"])
+
+    outer["train_min_days"] = 9999
+    inner["val_days"] = 9999
+
+    assert fp["outer_fold_params"] == captured_outer
+    assert fp["inner_fold_params"] == captured_inner
 
 
 def test_baseline_cache_fingerprint_differs_when_tank_differs():
@@ -353,7 +437,7 @@ def test_baseline_cache_fingerprint_differs_when_tank_differs():
     reusing stale spend/litres/cpl economics (fps-e2l review finding)."""
     df = _synth_df(n=60)
     arm = ArmSpec("baseline", df)
-    common = (arm, ["f1", "f2"], [1, 2], 42, {}, {}, None, True)
+    common = (arm, ["f1", "f2"], [1, 2], 42, {}, {}, True)
     fp_default = _baseline_cache_fingerprint(*common, TankParams())
     fp_custom = _baseline_cache_fingerprint(*common, TankParams(tank_size_litres=30.0))
     assert fp_default != fp_custom

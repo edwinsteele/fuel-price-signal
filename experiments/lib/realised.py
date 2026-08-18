@@ -262,7 +262,6 @@ def _baseline_cache_fingerprint(
     seed: int,
     outer_fold_params: dict,
     inner_fold_params: dict,
-    fold_subset: Iterable[int] | None,
     collect_fills: bool,
     tank: TankParams,
 ) -> dict:
@@ -281,15 +280,38 @@ def _baseline_cache_fingerprint(
     keying the cache file to batch_dir); the per-fold val_start/val_end
     cross-check in run_paired_realised_backtest catches a date-grid drift even
     so.
+
+    Deliberately excludes ``fold_subset``: fold NUMBERING and each fold's
+    val_start/val_end come from enumerating walk_forward_folds(df,
+    **outer_fold_params) BEFORE fold_subset filters which are kept (see
+    _plan_folds), so a fold's identity and economics don't depend on which
+    subset of folds any particular call asked for — only outer_fold_params
+    does. Including fold_subset here would defeat the whole point of
+    BaselineCache.per_fold's per-fold ``.get()`` lookup: a call with
+    fold_subset={1} and a later call with fold_subset={1, 2} share fold 1's
+    exact same baseline fit, and this fingerprint must say so, not force a
+    full mismatch/refit over a difference that's irrelevant to the baseline's
+    actual computation. Partial coverage (this run needs a fold the cache
+    doesn't have) degrades per-fold to a fresh compute for just that fold, not
+    a fingerprint-level rejection — see the cache_hit_folds bookkeeping in
+    run_paired_realised_backtest.
+
+    outer_fold_params/inner_fold_params are copied (``dict(...)``), not stored
+    by reference: they're the caller's own dict objects, and a cache's
+    fingerprint must be a frozen snapshot — if the caller mutated the SAME
+    dict in place before a later call (e.g. reusing one dict variable across
+    two run_paired_realised_backtest calls), an aliased reference would drift
+    right along with it, so a fingerprint comparison against the (also-just-
+    mutated) current call's params would wrongly compare equal and reuse a
+    cache captured under different fold geometry.
     """
     return {
         "baseline_arm": baseline.name,
         "baseline_feature_columns": list(_arm_cols(baseline, feature_columns)),
         "station_codes": sorted(station_codes),
         "seed": seed,
-        "outer_fold_params": outer_fold_params,
-        "inner_fold_params": inner_fold_params,
-        "fold_subset": sorted(fold_subset) if fold_subset is not None else None,
+        "outer_fold_params": dict(outer_fold_params),
+        "inner_fold_params": dict(inner_fold_params),
         "collect_fills": collect_fills,
         "tank": dataclasses.asdict(tank),
     }
@@ -357,7 +379,7 @@ def run_paired_realised_backtest(
 
     fingerprint = _baseline_cache_fingerprint(
         arms[0], feature_columns, station_codes, seed,
-        outer_fold_params, inner_fold_params, fold_subset, collect_fills, tank,
+        outer_fold_params, inner_fold_params, collect_fills, tank,
     )
     if baseline_cache is not None:
         if held_tau is not None:
