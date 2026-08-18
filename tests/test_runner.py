@@ -18,8 +18,10 @@ import pandas as pd
 import pytest
 
 import experiments.pipeline.runner as runner_module
+from experiments.lib.realised import BaselineCache, BaselineCacheMismatch
 from experiments.pipeline.batch_freeze import resolve_baseline_columns
 from experiments.pipeline.runner import (
+    BASELINE_CACHE_FILENAME,
     DEFAULT_INNER_FOLD_PARAMS,
     RETRYABLE_STATUSES,
     STATUS_ABORTED_CANDIDATE,
@@ -33,11 +35,13 @@ from experiments.pipeline.runner import (
     _check_provider_health,
     _finish,
     _grade_run,
+    _load_baseline_cache,
     _make_lookup_provider,
     _read_pass_criterion,
     _resolve_effect,
     _resolve_zone,
     _run_wfcv_screen,
+    _save_baseline_cache,
     _summarise_for_comment,
     default_out_dir,
     post_bd_comment,
@@ -880,6 +884,158 @@ def test_run_candidate_merges_partial_inner_fold_params(tmp_path, monkeypatch):
 
     assert seen["inner_fold_params"]["val_days"] == 30
     assert seen["inner_fold_params"]["train_min_days"] == DEFAULT_INNER_FOLD_PARAMS["train_min_days"]
+
+
+# ── R0 baseline cache (fps-e2l) ───────────────────────────────────────────────
+
+def test_load_baseline_cache_round_trip(tmp_path):
+    cache = BaselineCache(fingerprint={"seed": 42}, per_fold={1: {"own_tau": 0.3}})
+    _save_baseline_cache(tmp_path, cache, verbose=False)
+
+    loaded = _load_baseline_cache(tmp_path, verbose=False)
+
+    assert loaded.fingerprint == cache.fingerprint
+    assert loaded.per_fold == cache.per_fold
+    assert not (tmp_path / (BASELINE_CACHE_FILENAME + ".tmp")).exists()
+
+
+def test_load_baseline_cache_returns_none_when_absent(tmp_path):
+    assert _load_baseline_cache(tmp_path, verbose=False) is None
+
+
+def test_load_baseline_cache_returns_none_on_corrupt_file(tmp_path):
+    """A corrupt/unreadable cache is never a reason to abort — just refit R0."""
+    (tmp_path / BASELINE_CACHE_FILENAME).write_bytes(b"not a joblib file")
+    assert _load_baseline_cache(tmp_path, verbose=False) is None
+
+
+def test_load_baseline_cache_returns_none_when_file_is_not_a_baseline_cache(tmp_path):
+    """A file that deserializes fine but isn't a BaselineCache (a foreign
+    .joblib, or a corrupted write that still happens to unpickle) must not
+    reach run_paired_realised_backtest — it would fail there with a confusing
+    AttributeError instead of this function's clear "refitting R0" message."""
+    runner_module.joblib.dump({"not": "a BaselineCache"}, tmp_path / BASELINE_CACHE_FILENAME)
+    assert _load_baseline_cache(tmp_path, verbose=False) is None
+
+
+def test_save_baseline_cache_failure_cleans_up_tmp_file(tmp_path, monkeypatch):
+    """A dump failure must not leave a half-written .tmp file behind for the
+    next run to trip over."""
+    def raising_dump(obj, path):
+        pathlib.Path(path).write_bytes(b"partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runner_module.joblib, "dump", raising_dump)
+    cache = BaselineCache(fingerprint={}, per_fold={})
+
+    _save_baseline_cache(tmp_path, cache, verbose=False)  # must not raise
+
+    assert not (tmp_path / BASELINE_CACHE_FILENAME).exists()
+    assert not (tmp_path / (BASELINE_CACHE_FILENAME + ".tmp")).exists()
+
+
+def test_run_candidate_passes_loaded_baseline_cache_into_realised_backtest(tmp_path, monkeypatch):
+    """A cache already sitting in batch_dir must be loaded and forwarded —
+    the whole point of persisting it (fps-e2l)."""
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    cache = BaselineCache(fingerprint={"seed": 42}, per_fold={1: {"own_tau": 0.3}})
+    _save_baseline_cache(batch_dir, cache, verbose=False)
+
+    seen = _capture_realised_kwargs(monkeypatch)
+    run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+    )
+
+    assert seen["baseline_cache"].fingerprint == cache.fingerprint
+    assert seen["baseline_cache"].per_fold == cache.per_fold
+
+
+def test_run_candidate_retries_uncached_on_baseline_cache_mismatch(tmp_path, monkeypatch):
+    """A stale/mismatched cache must not abort the run — only cost the retry.
+
+    First call is made with the loaded cache; on BaselineCacheMismatch, the
+    runner must retry once with baseline_cache=None rather than surfacing the
+    mismatch as aborted_pipeline (that would misreport "every candidate
+    against this batch fails identically", which isn't true here — the batch
+    is fine, only the stale cache is stale).
+    """
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    _save_baseline_cache(batch_dir, BaselineCache(fingerprint={"seed": 999}, per_fold={}), verbose=False)
+
+    calls: list[dict] = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(kwargs)
+        if kwargs["baseline_cache"] is not None:
+            raise BaselineCacheMismatch("fingerprint mismatch (test)")
+        raise RuntimeError("stop here — only the retry behaviour matters")
+
+    monkeypatch.setattr(runner_module, "run_paired_realised_backtest", fake_run)
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["baseline_cache"] is not None
+    assert calls[1]["baseline_cache"] is None
+    # The retry's RuntimeError is a genuine unexpected failure, not the mismatch
+    # itself — proves the mismatch was swallowed, not propagated as a status.
+    assert result.status == STATUS_ABORTED_ENVIRONMENT
+
+
+class _FakeRealisedFull:
+    """A RealisedResult-shaped stand-in for the (mocked, DB-free) success path."""
+
+    def __init__(self, baseline_cache):
+        self.aggregate = pd.DataFrame([
+            {"arm": "R0", "cpl_held": 200.0},
+            {"arm": "candidate", "cpl_held": 195.0},
+        ])
+        self.fills = pd.DataFrame(columns=["fold", "arm", "station_code", "date"])
+        self.meta = {
+            "n_windows": 1, "total_wall_seconds": 1.0,
+            "baseline_cache_used": baseline_cache is not None, "baseline_cache_hit_folds": [],
+        }
+        self.baseline_cache = baseline_cache
+
+
+def test_run_candidate_persists_baseline_cache_after_successful_run(tmp_path, monkeypatch):
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+
+    new_cache = BaselineCache(fingerprint={"seed": 42}, per_fold={1: {"own_tau": 0.31}})
+    monkeypatch.setattr(
+        runner_module, "run_paired_realised_backtest", lambda *a, **k: _FakeRealisedFull(new_cache)
+    )
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+    )
+
+    assert result.status == "rejected"
+    persisted = _load_baseline_cache(batch_dir, verbose=False)
+    assert persisted.fingerprint == new_cache.fingerprint
+    assert persisted.per_fold == new_cache.per_fold
+
+
+def test_run_candidate_does_not_persist_when_baseline_cache_is_none(tmp_path, monkeypatch):
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+
+    monkeypatch.setattr(
+        runner_module, "run_paired_realised_backtest", lambda *a, **k: _FakeRealisedFull(None)
+    )
+
+    run_candidate(batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False)
+
+    assert not (batch_dir / BASELINE_CACHE_FILENAME).exists()
 
 
 # ── bd comment ─────────────────────────────────────────────────────────────

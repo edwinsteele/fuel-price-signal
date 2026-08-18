@@ -9,14 +9,19 @@ backtest (`experiments/lib/realised.py` — the arbiter), then emits results.jso
 rowpreds.parquet + fills.parquet and optionally posts a self-reported bd comment.
 
 R0 caching across a batch's nights (the parent design's "fit it once, cache the
-predictions") is deliberately NOT implemented here (DECIDED 2026-08-17, fps-3jj.4
-discussion): `run_paired_realised_backtest` couples the candidate's held-tau score
-to the baseline's own per-fold tau from the SAME call, so caching R0 correctly
-needs either extending `experiments/lib/realised.py` with a cached-baseline seam
-or accepting an approximation that scores the candidate at a stale tau. Both are
-real design decisions with correctness consequences for the arbiter, deferred to
-a follow-up bead (dormant until batch 2 makes the tradeoff concrete) rather than
-guessed at here. Every run refits both arms.
+predictions") is implemented via `experiments/lib/realised.py`'s BaselineCache
+seam (fps-e2l, following on from the deferral DECIDED 2026-08-17 in fps-3jj.4's
+discussion): `run_paired_realised_backtest` couples the candidate's held-tau
+score to the baseline's own per-fold tau from the SAME call, so a stale-tau
+approximation was rejected as a correctness risk to the arbiter; the cache
+seam instead captures the baseline's per-fold fit + own tau + economics and
+replays them exactly on a later call, never approximating. This module persists
+that cache to `<batch_dir>/r0_cache.joblib` (`_load_baseline_cache` /
+`_save_baseline_cache` below): night 1 of a batch has no cache and refits both
+arms; night 2+ loads it and skips refitting/re-replaying R0 entirely. A
+fingerprint mismatch (different station_codes/seed/fold params than the cache
+was captured under) falls back to a full refit rather than aborting — see
+`_load_baseline_cache`'s docstring.
 
 Outcome taxonomy (five codes — see fps-3jj):
   rejected            — ran to completion. The default outcome; results.json's
@@ -81,6 +86,7 @@ import time
 from dataclasses import dataclass
 
 import click
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -92,7 +98,12 @@ from experiments.lib.folds import iter_folds_with_baseline_fit
 from experiments.lib.gates import seed_variance_gate
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.pit_test import PitLeakError
-from experiments.lib.realised import ArmSpec, run_paired_realised_backtest
+from experiments.lib.realised import (
+    ArmSpec,
+    BaselineCache,
+    BaselineCacheMismatch,
+    run_paired_realised_backtest,
+)
 from experiments.lib.rowpreds import RowPredCollector
 from experiments.lib.zones import pooled_cpl
 from experiments.pipeline.batch_freeze import (
@@ -135,6 +146,10 @@ BASELINE_ARM = "R0"
 CANDIDATE_ARM = "candidate"
 PASS_CRITERION_FILENAME = "pass_criterion.json"
 RESULTS_FILENAME = "results.json"
+# Batch-scoped (not per-candidate) — every candidate run against a batch shares
+# the SAME R0 fit, so the cache lives alongside features.csv/fuel_signal.db in
+# batch_dir rather than in a candidate's own out_dir (fps-e2l).
+BASELINE_CACHE_FILENAME = "r0_cache.joblib"
 
 # walk_forward_folds' own defaults, read off the signature rather than restated,
 # so a change there can't silently invalidate _check_fold_geometry below.
@@ -468,13 +483,28 @@ def run_candidate(
         ArmSpec(BASELINE_ARM, candidate_frame, feature_columns=baseline_columns),
         ArmSpec(CANDIDATE_ARM, candidate_frame, feature_columns=candidate_cols, extra_feature_provider=provider),
     ]
+    baseline_cache = _load_baseline_cache(batch_dir, verbose=verbose)
+    realised_kwargs = dict(
+        seed=realised_seed, station_codes=station_codes,
+        outer_fold_params=outer_fold_params, inner_fold_params=inner_fold_params,
+        fold_subset=fold_subset, db_path=db_path, collect_fills=True, verbose=verbose,
+    )
     try:
-        realised = run_paired_realised_backtest(
-            arms, baseline_columns,
-            seed=realised_seed, station_codes=station_codes,
-            outer_fold_params=outer_fold_params, inner_fold_params=inner_fold_params,
-            fold_subset=fold_subset, db_path=db_path, collect_fills=True, verbose=verbose,
-        )
+        try:
+            realised = run_paired_realised_backtest(
+                arms, baseline_columns, baseline_cache=baseline_cache, **realised_kwargs
+            )
+        except BaselineCacheMismatch as exc:
+            # A stale/incompatible cache (e.g. this run overrides fold params
+            # away from the batch's usual config) is never a reason to abort —
+            # only a reason not to reuse it. Retry once, uncached: correctness
+            # is unaffected either way, this only costs the ~12min/night the
+            # cache would otherwise have saved (fps-e2l).
+            if verbose:
+                print(f"[runner] baseline cache mismatch ({exc}); refitting R0 this run.", flush=True)
+            realised = run_paired_realised_backtest(
+                arms, baseline_columns, baseline_cache=None, **realised_kwargs
+            )
     except ValueError as exc:
         # experiments/lib/realised.py's own explicit ValueErrors are all
         # config-shaped (duplicate/reserved arm names, mismatched arm index,
@@ -505,6 +535,12 @@ def run_candidate(
             STATUS_ABORTED_ENVIRONMENT, name, t0, out_dir,
             error=f"realised backtest raised: {exc!r}", bead_id=bead_id,
         )
+
+    if realised.baseline_cache is not None:
+        # Persist for the batch's next candidate run, whether this run reused a
+        # cache (pass-through, keeps it fresh) or just built one from scratch
+        # (night 1). Best-effort — see _save_baseline_cache.
+        _save_baseline_cache(batch_dir, realised.baseline_cache, verbose=verbose)
 
     provider_health_error = _check_provider_health(provider)
     if provider_health_error is not None:
@@ -558,6 +594,8 @@ def run_candidate(
             "realised_seed": realised_seed,
             "n_windows": realised.meta["n_windows"],
             "realised_wall_seconds": realised.meta["total_wall_seconds"],
+            "baseline_cache_used": realised.meta["baseline_cache_used"],
+            "baseline_cache_hit_folds": realised.meta["baseline_cache_hit_folds"],
             "wall_seconds": wall_seconds,
             "pass_criterion": _read_pass_criterion(batch_dir),
             "extra_feature_provider_hits": provider.stats["hits"],
@@ -674,6 +712,63 @@ def _build_axis_lookup(frame: pd.DataFrame, axis_series: pd.Series) -> pd.DataFr
 def _read_pass_criterion(batch_dir: pathlib.Path) -> dict | None:
     path = pathlib.Path(batch_dir) / PASS_CRITERION_FILENAME
     return json.loads(path.read_text()) if path.exists() else None
+
+
+def _load_baseline_cache(batch_dir: pathlib.Path, *, verbose: bool = True) -> BaselineCache | None:
+    """The batch's cached R0 fit, if present and readable.
+
+    Best-effort: a missing, corrupt, or unreadable cache file just means this
+    run refits R0 from scratch (still correct, just without the ~12min/night
+    saving) — never a reason to abort a candidate run. A fingerprint mismatch
+    (e.g. this run overrides inner_fold_params away from the batch's usual
+    config) is handled the same way, one level up in run_candidate: it's caught
+    around the run_paired_realised_backtest call and retried with
+    baseline_cache=None, rather than surfaced as an aborted_pipeline error —
+    reusing a stale-fingerprint cache would be a correctness bug, but simply
+    not reusing it never is (fps-e2l).
+
+    A file that deserializes but isn't a BaselineCache (a corrupted write that
+    still happens to unpickle, or a foreign .joblib someone dropped in
+    batch_dir) is treated the same as "unreadable" — returning it as-is would
+    let an object with no .fingerprint/.per_fold reach run_paired_realised_
+    backtest and fail there with a confusing AttributeError instead of this
+    function's clear "refitting R0" message.
+    """
+    path = pathlib.Path(batch_dir) / BASELINE_CACHE_FILENAME
+    if not path.exists():
+        return None
+    try:
+        loaded = joblib.load(path)
+    except Exception as exc:  # noqa: BLE001 — any load failure just means "no cache"
+        if verbose:
+            print(f"[runner] baseline cache at {path} unreadable ({exc!r}); refitting R0.", flush=True)
+        return None
+    if not isinstance(loaded, BaselineCache):
+        if verbose:
+            print(
+                f"[runner] baseline cache at {path} is not a BaselineCache ({type(loaded)!r}); "
+                "refitting R0.", flush=True,
+            )
+        return None
+    return loaded
+
+
+def _save_baseline_cache(batch_dir: pathlib.Path, cache: BaselineCache, *, verbose: bool = True) -> None:
+    """Persist the batch's R0 cache for the next candidate run to reuse.
+
+    Best-effort and atomic (write-then-rename via Path.replace/os.replace): a
+    write failure or interruption must not lose an already-completed backtest,
+    and a half-written file must never be read by a later run as if valid.
+    """
+    path = pathlib.Path(batch_dir) / BASELINE_CACHE_FILENAME
+    tmp_path = path.with_name(path.name + ".tmp")
+    try:
+        joblib.dump(cache, tmp_path)
+        tmp_path.replace(path)
+    except Exception as exc:  # noqa: BLE001 — caching is an optimization, not a correctness requirement
+        if verbose:
+            print(f"[runner] failed to persist baseline cache to {path} ({exc!r}); continuing.", flush=True)
+        tmp_path.unlink(missing_ok=True)
 
 
 def _make_lookup_provider(candidate_frame: pd.DataFrame, columns: list[str], date_column: str = "price_date"):
