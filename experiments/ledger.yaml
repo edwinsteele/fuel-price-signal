@@ -28,6 +28,37 @@
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
 - candidate: tgp_delta_7d
+  inputs: [tgp_delta_7d]
+  claim: >-
+    7-day AIP Sydney TGP (wholesale floor) momentum predicts near-term retail
+    descent, concentrating in shock regimes where today's wholesale-floor
+    position alone misleads. AI-sourced pipeline's held-out re-lock check
+    (batch0) on the claim that graduated the arbiter 2026-06-22.
+  falsified: >-
+    Pooled realised Δcpl is +0.0941 c/L (r0 189.66 → candidate 189.7541) —
+    opposite the predicted negative sign, failing the batch's pre-registered
+    sign+concentration criterion on sign alone. Harm DOES concentrate in shock
+    as predicted (shock +0.272 vs normal +0.009) but as a cost, not the
+    rescue of the raw gap's known shock weakness — and that pooled shock
+    number is driven almost entirely by one fold (fold 13, +1.09, not
+    seed-flagged); the other 3 shock folds are flat/mildly helpful. WFCV
+    log-loss favours the candidate (descriptive colour only, doesn't move the
+    arbiter). Batch0 used `add_columns` passthrough, not the original
+    graduation's `extra_feature_provider` closure, so this run cannot
+    distinguish data-vintage decay from implementation difference.
+  not_tested: >-
+    Whether the extra_feature_provider closure implementation (matching the
+    June graduation) reproduces the negative pooled effect on this later
+    snapshot. Whether fold 13 alone reflects a specific historical event where
+    wholesale-floor velocity misled, vs the other three shock folds
+    (flat/mildly helpful). Fold 3's extreme seed instability (~280x cohort
+    median) sits inside the normal-regime average, untested under a wider
+    seed sweep. Whether +0.0941 c/L clears a noise floor at all — not
+    available yet (fps-3jj.9).
+  outcome: rejected
+  evidence: experiments/candidates/batch0/tgp_delta_7d
+
+- candidate: tgp_delta_7d
   inputs: [AIP Sydney ULP terminal gate price, price_date]
   claim: >-
     The 7-day velocity of the wholesale floor leads retail: when the floor is

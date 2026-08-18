@@ -1,0 +1,292 @@
+{
+  "candidate": {
+    "name": "tgp_delta_7d",
+    "hypothesis": "7-day AIP Sydney TGP (wholesale floor) momentum predicts near-term retail descent, concentrating in shock regimes where today's wholesale floor position alone misleads (the raw gap station_minus_tgp_cents helps calm but hurts shock; tgp_delta_7d rescues exactly the shock regression). Already graduated the realised arbiter, 2026-06-22, experiments/2026-06-20_leading_indicators/.",
+    "predicted_signature": "Pooled realised CPL delta negative, sign concentrated in shock-regime folds (the highest-baseline-CPL / highest oracle-headroom folds), not magnitude-matched to the original -0.039 c/L pooled figure \u2014 later data vintage (snapshot 2026-08-10 vs the June 2026 experiment) and add_columns passthrough rather than the experiment's extra_feature_provider closure.",
+    "confidence_effect": 0.9,
+    "confidence_zone": 0.75,
+    "columns": [
+      "tgp_delta_7d"
+    ],
+    "inputs": [
+      "tgp_delta_7d"
+    ],
+    "prior_art": "Graduated the realised arbiter 2026-06-22 (14 WF folds, pooled -0.039 c/L; see project_tgp_leading_indicator memory / experiments/2026-06-20_leading_indicators/). The raw gap station_minus_tgp_cents (same upstream series, adjacent mechanism) was rejected: it helps calm (-0.012) but hurts shock (+0.011), because today's TGP position is accurate when the floor is stable and misleading when it's moving. tgp_delta_7d reads the floor's direction instead of its level, which is the complementary, not redundant, mechanism. Production compute already landed (#272 downloader, #275 DB ingest, #276 features.py compute); this candidate is the held-out re-lock check, not a new proposal.",
+    "target": {
+      "axis": "regime",
+      "expect_concentration_in": [
+        "shock"
+      ],
+      "folds": []
+    }
+  },
+  "provenance": {
+    "candidate": "tgp_delta_7d",
+    "batch": "batch0",
+    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch0",
+    "snapshot_date": "2026-08-10",
+    "git_sha": "94cdfef78f461c4687e026627f3f7673505a35b8",
+    "git_sha_is_run_time": true,
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "wall_seconds": 2022.0951882500667,
+    "status": "rejected",
+    "bead_id": "fps-32p"
+  },
+  "headline": {
+    "realised": {
+      "arbiter": "realised CPL (cost per litre), held tau \u2014 clean attribution, isolated from the operating point",
+      "r0_cpl_held": 189.66,
+      "candidate_cpl_held": 189.7541474654378,
+      "delta_cpl_held": 0.09414746543779984,
+      "effect_resolved": false,
+      "r0_cpl_own": 189.66,
+      "candidate_cpl_own": 189.7541474654378
+    },
+    "wfcv_log_loss": {
+      "label": "descriptive colour, NOT the arbiter (docs/CONVENTIONS.md \u2014 #250/#254 both showed flat WFCV log-loss with opposite realised outcomes)",
+      "delta_ll_all_mean_across_folds": -0.010634971264510991,
+      "delta_ll_hard25_mean_across_folds": -0.04978632180441873
+    },
+    "zone": {
+      "resolved": null,
+      "reason": "CONFIDENCE_EFFECT did not resolve true \u2014 scored conditionally"
+    },
+    "pass_criterion": null
+  },
+  "breakdowns": {
+    "per_fold": [
+      {
+        "fold": 1,
+        "regime": "shock",
+        "n_fills": 51,
+        "suppressed": false,
+        "delta_cpl_own": 0.0,
+        "delta_ll_all_median": 0.006736092456338272,
+        "delta_ll_hard25_median": 0.0059362477206412745
+      },
+      {
+        "fold": 2,
+        "regime": "normal",
+        "n_fills": 51,
+        "suppressed": false,
+        "delta_cpl_own": 0.786885245901658,
+        "delta_ll_all_median": 0.00493433503815216,
+        "delta_ll_hard25_median": -0.022272700585357796
+      },
+      {
+        "fold": 3,
+        "regime": "normal",
+        "n_fills": 54,
+        "suppressed": false,
+        "delta_cpl_own": 0.25230769230768146,
+        "delta_ll_all_median": -0.04228500960523801,
+        "delta_ll_hard25_median": -0.18080164373338015
+      },
+      {
+        "fold": 4,
+        "regime": "shock",
+        "n_fills": 54,
+        "suppressed": false,
+        "delta_cpl_own": -0.046875,
+        "delta_ll_all_median": -0.014238093828083331,
+        "delta_ll_hard25_median": -0.014851633101750528
+      },
+      {
+        "fold": 5,
+        "regime": "normal",
+        "n_fills": 53,
+        "suppressed": false,
+        "delta_cpl_own": -0.1538461538461604,
+        "delta_ll_all_median": -0.00629351434019737,
+        "delta_ll_hard25_median": -0.01339961765507669
+      },
+      {
+        "fold": 6,
+        "regime": "normal",
+        "n_fills": 55,
+        "suppressed": false,
+        "delta_cpl_own": -0.1727595628415486,
+        "delta_ll_all_median": -0.0026432859604848813,
+        "delta_ll_hard25_median": 0.000836484588342068
+      },
+      {
+        "fold": 7,
+        "regime": "normal",
+        "n_fills": 51,
+        "suppressed": false,
+        "delta_cpl_own": -0.28333333333333144,
+        "delta_ll_all_median": -0.0013037195807706903,
+        "delta_ll_hard25_median": -0.0007798577292200681
+      },
+      {
+        "fold": 8,
+        "regime": "normal",
+        "n_fills": 58,
+        "suppressed": false,
+        "delta_cpl_own": -0.5573118279569655,
+        "delta_ll_all_median": -0.05061101594400372,
+        "delta_ll_hard25_median": -0.204489092580313
+      },
+      {
+        "fold": 9,
+        "regime": "shock",
+        "n_fills": 57,
+        "suppressed": false,
+        "delta_cpl_own": 0.0,
+        "delta_ll_all_median": -0.01732851680819336,
+        "delta_ll_hard25_median": -0.07526241918359933
+      },
+      {
+        "fold": 10,
+        "regime": "normal",
+        "n_fills": 55,
+        "suppressed": false,
+        "delta_cpl_own": 0.0,
+        "delta_ll_all_median": 0.005267470337290497,
+        "delta_ll_hard25_median": 0.01776137525900634
+      },
+      {
+        "fold": 11,
+        "regime": "normal",
+        "n_fills": 52,
+        "suppressed": false,
+        "delta_cpl_own": 0.0,
+        "delta_ll_all_median": -0.030589954481842208,
+        "delta_ll_hard25_median": -0.12025324999343023
+      },
+      {
+        "fold": 12,
+        "regime": "normal",
+        "n_fills": 50,
+        "suppressed": false,
+        "delta_cpl_own": -0.36666666666667425,
+        "delta_ll_all_median": -0.02129968884619915,
+        "delta_ll_hard25_median": -0.09416675139572672
+      },
+      {
+        "fold": 13,
+        "regime": "shock",
+        "n_fills": 56,
+        "suppressed": false,
+        "delta_cpl_own": 1.0923076923076849,
+        "delta_ll_all_median": 0.002032814427699814,
+        "delta_ll_hard25_median": 0.0022458923363570804
+      },
+      {
+        "fold": 14,
+        "regime": "normal",
+        "n_fills": 55,
+        "suppressed": false,
+        "delta_cpl_own": 0.203125,
+        "delta_ll_all_median": 0.018732489432378097,
+        "delta_ll_hard25_median": 0.0024884607916455526
+      }
+    ],
+    "per_regime": [
+      {
+        "regime": "shock",
+        "n_fills": 218,
+        "suppressed": false,
+        "delta_cpl_own": 0.2720000000000198
+      },
+      {
+        "regime": "normal",
+        "n_fills": 535,
+        "suppressed": false,
+        "delta_cpl_own": 0.009322756334370297
+      }
+    ],
+    "per_axis": null,
+    "per_axis_coverage_note": null,
+    "min_row_cell_n": 30
+  },
+  "seed_flags": [
+    {
+      "cohort": "all",
+      "fold": 2,
+      "run": "R0",
+      "seed_std": 0.05170180882648443,
+      "ratio_vs_cohort_median": 9.083426016435585
+    },
+    {
+      "cohort": "all",
+      "fold": 2,
+      "run": "candidate",
+      "seed_std": 0.0463499741127595,
+      "ratio_vs_cohort_median": 8.143168880801097
+    },
+    {
+      "cohort": "all",
+      "fold": 3,
+      "run": "R0",
+      "seed_std": 1.5953402655462436,
+      "ratio_vs_cohort_median": 280.283332479982
+    },
+    {
+      "cohort": "all",
+      "fold": 3,
+      "run": "candidate",
+      "seed_std": 0.5102486796041353,
+      "ratio_vs_cohort_median": 89.64495123802926
+    },
+    {
+      "cohort": "all",
+      "fold": 4,
+      "run": "R0",
+      "seed_std": 0.07184194071925568,
+      "ratio_vs_cohort_median": 12.62182055545856
+    },
+    {
+      "cohort": "hard25",
+      "fold": 3,
+      "run": "R0",
+      "seed_std": 1.0232693670804893,
+      "ratio_vs_cohort_median": 57.23872889535755
+    },
+    {
+      "cohort": "hard25",
+      "fold": 3,
+      "run": "candidate",
+      "seed_std": 1.1208315513205138,
+      "ratio_vs_cohort_median": 62.6960753124466
+    },
+    {
+      "cohort": "hard25",
+      "fold": 4,
+      "run": "R0",
+      "seed_std": 0.3434013581865595,
+      "ratio_vs_cohort_median": 19.20887879172869
+    }
+  ],
+  "validation": {
+    "pit_test": "passed \u2014 reached the WFCV/realised stages, so the differential PIT truncation test found no leak",
+    "inputs_check": "passed \u2014 INPUTS declaration matched every column add_columns/add_axis actually read",
+    "candidate_column_nan_rate": {
+      "tgp_delta_7d": 0.0
+    }
+  },
+  "grading": {
+    "predicted_signature": "Pooled realised CPL delta negative, sign concentrated in shock-regime folds (the highest-baseline-CPL / highest oracle-headroom folds), not magnitude-matched to the original -0.039 c/L pooled figure \u2014 later data vintage (snapshot 2026-08-10 vs the June 2026 experiment) and add_columns passthrough rather than the experiment's extra_feature_provider closure.",
+    "verdict": "contradicted",
+    "explanation": "Pooled delta_cpl_held is +0.0941 (worse, opposite the predicted negative sign) \u2014 fails the batch's pre-registered sign+concentration criterion on sign alone. The predicted shock-concentration axis is right (shock +0.272 vs normal +0.009) but the sign inside it is backwards: shock is where the candidate hurts most, not where it rescues the raw gap's known shock weakness, and that pooled shock number is driven almost entirely by one non-seed-flagged fold (fold 13, +1.09) rather than a general shock pattern.",
+    "pending": false
+  },
+  "noise_band": {
+    "available": false,
+    "reason": "fps-3jj.9 not yet landed \u2014 no noise-floor calibration for this batch"
+  },
+  "plots": [
+    "per_fold_delta_bars.png",
+    "seed_mean_vs_median.png",
+    "realised_cpl_by_fold.png",
+    "tau_sweep.png",
+    "candidate_over_time.png",
+    "external_series_overlay.png"
+  ]
+}
