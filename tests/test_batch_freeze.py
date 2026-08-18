@@ -179,10 +179,15 @@ def test_check_baseline_contract_flags_removed_column(tmp_path):
     assert exc_info.value.removed == ["days_since_trough_entry_zzz_test_brand"]
 
 
-def _write_fake_make(repo_root: pathlib.Path, exit_code: int) -> None:
+def _write_fake_make(
+    repo_root: pathlib.Path, exit_code: int, *, features_exit_code: int = 0
+) -> None:
     repo_root.mkdir(parents=True, exist_ok=True)
     makefile = repo_root / "Makefile"
-    makefile.write_text(f"update:\n\t@exit {exit_code}\n")
+    makefile.write_text(
+        f"update:\n\t@exit {exit_code}\n"
+        f"features:\n\t@exit {features_exit_code}\n"
+    )
 
 
 def test_refresh_db_raises_on_failed_update(tmp_path):
@@ -192,7 +197,17 @@ def test_refresh_db_raises_on_failed_update(tmp_path):
         refresh_db(repo_root=repo_root)
 
 
-def test_refresh_db_succeeds_on_clean_update(tmp_path):
+def test_refresh_db_raises_on_failed_features_regen(tmp_path):
+    """A successful DB refresh followed by a failed features regen must still abort —
+    otherwise freeze_batch() would silently pin a features.csv/.parquet that predates
+    the just-refreshed DB (fps-3vo)."""
+    repo_root = tmp_path / "repo"
+    _write_fake_make(repo_root, exit_code=0, features_exit_code=1)
+    with pytest.raises(DbRefreshError):
+        refresh_db(repo_root=repo_root)
+
+
+def test_refresh_db_succeeds_on_clean_update_and_features_regen(tmp_path):
     repo_root = tmp_path / "repo"
     _write_fake_make(repo_root, exit_code=0)
     refresh_db(repo_root=repo_root)  # must not raise
