@@ -779,6 +779,98 @@ def test_model_strategy_decide_with_54feat_calibrated_artifact(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# ModelStrategy — decide with brand-trough columns (fps-3i7)
+# ---------------------------------------------------------------------------
+
+def test_model_strategy_decide_with_brand_trough_columns(tmp_path):
+    """ModelStrategy.decide populates days_since_trough_entry_<brand> natively.
+
+    Regression for fps-3i7 (the batch0 pipeline abort): decide() looped
+    LGA_FEATURE_COUNCILS to populate LGA trough columns but had no equivalent
+    loop for brand trough columns, so any feature_columns set including one
+    (e.g. batch_freeze.resolve_baseline_columns()'s discover_brand_feature_columns
+    output) raised "feature ... is in feature_columns but no value was
+    produced for it" on the very first decide() call — candidate-independent,
+    since the realised backtest's baseline arm carries no extra_feature_provider.
+    """
+    import math as _math
+
+    import joblib
+    import numpy as np
+    from sklearn.dummy import DummyClassifier
+
+    feature_columns = [*FEATURE_COLUMNS, "days_since_trough_entry_bp"]
+    clf = DummyClassifier(strategy="most_frequent")
+    clf.fit(np.zeros((2, len(feature_columns))), [0, 1])
+    model_path = tmp_path / "brand_trough_model.joblib"
+    joblib.dump({"pipeline": clf, "feature_columns": feature_columns}, model_path)
+
+    n = 270
+    period = 45
+    dates = _dates_from("2018-01-01", n)
+    prices = [
+        (d, 180.0 + 20.0 * _math.sin(2 * _math.pi * i / period))
+        for i, d in enumerate(dates)
+    ]
+    station_code = 777
+
+    history = PriceHistory(
+        avg_series=prices,
+        station_prices={station_code: prices},
+        station_lga_brand={station_code: (None, "BP")},
+        brand_mean_by_key={(d, "BP"): 178.0 for d, _ in prices},
+        brand_days_since_by_key={(d, "BP"): 12 for d, _ in prices},
+        qualifying_brands=["BP"],
+    )
+
+    strategy = ModelStrategy(model_path=model_path, threshold=0.40)
+    result = strategy.decide("2018-09-01", station_code, history)
+    assert isinstance(result, bool)
+
+
+def test_model_strategy_decide_raises_when_brand_trough_column_unfed(tmp_path):
+    """decide() still raises its named-feature ValueError when a declared
+    feature_columns entry genuinely has no source — brand-trough support
+    must not silently swallow a real config error the way a bare KeyError
+    would.
+    """
+    import math as _math
+
+    import joblib
+    import numpy as np
+    import pytest
+    from sklearn.dummy import DummyClassifier
+
+    feature_columns = [*FEATURE_COLUMNS, "days_since_trough_entry_bp"]
+    clf = DummyClassifier(strategy="most_frequent")
+    clf.fit(np.zeros((2, len(feature_columns))), [0, 1])
+    model_path = tmp_path / "brand_trough_model_unfed.joblib"
+    joblib.dump({"pipeline": clf, "feature_columns": feature_columns}, model_path)
+
+    n = 270
+    period = 45
+    dates = _dates_from("2018-01-01", n)
+    prices = [
+        (d, 180.0 + 20.0 * _math.sin(2 * _math.pi * i / period))
+        for i, d in enumerate(dates)
+    ]
+    station_code = 778
+
+    # qualifying_brands is empty, so decide() never adds a
+    # days_since_trough_entry_bp key to the feature dict at all.
+    history = PriceHistory(
+        avg_series=prices,
+        station_prices={station_code: prices},
+        station_lga_brand={station_code: (None, "BP")},
+        brand_mean_by_key={(d, "BP"): 178.0 for d, _ in prices},
+    )
+
+    strategy = ModelStrategy(model_path=model_path, threshold=0.40)
+    with pytest.raises(ValueError, match="days_since_trough_entry_bp.*no value was produced"):
+        strategy.decide("2018-09-01", station_code, history)
+
+
+# ---------------------------------------------------------------------------
 # Injection seams (#255): in-memory ModelStrategy + custom detector factory
 # ---------------------------------------------------------------------------
 
