@@ -88,6 +88,28 @@ check whether +0.0941 c/L clears a noise band or sits inside one.
 ![](candidate_over_time.png)
 ![](external_series_overlay.png)
 
+## Diagnostic — implementation-mismatch check (2026-08-18, post-dossier)
+
+The `not_tested` item below about the harness's `add_columns`/exact-key-lookup
+provider vs June's `.asof`-by-date closure was checked directly:
+`diagnostic_asof_provider.py` (this directory) reruns the identical frozen
+batch0 snapshot/seeds/fold geometry, but replaces the harness's exact
+`(station_code, date)` lookup (822 hits / 88 misses in the run above) with a
+date-only `.asof()` lookup matching June's `vel7_provider` exactly — valid
+because `tgp_delta_7d` is confirmed market-wide (one value per date, verified
+`nunique()==1` across stations before the run).
+
+**Result: bit-identical to the harness's run.** 910/910 hits, 0 misses, pooled
+`delta_cpl_held = +0.0941` — same to the decimal, same per-fold table across
+all 14 folds, fold 13 unchanged at +1.0923. Full output:
+`diagnostic_asof_provider.log`.
+
+**This rules out the implementation-mismatch explanation.** The 88 exact-key
+misses in the original run evidently never touched an economically live
+decision (LightGBM's missing-value handling made no difference to any
+buy/no-buy call on those station-days) — a faithful reproduction of June's own
+method gives the same result. The rejection is not a plumbing artifact.
+
 ## Judgement
 
 **Grading verdict: contradicted.** The predicted signature was a negative
@@ -103,12 +125,11 @@ of the pooled shock harm.
 
 **not_tested:**
 
-- Whether the original `extra_feature_provider` closure implementation
-  (matching the June graduation) reproduces the negative pooled effect on this
-  later snapshot. Batch0 used a simpler `add_columns` passthrough — a known
-  mechanical difference flagged in the candidate's own `PREDICTED_SIGNATURE`
-  ahead of the run. This run cannot distinguish "the effect decayed on newer
-  data" from "the passthrough plumbing differs from what actually graduated."
+- ~~Whether the original `extra_feature_provider` closure implementation
+  reproduces the negative pooled effect~~ — **tested 2026-08-18, see Diagnostic
+  section above: bit-identical result.** Ruled out as an explanation; the
+  candidate's own predicted-signature caveat about `add_columns` vs
+  `extra_feature_provider` does not hold up.
 - Whether fold 13 reflects a specific historical event where wholesale-floor
   velocity actively misled (a real, narrow failure mode worth understanding)
   versus a general property of shock regimes — only 4 shock folds exist here,
@@ -120,22 +141,20 @@ of the pooled shock harm.
   unknown, not just unfavourable, until `fps-3jj.9` lands a noise floor for
   this batch.
 
-**Recommendation:** Not a re-lock candidate on this evidence alone — the
-pre-registered sign+concentration criterion fails cleanly on sign, so this
-run does not support pulling `tgp_delta_7d` into `FEATURE_COLUMNS` right now.
-But a single outlier fold driving the whole effect, plus a known mechanical
-difference from the implementation that actually graduated in June, makes this
-read more like "needs a matched-implementation re-test" than a clean kill of
-the underlying mechanism. Confirms the standing call to hold off on the TGP
-re-lock (`#271`) pending more evidence, rather than closing the door on
-`tgp_delta_7d` outright.
+**Recommendation:** Not a re-lock candidate on this evidence — the
+pre-registered sign+concentration criterion fails cleanly on sign, and the
+2026-08-18 diagnostic closed off the one confound that could have explained
+the flip as an artifact. What's left is a single outlier fold (13) driving
+the whole pooled shock number, and an untested question of whether the June
+effect genuinely decayed on the later data vintage — real open ground for a
+future look, but no basis to pull `tgp_delta_7d` into `FEATURE_COLUMNS` right
+now. Confirms the standing call to hold off on the TGP re-lock (`#271`).
 
 ## Followups
 
 - `fps-3jj.9` (noise floor, P3, dormant) would let a future re-run check
   +0.0941 c/L against an actual noise band instead of reading it in isolation.
-- A matched-implementation re-test (`extra_feature_provider` instead of
-  `add_columns`) would separate "data vintage decayed the effect" from
-  "plumbing differs from June's graduation" — not filed as a bead yet; raise
-  with the owner before the generator proposes batch2 candidates against this
-  series.
+- Whether the June→now data vintage shift (rather than methodology) explains
+  the flip is still open — e.g. rerunning June's original three-arm script
+  against current data, or digging into what actually happened around fold
+  13's window (2024-10-20→2025-01-17) specifically. Not filed as a bead yet.

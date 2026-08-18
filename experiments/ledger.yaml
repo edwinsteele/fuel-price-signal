@@ -43,18 +43,21 @@
     number is driven almost entirely by one fold (fold 13, +1.09, not
     seed-flagged); the other 3 shock folds are flat/mildly helpful. WFCV
     log-loss favours the candidate (descriptive colour only, doesn't move the
-    arbiter). Batch0 used `add_columns` passthrough, not the original
-    graduation's `extra_feature_provider` closure, so this run cannot
-    distinguish data-vintage decay from implementation difference.
+    arbiter). Diagnostic re-run 2026-08-18 with an `.asof`-by-date provider
+    (matching June's `extra_feature_provider` closure exactly, ruling out the
+    `add_columns` exact-key-lookup plumbing as an explanation) reproduced
+    this result BIT-IDENTICALLY (910/910 hits vs the harness's 822/88, same
+    delta to the decimal, same per-fold table) — the rejection is not a
+    pipeline implementation artifact.
   not_tested: >-
-    Whether the extra_feature_provider closure implementation (matching the
-    June graduation) reproduces the negative pooled effect on this later
-    snapshot. Whether fold 13 alone reflects a specific historical event where
-    wholesale-floor velocity misled, vs the other three shock folds
-    (flat/mildly helpful). Fold 3's extreme seed instability (~280x cohort
-    median) sits inside the normal-regime average, untested under a wider
-    seed sweep. Whether +0.0941 c/L clears a noise floor at all — not
-    available yet (fps-3jj.9).
+    Whether fold 13 alone reflects a specific historical event where
+    wholesale-floor velocity misled (window 2024-10-20 to 2025-01-17), vs the
+    other three shock folds (flat/mildly helpful). Whether the June-to-now
+    data vintage shift itself explains the flip (not yet isolated from the
+    implementation, which is now ruled out). Fold 3's extreme seed instability
+    (~280x cohort median) sits inside the normal-regime average, untested
+    under a wider seed sweep. Whether +0.0941 c/L clears a noise floor at all
+    — not available yet (fps-3jj.9).
   outcome: rejected
   evidence: experiments/candidates/batch0/tgp_delta_7d
 

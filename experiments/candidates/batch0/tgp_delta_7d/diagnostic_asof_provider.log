@@ -1,0 +1,45 @@
+tgp_delta_7d distinct values per date: max=1 (expect 1 -- market-wide, not station-specific)
+[realised] loaded 2/2 arm histories (no baseline cache hit)  (65.1s)
+[realised] fold  1 2021-11-05→2022-02-02 always=172.98  (38.4s)
+[realised] fold  2 2022-02-03→2022-05-03 always=179.88  (43.4s)
+[realised] fold  3 2022-05-04→2022-08-01 always=199.60  (50.4s)
+[realised] fold  4 2022-08-02→2022-10-30 always=178.20  (57.6s)
+[realised] fold  5 2022-10-31→2023-01-28 always=191.33  (65.7s)
+[realised] fold  6 2023-01-29→2023-04-28 always=193.30  (73.6s)
+[realised] fold  7 2023-04-29→2023-07-27 always=183.52  (83.9s)
+[realised] fold  8 2023-07-28→2023-10-25 always=204.03  (96.1s)
+[realised] fold  9 2023-10-26→2024-01-23 always=204.42  (106.0s)
+[realised] fold 10 2024-01-24→2024-04-22 always=211.57  (116.3s)
+[realised] fold 11 2024-04-23→2024-07-21 always=210.34  (127.5s)
+[realised] fold 12 2024-07-22→2024-10-19 always=191.55  (142.6s)
+[realised] fold 13 2024-10-20→2025-01-17 always=191.59  (167.1s)
+[realised] fold 14 2025-01-18→2025-04-17 always=195.50  (181.0s)
+[realised] done  (1414.6s)
+
+=== aggregate (pooled CPL per arm, own + held tau) ===
+      arm  n_windows  own_tau_median  held_tau_median  always_cpl    cpl_own  saving_own_pct   cpl_held  saving_held_pct
+       R0         14            0.25             0.25  193.414835 189.660000        1.941338 189.660000         1.941338
+candidate         14            0.25             0.25  193.414835 189.754147        1.892661 189.754147         1.892661
+
+delta_cpl_held=+0.0941  (batch0 harness's exact-key provider got +0.0941)
+asof provider hits=910 misses=0  (harness's exact-key provider: 822 hits / 88 misses)
+
+=== per-fold delta_cpl_held (held tau), tagged shock/normal ===
+arm   candidate  regime
+fold                   
+1       +0.0000   shock
+2       +0.7869  normal
+3       +0.2523  normal
+4       -0.0469   shock
+5       -0.1538  normal
+6       -0.1728  normal
+7       -0.2833  normal
+8       -0.5573  normal
+9       +0.0000   shock
+10      +0.0000  normal
+11      +0.0000  normal
+12      -0.3667  normal
+13      +1.0923   shock
+14      +0.2031  normal
+
+[wall] 1415.4s
