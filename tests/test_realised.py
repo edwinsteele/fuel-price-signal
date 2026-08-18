@@ -249,6 +249,10 @@ def test_baseline_cache_reuse_skips_baseline_refit_and_history_load(monkeypatch)
     assert len(fit_calls) == n_folds, "only the candidate should be refit, not the baseline"
     assert result2.meta["baseline_cache_used"] is True
     assert result2.meta["baseline_cache_hit_folds"] == sorted(result1.per_window["fold"].unique().tolist())
+    # No always-buy replay (cached), and exactly 2 candidate replays per fold
+    # (own tau 0.35 != held/baseline-own tau 0.30, so both get scored fresh).
+    assert all(name != "always_buy" for name, _ in agg_calls)
+    assert len(agg_calls) == n_folds * 2
 
     pd.testing.assert_frame_equal(
         result1.per_window.reset_index(drop=True), result2.per_window.reset_index(drop=True),

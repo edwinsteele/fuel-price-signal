@@ -726,16 +726,31 @@ def _load_baseline_cache(batch_dir: pathlib.Path, *, verbose: bool = True) -> Ba
     baseline_cache=None, rather than surfaced as an aborted_pipeline error —
     reusing a stale-fingerprint cache would be a correctness bug, but simply
     not reusing it never is (fps-e2l).
+
+    A file that deserializes but isn't a BaselineCache (a corrupted write that
+    still happens to unpickle, or a foreign .joblib someone dropped in
+    batch_dir) is treated the same as "unreadable" — returning it as-is would
+    let an object with no .fingerprint/.per_fold reach run_paired_realised_
+    backtest and fail there with a confusing AttributeError instead of this
+    function's clear "refitting R0" message.
     """
     path = pathlib.Path(batch_dir) / BASELINE_CACHE_FILENAME
     if not path.exists():
         return None
     try:
-        return joblib.load(path)
+        loaded = joblib.load(path)
     except Exception as exc:  # noqa: BLE001 — any load failure just means "no cache"
         if verbose:
             print(f"[runner] baseline cache at {path} unreadable ({exc!r}); refitting R0.", flush=True)
         return None
+    if not isinstance(loaded, BaselineCache):
+        if verbose:
+            print(
+                f"[runner] baseline cache at {path} is not a BaselineCache ({type(loaded)!r}); "
+                "refitting R0.", flush=True,
+            )
+        return None
+    return loaded
 
 
 def _save_baseline_cache(batch_dir: pathlib.Path, cache: BaselineCache, *, verbose: bool = True) -> None:

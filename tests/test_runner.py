@@ -909,6 +909,15 @@ def test_load_baseline_cache_returns_none_on_corrupt_file(tmp_path):
     assert _load_baseline_cache(tmp_path, verbose=False) is None
 
 
+def test_load_baseline_cache_returns_none_when_file_is_not_a_baseline_cache(tmp_path):
+    """A file that deserializes fine but isn't a BaselineCache (a foreign
+    .joblib, or a corrupted write that still happens to unpickle) must not
+    reach run_paired_realised_backtest — it would fail there with a confusing
+    AttributeError instead of this function's clear "refitting R0" message."""
+    runner_module.joblib.dump({"not": "a BaselineCache"}, tmp_path / BASELINE_CACHE_FILENAME)
+    assert _load_baseline_cache(tmp_path, verbose=False) is None
+
+
 def test_save_baseline_cache_failure_cleans_up_tmp_file(tmp_path, monkeypatch):
     """A dump failure must not leave a half-written .tmp file behind for the
     next run to trip over."""
