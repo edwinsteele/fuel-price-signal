@@ -152,9 +152,25 @@ now. Confirms the standing call to hold off on the TGP re-lock (`#271`).
 
 ## Followups
 
+- **New lead, not yet investigated (2026-08-18): the R0 baseline itself
+  changed between June and now, and this looks like the strongest candidate
+  explanation.** batch0's 64-column baseline (`baseline_columns.json`) is
+  June's exact 54 `BASE` columns (`FEATURE_COLUMNS + LGA_FEATURE_COLUMNS +
+  NETWORK_FEATURE_COLUMNS`) **plus 10 brand-trough columns**
+  (`days_since_trough_entry_<brand>`, one per brand) that did not exist when
+  `tgp_delta_7d` graduated in June. Brand-trough distance and TGP-floor
+  distance are thematically adjacent — both are "how close to the bottom"
+  signals — so it's plausible `tgp_delta_7d`'s incremental value shrank or
+  reversed simply because the baseline it's now being measured against
+  already captures a related signal it didn't have to compete with in June.
+  This is a concrete, testable, and previously un-flagged mechanism — more
+  specific than a vague "data vintage" story, and doesn't require assuming
+  the world itself changed. See handover bd issue (filed below) for the
+  starting point.
 - `fps-3jj.9` (noise floor, P3, dormant) would let a future re-run check
   +0.0941 c/L against an actual noise band instead of reading it in isolation.
-- Whether the June→now data vintage shift (rather than methodology) explains
-  the flip is still open — e.g. rerunning June's original three-arm script
-  against current data, or digging into what actually happened around fold
-  13's window (2024-10-20→2025-01-17) specifically. Not filed as a bead yet.
+- Whether the June→now data vintage shift (rather than the baseline
+  composition above) explains the flip is still open — e.g. rerunning June's
+  original three-arm script against current data with June's ORIGINAL
+  54-column baseline (not batch0's 64), or digging into what actually
+  happened around fold 13's window (2024-10-20→2025-01-17) specifically.

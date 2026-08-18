@@ -50,14 +50,19 @@
     delta to the decimal, same per-fold table) — the rejection is not a
     pipeline implementation artifact.
   not_tested: >-
-    Whether fold 13 alone reflects a specific historical event where
-    wholesale-floor velocity misled (window 2024-10-20 to 2025-01-17), vs the
-    other three shock folds (flat/mildly helpful). Whether the June-to-now
-    data vintage shift itself explains the flip (not yet isolated from the
-    implementation, which is now ruled out). Fold 3's extreme seed instability
-    (~280x cohort median) sits inside the normal-regime average, untested
-    under a wider seed sweep. Whether +0.0941 c/L clears a noise floor at all
-    — not available yet (fps-3jj.9).
+    STRONGEST UNTESTED LEAD: batch0's 64-col baseline = June's exact 54-col
+    BASE plus 10 new days_since_trough_entry_<brand> columns that did not
+    exist when this graduated in June. Brand-trough distance and TGP-floor
+    distance are thematically adjacent (both "how close to the bottom") —
+    tgp_delta_7d's incremental value may have shrunk/reversed simply because
+    a related signal is now already in the baseline, independent of any
+    change in the world. Not yet tested — see bd fps-nor. Also untested:
+    whether fold 13 alone reflects a specific historical event (window
+    2024-10-20 to 2025-01-17) vs the other three shock folds (flat/mildly
+    helpful); whether June-to-now data vintage shift explains the flip
+    independent of the baseline-composition lead above; fold 3's extreme
+    seed instability (~280x cohort median) inside the normal-regime average;
+    whether +0.0941 c/L clears a noise floor at all (fps-3jj.9, not built).
   outcome: rejected
   evidence: experiments/candidates/batch0/tgp_delta_7d
 

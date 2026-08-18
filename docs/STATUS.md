@@ -13,7 +13,7 @@ Project-level state for agents picking up cold. Update this file when a phase co
 | `db.py` | Done | SQLite schema; upsert/load helpers; all read helpers |
 | `fill.py` | Done | Forward-fill per-station gaps into `daily_prices` |
 | `live.py` | Done | FuelCheck OAuth2; all-NSW all-fuel-type snapshots |
-| `tgp.py` | Partial | AIP Sydney TGP downloader → `data/tgp/tgp_sydney.csv`; daily `tgp-fetch.yml` action. Feeds pending `tgp_delta_7d` feature (#271); not yet in DB/features/model. |
+| `tgp.py` | Partial | AIP Sydney TGP downloader → `data/tgp/tgp_sydney.csv`; daily `tgp-fetch.yml` action. `tgp_delta_7d` is computed into every features.csv row (chips 1–3 of #271 done) but deliberately held OUT of `FEATURE_COLUMNS`/the trained model. AI-sourced pipeline's batch0 re-test (2026-08-18) rejected it — pooled realised delta_cpl_held +0.0941, wrong sign vs the original June graduation; a diagnostic re-run with June's exact implementation reproduced this bit-identically, ruling out a plumbing explanation. `#271`'s remaining chips (`FEATURE_COLUMNS` bump + `decide()` wiring) are on **hold** pending that disagreement — see `experiments/candidates/batch0/tgp_delta_7d/README.md`. |
 | `series.py` | Done | `resolve()`, `resolve_members()`, `enumerate_groups()`, `SeriesError` |
 | `cycle.py` | Done | `CycleDetector`; `detect(as_of_date)` → `CycleState`; sticky `find_peaks` confirmation (#250, no boundary whipsaw); 26 unit tests |
 | `signal.py` | Done | Four-signal port; `combine_signals`; 38 unit + integration tests |
