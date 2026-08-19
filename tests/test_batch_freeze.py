@@ -39,7 +39,7 @@ def _write_source(tmp_path: pathlib.Path, df: pd.DataFrame) -> tuple[pathlib.Pat
     return features_path, db_path
 
 
-def test_resolve_baseline_columns_is_sorted_and_excludes_brand_columns():
+def test_resolve_baseline_columns_excludes_brand_columns():
     """Brand-trough columns are computed into features.csv but are NOT in the lock.
 
     Phase 4b was evaluated and walked away on 2026-06-02 (docs/STATUS.md § Phase 4b;
@@ -49,11 +49,27 @@ def test_resolve_baseline_columns_is_sorted_and_excludes_brand_columns():
     """
     df = _features_df()
     resolved = resolve_baseline_columns(df)
-    assert resolved == sorted(resolved)
     assert "days_since_trough_entry_zzz_test_brand" not in resolved
     assert set(FEATURE_COLUMNS) <= set(resolved)
     assert set(resolved) == set(
         FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
+    )
+
+
+def test_resolve_baseline_columns_is_in_production_order_not_sorted():
+    """Order is part of the contract (fps-zci).
+
+    LightGBM breaks equal-gain split ties by feature index, so the same 54 columns
+    in a different order fit a different model — measured at 732/47,823 val rows'
+    probabilities changing, and 0.038 c/L on batch0's pooled realised delta. The
+    authoritative order is the one the locked artifact was trained in, which is
+    the group concatenation below, NOT its sorted permutation (they differ in 52
+    of 54 positions).
+    """
+    resolved = resolve_baseline_columns(_features_df())
+    assert resolved == FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
+    assert resolved != sorted(resolved), (
+        "sorted() reshuffles 52 of 54 indices away from the locked artifact's order"
     )
 
 
