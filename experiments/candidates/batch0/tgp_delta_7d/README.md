@@ -1,85 +1,90 @@
-# batch0 / tgp_delta_7d — pipeline re-lock check
+# batch0 / tgp_delta_7d — pipeline calibration run
 
-- **Date:** 2026-08-18
+- **Date:** 2026-08-19 (supersedes the 2026-08-18 run; see § History)
 - **Branch:** main
-- **SHA:** 94cdfef78f461c4687e026627f3f7673505a35b8
-- **Status:** done
-- **Bead:** fps-32p
+- **SHA:** 0a69c971eb4d0bf6fc0318d9565d1039cb847e00
+- **Status:** done — **calibration PASSED**
+- **Beads:** fps-32p (candidate), fps-nor (investigation), fps-sa1 + fps-zci (the two defects it found)
 
-## Hypothesis
+## What this run is for
 
-7-day AIP Sydney TGP (wholesale floor) momentum predicts near-term retail descent,
-concentrating in shock regimes where today's wholesale-floor position alone
-misleads (the raw gap `station_minus_tgp_cents` helps calm but hurts shock;
-`tgp_delta_7d` was supposed to rescue exactly that shock regression). Already
-graduated the realised arbiter once, 2026-06-22
-(`experiments/2026-06-20_leading_indicators/`, pooled −0.039 c/L, 14 WF folds).
-This run is the AI-sourced pipeline's held-out re-lock check on that same claim,
-not a new proposal — batch0 was purpose-built as the pipeline's known-graduate
-sanity check.
+batch0 exists to calibrate the AI-sourced pipeline, not to decide anything about
+`tgp_delta_7d`. The question is narrow: **does the pipeline produce the same
+number as an independently written script given the same inputs?**
+
+The reference is `diagnostic_baseline_composition.py` in this directory — same
+harness (`run_paired_realised_backtest`), same frozen snapshot, same 54-column
+production baseline, same fold geometry, seed 42. `runner.py`'s realised stage is
+single-seed at `SEEDS[0]=42`, so this is an exact-reproduction check.
 
 ## How to invoke this script
 
 ```bash
-PYTHONPATH=. uv run python -m experiments.pipeline.launch --candidate experiments/candidates/batch0/tgp_delta_7d.py
+PYTHONPATH=. uv run python -m experiments.pipeline.runner \
+  --batch-dir experiments/batches/batch0 \
+  --candidate experiments/candidates/batch0/tgp_delta_7d.py
 ```
+
+## Calibration result — PASSED
+
+| | pipeline | independent reference | diff |
+|---|---|---|---|
+| R0 `cpl_held` | 189.6717090069284 | 189.671709 | 0 |
+| candidate `cpl_held` | 189.6775604142693 | 189.677560 | 0 |
+| **`delta_cpl_held`** | **+0.005851** | **+0.0059** | **0** |
+
+The reference was computed *before* the fix that made this run possible, by a
+different script, using a different feature-injection path (`.asof`-by-date
+provider vs the pipeline's `add_columns` + exact-`(station_code, date)` lookup,
+822 hits / 88 misses). It still matches to every printed digit — so the 88
+exact-key misses again never touch an economically live decision.
+
+**The pipeline is exact.** What was wrong twice before was the *contract handed
+to it*, not the code.
 
 ## Facts
 
-All numbers below are transcribed from `facts.json` in this directory — no new
-arithmetic.
+Transcribed from `facts.json` — no new arithmetic.
 
-**Provenance:** batch `batch0`, snapshot 2026-08-10, seeds [42, 43, 44, 45, 46],
-wall time 2022.1s, bead `fps-32p`, pipeline status `rejected`.
+**Provenance:** batch `batch0`, snapshot 2026-08-10, seeds [42, 43, 44, 45, 46]
+(realised stage uses 42 alone), wall 1543.3s, status `rejected`.
 
 **Headline (realised CPL, held τ — the arbiter):**
 
-| | R0 (baseline) | candidate | delta |
+| | R0 | candidate | delta |
 |---|---|---|---|
-| CPL held | 189.66 | 189.7541 | **+0.0941** |
+| CPL held | 189.6717 | 189.6776 | **+0.0059** |
 
-`effect_resolved`: **false**. Zone: not resolved — `CONFIDENCE_EFFECT` (0.9) did
-not resolve true, so this run scored conditionally rather than against a
-sign+magnitude gate.
+`effect_resolved`: **false**. `CONFIDENCE_EFFECT` is 0.5 by design for this run —
+sign carries no information at this magnitude — so it scored conditionally.
 
-**WFCV log-loss** (descriptive colour only, NOT the arbiter — see
-`docs/CONVENTIONS.md` #250/#254, flat WFCV log-loss has shown opposite realised
-outcomes before): Δll_all mean across folds −0.0106, Δll_hard25 mean −0.0498 —
-both favour the candidate. Disagrees with the realised-CPL headline.
+**WFCV log-loss** (descriptive colour, NOT the arbiter): Δll_all mean −0.0137,
+Δll_hard25 mean −0.0646. Both favour the candidate, and disagree with the
+realised headline — the same divergence seen in June.
 
-**Per-regime breakdown** (min cell n=30, nothing suppressed):
+**Per-regime** (min cell n=30, nothing suppressed):
 
 | regime | n_fills | delta_cpl_own |
 |---|---|---|
-| shock | 218 | **+0.2720** |
-| normal | 535 | +0.0093 |
+| shock | 218 | +0.0320 |
+| normal | 534 | −0.0174 |
 
-**Per-fold, shock folds only** (the axis the hypothesis targets):
+**Shock folds** (the axis June's hypothesis targeted):
 
-| fold | n_fills | delta_cpl_own | seed-flagged? |
-|---|---|---|---|
-| 1 | 51 | 0.0000 | no |
-| 4 | 54 | −0.0469 | no |
-| 9 | 57 | 0.0000 | no |
-| 13 | 56 | **+1.0923** | no |
+| fold | n_fills | delta_cpl_own |
+|---|---|---|
+| 1 | 51 | 0.0000 |
+| 4 | 54 | +0.1094 |
+| 9 | 57 | −0.2989 |
+| 13 | 56 | +0.1271 |
 
-(Full 14-fold table, all regimes, is in `facts.json`.)
+Fold 13 — which drove essentially all of the 2026-08-18 run's apparent shock harm
+at +1.09 — is +0.127 here. Its dominance was an artifact of the wrong baseline.
+The largest contributor now is fold 2 (+1.147), a *normal* fold.
 
-**Seed stability:** `seed_flags` lists 8 cells exceeding 5× the cohort-median
-seed_std. The largest is fold 3 (normal regime), R0 seed_std=1.595 — **~280×**
-the cohort median — and its candidate-side counterpart at ~90×. Folds 2 and 4
-also flag at 8–13×. None of the four **shock** folds are flagged, so fold 13's
-+1.09 is not a seed-noise artifact.
-
-**Validation:** PIT test passed (reached WFCV/realised stages — no leak).
-INPUTS check passed. `tgp_delta_7d` NaN rate: 0.0%.
-
-**Noise floor:** not available yet (`fps-3jj.9`, P3, not built) — no way yet to
-check whether +0.0941 c/L clears a noise band or sits inside one.
-
-**Plots:** `per_fold_delta_bars.png`, `seed_mean_vs_median.png`,
-`realised_cpl_by_fold.png`, `tau_sweep.png`, `candidate_over_time.png`,
-`external_series_overlay.png`.
+**Seed stability:** 8 cells exceed 5× the cohort-median seed_std; none of the four
+shock folds. **Validation:** PIT passed, INPUTS passed, `tgp_delta_7d` NaN rate
+0.0%. **Noise floor:** still unavailable (`fps-3jj.9`).
 
 ![](per_fold_delta_bars.png)
 ![](realised_cpl_by_fold.png)
@@ -88,180 +93,99 @@ check whether +0.0941 c/L clears a noise band or sits inside one.
 ![](candidate_over_time.png)
 ![](external_series_overlay.png)
 
-## Diagnostic — implementation-mismatch check (2026-08-18, post-dossier)
+## History — two contract defects, found by this candidate
 
-The `not_tested` item below about the harness's `add_columns`/exact-key-lookup
-provider vs June's `.asof`-by-date closure was checked directly:
-`diagnostic_asof_provider.py` (this directory) reruns the identical frozen
-batch0 snapshot/seeds/fold geometry, but replaces the harness's exact
-`(station_code, date)` lookup (822 hits / 88 misses in the run above) with a
-date-only `.asof()` lookup matching June's `vel7_provider` exactly — valid
-because `tgp_delta_7d` is confirmed market-wide (one value per date, verified
-`nunique()==1` across stations before the run).
+The calibration took three attempts. Each failure was a real defect in what the
+pipeline was told the baseline *was*, and neither was in the pipeline itself.
 
-**Result: bit-identical to the harness's run.** 910/910 hits, 0 misses, pooled
-`delta_cpl_held = +0.0941` — same to the decimal, same per-fold table across
-all 14 folds, fold 13 unchanged at +1.0923. Full output:
-`diagnostic_asof_provider.log`.
-
-**This rules out the implementation-mismatch explanation.** The 88 exact-key
-misses in the original run evidently never touched an economically live
-decision (LightGBM's missing-value handling made no difference to any
-buy/no-buy call on those station-days) — a faithful reproduction of June's own
-method gives the same result. The rejection is not a plumbing artifact.
-
-## Diagnostic 2 — baseline composition + data vintage (2026-08-19, bd fps-nor)
-
-`diagnostic_baseline_composition.py` (this directory) reran the frozen batch0
-snapshot with three arms at seed 42 and identical fold geometry: `R0_54` (June's
-exact 54-column `BASE`), `cand_54` (`BASE + tgp_delta_7d`, June's `.asof`
-provider), and `R0_64` (batch0's 64-column baseline, as an in-process anchor).
-Outputs: `baseline_composition_{aggregate,deltas,per_window,fills}.csv`,
-`diagnostic_baseline_composition.log`.
-
-**Two facts settled before the run.** The TGP series is bit-identical between
-June's `AIP_TGP_2026-06-19.xlsx` (put through `realised_tgp.py`'s own
-`_load_tgp_pit()`) and batch0's `tgp_delta_7d` column — 3520 overlapping dates,
-max|diff| 0.000000. And batch0's 64-column R0 is **not the production baseline**:
-`batch_freeze.resolve_baseline_columns()` appended
-`discover_brand_feature_columns(df)`, pulling in the 10 Phase 4b brand-trough
-columns that were **evaluated and rejected on 2026-06-02** (docs/STATUS.md
-§ Phase 4b; AGENTS.md § Canonical feature set). `lgbm_calibrated.joblib` carries
-54. So the README's earlier framing — "10 new columns that did not exist in
-June" — was wrong twice over: they landed 2026-06-02 (PRs #183/#184), 18 days
-*before* the TGP experiment, and they are rejected, not new. Fixed in bd
-`fps-sa1`; the general problem is bd `fps-zci`.
-
-**The 2×2 (pooled `cpl_held`, always-buy 193.4148 in every cell):**
-
-| baseline | no tgp | + tgp_delta_7d | delta |
+| run | R0 | delta | defect |
 |---|---|---|---|
-| 54-col, June vintage | 189.7923 | 189.7529 | **−0.0394** |
-| 54-col, batch0 snapshot | 189.6717 | 189.6776 | **+0.0059** |
-| 64-col, batch0 snapshot | 189.6600 | 189.7541 | **+0.0941** |
+| 2026-08-18 | 64 cols, sorted | +0.0941 | wrong column **set** — carried the 10 rejected Phase 4b brand-trough columns |
+| 2026-08-19 (first) | 54 cols, sorted | +0.0439 | wrong column **order** — alphabetical, not the locked artifact's |
+| 2026-08-19 (final) | 54 cols, production order | **+0.0059** | — |
 
-The `R0_64` anchor reproduced batch0's 189.6600 **exactly**, so this process is
-a faithful reproduction of the original run and the other cells are comparable.
+**Defect 1 — set (bd `fps-sa1`, PR #309).**
+`batch_freeze.resolve_baseline_columns()` appended
+`discover_brand_feature_columns(df)`, on the rationale that it mirrored
+`train_lgbm`'s default resolution. It did — but that default is not the lock; the
+lock is `train_lgbm --no-brand-features`. The 10 brand-trough columns are Phase 4b,
+**evaluated and rejected 2026-06-02**. Every batch0 candidate was being graded
+against production-plus-a-rejected-feature-group.
 
-**Attribution of the −0.0394 → +0.0941 swing (+0.1335 total):**
+**Defect 2 — order (bd `fps-zci`, PR #310).** The same function returned the
+corrected 54 columns *sorted*. The locked artifact is in group order
+(`FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS`), and the two
+differ in **52 of 54 positions**. LightGBM breaks equal-gain split ties by feature
+index, so a permutation fits a different model: 732/47,823 val rows change
+probability (max |Δp| 0.090). Confirmed by rerunning the reference *in sorted
+order* — it reproduced the pipeline's sorted run to 7 decimal places, so order was
+the entire remaining discrepancy.
 
-| source | contribution |
-|---|---|
-| baseline composition (64 vs 54, same snapshot) | **+0.0882** |
-| data vintage (June → batch0 snapshot, same 54 columns) | **+0.0453** |
-
-Both are real; neither alone explains it. Note the composition effect lands
-mostly on the *candidate* side: the 10 brand-trough columns move R0 by only
-−0.0117 c/L, but move the tgp arm by +0.0765. The vintage shift is largely
-common-mode — R0_54 improved 0.1206 and cand_54 improved 0.0753 against June, so
-the pairing absorbs most of it and only +0.0453 survives into the delta.
-
-**But the headline is not the attribution — it's the resolution.** On the correct
-54-column baseline and current data, `tgp_delta_7d`'s pooled realised delta is
-**+0.0059 c/L**. That is assembled from per-fold pooled contributions an order of
-magnitude larger that very nearly cancel:
-
-| fold | 8 | 2 | 9 | 13 | 6 | 10 | others |
-|---|---|---|---|---|---|---|---|
-| contribution (c/L) | +0.654 | +0.288 | +0.210 | −0.209 | −0.208 | −0.046 | \|·\| < 0.03 |
-
-The largest single fold contributes **110× the pooled result**. Across all 14
-folds the two arms differ on **11 of 752 fills each way** (1.5%), and the two
-*baselines* — which differ by 10 whole feature columns — differ on 6/7 fills.
-June's own write-up already recorded that fold 10's entire −0.667 came from
-**one** decision flip (station 585, 21 Feb 2024). One flip is worth roughly
-0.05 c/L pooled, which is **larger than the effect that graduated this feature
-in June**.
-
-**Reading:** −0.0394 (June), +0.0059 (correct baseline, now) and +0.0941 (wrong
-baseline) are all within a couple of decision flips of zero and of each other.
-The realised arbiter, at 14 folds and ~750 fills, cannot resolve an effect this
-small. The June graduation and the batch0 rejection were never in genuine
-disagreement about the world — they disagreed about a quantity neither run could
-measure.
+Both defects were the same mistake at different levels: **the baseline was derived
+rather than declared.** Now `docs/CONVENTIONS.md` § "The baseline feature set is
+declared, never discovered".
 
 ## Judgement
 
-**Grading verdict: superseded — the pipeline's `contradicted` grade was measured
-against the wrong baseline, and the corrected measurement is inert.**
+**On the pipeline: calibrated.** It reproduces an independent implementation
+exactly. Its outputs can be trusted to the extent the contract it is handed is
+correct — which is now pinned to the locked artifact, order included.
 
-The batch0 run's `rejected` outcome (+0.0941, wrong sign) stands as a factual
-record of what that run produced, but it does not mean what it appeared to mean.
-Its R0 was production plus the rejected Phase 4b brand-trough group (fps-sa1),
-and roughly two-thirds of the apparent sign flip is that baseline defect. On the
-correct 54-column baseline against the same frozen snapshot, the pooled realised
-delta is **+0.0059 c/L** — not a rejection, not a graduation, just nothing.
+**On `tgp_delta_7d`: nothing, and that is the honest answer.** +0.0059 c/L is
+inert. It is neither June's −0.0394 graduation nor the batch0 rejection, and
+none of the three was ever a measurement:
 
-The pre-registered sign+concentration criterion cannot be adjudicated on this
-evidence either way. Sign is meaningless at +0.006 c/L when a single buy/wait
-flip is worth ~0.05, and the concentration read from the original run
-(shock +0.272 vs normal +0.009, essentially all of it fold 13) does not survive
-the baseline correction: on the 54-column baseline, fold 13 is +0.127 and the
-largest contribution is fold 8 (+0.654, a normal fold), with fold 2 (+1.147 per
-fold, +0.288 pooled) the next biggest. **The identity of the dominant fold
-changes with the baseline** — which is itself the diagnosis, not a new finding
-about fold 13.
+- per-fold pooled contributions span **−0.209 to +0.654 c/L** for a +0.006 total —
+  the largest single fold is ~110× the pooled result, and they nearly cancel
+- the two arms differ on **11 of 752 fills** (1.5%)
+- one buy/wait decision flip is worth **~0.05 c/L pooled** — *larger than the
+  −0.039 that graduated this feature in June*
+
+Three separate things each moved this headline by roughly one flip: the wrong
+column set (+0.088), two months of data vintage (+0.045), and column order
+(+0.038). None is large. The arbiter's headline is a near-cancellation of terms an
+order of magnitude bigger, so anything that nudges a few decisions reorders the
+answer.
 
 **not_tested:**
 
-- ~~Whether the original `extra_feature_provider` closure reproduces the negative
-  pooled effect~~ — tested 2026-08-18, bit-identical. Ruled out.
-- ~~Whether the baseline composition explains the flip~~ — tested 2026-08-19.
-  It explains +0.0882 of the +0.1335 swing; data vintage explains the other
-  +0.0453. Both real, neither sufficient, and both smaller than the instrument's
-  resolution.
-- ~~Whether fold 13 reflects a specific historical event~~ — moot. Fold 13's
-  dominance was an artifact of the 64-column baseline; it is +0.127 on the
-  correct one.
-- **What the noise floor actually is.** Still the live question, and now the
-  blocking one — `fps-3jj.9`. This run gives a first empirical handle (one
-  decision flip ≈ 0.05 c/L pooled; per-fold contributions span −0.21 to +0.65
-  for a +0.006 pooled result) but a proper band needs the placebo/shuffle
-  distribution, not one paired run.
+- **What the noise floor actually is** — `fps-3jj.9`, now the blocking question.
+  This run and its diagnostics give a first handle (one flip ≈ 0.05 c/L; per-fold
+  contributions ±0.2–0.65 for a +0.006 pooled result) but a band needs a
+  placebo/shuffle distribution, not one paired run.
 - **Why the 54-column baseline improved 0.1206 c/L between June's vintage and the
   2026-08-10 snapshot.** `always_cpl` is identical to the decimal (193.414835), so
-  the 50 preferred stations' eval-date prices did not change; feature *code*
-  barely changed in the window (the only relevant commit, `fc8de9f`, is a
-  parity-claimed perf refactor of `lga_leadership` backfill). The plausible
-  remaining mechanism is gap-fill adding historical rows for OTHER stations,
-  which feeds the LGA/network/stickiness aggregates. Unproven.
-- Fold 3's extreme seed instability in the original run (~280× cohort median)
-  sits inside the normal-regime average; untouched here (single seed, 42).
+  the 50 preferred stations' eval-date prices did not change, and feature code
+  barely moved in the window. Plausible mechanism: gap-fill adding historical rows
+  for *other* stations, feeding the LGA/network/stickiness aggregates. Unproven.
+- Fold 2's +1.147 — the current largest contributor. Not investigated, and on this
+  evidence not worth investigating: the dominant fold's identity changed with every
+  contract fix, which is a property of the metric, not of any fold.
 
 ## Recommendation
 
-**Hold `#271` — but on the corrected reasoning, not the batch0 reject.**
+**`#271` (TGP re-lock): hold.** Not because the feature is harmful — it isn't —
+but because there has never been realised evidence that it helps. The graduating
+number was below the instrument's resolution and does not reproduce.
 
-The case for the re-lock rested on a June realised delta of −0.039 c/L. That
-number is smaller than one decision flip in the same backtest, and it does not
-reproduce: same 54 columns, same folds, same seed, two months later gives
-+0.006. There is no realised evidence that `tgp_delta_7d` earns a place in
-`FEATURE_COLUMNS`, and equally none that it does harm.
+**Do not close the track.** The WFCV log-loss screen has favoured this feature
+consistently and independently of both contract defects (here: Δll_all −0.0137,
+Δll_hard25 −0.0646). A feature that reliably helps the screen while sitting inside
+the arbiter's noise floor is a case the project has no tooling for yet.
 
-Do **not** close the track. The WFCV log-loss screen has liked this feature
-consistently and independently of the baseline defect (June's velocity redesign;
-batch0's Δll_all −0.0106 / Δll_hard25 −0.0498 — both favouring the candidate even
-against the 64-column R0). A feature that reproducibly helps the screen while
-sitting inside the arbiter's noise floor is exactly the case the project has no
-tooling for yet.
-
-**Unblocking step is `fps-3jj.9` (noise floor), not another paired run.** Until
-there is a band, another 30-minute arbiter run produces one more number in the
-±0.1 c/L cloud and settles nothing. `fps-3jj.9` was filed P3/dormant on the
-assumption it was a nice-to-have; this investigation is the argument for
-promoting it.
+**The unblocking step is `fps-3jj.9`, not another paired run.** Without a band,
+another 25-minute arbiter run adds one more number to the ±0.1 c/L cloud.
 
 ## Followups
 
-- `fps-sa1` — batch_freeze resolved R0 to 64 columns (the acute bug). Fixed,
-  PR #309.
-- `fps-zci` (P1, design) — single-source the feature-scope contract and
-  fingerprint the baseline into every result. The fingerprint is the part that
-  would have surfaced this in a day rather than two months.
-- `fps-3jj.9` (noise floor) — see above; now the blocking capability for any
-  further `tgp_delta_7d` verdict.
-- Worth a look eventually: PR #306 (`fps-3i7`) wired brand-trough columns into
-  `ModelStrategy.decide()` for the live replay. That work was only necessary
-  because R0 wrongly included those columns. The parity is fine to keep, but it
-  is a measure of how far a wrong contract propagated before anyone questioned
-  it.
+- `fps-sa1` — wrong column set. Closed, PR #309.
+- `fps-zci` (P1) — single-source the feature-scope contract (set **and** order) and
+  fingerprint it into every result. The fingerprint is what would have caught both
+  defects in a day rather than two months; `results.json`'s `meta` still records no
+  baseline identity at all.
+- `fps-3jj.9` (P1, promoted from P3) — noise band. Blocking for any further verdict
+  on this candidate.
+- PR #306 (`fps-3i7`) wired brand-trough columns into `ModelStrategy.decide()` so
+  the live replay could produce columns the baseline should never have contained.
+  Fine to keep as parity, but it measures how far a wrong contract propagated
+  before anyone questioned it.
