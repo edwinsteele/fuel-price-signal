@@ -36,14 +36,13 @@ import click
 import numpy as np
 import pandas as pd
 
-from fuel_signal.db import DEFAULT_DB_PATH
 from fuel_signal.dates import date_from_int
+from fuel_signal.db import DEFAULT_DB_PATH
 from fuel_signal.features import (
     DEFAULT_FEATURES_CSV,
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
     NETWORK_FEATURE_COLUMNS,
-    discover_brand_feature_columns,
     load_features,
 )
 
@@ -78,19 +77,40 @@ class BaselineContractMismatch(RuntimeError):
 
 
 def resolve_baseline_columns(df: pd.DataFrame) -> list[str]:
-    """The full resolved baseline column set for a features DataFrame, sorted.
+    """The locked production baseline column set, sorted. 54 columns.
 
-    Mirrors train_lgbm.py's default resolution: FEATURE_COLUMNS + LGA_FEATURE_COLUMNS
-    + NETWORK_FEATURE_COLUMNS + whatever brand trough columns are actually present in
-    this DataFrame's header (DB-derived; not a module-level constant). Sorted so the
-    on-disk contract is stable regardless of column insertion order.
+    DECLARED, never discovered (fps-sa1). The features frame is deliberately a
+    SUPERSET of the model contract — a column sits in features.csv for one of three
+    reasons, and only the first puts it in the baseline:
+
+      * in the lock — FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS;
+      * evaluated and REJECTED — the 10 ``days_since_trough_entry_<brand>`` columns
+        (Phase 4b, walked away 2026-06-02: lost 9/14 folds in paired WFCV with a
+        non-shock regression at fold 11 — docs/STATUS.md § Phase 4b; AGENTS.md
+        § Canonical feature set: "Brand trough columns are excluded from the locked
+        baseline until a separate ablation graduates them");
+      * held out pending graduation — ``tgp_delta_7d`` (#271).
+
+    This used to append ``discover_brand_feature_columns(df)``, on the stated
+    rationale that it "mirrors train_lgbm.py's default resolution". It does — but
+    train_lgbm's *default* is not the lock; the lock is
+    ``train_lgbm --no-brand-features`` (AGENTS.md § Canonical feature set,
+    docs/STATUS.md § CLI). The result was a 64-column R0: production plus a feature
+    group the project had already rejected, silently applied to every candidate in
+    the batch. Discovery cannot tell "not yet in scope" from "in scope", so it is
+    the wrong mechanism here whatever the frame happens to contain.
+
+    Single-sourcing this contract properly — one importable symbol, checked against
+    the on-disk model artifact, fingerprinted into every result — is fps-zci. This
+    function is the acute fix.
     """
-    resolved = (
-        FEATURE_COLUMNS
-        + LGA_FEATURE_COLUMNS
-        + NETWORK_FEATURE_COLUMNS
-        + discover_brand_feature_columns(df)
-    )
+    resolved = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
+    missing = [c for c in resolved if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Features frame is missing {len(missing)} locked baseline column(s): "
+            f"{missing}. Regenerate features.csv/.parquet before freezing a batch."
+        )
     return sorted(resolved)
 
 
@@ -210,12 +230,10 @@ def check_baseline_contract(batch_dir: pathlib.Path, df: pd.DataFrame) -> None:
     """Re-resolve the baseline columns for `df` and compare against the frozen batch's.
 
     Called at the start of every run (fps-3jj.4, against the batch's own frozen
-    features DataFrame). FEATURE_COLUMNS / LGA_FEATURE_COLUMNS / NETWORK_FEATURE_COLUMNS
-    are read fresh from the current fuel_signal.features import (today's code), while
-    the brand-trough part is discovered from the batch's own (frozen, unchanging)
-    header — so this only fires on a genuine code-side contract change, e.g. a
-    FEATURE_COLUMNS bump landing mid-batch. Raises BaselineContractMismatch on drift;
-    the runner maps that to aborted_environment.
+    features DataFrame). The locked column set is read fresh from the current
+    fuel_signal.features import (today's code), so this fires on a genuine code-side
+    contract change — e.g. a FEATURE_COLUMNS bump landing mid-batch. Raises
+    BaselineContractMismatch on drift; the runner maps that to aborted_environment.
     """
     batch_dir = pathlib.Path(batch_dir)
     frozen = json.loads((batch_dir / BASELINE_COLUMNS_FILENAME).read_text())
