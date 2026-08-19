@@ -21,7 +21,7 @@ from fuel_signal.features import (
     LOCKED_FEATURE_FINGERPRINT,
     NETWORK_FEATURE_COLUMNS,
     NON_MODEL_COLUMNS,
-    NON_MODEL_REASON_HELD_OUT,
+    NON_MODEL_REASON_INCONCLUSIVE,
     NON_MODEL_REASON_REJECTED,
     baseline_fingerprint,
     non_model_columns,
@@ -122,9 +122,16 @@ def _frame(*columns: str) -> pd.DataFrame:
     return pd.DataFrame({c: [0.0] for c in (list(LOCKED_FEATURE_COLUMNS) + list(columns))})
 
 
-def test_non_model_columns_names_the_held_out_tgp_column():
+def test_non_model_columns_names_the_tgp_column_inconclusive():
+    """tgp_delta_7d is INCONCLUSIVE, not held-out-pending-graduation.
+
+    The distinction is load-bearing for readers, not for the model: the June 2026
+    graduation was retracted (see the reason string), so nothing is "pending". A
+    held-out code here reads as a queued retrain and is what a future session
+    would act on.
+    """
     found = non_model_columns(_frame("tgp_delta_7d"))
-    assert found["tgp_delta_7d"][0] == NON_MODEL_REASON_HELD_OUT
+    assert found["tgp_delta_7d"][0] == NON_MODEL_REASON_INCONCLUSIVE
 
 
 def test_non_model_columns_names_brand_troughs_as_rejected():

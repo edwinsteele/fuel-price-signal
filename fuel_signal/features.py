@@ -143,13 +143,27 @@ LOCKED_FEATURE_COLUMNS: list[str] = (
 # "in scope" to anything that inspects the frame (fps-zci item 3).
 NON_MODEL_REASON_REJECTED = "evaluated-and-rejected"
 NON_MODEL_REASON_HELD_OUT = "held-out-pending-graduation"
+#: Measured, but below the arbiter's resolution — neither graduated nor dead ground.
+#: Mirrors experiments/ledger.yaml's three-way vocabulary, which draws the same line:
+#: a REJECTED claim is ground the feature generator should not re-propose; an
+#: INCONCLUSIVE one was measured below the instrument's resolution and may still be
+#: open. Excluded from the lock exactly as firmly as the other two — the distinction
+#: is about what a future session should conclude, not about what the model sees.
+NON_MODEL_REASON_INCONCLUSIVE = "evaluated-inconclusive"
 
 #: Statically-named computed-but-excluded columns -> (reason_code, why).
 NON_MODEL_COLUMNS: dict[str, tuple[str, str]] = {
     "tgp_delta_7d": (
-        NON_MODEL_REASON_HELD_OUT,
-        "TGP momentum (#271), graduated from experiments/2026-06-20_leading_indicators "
-        "but not yet re-locked; joins the contract at the chip-4 retrain.",
+        NON_MODEL_REASON_INCONCLUSIVE,
+        "TGP momentum (#271). NOT graduated — the June 2026 realised-arbiter "
+        "graduation (-0.039 c/L) was retracted 2026-08-19: it does not reproduce "
+        "(+0.0059 c/L on identical columns, folds and seed) and was never "
+        "resolvable, being smaller than the ~0.05 c/L value of one buy/wait "
+        "decision flip. Against the R0-vs-R0 noise floor it sits at the 40th "
+        "percentile of pure fit noise. No TGP feature is in the lock. The column "
+        "stays computed because the ground may still be open on an axis nobody "
+        "has tested (see experiments/ledger.yaml), NOT because a retrain is "
+        "queued.",
     ),
 }
 
