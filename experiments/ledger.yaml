@@ -20,9 +20,18 @@
 #   falsified   - what the run actually showed (empty for graduates)
 #   not_tested  - adjacent ground this run did NOT rule out. The field that
 #                 stops the generator being timid. Requires real judgement.
-#   outcome     - graduated | rejected | disqualified | aborted_candidate
-#                 | aborted_environment
+#   outcome     - graduated | rejected | superseded | disqualified
+#                 | aborted_candidate | aborted_environment
+#   superseded_by - (only with outcome: superseded) what later work invalidated
+#                 this run's verdict, and what the corrected reading is. The run
+#                 itself is left in place — its numbers are still a factual
+#                 record of what that configuration produced.
 #   evidence    - experiment dir
+#
+# `superseded` is NOT `rejected`. A rejected claim is dead ground the generator
+# should not re-propose; a superseded one was measured wrong or measured below
+# the instrument's resolution, and the ground may still be open. Read
+# `superseded_by` before deciding. First use: batch0/tgp_delta_7d, 2026-08-19.
 #
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
@@ -49,21 +58,34 @@
     this result BIT-IDENTICALLY (910/910 hits vs the harness's 822/88, same
     delta to the decimal, same per-fold table) — the rejection is not a
     pipeline implementation artifact.
+  superseded_by: >-
+    2026-08-19 (bd fps-nor). This run's R0 was NOT the production baseline:
+    batch_freeze.resolve_baseline_columns() appended
+    discover_brand_feature_columns(df), so R0 = the locked 54 PLUS the 10
+    Phase 4b brand-trough columns that were evaluated and REJECTED on
+    2026-06-02. Fixed in bd fps-sa1 (PR #309). Rerun on the same frozen
+    snapshot with the correct 54-col baseline gives pooled delta_cpl_held
+    = +0.0059 c/L — inert, not a rejection. Attribution of the
+    -0.0394 -> +0.0941 swing: baseline composition +0.0882, data vintage
+    +0.0453. The R0_64 anchor reproduced 189.6600 exactly, so the original
+    run is faithfully reproduced; only its baseline was wrong.
+    ALSO: the pooled number is below the instrument's resolution. Per-fold
+    pooled contributions span -0.21 to +0.65 c/L for a +0.006 total; the two
+    arms differ on 11/752 fills; one decision flip is worth ~0.05 c/L pooled
+    — larger than the -0.039 that graduated this feature in June. -0.0394,
+    +0.0059 and +0.0941 are all within a couple of flips of zero.
   not_tested: >-
-    STRONGEST UNTESTED LEAD: batch0's 64-col baseline = June's exact 54-col
-    BASE plus 10 new days_since_trough_entry_<brand> columns that did not
-    exist when this graduated in June. Brand-trough distance and TGP-floor
-    distance are thematically adjacent (both "how close to the bottom") —
-    tgp_delta_7d's incremental value may have shrunk/reversed simply because
-    a related signal is now already in the baseline, independent of any
-    change in the world. Not yet tested — see bd fps-nor. Also untested:
-    whether fold 13 alone reflects a specific historical event (window
-    2024-10-20 to 2025-01-17) vs the other three shock folds (flat/mildly
-    helpful); whether June-to-now data vintage shift explains the flip
-    independent of the baseline-composition lead above; fold 3's extreme
-    seed instability (~280x cohort median) inside the normal-regime average;
-    whether +0.0941 c/L clears a noise floor at all (fps-3jj.9, not built).
-  outcome: rejected
+    What the noise floor actually IS (fps-3jj.9) — now the blocking question;
+    this run gives a first handle (one flip ~ 0.05 c/L pooled) but a real band
+    needs a placebo/shuffle distribution, not one paired run. Why the 54-col
+    baseline improved 0.1206 c/L between June's vintage and the 2026-08-10
+    snapshot (always_cpl identical to the decimal, feature code barely changed
+    — plausible mechanism is gap-fill adding historical rows for stations
+    outside the 50 preferred, feeding the LGA/network/stickiness aggregates;
+    unproven). Fold 3's seed instability (~280x cohort median). Fold 13's
+    idiosyncrasy is MOOT — its dominance was an artifact of the 64-col
+    baseline (+1.09 there, +0.127 on the correct one).
+  outcome: superseded
   evidence: experiments/candidates/batch0/tgp_delta_7d
 
 - candidate: tgp_delta_7d
