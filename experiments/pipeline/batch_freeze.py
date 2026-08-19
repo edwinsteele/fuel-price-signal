@@ -77,7 +77,7 @@ class BaselineContractMismatch(RuntimeError):
 
 
 def resolve_baseline_columns(df: pd.DataFrame) -> list[str]:
-    """The locked production baseline column set, sorted. 54 columns.
+    """The locked production baseline column set, in production order. 54 columns.
 
     DECLARED, never discovered (fps-sa1). The features frame is deliberately a
     SUPERSET of the model contract — a column sits in features.csv for one of three
@@ -100,6 +100,25 @@ def resolve_baseline_columns(df: pd.DataFrame) -> list[str]:
     the batch. Discovery cannot tell "not yet in scope" from "in scope", so it is
     the wrong mechanism here whatever the frame happens to contain.
 
+    ORDER IS PART OF THE CONTRACT, so this returns the columns in production order
+    and does NOT sort them (fps-zci). LightGBM breaks equal-gain split ties by
+    feature index, and with 35 near-identical LGA trough columns exact ties are
+    common — so the same 54 columns in a different order fit a DIFFERENT model.
+    Measured: sorted vs production order, same seed, changes 732/47,823 val rows'
+    probabilities (max |dp| 0.090) and moved batch0's pooled realised delta by
+    0.038 c/L, ~0.8 of a buy/wait decision flip.
+
+    The sorting this replaces was justified as "stable regardless of column
+    insertion order", which is backwards: it makes the on-disk contract diff-stable
+    while making the MODEL unstable to feature additions, since one
+    alphabetically-early insertion reshuffles every index after it. Production
+    order is append-only, so a new group leaves existing indices untouched.
+
+    Production order is authoritative because it is what the locked artifact was
+    trained in — ``joblib.load("data/models/lgbm_calibrated.joblib")["feature_columns"]``
+    equals this list exactly, and differs from its sorted permutation in 52 of 54
+    positions.
+
     Single-sourcing this contract properly — one importable symbol, checked against
     the on-disk model artifact, fingerprinted into every result — is fps-zci. This
     function is the acute fix.
@@ -111,7 +130,7 @@ def resolve_baseline_columns(df: pd.DataFrame) -> list[str]:
             f"Features frame is missing {len(missing)} locked baseline column(s): "
             f"{missing}. Regenerate features.csv/.parquet before freezing a batch."
         )
-    return sorted(resolved)
+    return resolved
 
 
 def _snapshot_date(df: pd.DataFrame) -> str:

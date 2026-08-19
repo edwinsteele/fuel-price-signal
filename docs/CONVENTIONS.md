@@ -84,6 +84,10 @@ Header inspection cannot tell these apart, so it silently promotes rejected and 
 
 Note that `train_lgbm`'s *default* resolution is not the lock — the lock is `train_lgbm --no-brand-features`. "Mirrors train_lgbm's default" is not a justification for a baseline resolution.
 
+**Order is part of the contract, and new columns append.** Keep the production order — the group concatenation above, which is exactly what `data/models/lgbm_calibrated.joblib`'s `feature_columns` holds — and never sort it. LightGBM breaks equal-gain split ties by feature index, and with 35 near-identical LGA trough columns exact ties are common, so the same columns in a different order fit a *different* model. Sorting looks tidier and is the wrong trade: it makes the contract file diff-stable while making the model unstable to feature additions, since one alphabetically-early insertion reshuffles every index after it. Appending leaves existing indices untouched.
+
+How much does order matter? **Pin it; don't sweep it.** Measured over 5 draws each on one train/val slice, order-variance is ~2% of seed-variance (log-loss std 0.000258 vs 0.015643; decision flips at τ=0.25 of 8–29 rows vs 1743–2069). It does not need the multi-seed discipline that seeds get. But it is *not* nothing at the arbiter: the sorted-vs-production permutation moved batch0's pooled realised delta by 0.038 c/L, ~0.8 of a decision flip — which says more about the arbiter differencing two nearly-identical quantities than about order.
+
 **Why:** `batch_freeze.resolve_baseline_columns()` appended `discover_brand_feature_columns(df)` on exactly that rationale, giving batch0 a 64-column R0 — production plus the rejected Phase 4b group — for every candidate in the batch, on both the log-loss screen and the realised arbiter. It surfaced only because `tgp_delta_7d` was re-tested as a known graduate and came back with the opposite sign; the candidate arms agreed to 0.0013 c/L while the baselines differed by 0.132 (fps-sa1, fps-nor). Single-sourcing and fingerprinting the contract so the next instance is caught automatically is fps-zci.
 
 ### New constants must not silently diverge from a canonical equivalent
