@@ -91,7 +91,8 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      say so — "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating),
      validation (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
      (`facts["noise_band"]`) — if `available: false`, say plainly "noise-floor band: not available
-     yet (fps-3jj.9)" rather than omitting the line; if available, report
+     for this batch (noise_floor.py hasn't been run — see fps-3jj.9)" rather than omitting the
+     line; if available, report
      `candidate_percentile_better_than_noise` as-is (already oriented so higher = better —
      don't re-derive or re-sign it).
    - **Judgement** (your reasoning, visibly separated — a `## Judgement` heading is enough):
@@ -154,10 +155,12 @@ that touches this candidate is either a human reading the README, or the retrosp
 - **Run-directory model (fps-icv, CONFIRMED BROKEN, not a hypothetical).** See Step 0 above — every
   candidate after the first in a multi-candidate batch is silently never dossiered until this is
   fixed in `launch.py`/`runner.py`. Do not hand-write a dossier to compensate; surface it instead.
-- **`noise_floor.json` contract.** `facts["noise_band"]["available"]` will read `false` for every
-  run until `fps-3jj.9` (P3, not yet built) writes `<batch_dir>/noise_floor.json =
-  {"deltas_cpl_held": [...]}` at batch-setup time. Report this plainly in the README (see Step 1
-  above) rather than inventing a noise estimate.
+- **`noise_floor.json` per-batch step.** `facts["noise_band"]["available"]` reads `false` for a
+  batch until someone runs `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor
+  <batch-name>` against it (fps-3jj.9; heavy — ~10 single-arm fits — so it's a deliberate
+  batch-setup step, not automatic). If you see `available: false`, that means this batch is
+  missing the run, not that the capability is unbuilt. Report it plainly in the README (see
+  Step 1 above) rather than inventing a noise estimate.
 
 ## The shim
 
