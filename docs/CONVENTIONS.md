@@ -164,6 +164,8 @@ Immediately after `gh pr create` returns a PR number, call `ScheduleWakeup(delay
 
 **A re-review after a fix commit can re-post identical comments against stale line numbers.** Observed on PR #311 (fps-3jj.9): CodeRabbit's second review, triggered by the fix-commit push, posted the same 4 comments verbatim — including inline diff suggestions quoting the pre-fix code — even though the fix commit had already addressed every one of them. Don't assume a repeated comment is a new/unaddressed finding; `grep`/`sed` the current file at the cited path and check whether the flagged code still looks like what the comment describes before touching anything again.
 
+**The opposite timing failure also happens, and its findings can still be valid.** Observed on PR #313 (fps-3jj.8): a manually-pasted external review was addressed and pushed as a fix commit, then CodeRabbit's own review posted ~20 minutes later — but its own metadata showed it had been comparing against the *original* pre-fix commit, not current HEAD. Its 6 findings didn't overlap with the fix already pushed, and 2 of them were real (confirmed against current code) and worth fixing anyway. The commit range a review cites is not a reliable signal of whether its findings are live or stale in either direction — verify every finding against current code regardless of what the review says it diffed against, the same discipline as the stale-repost case above, not a reason to auto-dismiss a review that looks behind.
+
 ## Code review caution
 
 Before filing an issue from an agent-driven logic review:
