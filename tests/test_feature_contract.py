@@ -57,6 +57,42 @@ def test_locked_feature_columns_excludes_every_non_model_column():
     assert not set(LOCKED_FEATURE_COLUMNS) & set(NON_MODEL_COLUMNS)
 
 
+def test_locked_feature_columns_contains_no_brand_trough_column():
+    """The fps-sa1 shape, asserted WITHOUT the model artifact.
+
+    The ordered-equality check against lgbm_calibrated.joblib is the real ground
+    truth, but data/models/ is gitignored, so that test always skips in CI — leaving
+    a corrupted lock to be caught by nothing. Brand troughs cannot be enumerated
+    statically (they are DB-derived), so this asserts the rule instead: every
+    trough-prefixed column in the lock must be one of the LGA troughs.
+    """
+    lga = set(LGA_FEATURE_COLUMNS)
+    brand_like = [
+        c for c in LOCKED_FEATURE_COLUMNS
+        if c.startswith("days_since_trough_entry_") and c not in lga
+    ]
+    assert not brand_like, (
+        "Phase 4b brand troughs were evaluated and rejected on 2026-06-02; they are "
+        f"computed into features.csv but must not be in the lock. Found: {brand_like}"
+    )
+
+
+def test_non_model_detector_does_not_defer_to_the_lock(monkeypatch):
+    """Guard the guard: a column wrongly IN the lock must still be reported.
+
+    A detector that skipped whatever the lock already claims would be blind to
+    exactly the defect it exists to find — the lock was the thing that was wrong in
+    fps-sa1. So non_model_columns() decides by what a column IS, not by where it
+    currently appears.
+    """
+    import fuel_signal.features as feats
+
+    leaked = "days_since_trough_entry_zzz_test_brand"
+    monkeypatch.setattr(feats, "LOCKED_FEATURE_COLUMNS", LOCKED_FEATURE_COLUMNS + [leaked])
+    found = feats.non_model_columns(_frame(leaked))
+    assert found[leaked][0] == NON_MODEL_REASON_REJECTED
+
+
 # ── ground truth ──────────────────────────────────────────────────────────────
 
 @pytest.mark.skipif(
@@ -136,13 +172,47 @@ def test_baseline_fingerprint_is_stable_across_calls():
     assert baseline_fingerprint(LOCKED_FEATURE_COLUMNS) == LOCKED_FEATURE_FINGERPRINT
 
 
-def test_experiments_lib_constants_reexports_the_same_object():
-    """experiments/lib is the import surface for experiment scripts; a copy there
-    would be the drift this issue exists to remove."""
+def test_experiments_lib_constants_reexports_the_same_contract():
+    """experiments/lib is the import surface for experiment scripts; a hand-written
+    second copy there would be the drift this issue exists to remove."""
     from experiments.lib.constants import BASELINE_COLUMNS, BASELINE_FINGERPRINT
 
     assert BASELINE_COLUMNS == LOCKED_FEATURE_COLUMNS
     assert BASELINE_FINGERPRINT == LOCKED_FEATURE_FINGERPRINT
+
+
+def test_experiments_lib_baseline_columns_is_a_copy_not_an_alias():
+    """Equal in value, separate in identity — mutating the re-export must not reach
+    through into fuel_signal's canonical list."""
+    from experiments.lib import constants
+
+    assert constants.BASELINE_COLUMNS is not LOCKED_FEATURE_COLUMNS
+    scratch = constants.BASELINE_COLUMNS
+    scratch.append("mutation_probe")
+    try:
+        assert "mutation_probe" not in LOCKED_FEATURE_COLUMNS
+    finally:
+        scratch.remove("mutation_probe")
+
+
+def test_write_meta_does_not_drag_the_feature_layer_into_import_time():
+    """experiments.lib.io is a leaf serialisation module and must stay one.
+
+    fuel_signal.features transitively imports scipy.signal (via lga_leadership),
+    which took io.py from ~27ms to ~700ms when the import sat at module scope. The
+    import lives inside write_meta instead.
+    """
+    import ast
+
+    tree = ast.parse((REPO_ROOT / "experiments" / "lib" / "io.py").read_text())
+    module_level = [
+        n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))
+    ]
+    offenders = [
+        m for n in module_level for m in [getattr(n, "module", None) or ""]
+        if m.startswith("fuel_signal") or m.startswith("experiments.lib.constants")
+    ]
+    assert not offenders, f"heavy import moved back to io.py module scope: {offenders}"
 
 
 # ── the detector: no second copy of the composition ───────────────────────────

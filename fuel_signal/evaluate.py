@@ -296,7 +296,11 @@ def log_experiment(
                 "Migrate or archive the existing file before logging new results."
             )
     with _RESULTS_CSV.open("a", newline="") as fh:
-        writer = csv.writer(fh)
+        # lineterminator="\n": csv.writer defaults to CRLF, which would append
+        # CRLF rows to an LF file and leave the ledger mixed. LF is also what git
+        # stores (core.autocrlf=input, and .gitattributes now pins `eol=lf`), so
+        # writing it directly keeps the working tree and the blob identical.
+        writer = csv.writer(fh, lineterminator="\n")
         if write_header:
             writer.writerow(_CSV_HEADER)
         writer.writerow([

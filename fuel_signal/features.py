@@ -173,15 +173,24 @@ def non_model_columns(df: pd.DataFrame) -> dict[str, tuple[str, str]]:
     pending graduation. This names the latter two so that a leak into the baseline
     is a machine-checkable condition rather than something a human has to notice
     two months later (fps-sa1, fps-nor).
+
+    Deliberately does NOT consult LOCKED_FEATURE_COLUMNS. A detector that skipped
+    whatever the lock already claims could not detect a column wrongly IN the lock —
+    which is the entire fps-sa1 failure — so membership is decided by what a column
+    IS: named in NON_MODEL_COLUMNS, or trough-prefixed without being one of the LGA
+    troughs (which share the prefix and are genuinely locked).
+
+    A consequence worth knowing: graduating a held-out column means deleting its
+    NON_MODEL_COLUMNS entry in the same change that adds it to the lock. Until then
+    resolve_baseline_columns() raises. That is the point — graduation is a
+    declaration, not something the code should infer.
     """
-    locked = set(LOCKED_FEATURE_COLUMNS)
+    lga = set(LGA_FEATURE_COLUMNS)
     out: dict[str, tuple[str, str]] = {}
     for col in df.columns:
-        if col in locked:
-            continue
         if col in NON_MODEL_COLUMNS:
             out[col] = NON_MODEL_COLUMNS[col]
-        elif col.startswith(_TROUGH_PREFIX):
+        elif col.startswith(_TROUGH_PREFIX) and col not in lga:
             out[col] = _BRAND_TROUGH_REASON
     return out
 

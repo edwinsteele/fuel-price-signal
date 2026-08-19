@@ -14,7 +14,11 @@ LGBM_DEFAULTS: dict = {"verbose": -1, "subsample": 0.8, "subsample_freq": 1}
 # rejected Phase 4b brand troughs into a 64-column R0) and fps-zci (a sorted
 # permutation of the right 54 columns fit a different model, worth 0.038 c/L on
 # the arbiter). ORDER IS PART OF THE CONTRACT — do not sort this.
-BASELINE_COLUMNS: list[str] = LOCKED_FEATURE_COLUMNS
+# A copy, not an alias: an in-place mutation here (`.append`, `.sort`) would
+# otherwise reach straight through into fuel_signal's canonical list and corrupt the
+# contract for every importer in the process — silently, since nothing re-reads the
+# artifact mid-run.
+BASELINE_COLUMNS: list[str] = list(LOCKED_FEATURE_COLUMNS)
 
 # Identity of BASELINE_COLUMNS as '<n>:<sha12>', hashed over the ORDERED list.
 # Stamp it into every meta.json (experiments.lib.io.write_meta does this for you)

@@ -126,6 +126,27 @@ def test_resolve_baseline_columns_raises_when_a_non_model_column_leaks_in(monkey
     assert "evaluated-and-rejected" in str(exc_info.value)
 
 
+def test_resolve_baseline_columns_raises_when_the_LOCK_ITSELF_is_corrupted(monkeypatch):
+    """The realistic corruption: a features.py edit, so BOTH references move.
+
+    The test above patches only batch_freeze's reference, which leaves
+    fuel_signal.features' copy pristine — so the detector would flag the leak even if
+    it deferred to the lock. Patching both is what an actual bad edit looks like, and
+    is the case that used to slip through: non_model_columns() skipped anything the
+    lock already claimed, which is precisely the thing that was wrong in fps-sa1.
+    """
+    import fuel_signal.features as feats
+
+    leaked_col = "days_since_trough_entry_zzz_test_brand"
+    corrupted = LOCKED_FEATURE_COLUMNS + [leaked_col]
+    monkeypatch.setattr(feats, "LOCKED_FEATURE_COLUMNS", corrupted)
+    monkeypatch.setattr(batch_freeze, "LOCKED_FEATURE_COLUMNS", corrupted)
+
+    with pytest.raises(NonModelColumnLeak) as exc_info:
+        resolve_baseline_columns(_features_df())
+    assert leaked_col in exc_info.value.leaked
+
+
 def test_freeze_manifest_records_the_baseline_fingerprint(tmp_path):
     """A batch's freeze.json says which R0 it pinned, in a form runs can be checked
     against mechanically (fps-zci item 5)."""

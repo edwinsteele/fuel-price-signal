@@ -8,9 +8,6 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from experiments.lib.constants import BASELINE_COLUMNS
-from fuel_signal.features import baseline_fingerprint
-
 
 def current_git_sha() -> str | None:
     """The current checkout's HEAD SHA, or None if git isn't available/this isn't a repo.
@@ -57,6 +54,12 @@ def write_meta(
     passes its own list is recorded with `declared_by_caller: true`, so a stamped
     default is never mistaken for a verified one.
     """
+    # Imported here, not at module scope: fuel_signal.features transitively pulls in
+    # scipy.signal (via lga_leadership), which took this leaf serialisation module
+    # from ~27ms to ~700ms to import. Nothing else in io.py needs the feature layer.
+    from experiments.lib.constants import BASELINE_COLUMNS
+    from fuel_signal.features import baseline_fingerprint
+
     stamped = dict(meta)
     columns = list(BASELINE_COLUMNS if baseline_columns is None else baseline_columns)
     stamped["baseline"] = {

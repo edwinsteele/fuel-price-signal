@@ -1,3 +1,6 @@
 # Experiment log: append-only CSV — use union merge to avoid conflicts when
 # multiple branches each add rows. Duplicate rows (same timestamp) are benign.
-experiments/results.csv merge=union
+# eol=lf pins the line ending: csv.writer defaults to CRLF, git normalises with
+# core.autocrlf=input, and the two disagreeing rewrote all 30 lines of this file
+# as invisible churn during the fps-zci schema migration.
+experiments/results.csv text eol=lf merge=union
