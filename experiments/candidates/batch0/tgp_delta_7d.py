@@ -5,15 +5,23 @@ fuel_signal/features.py (TGP_FEATURE_COLUMNS, chip 3 / PR #276) but deliberately
 held OUT of FEATURE_COLUMNS pending the TGP production re-lock (#271 /
 fps-1785999729707-1). This candidate's only job is to add the already-computed
 column to the model contract for one pipeline run, so the pipeline can be
-checked against a known answer before anything genuinely AI-sourced is trusted
-to it: the realised arbiter (experiments/2026-06-20_leading_indicators/, 14
-walk-forward folds) already found pooled delta -0.039 c/L, concentrated in the
-expensive shock-regime folds.
+checked against a known answer.
 
-Batch 1's pre-registered pass criterion (docs/routines/generator.md) is sign +
-concentration, not magnitude — this run uses a later data vintage and
-add_columns rather than the original experiment's extra_feature_provider
-closure, so the number is expected to land NEAR -0.039, not on it.
+REWRITTEN 2026-08-19 (bd fps-nor). The known answer is no longer June's
+-0.039 c/L. Two things were wrong with the first attempt: batch0's R0 carried
+the 10 REJECTED Phase 4b brand-trough columns (bd fps-sa1, fixed PR #309), and
+the June figure was never resolvable anyway — the arbiter's quantum is ~0.05 c/L
+per buy/wait flip, larger than the effect that graduated the feature.
+
+The reference is now +0.0059 c/L, from
+tgp_delta_7d/diagnostic_baseline_composition.py: same harness, same frozen
+snapshot, same corrected 54-column baseline, same folds, seed 42. runner.py's
+realised stage is single-seed at SEEDS[0]=42, so the pipeline should reproduce
+it EXACTLY.
+
+Read the pass criterion accordingly: this run calibrates the PIPELINE against a
+reference number, and says nothing about whether tgp_delta_7d earns a place in
+FEATURE_COLUMNS. #271 stays on hold either way.
 """
 from __future__ import annotations
 
@@ -31,23 +39,30 @@ HYPOTHESIS = (
 )
 
 PREDICTED_SIGNATURE = (
-    "Pooled realised CPL delta negative, sign concentrated in shock-regime "
-    "folds (the highest-baseline-CPL / highest oracle-headroom folds), not "
-    "magnitude-matched to the original -0.039 c/L pooled figure — later data "
-    "vintage (snapshot 2026-08-10 vs the June 2026 experiment) and add_columns "
-    "passthrough rather than the experiment's extra_feature_provider closure."
+    "Pooled realised delta_cpl_held = +0.0059 c/L, matching "
+    "experiments/candidates/batch0/tgp_delta_7d/diagnostic_baseline_composition.py "
+    "to the decimal. That reference was produced by the same harness "
+    "(run_paired_realised_backtest) on this same frozen snapshot, same 54-column "
+    "baseline, same fold geometry, at seed 42 — and runner.py's realised stage is "
+    "single-seed at SEEDS[0]=42, so this is an exact-reproduction check, not a "
+    "ballpark one. THIS RUN CALIBRATES THE PIPELINE, NOT THE FEATURE: the number "
+    "landing anywhere else means the pipeline is wired wrong."
 )
 
-# Own prior: P(pooled realised CPL delta < 0). This is a known graduate, not a
-# fresh proposal, so confidence is high but not 1.0 (later vintage + different
-# compute path than the original arbiter run).
-CONFIDENCE_EFFECT = 0.9
+# Own prior: P(pooled realised CPL delta < 0). Deliberately ~coin-flip. The
+# effect is inert (+0.0059 c/L) and the arbiter's quantum is ~0.05 c/L per
+# buy/wait flip, so SIGN CARRIES NO INFORMATION HERE — see bd fps-nor and
+# experiments/candidates/batch0/tgp_delta_7d/README.md § Diagnostic 2. The
+# earlier 0.9 was premised on "known graduate, expect -0.039 concentrated in
+# shock"; all three premises are now known false.
+CONFIDENCE_EFFECT = 0.5
 
-# P(the effect concentrates where TARGET says). Scored only if CONFIDENCE_EFFECT
-# resolves true.
-CONFIDENCE_ZONE = 0.75
+# No concentration claim. The original shock concentration was an artifact of
+# the wrong 64-column baseline (fps-sa1); on the corrected baseline the largest
+# fold contribution is fold 8, a NORMAL fold.
+CONFIDENCE_ZONE = 0.5
 
-TARGET = {"axis": "regime", "expect_concentration_in": ["shock"], "folds": []}
+TARGET = {"axis": "regime", "expect_concentration_in": [], "folds": []}
 
 MECHANISM_FAMILY = "external upstream wholesale signal"
 
