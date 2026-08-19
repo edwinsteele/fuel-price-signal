@@ -250,11 +250,18 @@ def build_confidence_calibration(candidates_root: pathlib.Path = DEFAULT_CANDIDA
         )
 
     n_resolved = sum(1 for p in pairs if p["effect_resolved"] is not None)
-    insufficient_data = n_resolved < MIN_CALIBRATION_N
+    # Gate on USABLE pairs, not just resolved-effect ones: a resolved-effect candidate with
+    # no recorded confidence_effect (e.g. predates the two-CONFIDENCE-field convention)
+    # contributes nothing to the means below. Gating on n_resolved alone could report
+    # insufficient_data: false while every mean still comes out None — exactly the
+    # unsupported-calibration-read this flag exists to prevent.
+    n_usable = sum(1 for p in pairs if p["effect_resolved"] is not None and p["confidence_effect"] is not None)
+    insufficient_data = n_usable < MIN_CALIBRATION_N
     result = {
         "scope": "cumulative across every dossiered candidate under experiments/candidates/, not just this batch",
         "min_calibration_n": MIN_CALIBRATION_N,
         "n_dossiered_with_resolved_effect": n_resolved,
+        "n_usable_for_calibration": n_usable,
         "insufficient_data": insufficient_data,
         "pairs": pairs,
         "mean_confidence_effect_when_resolved_true": None,
@@ -324,8 +331,14 @@ def compute_retrospective(
         "outcome_tally": build_outcome_tally(entries),
         "confidence_calibration": build_confidence_calibration(candidates_root),
     }
-    out_path.write_text(json.dumps(to_jsonable(payload), indent=2) + "\n")
-    return payload
+    # Converted once and both written and returned from the SAME object: to_jsonable maps
+    # non-finite floats (e.g. band_std_delta_cpl_held at n_draws=1, a real value _noise_band
+    # can produce) to None, so returning the pre-conversion `payload` instead would let a
+    # caller observe a NaN that the file on disk stores as null — same value, different type,
+    # a real (if narrow) way for a caller and the persisted record to silently disagree.
+    jsonable_payload = to_jsonable(payload)
+    out_path.write_text(json.dumps(jsonable_payload, indent=2) + "\n")
+    return jsonable_payload
 
 
 @click.command("retrospective")

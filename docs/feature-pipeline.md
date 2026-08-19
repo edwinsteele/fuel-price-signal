@@ -21,7 +21,7 @@ piece below runs on the owner's Mac.
 
 ## The pipeline, in order
 
-```
+```text
 generator ──files──▶ candidate modules ──claimed by──▶ launch (nightly) ──runs──▶ runner
                                                                                      │
                                                                                      ▼
@@ -62,7 +62,7 @@ by a human (or an interactive Claude session) at batch boundaries, not on a time
 
 ## Directory layout
 
-```
+```text
 experiments/
   batches/<batch>/            frozen snapshot: features.parquet, fuel_signal.db,
                                baseline_columns.json, freeze.json, noise_floor.json,

@@ -34,9 +34,10 @@ State the threshold used and which candidates (if any) clear it.
 |---|---|
 | ... | ... |
 
-State plainly whether any candidates are `never_run` or `retryable_incomplete` — those
-are missing data, not negative results, and the retrospective is incomplete while any
-remain. Don't write up final conclusions until the tally is clean.
+State plainly whether any candidates are `never_run`, `retryable_incomplete`, or
+`pending_dossier` — all three are missing data, not negative results, and the
+retrospective is incomplete while any remain. Don't write up final conclusions until
+the tally is clean (all three at zero).
 
 ## Confidence calibration
 

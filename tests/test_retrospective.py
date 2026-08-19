@@ -302,6 +302,32 @@ def test_confidence_calibration_reports_insufficient_data_below_min_n(tmp_path):
     assert len(result["pairs"]) == 1
 
 
+def test_confidence_calibration_gates_on_usable_pairs_not_just_resolved_effect(tmp_path, monkeypatch):
+    """A resolved-effect candidate with no recorded confidence_effect (predates the
+    two-CONFIDENCE-field convention) contributes nothing to the means — gating
+    insufficient_data on resolved-effect count alone could report `false` while every
+    mean still comes out None, exactly what this flag exists to prevent."""
+    import experiments.pipeline.retrospective as retro_module
+
+    monkeypatch.setattr(retro_module, "MIN_CALIBRATION_N", 2)
+    candidates_root = tmp_path / "candidates"
+    _write_dossier(
+        candidates_root, "batch1", "resolved_no_confidence",
+        _facts("resolved_no_confidence", confidence_effect=None, effect_resolved=True),
+    )
+    _write_dossier(
+        candidates_root, "batch1", "resolved_with_confidence",
+        _facts("resolved_with_confidence", confidence_effect=0.6, effect_resolved=True),
+    )
+
+    result = retro_module.build_confidence_calibration(candidates_root)
+
+    assert result["n_dossiered_with_resolved_effect"] == 2
+    assert result["n_usable_for_calibration"] == 1
+    assert result["insufficient_data"] is True
+    assert result["mean_confidence_effect_when_resolved_true"] is None
+
+
 def test_confidence_calibration_scans_every_batch_not_just_one(tmp_path):
     candidates_root = tmp_path / "candidates"
     _write_dossier(candidates_root, "batch1", "a", _facts("a", batch="batch1"))
@@ -369,6 +395,27 @@ def test_compute_retrospective_refuses_to_overwrite_without_force(tmp_path):
 
     with pytest.raises(FileExistsError, match="already exists"):
         compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+
+def test_compute_retrospective_returned_payload_matches_written_file_with_nan_std(tmp_path):
+    """_noise_band writes band_std_delta_cpl_held as float('nan') when a batch's noise floor
+    has only one draw (ddof=1 needs 2+ samples). to_jsonable maps that to None for the file
+    on disk; the RETURNED payload must go through the same conversion, or a caller reading
+    the return value would see a NaN the persisted record stores as null."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1"))
+    batch_dir = batches_dir / "batch1"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "noise_floor.json").write_text(
+        json.dumps({"deltas_cpl_held": [0.01], "partial": False})
+    )
+
+    payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+    on_disk = json.loads((batch_dir / RETROSPECTIVE_FILENAME).read_text())
+    assert payload == on_disk
+    assert payload["noise_floor"]["band_std_delta_cpl_held"] is None
 
 
 def test_compute_retrospective_force_overwrites(tmp_path):
