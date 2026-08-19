@@ -84,7 +84,12 @@ The largest contributor now is fold 2 (+1.147), a *normal* fold.
 
 **Seed stability:** 8 cells exceed 5× the cohort-median seed_std; none of the four
 shock folds. **Validation:** PIT passed, INPUTS passed, `tgp_delta_7d` NaN rate
-0.0%. **Noise floor:** still unavailable (`fps-3jj.9`).
+0.0%.
+
+**Noise floor** (`fps-3jj.9`, 5 R0-vs-R0 paired-seed draws on this batch): mean
+−0.0135 c/L, std 0.142 c/L. The candidate's +0.00585 c/L sits at the **40th
+percentile** of that distribution (`candidate_z_vs_band` = +0.14) — squarely
+inside pure fit noise, not near either tail.
 
 ![](per_fold_delta_bars.png)
 ![](realised_cpl_by_fold.png)
@@ -131,7 +136,7 @@ declared, never discovered".
 exactly. Its outputs can be trusted to the extent the contract it is handed is
 correct — which is now pinned to the locked artifact, order included.
 
-**On `tgp_delta_7d`: nothing, and that is the honest answer.** +0.0059 c/L is
+**On `tgp_delta_7d`: nothing, and now that has a ruler behind it.** +0.0059 c/L is
 inert. It is neither June's −0.0394 graduation nor the batch0 rejection, and
 none of the three was ever a measurement:
 
@@ -140,6 +145,10 @@ none of the three was ever a measurement:
 - the two arms differ on **11 of 752 fills** (1.5%)
 - one buy/wait decision flip is worth **~0.05 c/L pooled** — *larger than the
   −0.039 that graduated this feature in June*
+- **against the noise floor (`fps-3jj.9`, computed 2026-08-19): the 40th
+  percentile of pure fit noise** (band mean −0.0135, std 0.142 c/L; z = +0.14).
+  This is the confirmation, not just informal reasoning: the pipeline's own
+  seed-to-seed wobble is ~24× the size of the candidate's effect.
 
 Three separate things each moved this headline by roughly one flip: the wrong
 column set (+0.088), two months of data vintage (+0.045), and column order
@@ -149,10 +158,6 @@ answer.
 
 **not_tested:**
 
-- **What the noise floor actually is** — `fps-3jj.9`, now the blocking question.
-  This run and its diagnostics give a first handle (one flip ≈ 0.05 c/L; per-fold
-  contributions ±0.2–0.65 for a +0.006 pooled result) but a band needs a
-  placebo/shuffle distribution, not one paired run.
 - **Why the 54-column baseline improved 0.1206 c/L between June's vintage and the
   2026-08-10 snapshot.** `always_cpl` is identical to the decimal (193.414835), so
   the 50 preferred stations' eval-date prices did not change, and feature code
@@ -161,20 +166,25 @@ answer.
 - Fold 2's +1.147 — the current largest contributor. Not investigated, and on this
   evidence not worth investigating: the dominant fold's identity changed with every
   contract fix, which is a property of the metric, not of any fold.
+- **The retrospective acceptance criterion** (`fps-3jj.8`, not yet built) that
+  would formally rank a candidate against this band rather than eyeballing a
+  percentile — this dossier reports the number but doesn't gate on it
+  programmatically.
 
 ## Recommendation
 
-**`#271` (TGP re-lock): hold.** Not because the feature is harmful — it isn't —
-but because there has never been realised evidence that it helps. The graduating
-number was below the instrument's resolution and does not reproduce.
+**`#271` (TGP re-lock): hold — now on a resolved ruler, not just informal
+reasoning.** The graduating number was below the instrument's resolution, does
+not reproduce, and now measurably sits inside pipeline noise (40th percentile).
+Not because the feature is harmful — it isn't — but because there has never been
+realised evidence that it helps, and now there's a number confirming why the
+existing evidence couldn't have shown it either way.
 
 **Do not close the track.** The WFCV log-loss screen has favoured this feature
 consistently and independently of both contract defects (here: Δll_all −0.0137,
 Δll_hard25 −0.0646). A feature that reliably helps the screen while sitting inside
-the arbiter's noise floor is a case the project has no tooling for yet.
-
-**The unblocking step is `fps-3jj.9`, not another paired run.** Without a band,
-another 25-minute arbiter run adds one more number to the ±0.1 c/L cloud.
+the arbiter's noise floor is a case the project has no tooling for yet — see
+`fps-3jj.8` (retrospective, not yet built) for where that tooling would land.
 
 ## Followups
 
@@ -183,8 +193,8 @@ another 25-minute arbiter run adds one more number to the ±0.1 c/L cloud.
   fingerprint it into every result. The fingerprint is what would have caught both
   defects in a day rather than two months; `results.json`'s `meta` still records no
   baseline identity at all.
-- `fps-3jj.9` (P1, promoted from P3) — noise band. Blocking for any further verdict
-  on this candidate.
+- `fps-3jj.9` — noise band. Closed, PR #311; run against batch0 2026-08-19 (see
+  above). Candidate sits at the 40th percentile of the band.
 - PR #306 (`fps-3i7`) wired brand-trough columns into `ModelStrategy.decide()` so
   the live replay could produce columns the baseline should never have contained.
   Fine to keep as parity, but it measures how far a wrong contract propagated

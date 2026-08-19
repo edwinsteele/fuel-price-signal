@@ -271,13 +271,18 @@
   },
   "grading": {
     "predicted_signature": "Pooled realised delta_cpl_held = +0.0059 c/L, matching experiments/candidates/batch0/tgp_delta_7d/diagnostic_baseline_composition.py to the decimal. That reference was produced by the same harness (run_paired_realised_backtest) on this same frozen snapshot, same 54-column baseline, same fold geometry, at seed 42 \u2014 and runner.py's realised stage is single-seed at SEEDS[0]=42, so this is an exact-reproduction check, not a ballpark one. THIS RUN CALIBRATES THE PIPELINE, NOT THE FEATURE: the number landing anywhere else means the pipeline is wired wrong.",
-    "verdict": null,
-    "explanation": null,
-    "pending": true
+    "verdict": "matched",
+    "explanation": "Pipeline reproduced the independent reference exactly \u2014 delta_cpl_held +0.005851 vs the reference's +0.0059, R0 and candidate cpl_held matching to every printed digit. The calibration check this run existed to perform passed. Separately, now that fps-3jj.9's noise floor has been run against this batch, the feature's own delta sits at the 40th percentile of pure fit noise (z=+0.14 vs a band of mean -0.0135, std 0.142 c/L) \u2014 confirming it as inert, not adding a new pipeline-code finding.",
+    "pending": false
   },
   "noise_band": {
-    "available": false,
-    "reason": "fps-3jj.9 not yet landed \u2014 no noise-floor calibration for this batch"
+    "available": true,
+    "n_draws": 5,
+    "band_mean_delta_cpl_held": -0.013497944771069114,
+    "band_std_delta_cpl_held": 0.14204447295549547,
+    "candidate_delta_cpl_held": 0.005851407340855985,
+    "candidate_percentile_better_than_noise": 40.0,
+    "candidate_z_vs_band": 0.13622038020435703
   },
   "plots": [
     "per_fold_delta_bars.png",

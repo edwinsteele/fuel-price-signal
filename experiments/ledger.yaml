@@ -57,7 +57,11 @@
     total (largest fold ~110x the pooled result, near-total cancellation);
     the two arms differ on 11 of 752 fills. WFCV log-loss favours the
     candidate (delta_ll_all -0.0137, hard25 -0.0646) and disagrees with the
-    realised headline, as it did in June.
+    realised headline, as it did in June. Against the noise floor (fps-3jj.9,
+    PR #311, run against batch0 2026-08-19: 5 R0-vs-R0 paired-seed draws, mean
+    -0.0135 c/L, std 0.142 c/L), this candidate's +0.00585 c/L sits at the
+    40th percentile (z=+0.14) — squarely inside pure fit noise, confirming
+    "inert" rather than just asserting it.
   calibration: >-
     PASSED. The pipeline returned delta_cpl_held +0.005851 against an
     independent reference of +0.0059 from
@@ -78,16 +82,16 @@
     further 0.038 between the two 54-column runs. Each is about one decision
     flip.
   not_tested: >-
-    What the noise floor actually IS (fps-3jj.9, now the blocking question) —
-    this run gives a first handle but a band needs a placebo/shuffle
-    distribution, not one paired run. Why the 54-col baseline improved 0.1206
-    c/L between June's vintage and the 2026-08-10 snapshot (always_cpl
-    identical to the decimal, feature code barely changed; plausible mechanism
-    is gap-fill adding historical rows for stations outside the 50 preferred,
-    feeding the LGA/network/stickiness aggregates — unproven). Fold 2's +1.147,
-    the current largest contributor: not investigated, and on this evidence not
-    worth it — the dominant fold's identity changed with every contract fix,
-    which is a property of the metric rather than of any fold.
+    Why the 54-col baseline improved 0.1206 c/L between June's vintage and the
+    2026-08-10 snapshot (always_cpl identical to the decimal, feature code
+    barely changed; plausible mechanism is gap-fill adding historical rows for
+    stations outside the 50 preferred, feeding the LGA/network/stickiness
+    aggregates — unproven). Fold 2's +1.147, the current largest contributor:
+    not investigated, and on this evidence not worth it — the dominant fold's
+    identity changed with every contract fix, which is a property of the
+    metric rather than of any fold. The fps-3jj.8 retrospective acceptance
+    criterion (not yet built) that would formally rank a candidate against the
+    noise band rather than eyeballing a percentile.
   outcome: inconclusive
   evidence: experiments/candidates/batch0/tgp_delta_7d
 
