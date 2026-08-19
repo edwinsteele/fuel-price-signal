@@ -52,7 +52,14 @@ from experiments.pipeline.runner import (
 )
 from experiments.pipeline.validate import load_candidate_module, validate_candidate
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, NETWORK_FEATURE_COLUMNS
+from fuel_signal.features import (
+    FEATURE_COLUMNS,
+    LGA_FEATURE_COLUMNS,
+    LOCKED_FEATURE_COLUMNS,
+    LOCKED_FEATURE_FINGERPRINT,
+    NETWORK_FEATURE_COLUMNS,
+    baseline_fingerprint,
+)
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent
@@ -199,7 +206,7 @@ def test_run_candidate_aborted_environment_on_baseline_drift(tmp_path, monkeypat
     widened["new_locked_col"] = 0.0
     widened.to_parquet(batch_dir / "features.parquet")
     monkeypatch.setattr(
-        batch_freeze, "NETWORK_FEATURE_COLUMNS", NETWORK_FEATURE_COLUMNS + ["new_locked_col"]
+        batch_freeze, "LOCKED_FEATURE_COLUMNS", LOCKED_FEATURE_COLUMNS + ["new_locked_col"]
     )
     candidate_path = _write_candidate(tmp_path, PIT_SAFE_CANDIDATE)
 
@@ -1034,6 +1041,35 @@ def test_run_candidate_persists_baseline_cache_after_successful_run(tmp_path, mo
     persisted = _load_baseline_cache(batch_dir, verbose=False)
     assert persisted.fingerprint == new_cache.fingerprint
     assert persisted.per_fold == new_cache.per_fold
+
+
+def test_run_candidate_records_the_baseline_fingerprint_it_was_graded_against(
+    tmp_path, monkeypatch
+):
+    """results.json is self-describing about its R0 (fps-zci item 5).
+
+    The fingerprint covers what the run USED — the batch's frozen
+    baseline_columns.json — so a results.json stays interpretable no matter how the
+    constants move afterwards. Both contract defects found so far were compared
+    head-to-head for two months because this field did not exist.
+    """
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    monkeypatch.setattr(
+        runner_module, "run_paired_realised_backtest", lambda *a, **k: _FakeRealisedFull(None)
+    )
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+    )
+
+    assert result.status == "rejected"
+    frozen = json.loads((batch_dir / "baseline_columns.json").read_text())
+    meta = result.results["meta"]
+    assert meta["n_baseline_columns"] == len(frozen)
+    assert meta["baseline_fingerprint"] == baseline_fingerprint(frozen)
+    assert meta["baseline_fingerprint"] == LOCKED_FEATURE_FINGERPRINT
 
 
 def test_run_candidate_does_not_persist_when_baseline_cache_is_none(tmp_path, monkeypatch):

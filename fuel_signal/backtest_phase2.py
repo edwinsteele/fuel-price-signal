@@ -151,7 +151,9 @@ def patch_results_csv(
     with tempfile.NamedTemporaryFile(
         mode="w", newline="", dir=csv_path.parent, suffix=".tmp", delete=False
     ) as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        # lineterminator="\n" to match log_experiment and the stored form; the
+        # csv default (CRLF) would rewrite every line of the ledger on any patch.
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
         tmp_path = pathlib.Path(fh.name)

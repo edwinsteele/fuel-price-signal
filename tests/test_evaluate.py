@@ -239,7 +239,9 @@ def test_log_experiment_creates_file_with_header(tmp_path, monkeypatch):
 
     assert results_path.exists()
     lines = results_path.read_text().splitlines()
-    assert lines[0].startswith("timestamp,git_sha,name,features,train_start,train_end")
+    assert lines[0].startswith(
+        "timestamp,git_sha,name,features,baseline_fingerprint,train_start,train_end"
+    )
     assert len(lines) == 2  # header + one data row
 
 
@@ -266,6 +268,96 @@ def test_log_experiment_features_pipe_separated(tmp_path, monkeypatch):
 
     content = results_path.read_text()
     assert "cycle_pct_through|station_price_cents" in content
+
+
+def test_log_experiment_fingerprints_the_feature_set_it_logged(tmp_path, monkeypatch):
+    """Each row carries the identity of the ORDERED feature set it was scored on.
+
+    Derived from `features` rather than passed in, so the fingerprint and the column
+    list on the same row cannot disagree. Two rows with different fingerprints were
+    not measured against the same baseline (fps-zci).
+    """
+    import csv as _csv
+
+    from fuel_signal.features import LOCKED_FEATURE_COLUMNS, LOCKED_FEATURE_FINGERPRINT
+
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    log_experiment("lock", LOCKED_FEATURE_COLUMNS, holdout_logloss=0.5, holdout_brier=0.2)
+    log_experiment(
+        "permuted", sorted(LOCKED_FEATURE_COLUMNS), holdout_logloss=0.5, holdout_brier=0.2
+    )
+
+    rows = list(_csv.reader(results_path.open(newline="")))
+    idx = rows[0].index("baseline_fingerprint")
+    assert rows[1][idx] == LOCKED_FEATURE_FINGERPRINT
+    # Same 54 columns, sorted — a different model, so it must not fingerprint alike.
+    assert rows[2][idx] != LOCKED_FEATURE_FINGERPRINT
+    assert rows[2][idx].startswith(f"{len(LOCKED_FEATURE_COLUMNS)}:")
+
+
+def test_results_csv_on_disk_matches_the_current_schema():
+    """The real ledger is migrated, so the next lock-time write appends rather than
+    raising the header-mismatch guard."""
+    import csv as _csv
+
+    with ev._RESULTS_CSV.open(newline="") as fh:
+        assert next(_csv.reader(fh)) == ev._CSV_HEADER
+
+
+def test_results_csv_on_disk_is_well_formed():
+    """Every data row is exactly as wide as the header.
+
+    Three legacy rows carried UNQUOTED commas in `notes`, so csv.DictReader parsed
+    them into a None overflow key and `backtest_phase2.patch_results_csv`'s
+    DictReader->DictWriter round-trip raised
+    `ValueError: dict contains fields not in fieldnames: None`. That predated the
+    fingerprint column — this guard is what stops it coming back, since a ragged
+    ledger breaks every standard CSV consumer, not just that one.
+    """
+    import csv as _csv
+
+    with ev._RESULTS_CSV.open(newline="") as fh:
+        rows = list(_csv.reader(fh))
+    ragged = [(i, len(r)) for i, r in enumerate(rows[1:], start=2) if len(r) != len(ev._CSV_HEADER)]
+    assert not ragged, f"rows whose width != {len(ev._CSV_HEADER)} (line, width): {ragged}"
+
+
+def test_results_csv_on_disk_uses_lf_line_endings():
+    """Pinned by .gitattributes (`eol=lf`) and by the writers' lineterminator.
+
+    csv.writer defaults to CRLF while git normalises to LF (core.autocrlf=input);
+    the disagreement silently rewrote all 30 lines of the ledger during the fps-zci
+    schema migration, churn that a `splitlines()`-based diff check cannot see.
+    """
+    assert b"\r" not in ev._RESULTS_CSV.read_bytes()
+
+
+def test_log_experiment_appends_lf_not_crlf(tmp_path, monkeypatch):
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+
+    log_experiment("run_1", ["feat_a"], holdout_logloss=0.55, holdout_brier=0.18)
+    log_experiment("run_2", ["feat_b"], holdout_logloss=0.50, holdout_brier=0.17)
+
+    assert b"\r" not in results_path.read_bytes()
+
+
+def test_results_csv_survives_a_dictreader_dictwriter_round_trip():
+    """The exact operation backtest_phase2.patch_results_csv performs on this file."""
+    import csv as _csv
+    import io as _io
+
+    with ev._RESULTS_CSV.open(newline="") as fh:
+        reader = _csv.DictReader(fh)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+
+    assert not any(None in row for row in rows), "a row overflowed into DictReader's None key"
+    buf = _io.StringIO()
+    writer = _csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)  # raises ValueError if any row carries a None key
 
 
 def test_log_experiment_raises_on_schema_drift(tmp_path, monkeypatch):

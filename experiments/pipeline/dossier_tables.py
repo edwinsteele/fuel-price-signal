@@ -211,6 +211,11 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         "wall_seconds": meta.get("wall_seconds"),
         "status": results.get("status"),
         "bead_id": meta.get("bead_id"),
+        # Baseline identity (fps-zci item 5). None for runs that predate the field —
+        # which is exactly the population where a wrong R0 could be hiding, so the
+        # absence is itself the signal, not a formatting inconvenience.
+        "n_baseline_columns": meta.get("n_baseline_columns"),
+        "baseline_fingerprint": meta.get("baseline_fingerprint"),
     }
 
 
