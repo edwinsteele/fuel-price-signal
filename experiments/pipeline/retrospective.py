@@ -83,19 +83,36 @@ def find_batch_candidates(
 
 def _candidate_entry(candidate_path: pathlib.Path) -> dict:
     """One candidate's disk state: a dossiered entry (has facts.json), or one of the
-    not-yet-dossiered states the outcome tally counts separately from a real verdict."""
+    not-yet-dossiered states the outcome tally counts separately from a real verdict.
+
+    Checks results.json's status BEFORE consulting facts.json, not after: run_candidate
+    deletes results.json up front on every (re-)run but nothing ever deletes a previous
+    facts.json (runner.py's own comment on why — an in-flight run must not look like a
+    stale old verdict to a concurrent reader). A manually re-queued candidate that goes
+    retryable again would otherwise have its stale facts.json read as "dossiered" for as
+    long as the retry sits unresolved — checking status first means a retryable result
+    always wins over a leftover facts.json from a previous attempt.
+    """
     name = candidate_path.stem
     out_dir = default_out_dir(candidate_path)
-    facts_path = out_dir / FACTS_FILENAME
-    if facts_path.exists():
-        facts = json.loads(facts_path.read_text())
-        return {"candidate": name, "state": "dossiered", "facts": facts}
-
     status = read_run_status(out_dir)
-    if status is None:
-        return {"candidate": name, "state": "never_run", "facts": None}
     if status in RETRYABLE_STATUSES:
         return {"candidate": name, "state": "retryable_incomplete", "facts": None}
+
+    facts_path = out_dir / FACTS_FILENAME
+    if facts_path.exists():
+        try:
+            facts = json.loads(facts_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            # Deliberately loud, unlike read_run_status's total read: this routine is
+            # interactively invoked (docs/routines/retrospective.md), not an unattended
+            # nightly sweep, so a corrupted facts.json is worth stopping for rather than
+            # silently miscounting — but the raw exception doesn't name the candidate.
+            raise ValueError(f"candidate {name!r}: could not read {facts_path}: {exc}") from exc
+        return {"candidate": name, "state": "dossiered", "facts": facts}
+
+    if status is None:
+        return {"candidate": name, "state": "never_run", "facts": None}
     # Terminal status but no facts.json yet — the narrow race window between a run finishing
     # and the next dossier scan. Real, but should be rare and self-resolving.
     return {"candidate": name, "state": "pending_dossier", "facts": None}
@@ -145,8 +162,13 @@ def build_leaderboard(entries: list[dict], *, family_wise_threshold: float) -> l
         if entry["state"] != "dossiered":
             continue
         facts = entry["facts"]
-        realised = facts.get("headline", {}).get("realised", {})
-        zone = facts.get("headline", {}).get("zone", {})
+        # dossier_tables.build_facts writes headline: None (not a missing key) for every
+        # terminal status other than "rejected" (disqualified / aborted_candidate never
+        # reach the scoring stages) — `.get("headline", {})` doesn't catch that, since the
+        # key IS present, just null. `or {}` does.
+        headline = facts.get("headline") or {}
+        realised = headline.get("realised") or {}
+        zone = headline.get("zone") or {}
         noise_band = facts.get("noise_band", {"available": False})
         candidate_conf = facts.get("candidate", {})
         percentile = noise_band.get("candidate_percentile_better_than_noise") if noise_band.get("available") else None
@@ -211,8 +233,11 @@ def build_confidence_calibration(candidates_root: pathlib.Path = DEFAULT_CANDIDA
     for facts_path in sorted(pathlib.Path(candidates_root).glob("*/*/" + FACTS_FILENAME)):
         facts = json.loads(facts_path.read_text())
         candidate = facts.get("candidate", {})
-        realised = facts.get("headline", {}).get("realised", {})
-        zone = facts.get("headline", {}).get("zone", {})
+        # See build_leaderboard's comment: headline is None, not missing, for a
+        # disqualified/aborted_candidate dossier.
+        headline = facts.get("headline") or {}
+        realised = headline.get("realised") or {}
+        zone = headline.get("zone") or {}
         pairs.append(
             {
                 "candidate": candidate.get("name"),
@@ -264,6 +289,13 @@ def compute_retrospective(
     guard as noise_floor.py — a retrospective already written is a record other work may already
     reference)."""
     batch_dir = pathlib.Path(batches_dir) / batch_name
+    if not batch_dir.is_dir():
+        raise ValueError(
+            f"{batch_dir} does not exist — has this batch been frozen yet "
+            "(experiments.pipeline.batch_freeze)? A typo'd batch name would otherwise either "
+            "crash on the final write (no parent dir) or, if the batch dir happens to exist "
+            "with no matching candidates dir, silently write a zero-candidate retrospective."
+        )
     out_path = batch_dir / RETROSPECTIVE_FILENAME
     if out_path.exists() and not force:
         raise FileExistsError(
@@ -271,7 +303,14 @@ def compute_retrospective(
             "replace it."
         )
 
-    entries = [_candidate_entry(p) for p in find_batch_candidates(batch_name, candidates_root)]
+    candidate_modules = find_batch_candidates(batch_name, candidates_root)
+    if not candidate_modules:
+        raise ValueError(
+            f"No candidate modules found under {pathlib.Path(candidates_root) / batch_name} — "
+            "check the batch name and --candidates-dir; a real batch always has at least one "
+            "candidate filed against it by the generator."
+        )
+    entries = [_candidate_entry(p) for p in candidate_modules]
     n_dossiered = sum(1 for e in entries if e["state"] == "dossiered")
     threshold = family_wise_percentile_threshold(max(n_dossiered, 1))
 

@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from experiments.pipeline.retrospective import (
     RETROSPECTIVE_FILENAME,
+    _candidate_entry,
     build_confidence_calibration,
     build_leaderboard,
     build_outcome_tally,
@@ -38,6 +39,21 @@ def _facts(
             "zone": {"resolved": zone_resolved},
         },
         "noise_band": noise_band or {"available": False},
+    }
+
+
+def _disqualified_facts(name: str = "cand", batch: str = "batch1") -> dict:
+    """The real on-disk shape dossier_tables.build_facts writes for a terminal status
+    other than 'rejected' (disqualified / aborted_candidate never reach the scoring
+    stages): headline and breakdowns are None, not missing keys."""
+    return {
+        "candidate": {"name": name, "confidence_effect": 0.4, "confidence_zone": None},
+        "provenance": {"batch": batch, "status": "disqualified"},
+        "headline": None,
+        "breakdowns": None,
+        "status_note": "status='disqualified' — run did not reach the scoring stages",
+        "noise_band": {"available": False, "reason": "empty noise-floor sample or unresolved effect_delta_cpl_held"},
+        "grading": {"predicted_signature": "...", "verdict": None, "explanation": None, "pending": True},
     }
 
 
@@ -118,6 +134,52 @@ def test_compute_retrospective_terminal_status_no_facts_yet_is_pending_dossier(t
     assert payload["leaderboard"] == []
 
 
+def test_compute_retrospective_missing_batch_dir_raises_clear_error(tmp_path):
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"  # batch1 subdir deliberately never created
+
+    with pytest.raises(ValueError, match="does not exist"):
+        compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+
+def test_compute_retrospective_no_candidate_modules_raises_clear_error(tmp_path):
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    (batches_dir / "batch1").mkdir(parents=True)  # batch exists, but no candidates filed
+
+    with pytest.raises(ValueError, match="No candidate modules found"):
+        compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+
+# ── _candidate_entry ────────────────────────────────────────────────────────
+
+def test_candidate_entry_retryable_status_wins_over_stale_facts_json(tmp_path):
+    """A candidate manually re-queued after being dossiered once: run_candidate deletes
+    results.json up front on every (re-)run but never touches a previous facts.json
+    (runner.py's own comment on why). If the re-run goes retryable again, the retrospective
+    must report retryable_incomplete, not resurrect the stale dossiered facts."""
+    candidates_root = tmp_path / "candidates"
+    module_path = _write_dossier(candidates_root, "batch1", "requeued", _facts("requeued"))
+    out_dir = module_path.with_suffix("")
+    (out_dir / "results.json").write_text(json.dumps({"status": "aborted_pipeline"}))
+
+    entry = _candidate_entry(module_path)
+
+    assert entry["state"] == "retryable_incomplete"
+    assert entry["facts"] is None
+
+
+def test_candidate_entry_corrupted_facts_json_raises_with_candidate_name(tmp_path):
+    candidates_root = tmp_path / "candidates"
+    module_path = _write_candidate_module(candidates_root, "batch1", "broken")
+    out_dir = module_path.with_suffix("")
+    out_dir.mkdir()
+    (out_dir / "facts.json").write_text("{not valid json")
+
+    with pytest.raises(ValueError, match="broken"):
+        _candidate_entry(module_path)
+
+
 # ── family_wise_percentile_threshold ────────────────────────────────────────
 
 def test_family_wise_threshold_n1_is_plain_95th_percentile():
@@ -183,6 +245,27 @@ def test_build_leaderboard_skips_non_dossiered_entries():
     assert [r["candidate"] for r in rows] == ["ran"]
 
 
+def test_build_leaderboard_handles_disqualified_candidate_with_null_headline():
+    """dossier_tables writes headline: None (not a missing key) for any terminal status
+    other than 'rejected'. This must not crash, and the candidate still appears (it IS
+    dossiered) with null metrics rather than being silently dropped."""
+    entries = [
+        {"candidate": "dq", "state": "dossiered", "facts": _disqualified_facts("dq")},
+        {"candidate": "ok", "state": "dossiered", "facts": _facts("ok", delta=-0.02)},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_threshold=95.0)
+
+    assert {r["candidate"] for r in rows} == {"dq", "ok"}
+    dq_row = next(r for r in rows if r["candidate"] == "dq")
+    assert dq_row["status"] == "disqualified"
+    assert dq_row["delta_cpl_held"] is None
+    assert dq_row["effect_resolved"] is None
+    assert dq_row["zone_resolved"] is None
+    # No resolved metric sorts last regardless of ranking mode.
+    assert rows[-1]["candidate"] == "dq"
+
+
 # ── build_outcome_tally ────────────────────────────────────────────────────
 
 def test_build_outcome_tally_counts_every_state():
@@ -227,6 +310,24 @@ def test_confidence_calibration_scans_every_batch_not_just_one(tmp_path):
     result = build_confidence_calibration(candidates_root)
 
     assert {p["batch"] for p in result["pairs"]} == {"batch1", "batch2"}
+
+
+def test_confidence_calibration_handles_disqualified_candidate_with_null_headline(tmp_path):
+    """Same headline: None shape as the leaderboard test — this scans EVERY batch
+    (module docstring point 4), so one disqualified dossier anywhere must not poison
+    every other batch's calibration read."""
+    candidates_root = tmp_path / "candidates"
+    _write_dossier(candidates_root, "batch1", "dq", _disqualified_facts("dq", batch="batch1"))
+    _write_dossier(candidates_root, "batch2", "ok", _facts("ok", batch="batch2"))
+
+    result = build_confidence_calibration(candidates_root)
+
+    assert len(result["pairs"]) == 2
+    dq_pair = next(p for p in result["pairs"] if p["candidate"] == "dq")
+    assert dq_pair["effect_resolved"] is None
+    assert dq_pair["zone_resolved"] is None
+    # A None effect_resolved doesn't count toward n_dossiered_with_resolved_effect.
+    assert result["n_dossiered_with_resolved_effect"] == 1
 
 
 def test_confidence_calibration_computes_means_once_min_n_reached(tmp_path, monkeypatch):
