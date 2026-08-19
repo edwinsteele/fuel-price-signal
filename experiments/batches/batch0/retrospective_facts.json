@@ -1,0 +1,55 @@
+{
+  "batch": "batch0",
+  "computed_at": "2026-08-19T10:39:25.448820+00:00",
+  "git_sha": "25a86ee6a4f489bc0e8c920f84927357dbbb5aac",
+  "noise_floor": {
+    "available": true,
+    "n_draws": 5,
+    "band_mean_delta_cpl_held": -0.013497944771069114,
+    "band_std_delta_cpl_held": 0.14204447295549547
+  },
+  "family_wise_percentile_threshold": 95.0,
+  "leaderboard": [
+    {
+      "candidate": "tgp_delta_7d",
+      "status": "rejected",
+      "delta_cpl_held": 0.005851407340855985,
+      "effect_resolved": false,
+      "zone_resolved": null,
+      "confidence_effect": 0.5,
+      "confidence_zone": 0.5,
+      "noise_band_available": true,
+      "noise_band_percentile": 40.0,
+      "noise_band_z": 0.13622038020435703,
+      "clears_family_wise_threshold": false
+    }
+  ],
+  "outcome_tally": {
+    "total_candidates_filed": 1,
+    "dossiered_by_status": {
+      "rejected": 1
+    },
+    "never_run": 0,
+    "retryable_incomplete": 0,
+    "pending_dossier": 0
+  },
+  "confidence_calibration": {
+    "scope": "cumulative across every dossiered candidate under experiments/candidates/, not just this batch",
+    "min_calibration_n": 10,
+    "n_dossiered_with_resolved_effect": 1,
+    "n_usable_for_calibration": 1,
+    "insufficient_data": true,
+    "pairs": [
+      {
+        "candidate": "tgp_delta_7d",
+        "batch": "batch0",
+        "confidence_effect": 0.5,
+        "effect_resolved": false,
+        "confidence_zone": 0.5,
+        "zone_resolved": null
+      }
+    ],
+    "mean_confidence_effect_when_resolved_true": null,
+    "mean_confidence_effect_when_resolved_false": null
+  }
+}
