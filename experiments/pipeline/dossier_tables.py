@@ -20,13 +20,16 @@ launch.py's `find_stale_claims`/`release_stale_claim` (bd `in_progress` + a requ
 tail in run.log, not just "no results.json after 12h") already does correctly. Removed rather
 than fixed in place — one true stale-claim path, not two.
 
-One artifact this module reads that doesn't exist yet, an intentional forward-compatible slot:
+One artifact this module reads that a given batch may not have yet, a forward-compatible slot:
 
-  noise_floor.json (`NOISE_FLOOR_FILENAME`) — contract fps-3jj.9 (P3, not yet built) must satisfy:
-    write `{"deltas_cpl_held": [<float>, ...]}` into the batch dir at batch-setup time (10-20
-    uninformative draws through the same fit + realised-backtest path). Until that file exists,
-    facts["noise_band"]["available"] is False — the slot exists now so the schema doesn't change
-    once fps-3jj.9 lands.
+  noise_floor.json (`NOISE_FLOOR_FILENAME`) — written by `experiments/pipeline/noise_floor.py`
+    (fps-3jj.9): `{"deltas_cpl_held": [<float>, ...], "partial": <bool>, ...}`, one R0-vs-R0
+    realised-CPL delta per seed pair, into the batch dir. That module is a deliberate
+    batch-setup step (heavy — ~10 single-arm fits), not run automatically, so a batch that
+    hasn't had it run yet still reads facts["noise_band"]["available"] == False — that's a
+    missing per-batch step, not a missing capability. `"partial": true` means it was computed
+    with `--fold-subset` (an iteration/smoke speed-up, not a real calibration); `_noise_band()`
+    below refuses those rather than grading a full-fold delta against a partial-fold ruler.
 
 FIXED (fps-icv, was a KNOWN GAP): the run-directory convention this module assumes (one
 subdirectory per candidate) now holds. launch.py's `launch_detached` and runner.py's
@@ -252,8 +255,25 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None) -> dict:
         return {"available": False, "reason": "no batch_dir recorded in results.json meta"}
     path = batch_dir / NOISE_FLOOR_FILENAME
     if not path.exists():
-        return {"available": False, "reason": "fps-3jj.9 not yet landed — no noise-floor calibration for this batch"}
-    deltas = np.asarray(json.loads(path.read_text()).get("deltas_cpl_held", []), dtype=float)
+        return {
+            "available": False,
+            "reason": "no noise-floor calibration for this batch — run `PYTHONPATH=. uv run "
+            "python -m experiments.pipeline.noise_floor <batch>` (fps-3jj.9)",
+        }
+    noise_floor = json.loads(path.read_text())
+    if noise_floor.get("partial"):
+        # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover
+        # some outer folds, but effect_delta_cpl_held always pools every fold. Grading a
+        # candidate against a partial-fold floor as though it were the real one would silently
+        # misjudge the delta, not just weaken the estimate — refuse rather than mislabel it.
+        return {
+            "available": False,
+            "reason": "noise_floor.json was computed with --fold-subset (partial fold "
+            "coverage) — not a valid ruler against a delta pooled over every fold. Recompute "
+            "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
+            "--force` and no --fold-subset.",
+        }
+    deltas = np.asarray(noise_floor.get("deltas_cpl_held", []), dtype=float)
     delta = results.get("effect_delta_cpl_held")
     if delta is None or deltas.size == 0:
         return {"available": False, "reason": "empty noise-floor sample or unresolved effect_delta_cpl_held"}
