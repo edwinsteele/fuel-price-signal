@@ -70,7 +70,7 @@ Override is allowed when the regressing fold is known to be anomalous (a price-s
 
 ### The baseline feature set is declared, never discovered
 
-Code that needs "the production baseline columns" composes them from the column constants (`FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS`). It must **never** derive them by inspecting a features frame's header.
+Code that needs "the production baseline columns" imports **`fuel_signal.features.LOCKED_FEATURE_COLUMNS`** — one symbol, re-exported for experiment scripts as `experiments.lib.constants.BASELINE_COLUMNS`. Never retype the group composition `FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS`, and never derive the set by inspecting a features frame's header.
 
 `data/features.csv` is deliberately a **superset** of the model contract. A column sits in it for one of three reasons, and only the first puts it in the baseline:
 
@@ -80,7 +80,7 @@ Code that needs "the production baseline columns" composes them from the column 
 | Evaluated and **rejected**, still computed | the 10 `days_since_trough_entry_<brand>` (Phase 4b, 2026-06-02) |
 | **Held out** pending graduation | `tgp_delta_7d` (#271) |
 
-Header inspection cannot tell these apart, so it silently promotes rejected and held-out columns into the baseline.
+Header inspection cannot tell these apart, so it silently promotes rejected and held-out columns into the baseline. `fuel_signal.features.non_model_columns(df)` names the second and third categories with a machine-readable reason code, so "outside the lock" is an assertable condition rather than something a reviewer has to already know.
 
 Note that `train_lgbm`'s *default* resolution is not the lock — the lock is `train_lgbm --no-brand-features`. "Mirrors train_lgbm's default" is not a justification for a baseline resolution.
 
@@ -88,7 +88,9 @@ Note that `train_lgbm`'s *default* resolution is not the lock — the lock is `t
 
 How much does order matter? **Pin it; don't sweep it.** Measured over 5 draws each on one train/val slice, order-variance is ~2% of seed-variance (log-loss std 0.000258 vs 0.015643; decision flips at τ=0.25 of 8–29 rows vs 1743–2069). It does not need the multi-seed discipline that seeds get. But it is *not* nothing at the arbiter: the sorted-vs-production permutation moved batch0's pooled realised delta by 0.038 c/L, ~0.8 of a decision flip — which says more about the arbiter differencing two nearly-identical quantities than about order.
 
-**Why:** `batch_freeze.resolve_baseline_columns()` appended `discover_brand_feature_columns(df)` on exactly that rationale, giving batch0 a 64-column R0 — production plus the rejected Phase 4b group — for every candidate in the batch, on both the log-loss screen and the realised arbiter. It surfaced only because `tgp_delta_7d` was re-tested as a known graduate and came back with the opposite sign; the candidate arms agreed to 0.0013 c/L while the baselines differed by 0.132 (fps-sa1, fps-nor). Single-sourcing and fingerprinting the contract so the next instance is caught automatically is fps-zci.
+**Every result records which baseline it was measured against.** `baseline_fingerprint(columns)` returns `'<n>:<sha12>'` over the **ordered** list; it is stamped into experiment `meta.json` (automatically, by `experiments.lib.io.write_meta`), batch `freeze.json`, and each run's `results.json` → `facts.json`. Two runs whose fingerprints differ are not comparable, whatever their deltas say — check the fingerprints before comparing numbers across runs. A `null` fingerprint means the run predates the field, which is exactly the population where a wrong R0 could be hiding; there is no safe fallback, so nothing substitutes today's constants for it.
+
+**Why:** `batch_freeze.resolve_baseline_columns()` appended `discover_brand_feature_columns(df)` on exactly that rationale, giving batch0 a 64-column R0 — production plus the rejected Phase 4b group — for every candidate in the batch, on both the log-loss screen and the realised arbiter. It surfaced only because `tgp_delta_7d` was re-tested as a known graduate and came back with the opposite sign; the candidate arms agreed to 0.0013 c/L while the baselines differed by 0.132 (fps-sa1, fps-nor). Neither defect left any trace in the artifacts that recorded the runs, which is why two incommensurable baselines were compared head-to-head for two months — hence the single symbol and the fingerprint above (fps-zci).
 
 ### New constants must not silently diverge from a canonical equivalent
 

@@ -34,7 +34,9 @@ from fuel_signal.features import (  # noqa: E402
     DEFAULT_FEATURES_CSV,
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
+    LOCKED_FEATURE_COLUMNS,
     NETWORK_FEATURE_COLUMNS,
+    baseline_fingerprint,
     discover_brand_feature_columns,
     load_features,
 )
@@ -222,9 +224,14 @@ def main(
         [] if no_brand_features or no_lga_features
         else discover_brand_feature_columns(df)
     )
+    # The lock is LOCKED_FEATURE_COLUMNS — i.e. this command's --no-brand-features
+    # path, NOT its default (the default's extra brand-trough columns are Phase 4b,
+    # evaluated and rejected). Mirroring the default instead of the lock is what
+    # gave batch0 a 64-column R0 (fps-sa1), so the lock has one name (fps-zci) and
+    # this is the place it is produced.
     feature_columns = (
         FEATURE_COLUMNS if no_lga_features
-        else FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS + brand_columns
+        else LOCKED_FEATURE_COLUMNS + brand_columns
     )
 
     required = feature_columns + ["label", "price_date"]
@@ -277,7 +284,7 @@ def main(
     click.echo(
         f"Training on {len(feature_columns)} features ({schema_label} schema"
         + (f"; {len(brand_columns)} brand cols" if brand_columns else "")
-        + f"; seed={seed})."
+        + f"; seed={seed}; baseline={baseline_fingerprint(feature_columns)})."
     )
     result = train_and_evaluate(df, feature_columns=feature_columns, random_state=seed)
 

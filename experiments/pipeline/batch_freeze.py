@@ -40,10 +40,10 @@ from fuel_signal.dates import date_from_int
 from fuel_signal.db import DEFAULT_DB_PATH
 from fuel_signal.features import (
     DEFAULT_FEATURES_CSV,
-    FEATURE_COLUMNS,
-    LGA_FEATURE_COLUMNS,
-    NETWORK_FEATURE_COLUMNS,
+    LOCKED_FEATURE_COLUMNS,
+    baseline_fingerprint,
     load_features,
+    non_model_columns,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -76,8 +76,28 @@ class BaselineContractMismatch(RuntimeError):
         )
 
 
+class NonModelColumnLeak(RuntimeError):
+    """A column the project deliberately excludes from the lock reached the baseline.
+
+    Raised by resolve_baseline_columns() rather than returned quietly: this is the
+    exact shape of fps-sa1 (10 rejected Phase 4b brand-trough columns in R0), and it
+    went unnoticed for two months because nothing asserted the negative.
+    """
+
+    def __init__(self, leaked: dict[str, tuple[str, str]]) -> None:
+        self.leaked = leaked
+        detail = "; ".join(f"{c} ({code}: {why})" for c, (code, why) in sorted(leaked.items()))
+        super().__init__(
+            f"{len(leaked)} non-model column(s) leaked into the locked baseline: {detail}"
+        )
+
+
 def resolve_baseline_columns(df: pd.DataFrame) -> list[str]:
     """The locked production baseline column set, in production order. 54 columns.
+
+    Thin wrapper over ``fuel_signal.features.LOCKED_FEATURE_COLUMNS`` — the single
+    symbol for the contract (fps-zci) — plus the two frame-side assertions that only
+    make sense once a frame is in hand.
 
     DECLARED, never discovered (fps-sa1). The features frame is deliberately a
     SUPERSET of the model contract — a column sits in features.csv for one of three
@@ -119,17 +139,21 @@ def resolve_baseline_columns(df: pd.DataFrame) -> list[str]:
     equals this list exactly, and differs from its sorted permutation in 52 of 54
     positions.
 
-    Single-sourcing this contract properly — one importable symbol, checked against
-    the on-disk model artifact, fingerprinted into every result — is fps-zci. This
-    function is the acute fix.
+    Raises ValueError if the frame is missing a locked column, and NonModelColumnLeak
+    if a computed-but-excluded column (see features.non_model_columns) somehow reached
+    the resolved list — the assertion whose absence let fps-sa1 run for two months.
     """
-    resolved = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
+    resolved = list(LOCKED_FEATURE_COLUMNS)
     missing = [c for c in resolved if c not in df.columns]
     if missing:
         raise ValueError(
             f"Features frame is missing {len(missing)} locked baseline column(s): "
             f"{missing}. Regenerate features.csv/.parquet before freezing a batch."
         )
+    excluded = non_model_columns(df)
+    leaked = {c: excluded[c] for c in resolved if c in excluded}
+    if leaked:
+        raise NonModelColumnLeak(leaked)
     return resolved
 
 
@@ -239,6 +263,10 @@ def freeze_batch(
         "source_features": str(parquet_src),
         "source_db": str(db_path),
         "n_baseline_columns": len(baseline_columns),
+        # Identity of the ORDERED baseline this batch pinned (fps-zci item 5). Every
+        # run in the batch stamps the same value into its results.json, so two runs
+        # can be checked for commensurability mechanically instead of by eye.
+        "baseline_fingerprint": baseline_fingerprint(baseline_columns),
     }
     (batch_dir / FREEZE_MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2) + "\n")
 

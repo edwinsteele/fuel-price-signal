@@ -35,6 +35,8 @@ Usage:
 #   • meta serialisation        write_meta
 #   • timing                    time_block
 #   • shared constants          SEEDS, SHOCK_FOLDS, LGBM_DEFAULTS
+#   • the locked baseline (R0)  BASELINE_COLUMNS — never retype the group
+#                               composition, never derive it from the frame
 #
 # PROMOTION RULE:
 #   If an add_candidate_columns block is copied across 2+ experiments,
@@ -51,19 +53,14 @@ import pandas as pd
 
 from experiments.lib.aggregate import aggregate_with_deltas
 from experiments.lib.cohorts import hard_quantile_mask
-from experiments.lib.constants import SEEDS, SHOCK_FOLDS
+from experiments.lib.constants import BASELINE_COLUMNS, BASELINE_FINGERPRINT, SEEDS, SHOCK_FOLDS
 from experiments.lib.fit import fit_score, per_row_log_loss
 from experiments.lib.folds import iter_folds_with_baseline_fit
 from experiments.lib.gates import GateSpec, evaluate_gates, seed_variance_gate
 from experiments.lib.io import write_meta
 from experiments.lib.rowpreds import RowPredCollector
 from experiments.lib.timing import time_block
-from fuel_signal.features import (
-    FEATURE_COLUMNS,
-    LGA_FEATURE_COLUMNS,
-    NETWORK_FEATURE_COLUMNS,
-    load_features,
-)
+from fuel_signal.features import load_features
 
 OUT = pathlib.Path(__file__).parent
 
@@ -119,10 +116,12 @@ def main() -> None:
         df = add_candidate_columns(df)
     # TODO: print null rates / coverage stats for each new column
 
-    baseline_cols = FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
-    # TODO: update expected count if the baseline has changed
-    assert len(baseline_cols) == 54, f"expected 54, got {len(baseline_cols)}"
-    print(f"\nBaseline features: {len(baseline_cols)}", flush=True)
+    # R0 is the declared lock, imported — never retyped as a group composition and
+    # never re-derived from the frame's header. No hardcoded count to keep in sync
+    # either: the count moves with the contract, and the fingerprint below is what
+    # actually identifies it (fps-zci).
+    baseline_cols = BASELINE_COLUMNS
+    print(f"\nBaseline features: {len(baseline_cols)}  [{BASELINE_FINGERPRINT}]", flush=True)
     print(f"Run grid: {list(RUNS.keys())}", flush=True)
     print(f"Seeds: {SEEDS} (n={len(SEEDS)})", flush=True)
 
@@ -246,7 +245,8 @@ def main() -> None:
     meta = {
         "seeds": list(SEEDS),
         "shock_folds": sorted(SHOCK_FOLDS),
-        "n_baseline_features": len(baseline_cols),
+        # write_meta stamps meta["baseline"] (n_columns / ordered fingerprint /
+        # the column list) on its own — nothing to add here.
         "candidate_columns": [CANDIDATE_COL],  # TODO: list all candidate cols
         "definitions": {
             # TODO: human-readable formula for each candidate column
@@ -278,7 +278,7 @@ def main() -> None:
         "total_wall_seconds": time.perf_counter() - overall_t0,
     }
 
-    write_meta(OUT, meta)
+    write_meta(OUT, meta, baseline_columns=baseline_cols)
     print(f"[total wall] {time.perf_counter() - overall_t0:.1f}s", flush=True)
 
 

@@ -23,8 +23,10 @@ Batched (pre-build CycleDetector once for a large loop — see CLAUDE.md perf no
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import sqlite3
+from collections.abc import Sequence
 from datetime import date as _date
 from datetime import timedelta as _timedelta
 
@@ -108,13 +110,106 @@ NETWORK_FEATURE_COLUMNS: list[str] = [
 TGP_DELTA_DAYS: int = 7
 TGP_FEATURE_COLUMNS: list[str] = ["tgp_delta_7d"]
 
+_TROUGH_PREFIX = "days_since_trough_entry_"
+
+# ---------------------------------------------------------------------------
+# THE feature-scope contract
+# ---------------------------------------------------------------------------
+# One symbol for "the locked feature set". Everything that needs the production
+# baseline — batch_freeze, the experiment TEMPLATE, experiments/lib.constants —
+# imports THIS, rather than retyping the group composition (fps-zci).
+#
+# Two properties are load-bearing, and both have already been violated once:
+#
+#   SET   — the frame is a SUPERSET of the contract, so the set must be DECLARED,
+#           never discovered from a features-CSV header (fps-sa1 gave batch0 a
+#           64-column R0 by discovering the rejected brand-trough group).
+#   ORDER — LightGBM breaks equal-gain split ties by feature index, so the same
+#           columns in a different order fit a DIFFERENT model (fps-zci: sorting
+#           moved 732/47,823 val rows' probabilities and 0.038 c/L of batch0's
+#           pooled realised delta). Production order is the group concatenation
+#           below; it differs from its own sorted permutation in 52 of 54
+#           positions. NEW GROUPS APPEND — never insert, never sort.
+#
+# Ground truth is data/models/lgbm_calibrated.joblib's "feature_columns", which
+# this list must equal element-for-element. tests/test_feature_contract.py
+# asserts exactly that whenever the (gitignored) artifact is present.
+LOCKED_FEATURE_COLUMNS: list[str] = (
+    FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
+)
+
+# Why a column can be computed into features.csv yet sit OUTSIDE the lock.
+# Machine-readable so that "not in scope" stops being indistinguishable from
+# "in scope" to anything that inspects the frame (fps-zci item 3).
+NON_MODEL_REASON_REJECTED = "evaluated-and-rejected"
+NON_MODEL_REASON_HELD_OUT = "held-out-pending-graduation"
+
+#: Statically-named computed-but-excluded columns -> (reason_code, why).
+NON_MODEL_COLUMNS: dict[str, tuple[str, str]] = {
+    "tgp_delta_7d": (
+        NON_MODEL_REASON_HELD_OUT,
+        "TGP momentum (#271), graduated from experiments/2026-06-20_leading_indicators "
+        "but not yet re-locked; joins the contract at the chip-4 retrain.",
+    ),
+}
+
+#: Brand trough columns are DB-derived (qualifying brands depend on station counts),
+#: so they cannot be enumerated statically — they are matched by rule instead. Note
+#: the LGA trough columns share this prefix and ARE in the lock, hence the
+#: LGA_FEATURE_COLUMNS exclusion in non_model_columns().
+_BRAND_TROUGH_REASON = (
+    NON_MODEL_REASON_REJECTED,
+    "Phase 4b brand troughs, walked away 2026-06-02: lost 9/14 folds in paired WFCV "
+    "with a non-shock regression at fold 11 (docs/STATUS.md § Phase 4b; AGENTS.md "
+    "§ Canonical feature set). Still computed so a future ablation can graduate them.",
+)
+
+
+def non_model_columns(df: pd.DataFrame) -> dict[str, tuple[str, str]]:
+    """Columns present in `df` that are deliberately outside the lock, with why.
+
+    The features frame holds columns for three reasons and only the first puts a
+    column in the model contract: in the lock; evaluated and REJECTED; held out
+    pending graduation. This names the latter two so that a leak into the baseline
+    is a machine-checkable condition rather than something a human has to notice
+    two months later (fps-sa1, fps-nor).
+    """
+    locked = set(LOCKED_FEATURE_COLUMNS)
+    out: dict[str, tuple[str, str]] = {}
+    for col in df.columns:
+        if col in locked:
+            continue
+        if col in NON_MODEL_COLUMNS:
+            out[col] = NON_MODEL_COLUMNS[col]
+        elif col.startswith(_TROUGH_PREFIX):
+            out[col] = _BRAND_TROUGH_REASON
+    return out
+
+
+def baseline_fingerprint(columns: Sequence[str]) -> str:
+    """Identity of one baseline column list, as '<n>:<12 hex chars of sha256>'.
+
+    Hashes the ORDERED list — order is part of the contract, so two runs whose
+    baselines differ only by a permutation must NOT fingerprint alike. Stamped into
+    experiment meta.json, batch freeze.json and run results.json so cross-run
+    comparisons can be checked mechanically; both contract defects found so far were
+    invisible in the artifacts that recorded the runs (fps-zci item 5).
+
+    The leading count is redundant with the digest but is what a human reads first:
+    the fps-sa1 defect was "64" where "54" belonged.
+    """
+    digest = hashlib.sha256("\n".join(columns).encode("utf-8")).hexdigest()
+    return f"{len(columns)}:{digest[:12]}"
+
+
+LOCKED_FEATURE_FINGERPRINT: str = baseline_fingerprint(LOCKED_FEATURE_COLUMNS)
+
+
 # Brand trough feature columns are DB-derived (qualifying brands depend on
 # station counts) so they cannot be a module-level constant.  Call
 # brand_feature_columns(conn) within assemble_feature_rows to get the list,
 # or discover_brand_feature_columns() against a features-CSV DataFrame at
 # train/score time.
-
-_TROUGH_PREFIX = "days_since_trough_entry_"
 
 
 def discover_brand_feature_columns(df: pd.DataFrame) -> list[str]:

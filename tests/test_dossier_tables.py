@@ -75,6 +75,7 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "rejected", target=N
             "pass_criterion": {"criterion": "sign plus concentration"},
             "extra_feature_provider_hits": 100, "extra_feature_provider_misses": 0,
             "git_sha": "abc1234", "bead_id": bead_id,
+            "n_baseline_columns": 54, "baseline_fingerprint": "54:deadbeef1234",
         },
     }
 
@@ -233,6 +234,8 @@ def test_build_facts_rejected_run_has_all_blocks_and_suppresses_thin_cells(tmp_p
     assert facts["provenance"]["bead_id"] == "fps-test.1"
     assert facts["provenance"]["git_sha"] == "abc1234"
     assert facts["provenance"]["git_sha_is_run_time"] is True
+    assert facts["provenance"]["n_baseline_columns"] == 54
+    assert facts["provenance"]["baseline_fingerprint"] == "54:deadbeef1234"
 
     assert facts["headline"]["realised"]["delta_cpl_held"] == -0.05
     assert "NOT the arbiter" in facts["headline"]["wfcv_log_loss"]["label"]
@@ -420,6 +423,25 @@ def test_make_plots_returns_empty_when_run_did_not_score(tmp_path):
 
 
 # ── orchestration ─────────────────────────────────────────────────────────────
+
+def test_build_facts_leaves_the_baseline_fingerprint_none_for_older_runs(tmp_path):
+    """A run that predates the field reports None rather than a guess (fps-zci).
+
+    Unlike git_sha, there is no safe fallback: substituting today's constants would
+    assert that an old run used today's baseline, which is exactly the claim that was
+    false for every batch0 run. The absence is the signal.
+    """
+    run_dir, _ = _write_run(tmp_path)
+    results = json.loads((run_dir / dt.RESULTS_FILENAME).read_text())
+    del results["meta"]["n_baseline_columns"]
+    del results["meta"]["baseline_fingerprint"]
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["provenance"]["n_baseline_columns"] is None
+    assert facts["provenance"]["baseline_fingerprint"] is None
+
 
 def test_process_run_writes_facts_json_with_plots_list(tmp_path):
     run_dir, _ = _write_run(tmp_path)

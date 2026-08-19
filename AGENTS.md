@@ -310,7 +310,9 @@ The production model (`data/models/lgbm.joblib`, `lgbm_calibrated.joblib`) is tr
 | Core cycle + station features | 15 | `FEATURE_COLUMNS` |
 | LGA trough features | 35 | `LGA_FEATURE_COLUMNS` (one per `SYDNEY_METRO_COUNCILS` LGA) |
 | RAC_full network features | 4 | `NETWORK_FEATURE_COLUMNS` |
-| **Total** | **54** | |
+| **Total** | **54** | **`LOCKED_FEATURE_COLUMNS`** |
+
+`fuel_signal.features.LOCKED_FEATURE_COLUMNS` is the one symbol for this contract — import it (or `experiments.lib.constants.BASELINE_COLUMNS` from an experiment script) rather than retyping the group composition. Its order is production order and must not be sorted; `data/models/lgbm_calibrated.joblib`'s `feature_columns` is ground truth, and `tests/test_feature_contract.py` asserts ordered equality against it whenever the (gitignored) artifact is present. `baseline_fingerprint()` gives the contract a `'54:<sha12>'` identity that every experiment `meta.json`, batch `freeze.json` and run `results.json` records. See [docs/CONVENTIONS.md § The baseline feature set is declared, never discovered](docs/CONVENTIONS.md).
 
 **RAC_full group** (`network_px_std`, `network_px_std_delta_3d`, `lga_phase_std`, `lga_phase_std_delta_3d`): graduated via within-family ablation in #212; adds −0.045 Δh25 over the 50-feat LGA-only baseline.
 

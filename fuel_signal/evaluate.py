@@ -45,6 +45,8 @@ from collections.abc import Iterator
 import numpy as np
 import pandas as pd
 
+from fuel_signal.features import baseline_fingerprint
+
 # ---------------------------------------------------------------------------
 # Canonical split boundaries
 # ---------------------------------------------------------------------------
@@ -58,7 +60,7 @@ TEST_END = "2025-12-31"
 
 _RESULTS_CSV = pathlib.Path(__file__).parent.parent / "experiments" / "results.csv"
 _CSV_HEADER = [
-    "timestamp", "git_sha", "name", "features",
+    "timestamp", "git_sha", "name", "features", "baseline_fingerprint",
     "train_start", "train_end", "val_start", "val_end", "test_start", "test_end",
     "holdout_logloss", "holdout_brier",
     "realised_spend_cpl", "realised_savings_vs_always_buy_pct",
@@ -272,6 +274,14 @@ def log_experiment(
     by the backtest engine (Phase 3); leave None for probabilistic-only runs.
     seed_test_logloss_vector / mean / std are populated by score_phase2 --seeds
     at lock time; leave None for single-seed development runs.
+
+    baseline_fingerprint is derived from `features` rather than passed in, so a row's
+    fingerprint can never disagree with the column list on the same row. It identifies
+    the ORDERED feature set (fps-zci): two rows with different fingerprints were not
+    measured against the same baseline, whatever their metrics say. The `features`
+    column already holds the list, but it is 54 pipe-joined names — unusable for an
+    at-a-glance comparison, which is how a 64-column R0 and a sorted permutation of
+    the right 54 both survived (fps-sa1, fps-nor).
     """
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
@@ -294,6 +304,7 @@ def log_experiment(
             _git_sha(),
             name,
             "|".join(features),
+            baseline_fingerprint(features),
             TRAIN_START,
             TRAIN_END,
             VAL_START,

@@ -4,5 +4,6 @@
   "frozen_at": "2026-08-17T10:25:17.802426+00:00",
   "source_features": "data/features.parquet",
   "source_db": "fuel_signal.db",
-  "n_baseline_columns": 54
+  "n_baseline_columns": 54,
+  "baseline_fingerprint": "54:1a6ec2d84a69"
 }

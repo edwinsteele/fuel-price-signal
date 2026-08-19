@@ -11,13 +11,20 @@ from experiments.pipeline import batch_freeze
 from experiments.pipeline.batch_freeze import (
     BaselineContractMismatch,
     DbRefreshError,
+    NonModelColumnLeak,
     check_baseline_contract,
     freeze_batch,
     refresh_db,
     resolve_baseline_columns,
 )
 from fuel_signal.dates import date_from_int
-from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, NETWORK_FEATURE_COLUMNS
+from fuel_signal.features import (
+    FEATURE_COLUMNS,
+    LGA_FEATURE_COLUMNS,
+    LOCKED_FEATURE_COLUMNS,
+    NETWORK_FEATURE_COLUMNS,
+    baseline_fingerprint,
+)
 
 
 def _features_df(brand_cols: list[str] | None = None) -> pd.DataFrame:
@@ -90,6 +97,47 @@ def test_resolve_baseline_columns_excludes_tgp_and_unrelated_columns():
     resolved = resolve_baseline_columns(df)
     assert "tgp_delta_7d" not in resolved
     assert "label" not in resolved
+
+
+def test_resolve_baseline_columns_is_the_single_locked_symbol():
+    """No second copy of the composition here — batch_freeze imports the contract.
+
+    Retyping `FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS` at
+    every call site is how a script written before #216 silently carried a 50-column
+    baseline; fps-zci binds it to one name.
+    """
+    assert resolve_baseline_columns(_features_df()) == LOCKED_FEATURE_COLUMNS
+
+
+def test_resolve_baseline_columns_raises_when_a_non_model_column_leaks_in(monkeypatch):
+    """The assertion whose absence let fps-sa1 run for two months.
+
+    Simulated code-side: a rejected brand-trough column appearing in the locked
+    symbol itself. Whatever the route in, resolving a deliberately-excluded column
+    into R0 must be loud, not silent.
+    """
+    leaked_col = "days_since_trough_entry_zzz_test_brand"
+    monkeypatch.setattr(
+        batch_freeze, "LOCKED_FEATURE_COLUMNS", LOCKED_FEATURE_COLUMNS + [leaked_col]
+    )
+    with pytest.raises(NonModelColumnLeak) as exc_info:
+        resolve_baseline_columns(_features_df())
+    assert leaked_col in exc_info.value.leaked
+    assert "evaluated-and-rejected" in str(exc_info.value)
+
+
+def test_freeze_manifest_records_the_baseline_fingerprint(tmp_path):
+    """A batch's freeze.json says which R0 it pinned, in a form runs can be checked
+    against mechanically (fps-zci item 5)."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True,
+    )
+    manifest = json.loads((batch_dir / "freeze.json").read_text())
+    assert manifest["baseline_fingerprint"] == baseline_fingerprint(LOCKED_FEATURE_COLUMNS)
+    assert manifest["baseline_fingerprint"].startswith(f"{manifest['n_baseline_columns']}:")
 
 
 def test_freeze_batch_writes_snapshot_and_manifest(tmp_path):
@@ -213,7 +261,7 @@ def test_check_baseline_contract_flags_added_column(tmp_path, monkeypatch):
         batches_dir=tmp_path / "batches", skip_refresh=True,
     )
     monkeypatch.setattr(
-        batch_freeze, "NETWORK_FEATURE_COLUMNS", NETWORK_FEATURE_COLUMNS + ["new_locked_col"]
+        batch_freeze, "LOCKED_FEATURE_COLUMNS", LOCKED_FEATURE_COLUMNS + ["new_locked_col"]
     )
     widened = df.copy()
     widened["new_locked_col"] = 0.0
@@ -231,9 +279,9 @@ def test_check_baseline_contract_flags_removed_column(tmp_path, monkeypatch):
         "batch1", features_path=features_path, db_path=db_path,
         batches_dir=tmp_path / "batches", skip_refresh=True,
     )
-    dropped = NETWORK_FEATURE_COLUMNS[-1]
+    dropped = LOCKED_FEATURE_COLUMNS[-1]
     monkeypatch.setattr(
-        batch_freeze, "NETWORK_FEATURE_COLUMNS", NETWORK_FEATURE_COLUMNS[:-1]
+        batch_freeze, "LOCKED_FEATURE_COLUMNS", LOCKED_FEATURE_COLUMNS[:-1]
     )
 
     with pytest.raises(BaselineContractMismatch) as exc_info:

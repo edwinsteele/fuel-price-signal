@@ -122,7 +122,7 @@ from experiments.pipeline.validate import (
     validate_candidate,
 )
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import load_features
+from fuel_signal.features import baseline_fingerprint, load_features
 
 STATUS_REJECTED = "rejected"
 STATUS_DISQUALIFIED = "disqualified"
@@ -602,6 +602,14 @@ def run_candidate(
             "extra_feature_provider_misses": provider.stats["misses"],
             "git_sha": current_git_sha(),
             "bead_id": bead_id,
+            # Identity of the R0 this run was actually graded against (fps-zci item 5).
+            # Fingerprints what was USED — the batch's frozen baseline_columns.json —
+            # not today's constants, so a results.json is self-describing forever.
+            # Two runs whose fingerprints differ are not comparable, whatever their
+            # deltas say; fps-sa1 (64 vs 54 columns) and fps-zci (sorted vs production
+            # order) were both silent precisely because this field did not exist.
+            "n_baseline_columns": len(baseline_columns),
+            "baseline_fingerprint": baseline_fingerprint(baseline_columns),
         },
     }
     results_path = out_dir / RESULTS_FILENAME

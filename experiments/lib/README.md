@@ -19,7 +19,9 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 **Canonical skeleton:** `experiments/TEMPLATE_paired_wfcv.py` — copy, rename, fill in the TODOs.
 
 ## constants.py
-`SEEDS`, `SHOCK_FOLDS`, `LGBM_DEFAULTS` — shared constants. Import; never redefine per-script. Constants drift (LGBM params, seed tuple) between scripts is exactly what this lib prevents.
+`SEEDS`, `SHOCK_FOLDS`, `LGBM_DEFAULTS`, `BASELINE_COLUMNS`, `BASELINE_FINGERPRINT` — shared constants. Import; never redefine per-script. Constants drift (LGBM params, seed tuple) between scripts is exactly what this lib prevents.
+
+`BASELINE_COLUMNS` is R0 — the locked production feature set, re-exported from `fuel_signal.features.LOCKED_FEATURE_COLUMNS`. **Never** retype it as `FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS`, never re-derive it from a features frame's header, and never sort it — order is part of the contract. Both failure modes have already cost a batch (fps-sa1: discovery pulled the rejected Phase 4b brand troughs into a 64-column R0; fps-zci: a sorted permutation of the right 54 columns fit a different model, worth 0.038 c/L at the arbiter). `BASELINE_FINGERPRINT` is its `'<n>:<sha12>'` identity, hashed over the ordered list — print it, and let `write_meta` record it. See [docs/CONVENTIONS.md § The baseline feature set is declared, never discovered](../../docs/CONVENTIONS.md).
 
 ## fit.py
 `fit_score(train_df, val_df, cols, seed)` — trains one LightGBM model with `LGBM_DEFAULTS` and returns `(log_loss, probas, wall_seconds)`. `per_row_log_loss(y, p)` — element-wise binary cross-entropy.
@@ -44,7 +46,9 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 `aggregate_with_deltas(df_rows, cohort_ll_map, baseline_run="R0")` — groups by `(fold, regime, run)`, computes mean/median/`{col}_seedstd` per cohort column, and appends `delta_*_mean` / `delta_*_median` columns vs the baseline run. Ready to write directly to `fold_run.csv`.
 
 ## io.py
-`to_jsonable(o)` — recursively converts non-finite floats to `None`. `write_meta(out_dir, meta)` — serialises `meta` with `to_jsonable`, writes `meta.json`, and prints the path.
+`to_jsonable(o)` — recursively converts non-finite floats to `None`. `write_meta(out_dir, meta, *, baseline_columns=None)` — serialises `meta` with `to_jsonable`, writes `meta.json`, and prints the path.
+
+`write_meta` also stamps a `baseline` block (`n_columns`, `fingerprint`, `columns`, `declared_by_caller`) into every `meta.json`, so a result always says which R0 it was measured against. It defaults to `BASELINE_COLUMNS`; pass `baseline_columns=` — **in the order the model was fit in** — when the script's R0 is anything else.
 
 ## timing.py
 `time_block(label)` — context manager that prints `  [label] N.Ns` on exit.

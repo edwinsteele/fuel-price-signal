@@ -239,7 +239,9 @@ def test_log_experiment_creates_file_with_header(tmp_path, monkeypatch):
 
     assert results_path.exists()
     lines = results_path.read_text().splitlines()
-    assert lines[0].startswith("timestamp,git_sha,name,features,train_start,train_end")
+    assert lines[0].startswith(
+        "timestamp,git_sha,name,features,baseline_fingerprint,train_start,train_end"
+    )
     assert len(lines) == 2  # header + one data row
 
 
@@ -266,6 +268,41 @@ def test_log_experiment_features_pipe_separated(tmp_path, monkeypatch):
 
     content = results_path.read_text()
     assert "cycle_pct_through|station_price_cents" in content
+
+
+def test_log_experiment_fingerprints_the_feature_set_it_logged(tmp_path, monkeypatch):
+    """Each row carries the identity of the ORDERED feature set it was scored on.
+
+    Derived from `features` rather than passed in, so the fingerprint and the column
+    list on the same row cannot disagree. Two rows with different fingerprints were
+    not measured against the same baseline (fps-zci).
+    """
+    import csv as _csv
+
+    from fuel_signal.features import LOCKED_FEATURE_COLUMNS, LOCKED_FEATURE_FINGERPRINT
+
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    log_experiment("lock", LOCKED_FEATURE_COLUMNS, holdout_logloss=0.5, holdout_brier=0.2)
+    log_experiment(
+        "permuted", sorted(LOCKED_FEATURE_COLUMNS), holdout_logloss=0.5, holdout_brier=0.2
+    )
+
+    rows = list(_csv.reader(results_path.open(newline="")))
+    idx = rows[0].index("baseline_fingerprint")
+    assert rows[1][idx] == LOCKED_FEATURE_FINGERPRINT
+    # Same 54 columns, sorted — a different model, so it must not fingerprint alike.
+    assert rows[2][idx] != LOCKED_FEATURE_FINGERPRINT
+    assert rows[2][idx].startswith(f"{len(LOCKED_FEATURE_COLUMNS)}:")
+
+
+def test_results_csv_on_disk_matches_the_current_schema():
+    """The real ledger is migrated, so the next lock-time write appends rather than
+    raising the header-mismatch guard."""
+    import csv as _csv
+
+    with ev._RESULTS_CSV.open(newline="") as fh:
+        assert next(_csv.reader(fh)) == ev._CSV_HEADER
 
 
 def test_log_experiment_raises_on_schema_drift(tmp_path, monkeypatch):
