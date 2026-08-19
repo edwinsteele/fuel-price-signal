@@ -14,7 +14,7 @@ import pytest
 from click.testing import CliRunner
 
 import experiments.pipeline.noise_floor as noise_floor_module
-from experiments.pipeline.batch_freeze import resolve_baseline_columns
+from experiments.pipeline.batch_freeze import BaselineContractMismatch, resolve_baseline_columns
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
 from experiments.pipeline.noise_floor import compute_noise_floor, main
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
@@ -29,8 +29,8 @@ def _baseline_features_df(n: int = 5) -> pd.DataFrame:
     return pd.DataFrame(cols)
 
 
-def _write_batch_dir(tmp_path: pathlib.Path, df: pd.DataFrame) -> pathlib.Path:
-    batch_dir = tmp_path / "batch1"
+def _write_batch_dir(tmp_path: pathlib.Path, df: pd.DataFrame, name: str = "batch1") -> pathlib.Path:
+    batch_dir = tmp_path / name
     batch_dir.mkdir()
     df.to_parquet(batch_dir / "features.parquet")
     (batch_dir / "baseline_columns.json").write_text(json.dumps(resolve_baseline_columns(df)))
@@ -46,11 +46,11 @@ def _fake_result(cpl_held: float):
 
 
 def _stub_realised_by_seed(monkeypatch, cpl_by_seed: dict[int, float]) -> list[dict]:
-    """Route each call to its seed's canned cpl_held; record every call's kwargs."""
+    """Route each call to its seed's canned cpl_held; record every call's args/kwargs."""
     calls: list[dict] = []
 
     def _fake(arms, feature_columns, **kwargs):
-        calls.append(kwargs)
+        calls.append({"arms": arms, "feature_columns": feature_columns, **kwargs})
         return _fake_result(cpl_by_seed[kwargs["seed"]])
 
     monkeypatch.setattr(noise_floor_module, "run_paired_realised_backtest", _fake)
@@ -68,7 +68,11 @@ def test_compute_noise_floor_pairs_seeds_and_writes_expected_deltas(tmp_path, mo
         batch_dir, seeds_a=(1, 2), seeds_b=(10, 20), verbose=False,
     )
 
-    assert payload == {"deltas_cpl_held": [9.0, 18.0]}
+    assert payload["deltas_cpl_held"] == [9.0, 18.0]
+    assert payload["seeds_a"] == [1, 2]
+    assert payload["seeds_b"] == [10, 20]
+    assert payload["fold_subset"] is None
+    assert payload["partial"] is False
     on_disk = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
     assert on_disk == payload
 
@@ -81,11 +85,68 @@ def test_compute_noise_floor_mismatched_seed_lengths_raises(tmp_path):
         compute_noise_floor(batch_dir, seeds_a=(1, 2), seeds_b=(10,))
 
 
-def test_compute_noise_floor_calls_one_single_arm_fit_per_seed(tmp_path, monkeypatch):
-    """Every call is a single baseline-only arm — no candidate arm is involved,
-    since this measures pure fit noise, not a feature's effect."""
+def test_compute_noise_floor_repeated_seed_within_a_group_raises(tmp_path):
+    """A repeated seed in one group pairs a fit against a duplicate of itself,
+    which is harmless on its own but signals a caller error worth catching early."""
     df = _baseline_features_df()
     batch_dir = _write_batch_dir(tmp_path, df)
+
+    with pytest.raises(ValueError, match="free of repeats"):
+        compute_noise_floor(batch_dir, seeds_a=(1, 1), seeds_b=(10, 20))
+
+
+def test_compute_noise_floor_overlapping_seed_groups_raises(tmp_path):
+    """A seed shared between seeds_a and seeds_b pairs a fit against itself for that
+    draw — a guaranteed zero delta that silently narrows the floor."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+
+    with pytest.raises(ValueError, match="disjoint"):
+        compute_noise_floor(batch_dir, seeds_a=(1, 2), seeds_b=(2, 3))
+
+
+def test_compute_noise_floor_refuses_to_overwrite_without_force(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    (batch_dir / NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": [0.01]}))
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
+
+
+def test_compute_noise_floor_overwrites_existing_file_with_force(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    (batch_dir / NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": [0.01]}))
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
+
+    payload = compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), force=True, verbose=False)
+
+    assert payload["deltas_cpl_held"] == [1.0]
+
+
+def test_compute_noise_floor_raises_on_baseline_contract_drift(tmp_path, monkeypatch):
+    """The frozen baseline_columns.json is checked against the current code's own
+    resolution (same call every candidate run makes), catching a mid-batch
+    FEATURE_COLUMNS change rather than silently fitting the stale list."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    stale = resolve_baseline_columns(df)[:-1]  # drop one locked column -> drift
+    (batch_dir / "baseline_columns.json").write_text(json.dumps(stale))
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
+
+    with pytest.raises(BaselineContractMismatch):
+        compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
+
+
+def test_compute_noise_floor_calls_one_baseline_only_arm_per_seed(tmp_path, monkeypatch):
+    """Every call is a single baseline-only arm with the frozen baseline columns —
+    no candidate arm is involved, since this measures pure fit noise, not a
+    feature's effect."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    baseline_columns = json.loads((batch_dir / "baseline_columns.json").read_text())
     calls = _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
 
     compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
@@ -93,6 +154,10 @@ def test_compute_noise_floor_calls_one_single_arm_fit_per_seed(tmp_path, monkeyp
     assert len(calls) == 2
     assert {c["seed"] for c in calls} == {1, 2}
     for c in calls:
+        assert len(c["arms"]) == 1
+        assert c["arms"][0].name == noise_floor_module.BASELINE_ARM_NAME
+        assert c["arms"][0].feature_columns == baseline_columns
+        assert c["feature_columns"] == baseline_columns
         assert c["held_tau"] is None
         assert c["collect_fills"] is False
 
@@ -140,6 +205,21 @@ def test_compute_noise_floor_default_seeds_pair_five_and_five(tmp_path, monkeypa
     assert len(payload["deltas_cpl_held"]) == 5
 
 
+def test_compute_noise_floor_marks_fold_subset_runs_partial(tmp_path, monkeypatch):
+    """--fold-subset is an iteration/smoke speed-up; the written file must say so
+    rather than looking like a full calibration (see the dossier-consumption test)."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
+
+    payload = compute_noise_floor(
+        batch_dir, seeds_a=(1,), seeds_b=(2,), fold_subset=[1, 3], verbose=False,
+    )
+
+    assert payload["partial"] is True
+    assert payload["fold_subset"] == [1, 3]
+
+
 def test_dossier_tables_consumes_the_written_file(tmp_path, monkeypatch):
     """End-to-end schema check: what this module writes is exactly what
     dossier_tables._noise_band() reads (the fps-3jj.9 contract)."""
@@ -156,15 +236,26 @@ def test_dossier_tables_consumes_the_written_file(tmp_path, monkeypatch):
     assert band["n_draws"] == 2
 
 
+def test_dossier_tables_refuses_a_partial_fold_subset_file(tmp_path, monkeypatch):
+    """A --fold-subset run's output must not be silently graded as a full ruler."""
+    import experiments.pipeline.dossier_tables as dt
+
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
+    compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), fold_subset=[1], verbose=False)
+
+    band = dt._noise_band({"effect_delta_cpl_held": 5.0}, batch_dir)
+
+    assert band["available"] is False
+    assert "partial" in band["reason"] or "fold-subset" in band["reason"]
+
+
 def test_cli_writes_noise_floor_for_named_batch(tmp_path, monkeypatch):
     df = _baseline_features_df()
     batches_dir = tmp_path / "batches"
     batches_dir.mkdir()
-    batch_dir = batches_dir / "batch1"
-    batch_dir.mkdir()
-    df.to_parquet(batch_dir / "features.parquet")
-    (batch_dir / "baseline_columns.json").write_text(json.dumps(resolve_baseline_columns(df)))
-    (batch_dir / "fuel_signal.db").write_bytes(b"not a real sqlite file")
+    batch_dir = _write_batch_dir(batches_dir, df)
     _stub_realised_by_seed(
         monkeypatch,
         dict.fromkeys(set(noise_floor_module.SEEDS_A) | set(noise_floor_module.SEEDS_B), 0.0),
@@ -180,11 +271,7 @@ def test_cli_parses_fold_subset(tmp_path, monkeypatch):
     df = _baseline_features_df()
     batches_dir = tmp_path / "batches"
     batches_dir.mkdir()
-    batch_dir = batches_dir / "batch1"
-    batch_dir.mkdir()
-    df.to_parquet(batch_dir / "features.parquet")
-    (batch_dir / "baseline_columns.json").write_text(json.dumps(resolve_baseline_columns(df)))
-    (batch_dir / "fuel_signal.db").write_bytes(b"not a real sqlite file")
+    _write_batch_dir(batches_dir, df)
     calls = _stub_realised_by_seed(
         monkeypatch,
         dict.fromkeys(set(noise_floor_module.SEEDS_A) | set(noise_floor_module.SEEDS_B), 0.0),
@@ -197,3 +284,64 @@ def test_cli_parses_fold_subset(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     for c in calls:
         assert c["fold_subset"] == [1, 3]
+
+
+def test_cli_rejects_non_numeric_fold_subset(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    _write_batch_dir(batches_dir, df)
+    _stub_realised_by_seed(monkeypatch, {})  # must never be called
+
+    result = CliRunner().invoke(
+        main, ["batch1", "--batches-dir", str(batches_dir), "--fold-subset", "1,abc"]
+    )
+
+    assert result.exit_code != 0
+    assert "not an integer" in result.output
+
+
+def test_cli_rejects_non_positive_fold_subset(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    _write_batch_dir(batches_dir, df)
+    _stub_realised_by_seed(monkeypatch, {})  # must never be called
+
+    result = CliRunner().invoke(
+        main, ["batch1", "--batches-dir", str(batches_dir), "--fold-subset", "0,2"]
+    )
+
+    assert result.exit_code != 0
+    assert "1-indexed" in result.output
+
+
+def test_cli_refuses_to_overwrite_without_force(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    batch_dir = _write_batch_dir(batches_dir, df)
+    (batch_dir / NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": [0.01]}))
+    _stub_realised_by_seed(monkeypatch, {})  # must never be called
+
+    result = CliRunner().invoke(main, ["batch1", "--batches-dir", str(batches_dir)])
+
+    assert result.exit_code != 0
+
+
+def test_cli_force_overwrites_existing_file(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    batch_dir = _write_batch_dir(batches_dir, df)
+    (batch_dir / NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": [0.01]}))
+    _stub_realised_by_seed(
+        monkeypatch,
+        dict.fromkeys(set(noise_floor_module.SEEDS_A) | set(noise_floor_module.SEEDS_B), 0.0),
+    )
+
+    result = CliRunner().invoke(main, ["batch1", "--batches-dir", str(batches_dir), "--force"])
+
+    assert result.exit_code == 0, result.output
+    on_disk = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
+    assert on_disk["deltas_cpl_held"] == [0.0] * 5

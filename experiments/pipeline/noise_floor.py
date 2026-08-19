@@ -4,8 +4,10 @@ The dossier (experiments/pipeline/dossier_tables.py's `_noise_band()`) already r
 `<batch_dir>/noise_floor.json` and grades every candidate's realised delta against it;
 until this module ran, that file didn't exist and every dossier reported
 `facts["noise_band"]["available"] = False`. This module is the producer that satisfies
-that contract — the schema (`{"deltas_cpl_held": [<float>, ...]}`) and filename
-(`NOISE_FLOOR_FILENAME`) are fixed by dossier_tables.py, not redefined here.
+that contract — the required key (`"deltas_cpl_held": [<float>, ...]`) and filename
+(`NOISE_FLOOR_FILENAME`) are fixed by dossier_tables.py, not redefined here. The payload
+also carries provenance (seeds, fold_subset, a "partial" flag, timestamp, git SHA) that
+dossier_tables.py doesn't require but a human debugging a batch later will want.
 
 Why this shape (see fps-3jj.9's bd description for the full history): a placebo arm
 compares a noisy number against a noisy ruler; a permuted-column null needs a
@@ -38,15 +40,18 @@ import json
 import pathlib
 import time
 from collections.abc import Iterable
+from datetime import datetime, timezone
 
 import click
 
 from experiments.lib.constants import SEEDS
+from experiments.lib.io import current_git_sha
 from experiments.lib.realised import ArmSpec, run_paired_realised_backtest
 from experiments.pipeline.batch_freeze import (
     BASELINE_COLUMNS_FILENAME,
     DEFAULT_BATCHES_DIR,
     FROZEN_DB_FILENAME,
+    check_baseline_contract,
 )
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
@@ -106,6 +111,7 @@ def compute_noise_floor(
     inner_fold_params: dict | None = None,
     fold_subset: Iterable[int] | None = None,
     station_codes: list[int] | None = None,
+    force: bool = False,
     verbose: bool = True,
 ) -> dict:
     """Compute `len(seeds_a)` R0-vs-R0 realised-CPL deltas and persist them to
@@ -114,23 +120,52 @@ def compute_noise_floor(
     Reads the frozen batch's own features + baseline column contract (declared,
     never discovered — same `baseline_columns.json` every candidate run reads,
     fps-sa1) and its cloned DB, so this reproduces the exact fit + realised-backtest
-    path a candidate run takes, minus the candidate arm.
+    path a candidate run takes, minus the candidate arm. Also re-checks that
+    contract against the current code (`check_baseline_contract`, same call every
+    candidate run makes) so a code-side FEATURE_COLUMNS drift since freeze is
+    caught here too, not just silently fit against a stale list.
 
-    Returns the written payload. Raises ValueError if seeds_a/seeds_b aren't the
-    same length — they pair 1:1 into one draw per pair, so a length mismatch means
-    some seed has no partner.
+    Returns the written payload. Raises:
+      - ValueError if seeds_a/seeds_b aren't the same length (they pair 1:1 into
+        one draw per pair, so a length mismatch means some seed has no partner),
+        or if either group has a repeated seed, or the two groups overlap — a
+        shared/repeated seed pairs a fit against itself and writes a zero delta,
+        silently narrowing the floor.
+      - FileExistsError if `<batch_dir>/noise_floor.json` already exists and
+        `force` is not set — a full calibration already sitting there is the
+        ruler every dossier so far was graded against; overwriting it silently
+        (e.g. from a re-run) would move that ruler under them after the fact.
+      - BaselineContractMismatch (via check_baseline_contract) on column drift.
     """
     if len(seeds_a) != len(seeds_b):
         raise ValueError(
             f"seeds_a and seeds_b must pair 1:1; got {len(seeds_a)} vs {len(seeds_b)} seeds."
         )
+    if len(set(seeds_a)) != len(seeds_a) or len(set(seeds_b)) != len(seeds_b):
+        raise ValueError(f"seeds_a and seeds_b must each be free of repeats; got {seeds_a}, {seeds_b}.")
+    overlap = set(seeds_a) & set(seeds_b)
+    if overlap:
+        raise ValueError(
+            f"seeds_a and seeds_b must be disjoint — a shared seed {sorted(overlap)} pairs a fit "
+            "against itself and writes a zero delta, silently narrowing the floor."
+        )
+
     batch_dir = pathlib.Path(batch_dir)
+    out_path = batch_dir / NOISE_FLOOR_FILENAME
+    if out_path.exists() and not force:
+        raise FileExistsError(
+            f"{out_path} already exists. Every dossier written so far was graded against it — "
+            "pass force=True (CLI: --force) only if you intend to replace that ruler for the "
+            "whole batch, not just for this run."
+        )
+
     outer_fold_params = dict(outer_fold_params or {})
     # Merged, not replaced — same rationale as runner.py's run_candidate: a caller
     # overriding one key (say val_days) still gets a workable train_min_days.
     inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
 
     frame = load_features(batch_dir / "features.csv")  # .parquet sibling, batch_freeze convention
+    check_baseline_contract(batch_dir, frame)
     baseline_columns = json.loads((batch_dir / BASELINE_COLUMNS_FILENAME).read_text())
     db_path = batch_dir / FROZEN_DB_FILENAME
 
@@ -156,8 +191,20 @@ def compute_noise_floor(
                 flush=True,
             )
 
-    payload = {"deltas_cpl_held": deltas}
-    out_path = batch_dir / NOISE_FLOOR_FILENAME
+    # fold_subset is documented as an iteration/smoke speed-up, not a real calibration —
+    # a partial-fold floor is not comparable to effect_delta_cpl_held, which always pools
+    # every fold. Tagging it "partial" (rather than just omitting the metadata) means
+    # dossier_tables._noise_band() can refuse it outright instead of silently grading
+    # every candidate against a ruler that only covers some folds.
+    payload = {
+        "deltas_cpl_held": deltas,
+        "seeds_a": list(seeds_a),
+        "seeds_b": list(seeds_b),
+        "fold_subset": list(fold_subset) if fold_subset is not None else None,
+        "partial": fold_subset is not None,
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "git_sha": current_git_sha(),
+    }
     out_path.write_text(json.dumps(payload, indent=2) + "\n")
     if verbose:
         print(
@@ -168,6 +215,25 @@ def compute_noise_floor(
     return payload
 
 
+def _parse_fold_subset(value: str | None) -> list[int] | None:
+    """Comma-separated 1-indexed fold numbers, e.g. '1,2'. None -> None (every fold)."""
+    if not value:
+        return None
+    folds: list[int] = []
+    for token in value.split(","):
+        try:
+            fold = int(token)
+        except ValueError:
+            raise click.BadParameter(
+                f"{token!r} is not an integer — expected comma-separated 1-indexed fold "
+                "numbers, e.g. '1,2'."
+            ) from None
+        if fold < 1:
+            raise click.BadParameter(f"fold {fold} is not 1-indexed — folds start at 1.")
+        folds.append(fold)
+    return folds
+
+
 @click.command("noise_floor")
 @click.argument("batch_name")
 @click.option(
@@ -176,13 +242,20 @@ def compute_noise_floor(
 )
 @click.option(
     "--fold-subset", default=None,
-    help="Comma-separated 1-indexed outer folds, e.g. '1,2' (iteration/smoke speed-up).",
+    help="Comma-separated 1-indexed outer folds, e.g. '1,2'. Iteration/smoke speed-up ONLY — "
+    "the result covers a partial fold set and is written as 'partial': true, which the "
+    "dossier refuses to grade candidates against.",
 )
-def main(batch_name: str, batches_dir: str, fold_subset: str | None) -> None:
+@click.option(
+    "--force", is_flag=True, default=False,
+    help="Overwrite an existing noise_floor.json for this batch. Every dossier written so "
+    "far was graded against it — only pass this if you intend to replace that ruler.",
+)
+def main(batch_name: str, batches_dir: str, fold_subset: str | None, force: bool) -> None:
     """Compute and persist the noise-floor calibration for an already-frozen batch."""
     batch_dir = pathlib.Path(batches_dir) / batch_name
-    subset = [int(x) for x in fold_subset.split(",")] if fold_subset else None
-    compute_noise_floor(batch_dir, fold_subset=subset)
+    subset = _parse_fold_subset(fold_subset)
+    compute_noise_floor(batch_dir, fold_subset=subset, force=force)
     click.echo(f"Wrote noise floor for batch '{batch_name}' -> {batch_dir / NOISE_FLOOR_FILENAME}")
 
 
