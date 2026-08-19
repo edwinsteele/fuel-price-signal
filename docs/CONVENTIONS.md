@@ -162,6 +162,8 @@ Notes about completed work are fine briefly, then purge unless they inform futur
 
 Immediately after `gh pr create` returns a PR number, call `ScheduleWakeup(delaySeconds=270)` with a prompt that runs `gh pr view <N> --json comments,reviews,mergeable,statusCheckRollup`. This is a mandatory mechanical step, not a suggestion — do it before writing any response to the user. When the wakeup fires: act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Use judgement on style nits that conflict with project conventions. Run `uv run ruff check . && uv run pytest -q`, push, and repeat until no actionable comments remain. The goal is a ready-to-merge deliverable.
 
+**A re-review after a fix commit can re-post identical comments against stale line numbers.** Observed on PR #311 (fps-3jj.9): CodeRabbit's second review, triggered by the fix-commit push, posted the same 4 comments verbatim — including inline diff suggestions quoting the pre-fix code — even though the fix commit had already addressed every one of them. Don't assume a repeated comment is a new/unaddressed finding; `grep`/`sed` the current file at the cited path and check whether the flagged code still looks like what the comment describes before touching anything again.
+
 ## Code review caution
 
 Before filing an issue from an agent-driven logic review:
