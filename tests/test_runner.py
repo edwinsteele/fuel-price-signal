@@ -19,6 +19,7 @@ import pytest
 
 import experiments.pipeline.runner as runner_module
 from experiments.lib.realised import BaselineCache, BaselineCacheMismatch
+from experiments.pipeline import batch_freeze
 from experiments.pipeline.batch_freeze import resolve_baseline_columns
 from experiments.pipeline.runner import (
     BASELINE_CACHE_FILENAME,
@@ -183,19 +184,30 @@ def test_run_candidate_default_out_dir_keeps_two_batch_siblings_separate(tmp_pat
     assert "boom b" in json.loads(result_b.results_path.read_text())["error"]
 
 
-def test_run_candidate_aborted_environment_on_baseline_drift(tmp_path):
+def test_run_candidate_aborted_environment_on_baseline_drift(tmp_path, monkeypatch):
+    """Drift is code-side: a locked-column bump landing mid-batch (fps-sa1).
+
+    It used to be simulated by adding a brand-trough column to the frame, back when
+    resolve_baseline_columns() discovered that group. It no longer does — the lock
+    never contained brand troughs — so the drift has to come from the column
+    constants themselves, which is the only thing that can legitimately move now.
+    """
     df = _baseline_features_df()
     batch_dir = _write_batch_dir(tmp_path, df)
-    # Drift the frozen frame's baseline columns after freezing.
-    drifted = df.copy()
-    drifted["days_since_trough_entry_new_brand"] = 0.0
-    drifted.to_parquet(batch_dir / "features.parquet")
+
+    widened = df.copy()
+    widened["new_locked_col"] = 0.0
+    widened.to_parquet(batch_dir / "features.parquet")
+    monkeypatch.setattr(
+        batch_freeze, "NETWORK_FEATURE_COLUMNS", NETWORK_FEATURE_COLUMNS + ["new_locked_col"]
+    )
     candidate_path = _write_candidate(tmp_path, PIT_SAFE_CANDIDATE)
 
     result = run_candidate(batch_dir, candidate_path, out_dir=tmp_path / "out")
 
     assert result.status == STATUS_ABORTED_ENVIRONMENT
     assert "baseline" in result.error.lower() or "contract" in result.error.lower()
+
 
 
 def test_run_candidate_disqualified_on_pit_leak(tmp_path):

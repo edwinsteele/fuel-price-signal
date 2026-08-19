@@ -68,6 +68,24 @@ Override is allowed when the regressing fold is known to be anomalous (a price-s
 
 **Why:** on 2026-06-03, `station_minus_last_max_cents` looked like a clean drop on one val window (5-seed Δ −0.0112 ± 0.0043), but a 14-fold paired walk-forward CV showed 7/14 fold-wins, mean Δ +0.0104, with fold 9 (2023-10→2024-01) regressing by +0.103. See `experiments/2026-06-03_drop_redundant_pair/`.
 
+### The baseline feature set is declared, never discovered
+
+Code that needs "the production baseline columns" composes them from the column constants (`FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS`). It must **never** derive them by inspecting a features frame's header.
+
+`data/features.csv` is deliberately a **superset** of the model contract. A column sits in it for one of three reasons, and only the first puts it in the baseline:
+
+| Reason | Example |
+|---|---|
+| In the lock | the 54 (see [AGENTS.md § Canonical feature set](../AGENTS.md#canonical-feature-set-54-feat-baseline-locked-issue-216)) |
+| Evaluated and **rejected**, still computed | the 10 `days_since_trough_entry_<brand>` (Phase 4b, 2026-06-02) |
+| **Held out** pending graduation | `tgp_delta_7d` (#271) |
+
+Header inspection cannot tell these apart, so it silently promotes rejected and held-out columns into the baseline.
+
+Note that `train_lgbm`'s *default* resolution is not the lock — the lock is `train_lgbm --no-brand-features`. "Mirrors train_lgbm's default" is not a justification for a baseline resolution.
+
+**Why:** `batch_freeze.resolve_baseline_columns()` appended `discover_brand_feature_columns(df)` on exactly that rationale, giving batch0 a 64-column R0 — production plus the rejected Phase 4b group — for every candidate in the batch, on both the log-loss screen and the realised arbiter. It surfaced only because `tgp_delta_7d` was re-tested as a known graduate and came back with the opposite sign; the candidate arms agreed to 0.0013 c/L while the baselines differed by 0.132 (fps-sa1, fps-nor). Single-sourcing and fingerprinting the contract so the next instance is caught automatically is fps-zci.
+
 ### New constants must not silently diverge from a canonical equivalent
 
 When a change introduces a numeric constant (a band width, a window length, a threshold) that has a canonical equivalent already in the codebase, either reuse the canonical one or **ablate the divergence before merge** — cite the measured cost of the new value vs the canonical value, same evidence bar as a feature change.

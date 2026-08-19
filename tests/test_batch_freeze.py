@@ -7,6 +7,7 @@ import pathlib
 import pandas as pd
 import pytest
 
+from experiments.pipeline import batch_freeze
 from experiments.pipeline.batch_freeze import (
     BaselineContractMismatch,
     DbRefreshError,
@@ -38,12 +39,32 @@ def _write_source(tmp_path: pathlib.Path, df: pd.DataFrame) -> tuple[pathlib.Pat
     return features_path, db_path
 
 
-def test_resolve_baseline_columns_is_sorted_and_includes_brand_columns():
+def test_resolve_baseline_columns_is_sorted_and_excludes_brand_columns():
+    """Brand-trough columns are computed into features.csv but are NOT in the lock.
+
+    Phase 4b was evaluated and walked away on 2026-06-02 (docs/STATUS.md § Phase 4b;
+    AGENTS.md § Canonical feature set). Resolving them in by discovery gave batch0 a
+    64-column R0 — production plus a rejected feature group — and silently graded
+    every candidate in that batch against it (fps-sa1). Declared, never discovered.
+    """
     df = _features_df()
     resolved = resolve_baseline_columns(df)
     assert resolved == sorted(resolved)
-    assert "days_since_trough_entry_zzz_test_brand" in resolved
+    assert "days_since_trough_entry_zzz_test_brand" not in resolved
     assert set(FEATURE_COLUMNS) <= set(resolved)
+    assert set(resolved) == set(
+        FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS
+    )
+
+
+def test_resolve_baseline_columns_matches_the_locked_54_feat_baseline():
+    assert len(resolve_baseline_columns(_features_df())) == 54
+
+
+def test_resolve_baseline_columns_raises_when_a_locked_column_is_absent():
+    df = _features_df().drop(columns=[NETWORK_FEATURE_COLUMNS[0]])
+    with pytest.raises(ValueError, match="missing 1 locked baseline column"):
+        resolve_baseline_columns(df)
 
 
 def test_resolve_baseline_columns_excludes_tgp_and_unrelated_columns():
@@ -148,35 +169,61 @@ def test_check_baseline_contract_passes_when_unchanged(tmp_path):
     check_baseline_contract(batch_dir, df)  # must not raise
 
 
-def test_check_baseline_contract_flags_added_column(tmp_path):
+def test_check_baseline_contract_ignores_a_new_brand_column_in_the_frame(tmp_path):
+    """The regression this whole change exists to prevent (fps-sa1).
+
+    A brand-trough column appearing in the features header is not a contract change
+    — the lock never contained that group. Before the fix it silently WAS one, and
+    the baseline grew by 10 columns without anything flagging it.
+    """
     df = _features_df()
     features_path, db_path = _write_source(tmp_path, df)
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
         batches_dir=tmp_path / "batches", skip_refresh=True,
     )
-    drifted = df.copy()
-    drifted["days_since_trough_entry_new_brand"] = 0.0
+    widened = df.copy()
+    widened["days_since_trough_entry_new_brand"] = 0.0
+
+    check_baseline_contract(batch_dir, widened)  # must not raise
+
+
+def test_check_baseline_contract_flags_added_column(tmp_path, monkeypatch):
+    """Drift is now code-side only: a FEATURE_COLUMNS-family bump landing mid-batch."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True,
+    )
+    monkeypatch.setattr(
+        batch_freeze, "NETWORK_FEATURE_COLUMNS", NETWORK_FEATURE_COLUMNS + ["new_locked_col"]
+    )
+    widened = df.copy()
+    widened["new_locked_col"] = 0.0
 
     with pytest.raises(BaselineContractMismatch) as exc_info:
-        check_baseline_contract(batch_dir, drifted)
-    assert exc_info.value.added == ["days_since_trough_entry_new_brand"]
+        check_baseline_contract(batch_dir, widened)
+    assert exc_info.value.added == ["new_locked_col"]
     assert exc_info.value.removed == []
 
 
-def test_check_baseline_contract_flags_removed_column(tmp_path):
+def test_check_baseline_contract_flags_removed_column(tmp_path, monkeypatch):
     df = _features_df()
     features_path, db_path = _write_source(tmp_path, df)
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
         batches_dir=tmp_path / "batches", skip_refresh=True,
     )
-    drifted = df.drop(columns=["days_since_trough_entry_zzz_test_brand"])
+    dropped = NETWORK_FEATURE_COLUMNS[-1]
+    monkeypatch.setattr(
+        batch_freeze, "NETWORK_FEATURE_COLUMNS", NETWORK_FEATURE_COLUMNS[:-1]
+    )
 
     with pytest.raises(BaselineContractMismatch) as exc_info:
-        check_baseline_contract(batch_dir, drifted)
+        check_baseline_contract(batch_dir, df)
     assert exc_info.value.added == []
-    assert exc_info.value.removed == ["days_since_trough_entry_zzz_test_brand"]
+    assert exc_info.value.removed == [dropped]
 
 
 def _write_fake_make(
