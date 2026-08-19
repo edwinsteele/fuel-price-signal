@@ -10,8 +10,10 @@
 #
 # KEYED ON THE CLAIM, NOT THE FEATURE NAME. `inputs` (what data) is held
 # separately from `claim` (what was asserted), because a rejected claim over a
-# data source does not condemn the source: station_minus_tgp_cents was rejected
-# but tgp_delta_7d graduated off the same TGP series.
+# data source does not condemn the source: the regime-local cycle_mean_length
+# denominator was rejected, but the cycle features built on the same detector
+# remain locked. (This comment previously used TGP as its example — both TGP
+# claims are now rejected/inconclusive, so it no longer illustrates the point.)
 #
 # Fields:
 #   candidate   - the column(s) or change under test
@@ -100,14 +102,24 @@
   claim: >-
     The 7-day velocity of the wholesale floor leads retail: when the floor is
     moving up fast, buy before the pump follows.
-  falsified: ""
+  falsified: >-
+    SUPERSEDED 2026-08-19 — this entry recorded a graduation that does not hold.
+    The -0.039 c/L that graduated it does not reproduce (+0.0059 on identical
+    columns, folds and seed) and was never resolvable: it is smaller than the
+    ~0.05 c/L value of a single buy/wait decision flip. See the batch0 entry
+    above for the full account and the noise-floor grading. NOT re-proposable as
+    stated; the velocity claim is measured out to the resolution of the current
+    arbiter.
   not_tested: >-
     MA-smoothing of the velocity (parked — 7d point-to-point already beat 3d, so
     smoothing was never run). Horizons between 7 and 14 days. Whether velocity of
     a *different* upstream series (crude, Singapore Mogas) carries the same signal
-    with more lead in shocks.
-  outcome: graduated
-  evidence: experiments/2026-06-20_leading_indicators/
+    with more lead in shocks. Whether ANY TGP expression helps on the LATE-DESCENT
+    axis specifically — never tested for velocity or for the gap; see the
+    station_minus_tgp_cents entry below.
+  outcome: inconclusive
+  evidence: experiments/2026-06-20_leading_indicators/ (superseded by
+    experiments/candidates/batch0/tgp_delta_7d)
 
 - candidate: station_minus_tgp_cents
   inputs: [AIP Sydney ULP terminal gate price, station price]
@@ -123,10 +135,17 @@
     #262 headroom actually lives. The floor-proximity brake cancels velocity's
     pre-spike buy.
   not_tested: >-
-    Velocity/acceleration of the floor — became tgp_delta_7d, which graduated.
-    A gap measured against a *forward-looking* floor rather than today's. Whether
-    the gap is usable when explicitly gated OFF during shock regimes rather than
-    tamed by an interaction.
+    Velocity/acceleration of the floor — became tgp_delta_7d, which was measured
+    INERT in batch0 (see entries above); the pivot to velocity did not rescue the
+    series. A gap measured against a *forward-looking* floor rather than today's.
+    Whether the gap is usable when explicitly gated OFF during shock regimes
+    rather than tamed by an interaction. AND THE OPEN ONE: whether the gap helps
+    on LATE-DESCENT rows specifically. It was rejected on the SHOCK axis, which
+    is not the axis its mechanism targets — the same oracle diagnostic that fed
+    this rejection also measured gap -> depth-remaining at r2=0.63 (vs
+    gap -> days 0.47, gap/slope 0.19), and "how much further is there to fall"
+    is precisely the late-descent question. That regime-segmented test was never
+    run, for the gap or for velocity.
   outcome: rejected
   evidence: experiments/2026-06-20_leading_indicators/
 
