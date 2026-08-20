@@ -10,6 +10,13 @@ Freezes, once per batch:
     unpinned DB would silently un-freeze the batch.
   - the resolved baseline feature-column list -> <batch_dir>/baseline_columns.json
   - a freeze manifest (snapshot date, git SHA, source paths) -> <batch_dir>/freeze.json
+  - the noise-floor calibration (fps-3jj.9) -> <batch_dir>/noise_floor.json, as the
+    final step (fps-cf8) — batch setup is one command, not two the operator must
+    remember to run in order, and the floor is guaranteed to be computed against the
+    same snapshot it will grade every candidate against. `--skip-noise-floor` opts out
+    for local iteration; a batch skipped this way has no noise_floor.json, and
+    dossier_tables._noise_band() already refuses to grade a candidate without one, so
+    skipping never produces a silently-ungraded batch.
 
 DB refresh (the `make update` chain: pull, db, fill, classify, lga-leadership), followed
 by a features.csv/.parquet regeneration (`make features`), is a hard-gated pre-step:
@@ -220,12 +227,24 @@ def freeze_batch(
     db_path: pathlib.Path = DEFAULT_DB_PATH,
     batches_dir: pathlib.Path = DEFAULT_BATCHES_DIR,
     skip_refresh: bool = False,
+    skip_noise_floor: bool = False,
 ) -> pathlib.Path:
-    """Freeze one batch: refresh (hard-gated) -> snapshot data + DB -> pin the column contract.
+    """Freeze one batch: refresh (hard-gated) -> snapshot data + DB -> pin the column
+    contract -> compute the noise floor (fps-cf8).
 
     Returns the batch directory. Raises FileExistsError if the batch dir already
     exists — a batch is frozen once; re-freezing an existing batch is very likely a
     mistake, not an update.
+
+    The noise floor (~10 single-arm fits, experiments/pipeline/noise_floor.py) is the
+    final step so batch setup is one command instead of two that must be run in the
+    right order by hand with nothing checking they agree (fps-cf8). `skip_noise_floor`
+    is an escape hatch for local iteration — e.g. a fake/undersized DB in a test, or a
+    quick freeze the operator will immediately re-freeze anyway. Skipping it leaves no
+    noise_floor.json, and dossier_tables._noise_band() already refuses to grade any
+    candidate against a batch that doesn't have one, so a skipped batch stays
+    correctly ungraded rather than silently ungraded — recompute later with
+    `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch>`.
     """
     if not skip_refresh:
         refresh_db()
@@ -270,6 +289,14 @@ def freeze_batch(
     }
     (batch_dir / FREEZE_MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2) + "\n")
 
+    if not skip_noise_floor:
+        # Local import: noise_floor.py imports several names from this module at
+        # module load time, so a top-level import here would be circular. Deferred to
+        # call time, by which this module is always fully loaded.
+        from experiments.pipeline.noise_floor import compute_noise_floor
+
+        compute_noise_floor(batch_dir)
+
     return batch_dir
 
 
@@ -312,14 +339,30 @@ def check_baseline_contract(batch_dir: pathlib.Path, df: pd.DataFrame) -> None:
     "--skip-refresh", is_flag=True, default=False,
     help="Skip the hard-gated `make update` DB refresh (for local testing only).",
 )
-def main(batch_name: str, features_path: str, db_path: str, batches_dir: str, skip_refresh: bool) -> None:
-    """Freeze a batch: refresh the DB, snapshot data/features + the DB, pin the baseline contract."""
+@click.option(
+    "--skip-noise-floor", is_flag=True, default=False,
+    help="Skip computing the noise floor (~10 fits) as the final freeze step. The batch "
+    "stays correctly ungraded (dossier_tables._noise_band() refuses without one) until "
+    "you run `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch>` — "
+    "for local iteration only, not normal batch setup.",
+)
+def main(
+    batch_name: str,
+    features_path: str,
+    db_path: str,
+    batches_dir: str,
+    skip_refresh: bool,
+    skip_noise_floor: bool,
+) -> None:
+    """Freeze a batch: refresh the DB, snapshot data/features + the DB, pin the
+    baseline contract, and compute the noise floor — batch setup as one command."""
     batch_dir = freeze_batch(
         batch_name,
         features_path=pathlib.Path(features_path),
         db_path=pathlib.Path(db_path),
         batches_dir=pathlib.Path(batches_dir),
         skip_refresh=skip_refresh,
+        skip_noise_floor=skip_noise_floor,
     )
     click.echo(f"Froze batch '{batch_name}' -> {batch_dir}")
 

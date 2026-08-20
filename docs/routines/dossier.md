@@ -90,9 +90,11 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      relative to `headline.zone` and the note says by how much), the `seed_flags` list (if empty,
      say so — "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating),
      validation (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
-     (`facts["noise_band"]`) — if `available: false`, say plainly "noise-floor band: not available
-     for this batch (noise_floor.py hasn't been run — see fps-3jj.9)" rather than omitting the
-     line; if available, report
+     (`facts["noise_band"]`) — if `available: false`, say plainly "noise-floor band: not
+     available" and quote `facts["noise_band"]["reason"]` verbatim rather than omitting the
+     line or paraphrasing it (as of `fps-cf8` there is more than one refusal reason — no floor
+     yet, a partial `--fold-subset` floor, or a `baseline_fingerprint` mismatch against a
+     stale/re-locked floor — and the reason string already says which); if available, report
      `candidate_percentile_better_than_noise` as-is (already oriented so higher = better —
      don't re-derive or re-sign it).
    - **Judgement** (your reasoning, visibly separated — a `## Judgement` heading is enough):
@@ -155,12 +157,16 @@ that touches this candidate is either a human reading the README, or the retrosp
 - **Run-directory model (fps-icv, CONFIRMED BROKEN, not a hypothetical).** See Step 0 above — every
   candidate after the first in a multi-candidate batch is silently never dossiered until this is
   fixed in `launch.py`/`runner.py`. Do not hand-write a dossier to compensate; surface it instead.
-- **`noise_floor.json` per-batch step.** `facts["noise_band"]["available"]` reads `false` for a
-  batch until someone runs `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor
-  <batch-name>` against it (fps-3jj.9; heavy — ~10 single-arm fits — so it's a deliberate
-  batch-setup step, not automatic). If you see `available: false`, that means this batch is
-  missing the run, not that the capability is unbuilt. Report it plainly in the README (see
-  Step 1 above) rather than inventing a noise estimate.
+- **`noise_floor.json` per-batch step.** `batch_freeze.py` computes this as its own final step
+  (`fps-cf8`), so a batch frozen normally always has one. `facts["noise_band"]["available"]`
+  still reads `false` in three cases: an older batch frozen before `fps-cf8` or with
+  `--skip-noise-floor` (never computed), a floor computed with `--fold-subset` (partial fold
+  coverage), or a floor whose `baseline_fingerprint` no longer matches this run's (a re-lock —
+  graduation or `LOCKED_FEATURE_COLUMNS` change — invalidates an existing batch's floor; see
+  `docs/CONVENTIONS.md`). If you see `available: false`, that means this batch is missing a
+  *matching* floor, not that the capability is unbuilt. Report it plainly in the README (see
+  Step 1 above), quoting `facts["noise_band"]["reason"]`, rather than inventing a noise
+  estimate.
 
 ## The shim
 

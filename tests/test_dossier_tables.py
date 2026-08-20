@@ -296,7 +296,9 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     noise_deltas = list(np.random.default_rng(2).normal(0, 0.02, size=20))
 
     def add_noise_floor(batch_dir):
-        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": noise_deltas}))
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:deadbeef1234",
+        }))
 
     run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
 
@@ -312,6 +314,26 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     expected_percentile = sum(d > -0.05 for d in noise_deltas) / len(noise_deltas) * 100
     assert band["candidate_percentile_better_than_noise"] == pytest.approx(expected_percentile)
     assert band["candidate_percentile_better_than_noise"] > 90
+
+
+def test_build_facts_noise_band_refuses_a_mismatched_baseline_fingerprint(tmp_path):
+    """fps-cf8: a floor computed against a different baseline must not silently grade
+    this run — the exact failure class (fps-sa1, fps-zci) the noise floor exists to
+    guard other candidates against."""
+    noise_deltas = list(np.random.default_rng(2).normal(0, 0.02, size=20))
+
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:wrongwrongwr",
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
+
+    facts = dt.build_facts(run_dir)
+
+    band = facts["noise_band"]
+    assert band["available"] is False
+    assert "fingerprint" in band["reason"]
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────
@@ -470,7 +492,9 @@ def test_process_run_facts_json_is_strictly_valid_even_with_a_single_draw_noise_
     # raw json.dumps, which happily emits the literal `NaN` token (not valid JSON per RFC 8259).
     # facts.json is the sole input to the downstream Claude session and to any non-Python reader.
     def add_noise_floor(batch_dir):
-        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": [0.01]}))
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [0.01], "baseline_fingerprint": "54:deadbeef1234",
+        }))
 
     run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
 

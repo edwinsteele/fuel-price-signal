@@ -23,5 +23,6 @@
   "fold_subset": null,
   "partial": false,
   "computed_at": "2026-08-19T08:27:39.612457+00:00",
-  "git_sha": "d22f80493a81cce0f7a6cc9607c5ce1dbb660f05"
+  "git_sha": "d22f80493a81cce0f7a6cc9607c5ce1dbb660f05",
+  "baseline_fingerprint": "54:1a6ec2d84a69"
 }

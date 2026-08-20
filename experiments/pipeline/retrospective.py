@@ -141,7 +141,7 @@ def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
     (fps-zci). The dummy delta below only feeds the per-candidate percentile/z fields, which this
     function discards; mean/std/n_draws/available/reason don't depend on it.
     """
-    band = _noise_band({"effect_delta_cpl_held": 0.0}, batch_dir)
+    band = _noise_band({"effect_delta_cpl_held": 0.0}, batch_dir, check_fingerprint=False)
     if not band.get("available"):
         return band
     return {

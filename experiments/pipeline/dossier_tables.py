@@ -250,7 +250,14 @@ def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
     return {"pit_test": pit_test, "inputs_check": inputs_check, "candidate_column_nan_rate": nan_rates}
 
 
-def _noise_band(results: dict, batch_dir: pathlib.Path | None) -> dict:
+def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerprint: bool = True) -> dict:
+    """`check_fingerprint=False` is for retrospective.py's `_batch_noise_summary`,
+    which reuses this function's math to summarise a batch's floor on its own
+    (mean/std/n_draws) rather than to grade any one candidate run against it — it
+    calls with a dummy `results` that has no real `meta.baseline_fingerprint` to
+    compare, so the per-run identity check below would always (mis)fire as a
+    mismatch. `build_facts()`, which DOES grade a real run, always uses the default.
+    """
     if batch_dir is None:
         return {"available": False, "reason": "no batch_dir recorded in results.json meta"}
     path = batch_dir / NOISE_FLOOR_FILENAME
@@ -261,6 +268,23 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None) -> dict:
             "python -m experiments.pipeline.noise_floor <batch>` (fps-3jj.9)",
         }
     noise_floor = json.loads(path.read_text())
+    floor_fingerprint = noise_floor.get("baseline_fingerprint")
+    run_fingerprint = results.get("meta", {}).get("baseline_fingerprint")
+    if check_fingerprint and (floor_fingerprint is None or floor_fingerprint != run_fingerprint):
+        # fps-cf8: a floor computed against one baseline could silently grade a
+        # candidate run against a different one (fps-sa1, fps-zci — exactly the
+        # failure class feedback_baseline_declared_not_discovered warns about). Refuse
+        # rather than trust "file exists" the way this function used to. A floor with
+        # no fingerprint at all (pre-fps-cf8) is treated as a mismatch, not a pass —
+        # it cannot be shown to match, so it cannot be trusted either.
+        return {
+            "available": False,
+            "reason": f"noise_floor.json's baseline_fingerprint ({floor_fingerprint!r}) does not "
+            f"match this run's ({run_fingerprint!r}) — the floor was computed against a "
+            "different baseline (or predates baseline_fingerprint entirely) and does not grade "
+            "this run. Recompute with `PYTHONPATH=. uv run python -m experiments.pipeline."
+            "noise_floor <batch> --force`.",
+        }
     if noise_floor.get("partial"):
         # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover
         # some outer folds, but effect_delta_cpl_held always pools every fold. Grading a
