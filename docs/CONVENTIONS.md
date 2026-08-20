@@ -117,6 +117,14 @@ subsequent row stamped so pre- and post-change rows are mechanically
 distinguishable. `fps-929` may well argue for daily — that is a re-lock decision,
 not an experiment output.
 
+**Update 2026-08-21: the move to 1d is DECIDED and filed as `fps-oqz`** (blocked on
+`fps-15c`). Note what did and did not argue for it: `fps-929` closed as
+*signal-content limit* — re-picking τ at daily cadence is worth 0.062 c/L, so the
+economics did **not** make the case. The decision rests on the owner's rationale
+(uniformity with the daily price cadence, maximum decision resolution, a choice every
+day), with the 1.85 c/L cadence gain as a consequence rather than the argument. `fps-oqz`
+records the 2d alternative that was considered and rejected, at its numbers.
+
 **Quote realised CPL and headroom with the cadence attached.** "1.66 c/L of
 headroom" is not a fact about the model; "1.54 c/L at 7-day cadence" is.
 
