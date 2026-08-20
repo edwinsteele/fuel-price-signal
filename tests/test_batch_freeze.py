@@ -154,7 +154,7 @@ def test_freeze_manifest_records_the_baseline_fingerprint(tmp_path):
     features_path, db_path = _write_source(tmp_path, df)
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
-        batches_dir=tmp_path / "batches", skip_refresh=True,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
     )
     manifest = json.loads((batch_dir / "freeze.json").read_text())
     assert manifest["baseline_fingerprint"] == baseline_fingerprint(LOCKED_FEATURE_COLUMNS)
@@ -171,7 +171,7 @@ def test_freeze_batch_writes_snapshot_and_manifest(tmp_path):
         features_path=features_path,
         db_path=db_path,
         batches_dir=batches_dir,
-        skip_refresh=True,
+        skip_refresh=True, skip_noise_floor=True,
     )
 
     assert batch_dir == batches_dir / "batch1"
@@ -187,6 +187,85 @@ def test_freeze_batch_writes_snapshot_and_manifest(tmp_path):
     assert manifest["n_baseline_columns"] == len(baseline_columns)
 
 
+def test_freeze_batch_refuses_with_a_recovery_hint_when_noise_floor_is_missing(tmp_path):
+    """fps-cf8: the noise floor is the final freeze step (~10-25min), so a crash/
+    interrupt partway through leaves everything else already pinned but no
+    noise_floor.json. Re-running batch_freeze on that dir must not just say 'frozen
+    once' as though this were an ordinary refreeze mistake — point at the actual
+    (safe, no --force) recovery."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batches_dir = tmp_path / "batches"
+    freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+    )
+
+    with pytest.raises(FileExistsError, match="noise_floor batch1"):
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+        )
+
+
+def test_freeze_batch_refuses_without_the_hint_when_noise_floor_already_exists(tmp_path):
+    """A batch that already has its noise_floor.json is a genuine full refreeze
+    attempt, not a crash-recovery case — no recovery hint to show."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batches_dir = tmp_path / "batches"
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+    )
+    (batch_dir / "noise_floor.json").write_text("{}")
+
+    with pytest.raises(FileExistsError) as exc_info:
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+        )
+    assert "noise_floor batch1" not in str(exc_info.value)
+
+
+def test_freeze_batch_computes_the_noise_floor_as_its_final_step(tmp_path, monkeypatch):
+    """fps-cf8: batch setup is one command — the noise floor is no longer a second
+    step the operator must remember to run, in order, after freeze."""
+    import experiments.pipeline.noise_floor as noise_floor_module
+
+    calls: list[pathlib.Path] = []
+    monkeypatch.setattr(
+        noise_floor_module, "compute_noise_floor", lambda batch_dir, **kw: calls.append(batch_dir)
+    )
+
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True,
+    )
+
+    assert calls == [batch_dir]
+
+
+def test_freeze_batch_skip_noise_floor_leaves_batch_correctly_ungraded(tmp_path):
+    """The --skip-noise-floor escape hatch must not produce a silently-ungraded
+    batch: no noise_floor.json means the dossier refuses to grade, not that it
+    grades against nothing."""
+    import experiments.pipeline.dossier_tables as dt
+
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
+    )
+
+    assert not (batch_dir / "noise_floor.json").exists()
+    band = dt._noise_band({"effect_delta_cpl_held": 5.0, "meta": {}}, batch_dir)
+    assert band["available"] is False
+
+
 def test_freeze_batch_handles_iso_string_price_date(tmp_path):
     """price_date is ISO-string in some features.csv outputs, INTEGER YYYYMMDD in the DB."""
     df = _features_df()
@@ -195,7 +274,7 @@ def test_freeze_batch_handles_iso_string_price_date(tmp_path):
 
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
-        batches_dir=tmp_path / "batches", skip_refresh=True,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
     )
     manifest = json.loads((batch_dir / "freeze.json").read_text())
     assert manifest["snapshot_date"] == "2026-05-14"
@@ -208,12 +287,12 @@ def test_freeze_batch_refuses_to_refreeze_existing_batch(tmp_path):
 
     freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
-        batches_dir=batches_dir, skip_refresh=True,
+        batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
     )
     with pytest.raises(FileExistsError):
         freeze_batch(
             "batch1", features_path=features_path, db_path=db_path,
-            batches_dir=batches_dir, skip_refresh=True,
+            batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
         )
 
 
@@ -224,7 +303,7 @@ def test_freeze_batch_requires_source_features(tmp_path):
             features_path=tmp_path / "data" / "features.csv",
             db_path=tmp_path / "fuel_signal.db",
             batches_dir=tmp_path / "batches",
-            skip_refresh=True,
+            skip_refresh=True, skip_noise_floor=True,
         )
 
 
@@ -240,7 +319,7 @@ def test_freeze_batch_requires_source_db(tmp_path):
             features_path=features_path,
             db_path=tmp_path / "fuel_signal.db",
             batches_dir=tmp_path / "batches",
-            skip_refresh=True,
+            skip_refresh=True, skip_noise_floor=True,
         )
 
 
@@ -249,7 +328,7 @@ def test_check_baseline_contract_passes_when_unchanged(tmp_path):
     features_path, db_path = _write_source(tmp_path, df)
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
-        batches_dir=tmp_path / "batches", skip_refresh=True,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
     )
     check_baseline_contract(batch_dir, df)  # must not raise
 
@@ -265,7 +344,7 @@ def test_check_baseline_contract_ignores_a_new_brand_column_in_the_frame(tmp_pat
     features_path, db_path = _write_source(tmp_path, df)
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
-        batches_dir=tmp_path / "batches", skip_refresh=True,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
     )
     widened = df.copy()
     widened["days_since_trough_entry_new_brand"] = 0.0
@@ -279,7 +358,7 @@ def test_check_baseline_contract_flags_added_column(tmp_path, monkeypatch):
     features_path, db_path = _write_source(tmp_path, df)
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
-        batches_dir=tmp_path / "batches", skip_refresh=True,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
     )
     monkeypatch.setattr(
         batch_freeze, "LOCKED_FEATURE_COLUMNS", LOCKED_FEATURE_COLUMNS + ["new_locked_col"]
@@ -298,7 +377,7 @@ def test_check_baseline_contract_flags_removed_column(tmp_path, monkeypatch):
     features_path, db_path = _write_source(tmp_path, df)
     batch_dir = freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
-        batches_dir=tmp_path / "batches", skip_refresh=True,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
     )
     dropped = LOCKED_FEATURE_COLUMNS[-1]
     monkeypatch.setattr(

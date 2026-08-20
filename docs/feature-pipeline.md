@@ -36,14 +36,15 @@ generator ──files──▶ candidate modules ──claimed by──▶ launc
                                                                             retrospective_facts.json + RETROSPECTIVE.md
 ```
 
-A batch is set up once (`batch_freeze.py` + `noise_floor.py`, both one-off per batch, not
-scheduled), then candidates are filed against it and cycle through launch → dossier nightly
-until the batch is done, at which point the retrospective closes it out.
+A batch is set up once (`batch_freeze.py`, one-off per batch, not scheduled — its final step
+computes the noise floor itself, `fps-cf8`), then candidates are filed against it and cycle
+through launch → dossier nightly until the batch is done, at which point the retrospective
+closes it out.
 
 | Stage | Module | Cadence | Bead |
 |---|---|---|---|
-| Batch freeze | `experiments/pipeline/batch_freeze.py` | once per batch, at setup | `fps-3jj.1` |
-| Noise floor | `experiments/pipeline/noise_floor.py` | once per batch, right after freeze | `fps-3jj.9` |
+| Batch freeze (incl. noise floor) | `experiments/pipeline/batch_freeze.py` | once per batch, at setup | `fps-3jj.1`, `fps-cf8` |
+| Noise floor (recompute only) | `experiments/pipeline/noise_floor.py` | after a re-lock, or after `--skip-noise-floor` | `fps-3jj.9` |
 | Generator | (a Claude session following `docs/routines/generator.md`) | event: queue drained / new batch | `fps-3jj.7` |
 | Launch | `experiments/pipeline/launch.py` | nightly | `fps-3jj.5` |
 | Runner | `experiments/pipeline/runner.py` | invoked BY launch, or by hand | `fps-3jj.4` |
@@ -118,6 +119,14 @@ the judgement session can crash and resume without losing the facts.
   delta — pure fit noise by construction, no definition of an "uninformative column" needed
   (a per-night placebo/permuted-column null was considered and rejected: for a market-wide
   series shared by every station, a within-date permutation is a no-op).
+- **The noise floor carries its own baseline identity, and a mismatch is refused, not
+  trusted** (`fps-cf8`). `noise_floor.json` stamps `baseline_fingerprint` the same way every
+  candidate run does; `dossier_tables._noise_band()` refuses (`available: False`) rather than
+  grade whenever the floor's fingerprint doesn't match the run's — the same failure class as
+  `fps-sa1`/`fps-zci`, just one level up: the floor is a run whose number is compared against
+  EVERY candidate's. A re-lock (a graduation, or any `LOCKED_FEATURE_COLUMNS` change)
+  invalidates an existing batch's floor; recompute with `noise_floor.py <batch> --force`
+  (`docs/CONVENTIONS.md`).
 - **Multiple comparisons in the retrospective.** Grading N candidates against the SAME noise
   band and asking "did the best one beat noise?" is a different, easier-to-satisfy-by-chance
   question than grading one candidate alone. `retrospective.py`'s
@@ -130,16 +139,18 @@ Every stage is a `click` CLI, invocable directly (not only via its routine):
 
 ```bash
 PYTHONPATH=. uv run python -m experiments.pipeline.batch_freeze <batch>
-PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch>
+# noise_floor.py is invoked automatically as batch_freeze's final step (fps-cf8) — only
+# run it directly to recompute (--force) after a re-lock, or after --skip-noise-floor:
+PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> --force
 PYTHONPATH=. uv run python -m experiments.pipeline.runner --batch-dir experiments/batches/<batch> --candidate experiments/candidates/<batch>/<name>.py
 PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables --scan experiments/candidates
 PYTHONPATH=. uv run python -m experiments.pipeline.retrospective <batch>
 ```
 
-`noise_floor.py` and `runner.py`'s realised stage are both heavy (single-arm or paired full
-walk-forward fits, ~10–25 min) — see `bd recall` / `feedback_user_runs_pipeline` if invoking
-interactively: hand the command to the user rather than shelling out to a long-running
-process from within a session.
+`batch_freeze.py` (now including the noise floor) and `runner.py`'s realised stage are both
+heavy (single-arm or paired full walk-forward fits, ~10–25 min) — see `bd recall` /
+`feedback_user_runs_pipeline` if invoking interactively: hand the command to the user rather
+than shelling out to a long-running process from within a session.
 
 ## Further reading
 

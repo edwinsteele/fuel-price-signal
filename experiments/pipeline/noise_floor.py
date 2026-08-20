@@ -6,8 +6,11 @@ until this module ran, that file didn't exist and every dossier reported
 `facts["noise_band"]["available"] = False`. This module is the producer that satisfies
 that contract — the required key (`"deltas_cpl_held": [<float>, ...]`) and filename
 (`NOISE_FLOOR_FILENAME`) are fixed by dossier_tables.py, not redefined here. The payload
-also carries provenance (seeds, fold_subset, a "partial" flag, timestamp, git SHA) that
-dossier_tables.py doesn't require but a human debugging a batch later will want.
+also carries provenance (seeds, fold_subset, a "partial" flag, timestamp, git SHA,
+`baseline_fingerprint`, fold geometry, wall_seconds) — `baseline_fingerprint` IS required
+by dossier_tables.py's `_noise_band()` (fps-cf8: it refuses to grade a candidate against a
+floor whose fingerprint doesn't match the candidate's own), the rest is for a human
+debugging a batch later.
 
 Why this shape (see fps-3jj.9's bd description for the full history): a placebo arm
 compares a noisy number against a noisy ruler; a permuted-column null needs a
@@ -27,12 +30,17 @@ noise; one just outside it is not necessarily signal — a floor, not the true b
 `SEEDS_A`/`SEEDS_B` pair index-wise (42↔47, 43↔48, ...) into `len(SEEDS_A)` independent
 draws, each costing one single-arm (baseline only, no candidate) full walk-forward fit
 per seed — 10 fits total for the 5-pair default. Because a batch is frozen (data + DB
-pinned), every draw is deterministic, so this runs once at batch-setup time (right
-after `batch_freeze.py`) and is cached to disk from then on.
+pinned), every draw is deterministic, so this runs once at batch-setup time and is
+cached to disk from then on.
 
-Usage (batch setup, once, after batch_freeze.py and before the launch routine claims
-candidate 1):
-  PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch-name>
+fps-cf8: `batch_freeze.py`'s `freeze_batch()` now calls `compute_noise_floor()` as its
+own final step, so batch setup is one command and the floor cannot be forgotten or run
+against a different snapshot than the one it grades. This module's CLI remains for
+recomputing a floor on its own (e.g. after `--skip-noise-floor`, or with `--force`
+after a re-lock invalidates the existing one — see docs/CONVENTIONS.md).
+
+Usage (recompute a floor for an already-frozen batch):
+  PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch-name> --force
 """
 from __future__ import annotations
 
@@ -55,7 +63,7 @@ from experiments.pipeline.batch_freeze import (
 )
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
-from fuel_signal.features import load_features
+from fuel_signal.features import baseline_fingerprint, load_features
 
 BASELINE_ARM_NAME = "baseline"
 
@@ -78,13 +86,19 @@ def _baseline_cpl_held(
     station_codes: list[int] | None,
     db_path: pathlib.Path,
     verbose: bool,
-) -> float:
-    """Fit the baseline alone (no candidate arm) at `seed`; return its pooled cpl_held.
+) -> tuple[float, int]:
+    """Fit the baseline alone (no candidate arm) at `seed`; return (cpl_held, n_windows).
 
     held_tau=None means the baseline's own per-fold τ IS the held τ (see
     experiments/lib/realised.py's module docstring), so with a single arm cpl_held
     equals cpl_own — this is exactly the R0 fit + realised-backtest path every
     candidate run pays for, just without a candidate arm alongside it.
+
+    n_windows is the fold geometry actually walked (experiments/lib/realised.py's
+    RealisedResult.meta) — a fourth dependency the floor pins alongside the three
+    batch_freeze.py already pins (features, DB, baseline columns), so a later fold-
+    geometry change is visible in noise_floor.json rather than silently drifting the
+    ruler out from under it.
     """
     result = run_paired_realised_backtest(
         [ArmSpec(BASELINE_ARM_NAME, frame, feature_columns=baseline_columns)],
@@ -99,7 +113,8 @@ def _baseline_cpl_held(
         collect_fills=False,
         verbose=verbose,
     )
-    return float(result.aggregate.set_index("arm").loc[BASELINE_ARM_NAME, "cpl_held"])
+    cpl_held = float(result.aggregate.set_index("arm").loc[BASELINE_ARM_NAME, "cpl_held"])
+    return cpl_held, int(result.meta["n_windows"])
 
 
 def compute_noise_floor(
@@ -171,6 +186,7 @@ def compute_noise_floor(
 
     t0 = time.perf_counter()
     deltas: list[float] = []
+    n_windows: int | None = None
     for i, (seed_a, seed_b) in enumerate(zip(seeds_a, seeds_b, strict=True), start=1):
         kwargs = dict(
             outer_fold_params=outer_fold_params,
@@ -180,8 +196,24 @@ def compute_noise_floor(
             db_path=db_path,
             verbose=verbose,
         )
-        cpl_a = _baseline_cpl_held(frame, baseline_columns, seed_a, **kwargs)
-        cpl_b = _baseline_cpl_held(frame, baseline_columns, seed_b, **kwargs)
+        cpl_a, n_windows_a = _baseline_cpl_held(frame, baseline_columns, seed_a, **kwargs)
+        cpl_b, n_windows_b = _baseline_cpl_held(frame, baseline_columns, seed_b, **kwargs)
+        # Every draw walks the same frozen data + fold geometry, so both halves of a
+        # pair — and every pair — must agree on how many windows they walked. A
+        # mismatch means the two calls silently saw different fold geometry (e.g. a
+        # config change mid-run), which would make the deltas incomparable.
+        if n_windows_a != n_windows_b:
+            raise ValueError(
+                f"pair {i}: seed {seed_a} walked {n_windows_a} windows but seed {seed_b} "
+                f"walked {n_windows_b} — fold geometry must match within a pair."
+            )
+        if n_windows is None:
+            n_windows = n_windows_a
+        elif n_windows != n_windows_a:
+            raise ValueError(
+                f"pair {i}: walked {n_windows_a} windows but pair 1 walked {n_windows} — "
+                "fold geometry must be identical across every draw."
+            )
         delta = cpl_b - cpl_a
         deltas.append(delta)
         if verbose:
@@ -196,6 +228,7 @@ def compute_noise_floor(
     # every fold. Tagging it "partial" (rather than just omitting the metadata) means
     # dossier_tables._noise_band() can refuse it outright instead of silently grading
     # every candidate against a ruler that only covers some folds.
+    wall_seconds = time.perf_counter() - t0
     payload = {
         "deltas_cpl_held": deltas,
         "seeds_a": list(seeds_a),
@@ -204,12 +237,24 @@ def compute_noise_floor(
         "partial": fold_subset is not None,
         "computed_at": datetime.now(timezone.utc).isoformat(),
         "git_sha": current_git_sha(),
+        # Identity of the R0 these draws were fit against (fps-cf8, closing the gap
+        # left by fps-zci item 5: the noise floor is a run whose number is compared
+        # against EVERY candidate's, and until now it was the one run that didn't
+        # carry this). dossier_tables._noise_band() refuses to grade a candidate
+        # whose own baseline_fingerprint doesn't match this one.
+        "baseline_fingerprint": baseline_fingerprint(baseline_columns),
+        # Fold geometry (fps-cf8's fourth pinned dependency, alongside the three
+        # batch_freeze.py already pins): how many windows were walked, and the params
+        # that produced that geometry.
+        "n_windows": n_windows,
+        "outer_fold_params": outer_fold_params,
+        "inner_fold_params": inner_fold_params,
+        "wall_seconds": wall_seconds,
     }
     out_path.write_text(json.dumps(payload, indent=2) + "\n")
     if verbose:
         print(
-            f"[noise_floor] wrote {len(deltas)} draws to {out_path} "
-            f"in {time.perf_counter() - t0:.1f}s",
+            f"[noise_floor] wrote {len(deltas)} draws to {out_path} in {wall_seconds:.1f}s",
             flush=True,
         )
     return payload

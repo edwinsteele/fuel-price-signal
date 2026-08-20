@@ -18,7 +18,12 @@ from experiments.pipeline.batch_freeze import BaselineContractMismatch, resolve_
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
 from experiments.pipeline.noise_floor import compute_noise_floor, main
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
-from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, NETWORK_FEATURE_COLUMNS
+from fuel_signal.features import (
+    FEATURE_COLUMNS,
+    LGA_FEATURE_COLUMNS,
+    NETWORK_FEATURE_COLUMNS,
+    baseline_fingerprint,
+)
 
 
 def _baseline_features_df(n: int = 5) -> pd.DataFrame:
@@ -38,20 +43,26 @@ def _write_batch_dir(tmp_path: pathlib.Path, df: pd.DataFrame, name: str = "batc
     return batch_dir
 
 
-def _fake_result(cpl_held: float):
+def _fake_result(cpl_held: float, n_windows: int = 5):
     class _Fake:
         aggregate = pd.DataFrame([{"arm": "baseline", "cpl_own": cpl_held, "cpl_held": cpl_held}])
+        meta = {"n_windows": n_windows}
 
     return _Fake()
 
 
-def _stub_realised_by_seed(monkeypatch, cpl_by_seed: dict[int, float]) -> list[dict]:
-    """Route each call to its seed's canned cpl_held; record every call's args/kwargs."""
+def _stub_realised_by_seed(
+    monkeypatch, cpl_by_seed: dict[int, float], n_windows_by_seed: dict[int, int] | None = None
+) -> list[dict]:
+    """Route each call to its seed's canned cpl_held (+ optional n_windows); record
+    every call's args/kwargs."""
     calls: list[dict] = []
+    n_windows_by_seed = n_windows_by_seed or {}
 
     def _fake(arms, feature_columns, **kwargs):
         calls.append({"arms": arms, "feature_columns": feature_columns, **kwargs})
-        return _fake_result(cpl_by_seed[kwargs["seed"]])
+        seed = kwargs["seed"]
+        return _fake_result(cpl_by_seed[seed], n_windows_by_seed.get(seed, 5))
 
     monkeypatch.setattr(noise_floor_module, "run_paired_realised_backtest", _fake)
     return calls
@@ -188,6 +199,44 @@ def test_compute_noise_floor_merges_partial_inner_fold_params(tmp_path, monkeypa
         assert c["inner_fold_params"]["train_min_days"] == DEFAULT_INNER_FOLD_PARAMS["train_min_days"]
 
 
+def test_compute_noise_floor_stamps_provenance(tmp_path, monkeypatch):
+    """fps-cf8 acceptance: baseline_fingerprint, fold geometry, and wall_seconds must
+    be in the written payload, not just deltas/seeds."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0}, {1: 7, 2: 7})
+
+    payload = compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
+
+    baseline_columns = json.loads((batch_dir / "baseline_columns.json").read_text())
+    assert payload["baseline_fingerprint"] == baseline_fingerprint(baseline_columns)
+    assert payload["n_windows"] == 7
+    assert payload["outer_fold_params"] == {}
+    assert payload["inner_fold_params"] == DEFAULT_INNER_FOLD_PARAMS
+    assert payload["wall_seconds"] >= 0.0
+
+
+def test_compute_noise_floor_raises_on_n_windows_mismatch_within_pair(tmp_path, monkeypatch):
+    """Both halves of a pair walk the same frozen data + fold geometry; if they
+    disagree on n_windows, something (e.g. a mid-run config change) broke that
+    invariant and the resulting delta is not trustworthy."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0}, {1: 7, 2: 8})
+
+    with pytest.raises(ValueError, match="fold geometry must match"):
+        compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
+
+
+def test_compute_noise_floor_raises_on_n_windows_mismatch_across_pairs(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0}, {1: 7, 2: 7, 3: 8, 4: 8})
+
+    with pytest.raises(ValueError, match="fold geometry must be identical"):
+        compute_noise_floor(batch_dir, seeds_a=(1, 3), seeds_b=(2, 4), verbose=False)
+
+
 def test_compute_noise_floor_default_seeds_pair_five_and_five(tmp_path, monkeypatch):
     """SEEDS_A/SEEDS_B (the module defaults) are the fps-3jj.9 'starting idea':
     production SEEDS (42..46) paired index-wise against a disjoint 47..51."""
@@ -220,6 +269,11 @@ def test_compute_noise_floor_marks_fold_subset_runs_partial(tmp_path, monkeypatc
     assert payload["fold_subset"] == [1, 3]
 
 
+def _matching_fingerprint(batch_dir: pathlib.Path) -> str:
+    baseline_columns = json.loads((batch_dir / "baseline_columns.json").read_text())
+    return baseline_fingerprint(baseline_columns)
+
+
 def test_dossier_tables_consumes_the_written_file(tmp_path, monkeypatch):
     """End-to-end schema check: what this module writes is exactly what
     dossier_tables._noise_band() reads (the fps-3jj.9 contract)."""
@@ -229,8 +283,11 @@ def test_dossier_tables_consumes_the_written_file(tmp_path, monkeypatch):
     batch_dir = _write_batch_dir(tmp_path, df)
     _stub_realised_by_seed(monkeypatch, {1: 100.0, 2: 200.0, 10: 109.0, 20: 218.0})
     compute_noise_floor(batch_dir, seeds_a=(1, 2), seeds_b=(10, 20), verbose=False)
+    fp = _matching_fingerprint(batch_dir)
 
-    band = dt._noise_band({"effect_delta_cpl_held": 5.0}, batch_dir)
+    band = dt._noise_band(
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp}}, batch_dir
+    )
 
     assert band["available"] is True
     assert band["n_draws"] == 2
@@ -244,11 +301,53 @@ def test_dossier_tables_refuses_a_partial_fold_subset_file(tmp_path, monkeypatch
     batch_dir = _write_batch_dir(tmp_path, df)
     _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
     compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), fold_subset=[1], verbose=False)
+    fp = _matching_fingerprint(batch_dir)
 
-    band = dt._noise_band({"effect_delta_cpl_held": 5.0}, batch_dir)
+    band = dt._noise_band(
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp}}, batch_dir
+    )
 
     assert band["available"] is False
     assert "partial" in band["reason"] or "fold-subset" in band["reason"]
+
+
+def test_dossier_tables_refuses_a_mismatched_fingerprint(tmp_path, monkeypatch):
+    """fps-cf8: a floor computed against one baseline must not silently grade a
+    candidate run stamped with a different baseline_fingerprint — this is the exact
+    failure class (fps-sa1, fps-zci) the noise floor exists to guard other candidates
+    against, and until now the floor itself was ungated."""
+    import experiments.pipeline.dossier_tables as dt
+
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
+    compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
+
+    band = dt._noise_band(
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": "54:deadbeefcafe"}},
+        batch_dir,
+    )
+
+    assert band["available"] is False
+    assert "fingerprint" in band["reason"]
+
+
+def test_dossier_tables_refuses_a_floor_with_no_fingerprint(tmp_path, monkeypatch):
+    """A pre-fps-cf8 floor (no baseline_fingerprint at all) cannot be shown to match,
+    so it must not be treated as a pass by default."""
+    import experiments.pipeline.dossier_tables as dt
+
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    (batch_dir / NOISE_FLOOR_FILENAME).write_text(json.dumps({"deltas_cpl_held": [0.01]}))
+
+    band = dt._noise_band(
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": "54:whatever"}},
+        batch_dir,
+    )
+
+    assert band["available"] is False
+    assert "fingerprint" in band["reason"]
 
 
 def test_cli_writes_noise_floor_for_named_batch(tmp_path, monkeypatch):
