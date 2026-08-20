@@ -390,8 +390,8 @@ def validate_never_dry(tank: TankParams, *, max_states: int = 10_000) -> list[Ne
     start would silently pass it.
 
     Returns [] when the config is safe under every reachable buy/wait sequence
-    (i.e. run_backtest's never-dry assertion cannot fire for any strategy).
-    Each violation names the stranded level and the depletion it fails to cover.
+    (i.e. run_backtest's never-dry check cannot raise for any strategy). Each
+    violation names the stranded level and the depletion it fails to cover.
     """
     size = tank.tank_size_litres
     depletion = tank.daily_consumption_litres * tank.evaluation_interval_days
@@ -506,17 +506,19 @@ def run_backtest(
     """Replay strategy over [start_date, end_date] and return spend metrics.
 
     Tank starts at 50% full. Between evaluations it depletes at
-    tank.daily_consumption_litres per day. On each evaluation date the
-    strategy decides whether to fill up (True) or wait (False). If the
-    strategy waits but the tank cannot survive to the next evaluation
-    (``tank_level < depletion``) or has dropped below ``tank.floor_fraction``,
-    an emergency half-fill is triggered. The two conditions are independent:
-    ``floor_fraction`` is a reserve-comfort trigger, ``depletion`` is the
-    forward-looking never-dry guarantee the emergency rule exists for (bd
-    fps-5mn — the floor-only check left a gap when ``floor_fraction * size <
-    depletion``, letting a wait strand the tank). Call ``validate_never_dry(tank)``
-    before trusting a non-default tank config; a config it flags can still
-    trip the assertion below via an adversarial (always-wait) strategy.
+    tank.daily_consumption_litres per day. On each evaluation date (other than
+    the last, which has no subsequent depletion to survive) the strategy
+    decides whether to fill up (True) or wait (False). If the strategy waits
+    but the tank cannot survive to the next evaluation (``tank_level <
+    depletion``) or has dropped below ``tank.floor_fraction``, an emergency
+    half-fill is triggered. The two conditions are independent: ``floor_fraction``
+    is a reserve-comfort trigger (applies at every date, including the last),
+    ``depletion`` is the forward-looking never-dry guarantee the emergency rule
+    exists for (bd fps-5mn — the floor-only check left a gap when
+    ``floor_fraction * size < depletion``, letting a wait strand the tank).
+    Call ``validate_never_dry(tank)`` before trusting a non-default tank config;
+    a config it flags can still raise ``RuntimeError`` below via an adversarial
+    (always-wait) strategy.
 
     collect_fills: when True, populate ``result.fills`` with a per-fill ledger
         (date / price / litres / spend / emergency) for downstream stratification.
@@ -558,18 +560,22 @@ def run_backtest(
                 )
             )
 
+    last_i = len(eval_dates) - 1
     for i, as_of in enumerate(eval_dates):
         price = history.station_price_at(station_code, as_of)
 
         if i > 0:
             tank_level -= depletion
-            # Only assert when there was a price to decide on. A station with no
+            # Only check when there was a price to decide on. A station with no
             # data for as_of never reached a decide point, so the emergency rule
             # never had a chance to fire — that's a data-coverage gap, not the
-            # never-dry-guarantee failure this assertion exists to catch (a station
+            # never-dry-guarantee failure this check exists to catch (a station
             # with no data at all is silently skipped by aggregate_backtest).
-            if price is not None:
-                assert tank_level >= -1e-9, (
+            if price is not None and tank_level < -1e-9:
+                # Explicit exception, not `assert`: `python -O` strips asserts,
+                # which would let the clamp below silently mask this failure —
+                # exactly the bug this fix exists to stop happening quietly.
+                raise RuntimeError(
                     f"tank ran dry at {as_of} (level={tank_level:.4f}L, "
                     f"depletion={depletion:.4f}L) despite the never-dry emergency "
                     f"rule — this tank config is unsafe under an adversarial "
@@ -588,7 +594,14 @@ def run_backtest(
                 fill_events += 1
                 tank_level = tank.tank_size_litres
                 _record(as_of, price, litres, emergency=False)
-        elif tank_level < depletion or tank_level / tank.tank_size_litres < tank.floor_fraction:
+        # The depletion-survival trigger only applies when there's a next
+        # evaluation to survive to — on the final date there is none, so only
+        # the floor-comfort trigger still applies there (mirrors
+        # _oracle_transitions' deplete=False handling of the final date).
+        elif (
+            (i != last_i and tank_level < depletion)
+            or tank_level / tank.tank_size_litres < tank.floor_fraction
+        ):
             # Emergency half-fill to avoid running dry before next evaluation
             target = tank.tank_size_litres * 0.5
             litres = max(0.0, target - tank_level)
@@ -631,7 +644,7 @@ def run_backtest(
 # emergency rule, bd fps-5mn) both are for any tank config validate_never_dry()
 # accepts — so ``model_cpl − oracle_cpl`` is the recoverable headroom: an upper
 # bound on cents a PIT-safe feature could win in a zone. (For a tank config
-# validate_never_dry() flags, run_backtest asserts rather than silently running
+# validate_never_dry() flags, run_backtest raises rather than silently running
 # dry — see _oracle_transitions for how the oracle instead prunes those paths
 # as infeasible. The default TankParams passes validate_never_dry() at 1–7 day
 # cadence, which is what #262 and fps-fii used.)
@@ -668,11 +681,11 @@ def _oracle_transitions(
     (still a uniform per-layer rule, so conservation holds with N−1 depletions).
 
     The WAIT branch below mirrors run_backtest's emergency condition exactly
-    (``level < depletion or level / size < floor_fraction``, bd fps-5mn): both
-    are forced into an emergency half-fill on the same reachable levels. Where
-    the two genuinely diverge is what happens when even that half-fill can't
-    survive one more depletion (``0.5 * size < depletion`` — the emergency
-    target itself is short): run_backtest's assertion trips on that path for an
+    (``(non-final and level < depletion) or level / size < floor_fraction``, bd
+    fps-5mn): both are forced into an emergency half-fill on the same reachable
+    levels. Where the two genuinely diverge is what happens when even that
+    half-fill can't survive one more depletion (``0.5 * size < depletion`` — the
+    emergency target itself is short): run_backtest raises on that path for an
     adversarial (always-wait) strategy, while this function prunes it as
     infeasible instead. So the oracle is the strict CPL ceiling over *never-dry*
     strategies (always-buy and the production model, kept fed by its emergency
@@ -709,9 +722,11 @@ def _oracle_transitions(
     buy_litres = buy_litres if buy_litres > 1e-9 else 0.0
     _emit(size, buy_spend, buy_litres, False)
 
-    # WAIT → forced emergency half-fill if below floor or can't survive to the
-    # next decide point, else hold. Kept in sync with run_backtest's condition.
-    if level < depletion or level / size < tank.floor_fraction:
+    # WAIT → forced emergency half-fill if below floor, or (deplete only — no
+    # forced fill on the depletion-survival ground for the final date, which has
+    # no next depletion to survive) can't survive to the next decide point, else
+    # hold. Kept in sync with run_backtest's condition.
+    if (deplete and level < depletion) or level / size < tank.floor_fraction:
         target = 0.5 * size
         emerg_litres = max(0.0, target - level)
         post = target if emerg_litres > 1e-9 else level

@@ -221,9 +221,9 @@ def test_waiting_strategy_cannot_strand_tank_at_3d_cadence():
     """Regression for fps-5mn: an always-wait strategy on the default tank at
     3-day cadence used to run dry (fps-fii found 109 dry events / 389L under the
     old floor-only emergency rule). With the fix, run_backtest must complete
-    without tripping the never-dry assertion, and every emergency fill must
-    actually cover the next interval (no fill of 0 litres leaving a level below
-    the next depletion)."""
+    without raising the never-dry check, and every emergency fill must actually
+    cover the next interval (no fill of 0 litres leaving a level below the next
+    depletion)."""
 
     class AlwaysWaitStrategy:
         name = "always_wait"
@@ -237,12 +237,61 @@ def test_waiting_strategy_cannot_strand_tank_at_3d_cadence():
         history, AlwaysWaitStrategy(), 60, "2020-01-01", "2020-12-01", tank,
         collect_fills=True,
     )
-    # No exception raised above == the assertion never fired. Every fill on an
-    # always-wait strategy must be an emergency half-fill that actually bought
-    # litres (a 0-litre "emergency" would leave the tank exactly as stranded as
-    # before the fix).
+    # No exception raised above == the never-dry check never fired. Every fill
+    # on an always-wait strategy must be an emergency half-fill that actually
+    # bought litres (a 0-litre "emergency" would leave the tank exactly as
+    # stranded as before the fix).
     assert result.fill_events > 0
     assert all(f.emergency and f.litres > 0 for f in result.fills)
+
+
+def test_run_backtest_raises_runtimeerror_on_unsafe_tank_with_adversarial_strategy():
+    """A tank config validate_never_dry() flags must raise — not silently clamp
+    — when an always-wait strategy actually drives it dry. Regression for a
+    CodeRabbit finding on the initial fps-5mn fix: a bare ``assert`` is stripped
+    under ``python -O``, which would let the clamp mask this exact failure."""
+    import pytest
+
+    class AlwaysWaitStrategy:
+        name = "always_wait"
+
+        def decide(self, *_):
+            return False
+
+    tank = TankParams(
+        tank_size_litres=50.0, daily_consumption_litres=30.0,
+        evaluation_interval_days=1, floor_fraction=0.10,
+    )
+    assert validate_never_dry(tank) != []  # this is exactly what it should flag
+    history = _constant_history(71, "2020-01-01", 10, 180.0)
+    with pytest.raises(RuntimeError, match="tank ran dry"):
+        run_backtest(history, AlwaysWaitStrategy(), 71, "2020-01-01", "2020-01-10", tank)
+
+
+def test_final_evaluation_does_not_force_unnecessary_emergency_fill():
+    """The depletion-survival trigger only protects a NEXT evaluation — the
+    final eval date has none, so a wait there must not force an emergency buy
+    purely because tank_level < depletion (only the floor-comfort trigger still
+    applies on the last date). Regression for a CodeRabbit finding: forcing a
+    buy on the terminal date inflates spend for a future evaluation that never
+    happens. Config: 2 eval dates 1 day apart, D=15L, floor*size=5L; the second
+    (and final) date lands at level=10L — above the floor, below D."""
+
+    class AlwaysWaitStrategy:
+        name = "always_wait"
+
+        def decide(self, *_):
+            return False
+
+    history = _constant_history(72, "2020-01-01", 5, 180.0)
+    tank = TankParams(
+        tank_size_litres=50.0, daily_consumption_litres=15.0,
+        evaluation_interval_days=1, floor_fraction=0.10,
+    )
+    result = run_backtest(
+        history, AlwaysWaitStrategy(), 72, "2020-01-01", "2020-01-02", tank,
+    )
+    assert result.fill_events == 0
 
 
 # ---------------------------------------------------------------------------
