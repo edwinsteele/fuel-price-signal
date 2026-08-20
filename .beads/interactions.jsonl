@@ -79,3 +79,4 @@
 {"id":"int-0ba647871e815a72a6927997c017cb84","kind":"field_change","created_at":"2026-08-20T01:00:07.291246Z","actor":"Edwin Steele","issue_id":"fps-1785999730023-4-264564ac","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-d50b7f56ae380b42b3476f606aee1e07","kind":"field_change","created_at":"2026-08-20T01:23:31.753334Z","actor":"Edwin Steele","issue_id":"fps-fii","extra":{"field":"priority","new_value":"1","old_value":"2"}}
 {"id":"int-d0bae9d89c9a7467317bd0d460fcb43b","kind":"field_change","created_at":"2026-08-20T07:20:32.923441Z","actor":"Edwin Steele","issue_id":"fps-8qc","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-cd46153eb4755653c75c72449fa3b571","kind":"field_change","created_at":"2026-08-20T08:45:04.387245Z","actor":"Edwin Steele","issue_id":"fps-fii","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

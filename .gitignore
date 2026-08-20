@@ -52,6 +52,11 @@ experiments/**/*.npy
 experiments/**/*.joblib
 experiments/**/*.pkl
 experiments/**/*.parquet
+
+# Smoke-run outputs (CADENCE_FOLDS=... and friends): fold-subset artifacts that
+# share filenames with a full run. Committing them puts a 1-fold ledger next to a
+# 14-fold one, which reads as a like-for-like comparison and is not one.
+experiments/**/smoke/
 experiments/**/*.h5
 experiments/**/*.html
 

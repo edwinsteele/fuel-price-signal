@@ -39,6 +39,75 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: evaluation cadence (TankParams.evaluation_interval_days) as a free parameter
+  inputs: [station daily prices, model/oracle realised fill ledgers]
+  claim: >-
+    #262's window-level headroom of 1.66 c/L -- the number that justified "the
+    model is near the perfect-foresight floor, stop doing feature work" -- is an
+    artifact of the 7-day decision grid, which is a TankParams default rather than
+    a fact about the world. A finer grid should expose within-week dips the weekly
+    grid cannot see, so the true ceiling should sit well below 188.14.
+  falsified: >-
+    The "near the floor" judgement, not the measurement. Headroom nearly DOUBLES at
+    daily cadence: 1.54 -> 2.97 c/L (7d always 193.41 / model 189.67 / oracle
+    188.14; 1d 192.99 / 187.82 / 184.85). Robust -- grew in 12/14 folds, median
+    +1.70. Also falsified: "~250 real decisions, hence structurally small feature
+    effects" as a property of the TANK. Forced-fill COUNT is cadence-invariant
+    (508/499/500) because hitting the floor depends on distance driven, not on how
+    often you look; chosen fills go 244 -> 896 -> 1832. So that explanation, and
+    the ~0.05 c/L decision-flip quantum built on it, are 7-DAY quantities. Also
+    falsified: #262's model CPL of 189.79 does not reproduce (189.67 on the current
+    features.csv vintage; always-buy and oracle match to the cent, both being
+    price-only), so 7d headroom is 1.54 not 1.66.
+  not_tested: >-
+    Whether the extra headroom is RECOVERABLE -- the ceiling is leaky by
+    construction, so 2.97 is an upper bound on a partly-unforecastable prize.
+    Whether re-picking tau against daily-cadence economics captures part of it with
+    NO new features: tau was held at the production 0.25 at every cadence (correct
+    for isolating the cadence effect), so the daily arm is the production model
+    operated as-is, not tuned for 7x more decisions. This is the cheapest untested
+    move and should precede any feature work. Whether the model's plateau past 2d
+    (189.67 -> 187.85 -> 187.82, i.e. 0.03 c/L for doubling its chances, while the
+    oracle keeps improving) is a signal-content limit or an operating-point limit
+    -- the tau sweep above is what separates those. Whether cadences between 2d and
+    7d behave differently: 3/4/5/6 are all DISQUALIFIED by the engine defect below,
+    not merely unrun. Whether any OTHER repo result was measured at a cadence whose
+    lattice makes the engine's run-dry clamp reachable.
+  outcome: rejected
+  evidence: experiments/2026-08-20_cadence_ceiling/
+
+- candidate: run_backtest's run-dry clamp vs run_oracle_backtest's run-dry pruning
+  inputs: [tank dynamics only -- no price or feature data]
+  claim: >-
+    Sweeping TankParams.evaluation_interval_days is a free knob, so oracle-vs-model
+    headroom can be compared at any cadence.
+  falsified: >-
+    It is not free. run_backtest clamps a tank that would go negative to 0 and
+    continues (its emergency rule tests the CURRENT level, not the post-depletion
+    overshoot, despite its own comment saying it exists "to avoid running dry before
+    next evaluation"), while run_oracle_backtest prunes run-dry paths outright. So
+    the oracle is a ceiling only over NEVER-DRY strategies, and whether the model
+    stays never-dry depends on the reachable level lattice, which depends on
+    D = daily x interval. At 3-day cadence a reachable level (7.14 L) sits ABOVE the
+    10% emergency floor yet cannot survive a 10.71 L interval: the model strands the
+    tank and understates its CPL denominator on exactly the paths where waiting
+    looked cheapest. Measured: 109 dry events / 389 L at 3d (worst single event
+    3.571 L = one day's burn); at one-fold scale headroom went to -1.47, impossible
+    for a true ceiling. Exact rational arithmetic over the lattice: cadences 1, 2
+    and 7 are safe on the default tank; 3, 4, 5, 6 and 8-14 are not.
+  not_tested: >-
+    Whether the proposed fix (emergency fires when `tank_level < depletion`, i.e.
+    test what the comment claims) is truly a no-op on the default 7-day lattice
+    {0, 25, 50}. It is a no-op by DERIVATION at 7d/2d/1d -- identical decision at all
+    29 reachable levels -- but that has not been EXECUTED. The merge gate is that 7d
+    must reproduce 193.41 / 189.67 / 188.14 exactly; if it does not, the cadence
+    experiment's conclusions are retracted rather than patched. Also untested:
+    whether any non-default tank used elsewhere (the CLI exposes --tank-size,
+    --daily-use and --eval-interval with only positivity checks) has already
+    produced a silently dry-clamped CPL.
+  outcome: disqualified
+  evidence: experiments/2026-08-20_cadence_ceiling/
+
 - candidate: per-zone headroom attribution (consumption-interval + bootstrap CIs)
   inputs: [model/oracle realised fill ledgers, cycle_pct_through, network_px_std]
   claim: >-
