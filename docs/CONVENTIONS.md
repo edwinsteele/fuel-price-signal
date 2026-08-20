@@ -118,6 +118,23 @@ Two cheap pre-screens (no retrain) before committing to a feature-regen → retr
 
 **Why:** #250 (boundary fix) and #254 (regime cycle-length denominator) both showed flat WFCV log-loss. #250 was realised-positive (saving 3.04% → 3.37%) and would have been wrongly binned on the screen; #254's τ-sweep showed the apparent realised "win" was an operating-point artifact and the feature economically inert (fold 7 — where the denominators diverge most in value — had the *lowest* decision-disagreement, 1.3%). A single proxy promoted to a hard reject gate fails for any feature class whose value is orthogonal to the proxy. The held-τ realised backtest is a one-call paired walk-forward capability: `experiments/lib/realised.run_paired_realised_backtest` (#255) — use it as the arbiter for decision-timing features.
 
+### Bucketed results — check the convention spread before believing an ordering
+
+Before reporting any aggregate **sliced into buckets** (cycle regime, volatility band, quarter, month), list the free choices its construction made — inventory basis, timestamp convention, boundary inclusivity, span trimming, tie-breaking — recompute it under each, and report:
+
+```
+spread ACROSS conventions, per bucket   (the ruler's sloppiness)
+spread BETWEEN buckets, per convention  (the thing you want to see)
+```
+
+**A bucket comparison is readable only when the between-bucket gap exceeds the between-convention gap.** If it doesn't, do not pick a convention and proceed — that codifies an assumption as a fact, and the temptation is always to pick the one agreeing with the hypothesis you already hold. Change the measured quantity instead.
+
+The convention spread is a **bias** term: it does not shrink with more stations, folds or seeds. A result can carry a tight bootstrap CI and still be meaningless, so report the spread *next to* the CI — they answer different questions. And an ordering claim is a **contrast**: bootstrap the difference rather than eyeballing two overlapping intervals (shared folds make the contrast tighter than either interval suggests), and run it for every axis you make a claim on, not just the headline one.
+
+**The specific trap this generalises:** allocating a **path-coupled total cost** to sub-periods has no unique answer. In a tank-based backtest the oracle buys cheaply just *before* an expensive stretch and coasts through it; which period gets the credit is a choice. So `model_cpl − oracle_cpl` is well defined at **window level, per station** — the granularity `run_oracle_backtest` optimises — and **not identified at any sub-window zone**. Quantities natively stamped at a moment (per-row log-loss, per-decision accuracy, prices, predictions) are safe to bucket.
+
+**Why:** the #262 headroom map's per-zone rows drove real decisions — "regime axis FLAT" retired the late-descent thread, and a 12–16c volatility "hump" was treated as a target. `experiments/2026-08-20_headroom_attribution/` recomputed them under six conventions: every zone moved 2.5–5.1 c/L while the zones differed by 0.5–3.4, no contrast separated on either axis, and the impossible negatives that motivated the fix reappeared under two of the six. Every per-zone row was withdrawn; the window-level 1.66 c/L stands. Note the tell is not always available — that map's negatives exposed it only because it compared against an oracle; the same defect measured against always-buy is silent.
+
 ## Definition of done
 
 Before considering a change complete, in this order:
