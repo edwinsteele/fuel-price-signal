@@ -185,6 +185,31 @@ The convention spread is a **bias** term: it does not shrink with more stations,
 
 **Why:** the #262 headroom map's per-zone rows drove real decisions — "regime axis FLAT" retired the late-descent thread, and a 12–16c volatility "hump" was treated as a target. `experiments/2026-08-20_headroom_attribution/` recomputed them under six conventions: every zone moved 2.5–5.1 c/L while the zones differed by 0.5–3.4, no contrast separated on either axis, and the impossible negatives that motivated the fix reappeared under two of the six. Every per-zone row was withdrawn; the window-level number survives *as a window-level quantity* — but it is not a constant. `experiments/2026-08-20_cadence_ceiling/` (bd `fps-fii`) showed it is conditional on the evaluation cadence: 1.54 c/L on a 7-day decision grid, 2.97 c/L on a daily one. Quote it with its cadence attached. Note the tell is not always available — that map's negatives exposed it only because it compared against an oracle; the same defect measured against always-buy is silent.
 
+**The mechanical corollary: cut economics on folds, not on row labels.** A fold is not a
+sub-period — `experiments/lib/realised.py` calls `aggregate_backtest` once per fold and
+`aggregate_backtest` calls `run_backtest` once per station with a fresh tank, so each
+(fold, station) is an **independent simulation** and any per-fold, per-station or
+per-fold-group figure is a sum of complete windows. Nothing is allocated, so nothing is
+unidentified. A row-level label (cycle regime, day-of-week, volatility band, a candidate's
+`add_axis`) slices *through* a window instead, so a cost cut on one is unidentified no
+matter how many fills back it. Express a zone claim as a set of folds where you can; where
+the mechanism really is row-level, make the claim on a quantity stamped at a moment
+(per-row log-loss, per-decision accuracy, "did the model pick a worse week than the
+oracle?") rather than on pooled CPL. `experiments/pipeline/` enforces this by attaching
+`ROW_AXIS_ECONOMICS_CAVEAT` to any `per_axis` delta or `CONFIDENCE_ZONE` grade that used a
+row label, so the caveat travels with the number instead of living only here.
+
+**And note the tell is often missing.** #262's per-zone rows exposed themselves through
+*impossible negatives* — a perfect-foresight oracle cannot lose — but that only worked
+because the comparison was against an oracle. The same defect measured against always-buy
+produces no impossible value at all. The 2026-06-18 gate-1 per-regime saving% sat unchallenged
+for two months for exactly that reason (withdrawn 2026-08-21,
+`experiments/2026-08-21_path_coupling_audit/`, bd `fps-grp`): one free convention already in
+that experiment — whether forced emergency fills count — moved each bucket 8.15–21.30 c/L
+against a between-bucket spread of 6.73–10.40, and *reversed* the ordering. **Absence of an
+impossible value is not evidence of identification.** Enumerate the free conventions and
+measure the spread; don't wait for the quantity to embarrass itself.
+
 ## Definition of done
 
 Before considering a change complete, in this order:

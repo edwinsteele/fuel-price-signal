@@ -92,5 +92,16 @@ def add_axis(df: pd.DataFrame) -> pd.Series:
     sees it) but corrupts the CONCLUSION ("helps on days that turned out to be
     near the trough" is unactionable at 7am). Day-of-week is trivially
     PIT-safe: it's knowable in advance from the calendar alone.
+
+    A ROW-LEVEL AXIS CANNOT CARRY A COST CLAIM (fps-grp). Pooled realised CPL is
+    a path-coupled total -- a buy now changes what is possible later -- so
+    cutting it on a per-row label allocates that total to a sub-period, which
+    has no unique answer. Both the dossier's per_axis deltas and CONFIDENCE_ZONE
+    graded on this axis ship an identification caveat and are colour, not
+    findings. TARGET["folds"] and the built-in axis "regime" (SHOCK_FOLDS) are
+    graded on identified quantities instead, because each (fold, station) is an
+    independent simulation with its own tank. Prefer them for the headline zone
+    claim; keep add_axis for descriptive breakdowns (feature values, NaN rates,
+    log-loss), which are natively stamped at a moment and unaffected.
     """
     return pd.to_datetime(df["price_date"]).dt.day_name().rename("axis")

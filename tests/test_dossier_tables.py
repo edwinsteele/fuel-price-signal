@@ -16,6 +16,7 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
+from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT
 from experiments.pipeline import dossier_tables as dt
 from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM, RETRYABLE_STATUSES
 
@@ -252,6 +253,9 @@ def test_build_facts_rejected_run_has_all_blocks_and_suppresses_thin_cells(tmp_p
     assert set(regimes) == {"shock", "normal"}
 
     assert facts["breakdowns"]["per_axis"] is None  # no add_axis declared
+    # No row-level axis, so no unidentified cell to warn about. per_fold/per_regime
+    # cut on whole folds (independent simulations) and must NOT carry the caveat.
+    assert facts["breakdowns"]["per_axis_identification_note"] is None
 
     assert facts["seed_flags"] == [
         {"cohort": "all", "fold": 4, "run": "candidate", "seed_std": 0.09, "ratio_vs_cohort_median": 9.0}
@@ -276,6 +280,15 @@ def test_build_facts_per_axis_present_when_add_axis_declared(tmp_path):
     assert per_axis is not None
     assert {row["axis"] for row in per_axis} <= {"A", "B"}
     assert all(row["n_fills"] >= 0 for row in per_axis)
+
+    # fps-grp: a per-row axis cuts THROUGH a window, so its CPL cells allocate a
+    # path-coupled cost to a sub-period and are not identified. The caveat must ship
+    # in the same dict as the numbers — a dossier reader must not be able to meet the
+    # delta without it — and must say so in terms the reader can act on.
+    note = facts["breakdowns"]["per_axis_identification_note"]
+    assert note == ROW_AXIS_ECONOMICS_CAVEAT
+    assert "NOT IDENTIFIED" in note
+    assert "never as a finding" in note
 
 
 def test_build_facts_non_rejected_status_sets_status_note_and_no_breakdowns(tmp_path):
