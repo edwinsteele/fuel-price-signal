@@ -121,6 +121,21 @@ Read all of the following before proposing anything:
    - **Row-level cycle regime**: `experiments/lib/zones.py` `assign_regime()` over
      `cycle_pct_through` — `normal` (0.0–0.6), `late_descent` (0.6–1.0), `overdue`
      (≥1.0).
+   - **`TARGET["axis"] = "regime"` is a RESERVED NAME meaning the FOLD-level one.**
+     The runner implements it as `"shock" if fold in SHOCK_FOLDS else "normal"`
+     (`runner.py`, `_resolve_zone`) — it does **not** call `assign_regime()`. The two
+     axes share a level named `normal`, so a candidate that writes
+     `{"axis": "regime", "expect_concentration_in": ["normal"]}` meaning *cycle-phase
+     normal* is silently graded against *non-shock folds* instead. No error is raised;
+     the grade is just wrong. To target the row-level cycle regime, supply your own
+     `add_axis` returning those labels and name the axis something else
+     (`"cycle_regime"`), accepting the row-level COST caveat below.
+   - **The cycle-phase axis has a known unfixed defect** and bd `fps-x0f` is
+     re-examining whether it measures anything: `cycle_pct_through` divides by
+     `cycle_mean_length`, still an expanding all-history mean over every confirmed peak
+     to date. A candidate is free to target it, but should not treat "late descent is a
+     weak zone" as established — three prior findings on that axis disagree with each
+     other.
    - A candidate's `TARGET` axis is not limited to these two — `add_axis` lets a
      candidate declare its own per-row grouping (day-of-week, TGP direction,
      competition density, cycle amplitude, brand class are all live, uncut
