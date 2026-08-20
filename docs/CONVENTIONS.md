@@ -118,10 +118,14 @@ not an experiment output.
 **Quote realised CPL and headroom with the cadence attached.** "1.66 c/L of
 headroom" is not a fact about the model; "1.54 c/L at 7-day cadence" is.
 
-**Ordering rule — stamp before you decide.** The `tank_params` column must land in
-`results.csv` *before* any run that could change the canonical cadence, otherwise
-that run's own row is indistinguishable from the rows it should be compared
-against. This is why `fps-xx1` blocks `fps-929`.
+**Ordering rule — stamp before you decide.** The `tank_params` column (`fps-xx1`)
+now lives in `results.csv`, alongside `baseline_fingerprint`, derived inside
+`log_experiment` from the `TankParams` the backtest actually ran with — same rule
+as the fingerprint, the stamp cannot disagree with what produced the row. It is
+empty when no backtest ran (`tank=None`) and `50/3.571/7d/10%` on every existing
+realised-CPL row, since none of them predate the 7-day default. This was the
+precondition for `fps-929`: without it, a daily-cadence re-lock's own row would be
+indistinguishable from the 7-day rows it must be compared against.
 
 **And cadence is not free to sweep.** `run_backtest` clamps a dry tank to 0 and
 continues while `run_oracle_backtest` prunes run-dry paths, so a cadence whose

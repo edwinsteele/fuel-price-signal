@@ -354,6 +354,19 @@ class TankParams:
     floor_fraction: float = 0.10                   # emergency half-fill threshold
 
 
+def format_tank_params(tank: TankParams) -> str:
+    """Render as size/daily/interval/floor, e.g. ``50/3.571/7d/10%``.
+
+    A readable literal, not a hash: four numbers are already glanceable, so unlike
+    ``baseline_fingerprint`` the values themselves are the stamp.
+    """
+    size = f"{tank.tank_size_litres:g}"
+    daily = f"{tank.daily_consumption_litres:.3f}"
+    interval = f"{tank.evaluation_interval_days}d"
+    floor = f"{tank.floor_fraction * 100:g}%"
+    return f"{size}/{daily}/{interval}/{floor}"
+
+
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------

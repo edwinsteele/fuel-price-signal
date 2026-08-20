@@ -45,6 +45,7 @@ from collections.abc import Iterator
 import numpy as np
 import pandas as pd
 
+from fuel_signal.backtest import TankParams, format_tank_params
 from fuel_signal.features import baseline_fingerprint
 
 # ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ TEST_END = "2025-12-31"
 
 _RESULTS_CSV = pathlib.Path(__file__).parent.parent / "experiments" / "results.csv"
 _CSV_HEADER = [
-    "timestamp", "git_sha", "name", "features", "baseline_fingerprint",
+    "timestamp", "git_sha", "name", "features", "baseline_fingerprint", "tank_params",
     "train_start", "train_end", "val_start", "val_end", "test_start", "test_end",
     "holdout_logloss", "holdout_brier",
     "realised_spend_cpl", "realised_savings_vs_always_buy_pct",
@@ -263,6 +264,7 @@ def log_experiment(
     notes: str = "",
     realised_spend_cpl: float | None = None,
     realised_savings_vs_always_buy_pct: float | None = None,
+    tank: TankParams | None = None,
     seed_test_logloss_vector: list[float] | None = None,
     seed_test_logloss_mean: float | None = None,
     seed_test_logloss_std: float | None = None,
@@ -272,6 +274,9 @@ def log_experiment(
     Creates the file with a header row if it does not exist yet.
     realised_spend_cpl and realised_savings_vs_always_buy_pct are populated
     by the backtest engine (Phase 3); leave None for probabilistic-only runs.
+    tank is the TankParams the backtest engine actually ran with — pass it
+    whenever realised_spend_cpl was produced by one; leave None otherwise, so an
+    empty tank_params column means "no backtest ran", not "ran at an unknown tank".
     seed_test_logloss_vector / mean / std are populated by score_phase2 --seeds
     at lock time; leave None for single-seed development runs.
 
@@ -282,6 +287,12 @@ def log_experiment(
     column already holds the list, but it is 54 pipe-joined names — unusable for an
     at-a-glance comparison, which is how a 64-column R0 and a sorted permutation of
     the right 54 both survived (fps-sa1, fps-nor).
+
+    tank_params is formatted from the `tank` object rather than accepting a
+    pre-formatted string, for the same reason: the stamp cannot disagree with what
+    actually ran (fps-xx1, copying the fingerprint precedent one contract down —
+    fps-fii measured realised CPL moving 189.67/187.85/187.82 c/L across 7/2/1-day
+    cadence on an otherwise identical run).
     """
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
@@ -309,6 +320,7 @@ def log_experiment(
             name,
             "|".join(features),
             baseline_fingerprint(features),
+            format_tank_params(tank) if tank is not None else "",
             TRAIN_START,
             TRAIN_END,
             VAL_START,
