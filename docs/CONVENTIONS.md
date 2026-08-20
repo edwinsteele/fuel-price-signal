@@ -94,6 +94,42 @@ How much does order matter? **Pin it; don't sweep it.** Measured over 5 draws ea
 
 **Why:** `batch_freeze.resolve_baseline_columns()` appended `discover_brand_feature_columns(df)` on exactly that rationale, giving batch0 a 64-column R0 — production plus the rejected Phase 4b group — for every candidate in the batch, on both the log-loss screen and the realised arbiter. It surfaced only because `tgp_delta_7d` was re-tested as a known graduate and came back with the opposite sign; the candidate arms agreed to 0.0013 c/L while the baselines differed by 0.132 (fps-sa1, fps-nor). Neither defect left any trace in the artifacts that recorded the runs, which is why two incommensurable baselines were compared head-to-head for two months — hence the single symbol and the fingerprint above (fps-zci).
 
+### The decision cadence is a lock parameter, declared — not a default
+
+`TankParams.evaluation_interval_days` looks like a knob and behaves like part of
+the model contract. `experiments/2026-08-20_cadence_ceiling/` (bd `fps-fii`)
+measured the same model, folds, seed and columns at 7 / 2 / 1 day and got
+**headroom 1.54 / 2.69 / 2.97 c/L and realised CPL 189.67 / 187.85 / 187.82**.
+Cadence moves realised economics by more than most feature decisions do.
+
+**The canonical cadence is 7 days.** Every row in `experiments/results.csv`
+carrying a realised CPL was produced at it (`score_phase2.py` constructs a bare
+`TankParams()` with no CLI override), and every published headroom figure assumes
+it. Do not change it because a finer grid scores better — that is discovering the
+lock rather than declaring it, the same failure as resolving R0 from a frame
+header.
+
+**Moving it is a deliberate re-lock**, with the same ceremony as changing
+`LOCKED_FEATURE_COLUMNS`: a recorded rationale, a stated before/after, and every
+subsequent row stamped so pre- and post-change rows are mechanically
+distinguishable. `fps-929` may well argue for daily — that is a re-lock decision,
+not an experiment output.
+
+**Quote realised CPL and headroom with the cadence attached.** "1.66 c/L of
+headroom" is not a fact about the model; "1.54 c/L at 7-day cadence" is.
+
+**Ordering rule — stamp before you decide.** The `tank_params` column must land in
+`results.csv` *before* any run that could change the canonical cadence, otherwise
+that run's own row is indistinguishable from the rows it should be compared
+against. This is why `fps-xx1` blocks `fps-929`.
+
+**And cadence is not free to sweep.** `run_backtest` clamps a dry tank to 0 and
+continues while `run_oracle_backtest` prunes run-dry paths, so a cadence whose
+reachable lattice puts a level in the open `(floor*size, D)` interval silently
+understates CPL. Default tank: 1, 2 and 7 days are safe; 3, 4, 5, 6 and 8-14 are
+not. Check the *starting* level (50% of tank) too, not only the wait-chain — the
+example at `README.md:756` fails there and nowhere else. See bd `fps-5mn`.
+
 ### New constants must not silently diverge from a canonical equivalent
 
 When a change introduces a numeric constant (a band width, a window length, a threshold) that has a canonical equivalent already in the codebase, either reuse the canonical one or **ablate the divergence before merge** — cite the measured cost of the new value vs the canonical value, same evidence bar as a feature change.
