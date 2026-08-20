@@ -101,10 +101,16 @@
     {0, 25, 50}. It is a no-op by DERIVATION at 7d/2d/1d -- identical decision at all
     29 reachable levels -- but that has not been EXECUTED. The merge gate is that 7d
     must reproduce 193.41 / 189.67 / 188.14 exactly; if it does not, the cadence
-    experiment's conclusions are retracted rather than patched. Also untested:
-    whether any non-default tank used elsewhere (the CLI exposes --tank-size,
-    --daily-use and --eval-interval with only positivity checks) has already
-    produced a silently dry-clamped CPL.
+    experiment's conclusions are retracted rather than patched. RESOLVED 2026-08-20
+    (was: has any other repo result been measured at an unsafe cadence?) -- the
+    committed record is clean, every harness result runs TankParams() = 7d, no doc
+    quotes a non-default-cadence number, and the default has been 7 throughout the
+    knob's git history. But the audit found README.md:756's documented CLI example
+    (--tank-size 60 --daily-use 4.5 --eval-interval 7) IS unsafe: D = 31.5 L and the
+    engine starts at 30 L, so the starting level itself is in the gap and the first
+    wait strands the tank. Every strategy except always-buy, silently. Folded into
+    fps-5mn, which was raised to P1; note a lattice-only validator would MISS it,
+    since the offending level is the start level rather than a wait-chain rung.
   outcome: disqualified
   evidence: experiments/2026-08-20_cadence_ceiling/
 
