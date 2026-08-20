@@ -39,6 +39,41 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: per-zone headroom attribution (consumption-interval + bootstrap CIs)
+  inputs: [model/oracle realised fill ledgers, cycle_pct_through, network_px_std]
+  claim: >-
+    The #262 headroom map's impossible negative cells are attribution artifacts
+    (unpaired denominators + path coupling), so re-attributing cost to the
+    consumption interval instead of the purchase event, and adding bootstrap CIs,
+    will make per-zone headroom trustworthy enough to drive feature decisions.
+  falsified: >-
+    The ESTIMATOR fix works but the QUANTITY is not identified. Per-zone headroom
+    depends on two free bookkeeping conventions with no physical content -- cost
+    basis (fifo/average) and interval label (start/mid/end) -- and across those 6
+    combinations each zone moves MORE than the zones differ from each other.
+    Regime per-zone spread 2.53-2.95 c/L vs between-zone 0.90-3.36; the "worst
+    zone" changes three times. Volatility is worse: >=16c spans -0.11..5.02
+    (spread 5.13). No contrast separates on either axis (best late_descent>normal
+    p=0.90, CI [-0.77,+3.49]; 12-16c vs >=16c p=0.42). Impossible negatives are
+    not robustly removed either -- absent at `start` labelling, back at
+    average/end and average/mid (3 of 42 grid cells). This CANNOT be fixed with
+    more data: convention spread is a bias/identification term, not variance.
+    Consequence: every per-zone row of #262 is withdrawn -- "regime axis FLAT"
+    (which rested the late-descent thread), the 12-16c hump's magnitude and peak
+    status, monthly episode clustering, and the +/-0.5 per-band noise floor that
+    was derived from the negatives.
+  not_tested: >-
+    Whether a measure that never allocates cost to a period -- e.g. decision-
+    timing accuracy, "did the model pick a worse week than the oracle?" -- can
+    carry the zone comparison instead. That is the redirect for fps-x0f step 2.
+    Whether the window-level 1.66 c/L ceiling itself moves under a finer
+    evaluation cadence (the 7-day interval is a TankParams default, not a fact
+    about the world; the oracle is fit-free so this is cheap to resize).
+    Whether any OTHER path-coupled quantity in the repo is sliced by period the
+    same way.
+  outcome: rejected
+  evidence: experiments/2026-08-20_headroom_attribution/
+
 - candidate: tgp_delta_7d
   inputs: [tgp_delta_7d]
   claim: >-
