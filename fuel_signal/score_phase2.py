@@ -74,6 +74,7 @@ import numpy as np
 import pandas as pd
 
 from fuel_signal import evaluate as _ev
+from fuel_signal.backtest import TankParams
 from fuel_signal.features import FEATURE_COLUMNS
 from fuel_signal.train_logreg import train_and_evaluate
 
@@ -457,8 +458,12 @@ def run_realised_spend_backtest(
     model_path: str | None,
     chosen_tau: float,
     no_backtest: bool,
-) -> tuple[float | None, float | None]:
-    """Return (realised_cpl, realised_savings_pct) for the chosen τ, or (None, None).
+) -> tuple[float | None, float | None, TankParams | None]:
+    """Return (realised_cpl, realised_savings_pct, tank) for the chosen τ, or (None, None, None).
+
+    `tank` is the TankParams instance the backtest actually ran with, for stamping
+    into results.csv (fps-xx1) — returned only when a real CPL was produced, so it
+    can never disagree with the realised-spend columns on the same row.
 
     Backtest is skipped — without raising — when:
       - --no-backtest is set
@@ -468,20 +473,19 @@ def run_realised_spend_backtest(
     """
     if no_backtest:
         click.echo("\nSkipping realised-spend backtest (--no-backtest).")
-        return None, None
+        return None, None, None
     if model_path is None:
         click.echo("\nSkipping realised-spend backtest (no --model-path).")
-        return None, None
+        return None, None, None
     db_file = pathlib.Path(db_path)
     if not db_file.exists():
         click.echo(f"\nSkipping realised-spend backtest (DB not found: {db_path}).")
-        return None, None
+        return None, None, None
 
     import fuel_signal.db as _db
     from fuel_signal.backtest import (
         AlwaysBuyStrategy,
         ModelStrategy,
-        TankParams,
         _evaluation_dates,
         load_history,
     )
@@ -512,7 +516,7 @@ def run_realised_spend_backtest(
         click.echo(
             "\nWARNING: Backtest CPL is NaN — realised-spend columns not populated."
         )
-        return None, None
+        return None, None, None
 
     savings_pct = (
         (always_cpl - model_cpl) / always_cpl * 100
@@ -523,7 +527,7 @@ def run_realised_spend_backtest(
         f"  Model      CPL : {model_cpl:.2f} c/L"
         f"  ({savings_pct:+.2f}% vs always-buy)"
     )
-    return model_cpl, savings_pct
+    return model_cpl, savings_pct, tank
 
 
 # ---------------------------------------------------------------------------
@@ -785,7 +789,7 @@ def main(
         )
 
     # Step 7: run backtest for realised-spend columns (default on; gated by DB + model presence).
-    realised_cpl, realised_savings_pct = run_realised_spend_backtest(
+    realised_cpl, realised_savings_pct, realised_tank = run_realised_spend_backtest(
         db_path=db_path,
         model_path=model_path,
         chosen_tau=chosen_tau,
@@ -821,6 +825,7 @@ def main(
             notes=notes,
             realised_spend_cpl=realised_cpl,
             realised_savings_vs_always_buy_pct=realised_savings_pct,
+            tank=realised_tank,
             seed_test_logloss_vector=seed_result["logloss_vector"] if seed_result else None,
             seed_test_logloss_mean=seed_result["logloss_mean"] if seed_result else None,
             seed_test_logloss_std=seed_result["logloss_std"] if seed_result else None,

@@ -240,7 +240,7 @@ def test_log_experiment_creates_file_with_header(tmp_path, monkeypatch):
     assert results_path.exists()
     lines = results_path.read_text().splitlines()
     assert lines[0].startswith(
-        "timestamp,git_sha,name,features,baseline_fingerprint,train_start,train_end"
+        "timestamp,git_sha,name,features,baseline_fingerprint,tank_params,train_start,train_end"
     )
     assert len(lines) == 2  # header + one data row
 
@@ -294,6 +294,59 @@ def test_log_experiment_fingerprints_the_feature_set_it_logged(tmp_path, monkeyp
     # Same 54 columns, sorted — a different model, so it must not fingerprint alike.
     assert rows[2][idx] != LOCKED_FEATURE_FINGERPRINT
     assert rows[2][idx].startswith(f"{len(LOCKED_FEATURE_COLUMNS)}:")
+
+
+def test_log_experiment_raises_on_realised_cpl_without_tank(tmp_path, monkeypatch):
+    """A realised CPL with no tank stamp is exactly the ambiguity fps-xx1 exists to
+    prevent — must fail loudly rather than write an unattributed row."""
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+
+    with pytest.raises(ValueError, match="realised_spend_cpl was passed without tank"):
+        log_experiment(
+            "m", [], holdout_logloss=0.5, holdout_brier=0.2, realised_spend_cpl=190.0
+        )
+
+
+def test_log_experiment_tank_params_empty_when_no_tank_passed(tmp_path, monkeypatch):
+    """No backtest ran, so tank_params must stay empty rather than assume the default —
+    an empty stamp means "no backtest", not "ran at an unknown tank" (fps-xx1)."""
+    import csv as _csv
+
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    log_experiment("no_backtest", [], holdout_logloss=0.5, holdout_brier=0.2)
+
+    rows = list(_csv.reader(results_path.open(newline="")))
+    idx = rows[0].index("tank_params")
+    assert rows[1][idx] == ""
+
+
+def test_log_experiment_stamps_the_tank_it_ran_with(tmp_path, monkeypatch):
+    """tank_params is derived from the TankParams object passed in, so a row's stamp
+    cannot disagree with the tank the backtest actually used — the same rule as
+    baseline_fingerprint, one contract down (fps-xx1, copying fps-zci's precedent).
+
+    A row written under a non-default tank must be mechanically distinguishable from
+    a default one (fps-xx1 acceptance criterion).
+    """
+    import csv as _csv
+
+    from fuel_signal.backtest import TankParams
+
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+    log_experiment("default_tank", [], holdout_logloss=0.5, holdout_brier=0.2, tank=TankParams())
+    log_experiment(
+        "daily_tank", [], holdout_logloss=0.5, holdout_brier=0.2,
+        tank=TankParams(evaluation_interval_days=1),
+    )
+
+    rows = list(_csv.reader(results_path.open(newline="")))
+    idx = rows[0].index("tank_params")
+    assert rows[1][idx] == "50/3.571/7d/10%"
+    assert rows[2][idx] == "50/3.571/1d/10%"
+    assert rows[1][idx] != rows[2][idx]
 
 
 def test_results_csv_on_disk_matches_the_current_schema():
