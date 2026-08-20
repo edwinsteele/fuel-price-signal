@@ -283,26 +283,32 @@ does that job.
 Five candidates cannot calibrate anything on their own. The retrospective (`fps-3jj.8`)
 appends confidences and outcomes to a running record and reads calibration across
 batches, not within one. Don't expect — or claim — a confident calibration read from
-batch 2 alone.
+`batch1` alone.
 
 ## Batch sizing
 
-- **Batch 1 = 1** — `tgp_delta_7d` as a known graduate, to check the pipeline gives
-  the right answer before trusting it on anything new.
-- **Batch 2 = 5** — the first genuinely AI-sourced set. Small enough that a runner bug
-  costs 5 nights, not 10; re-freezes onto fresher data sooner.
-- **Batch 3+ = 10–15.**
+**Batches are numbered by their directory name**, and the directory name is the batch
+name — `batch0`, `batch1`, `batch2`. Nothing in the code constrains this
+(`parse_candidate_ref` takes free-form paths), so the only thing keeping it coherent is
+using one scheme everywhere. An earlier revision of this file numbered batches from 1
+while the directories numbered from 0; if you meet "batch 2 = the first AI-sourced set"
+in an old note or bead title, it means `batch1` here.
+
+- **`batch0` = 1 candidate** — `tgp_delta_7d` as a known graduate, to check the pipeline
+  gives the right answer before trusting it on anything new. **Done 2026-08-19.**
+- **`batch1` = 5 candidates** — the first genuinely AI-sourced set. Small enough that a
+  runner bug costs 5 nights, not 10; re-freezes onto fresher data sooner.
+- **`batch2`+ = 10–15.**
 
 **Ordering constraint — DISCHARGED 2026-08-21. It no longer gates this session.**
 
-This file used to require **batch 1 → finish the TGP re-lock (`fps-1785999729707-1` /
-gh#271) → batch 2**, so that batch 1's known-graduate check could not be run against a
+This file used to require **`batch0` → finish the TGP re-lock (`fps-1785999729707-1` /
+gh#271) → `batch1`**, so that the known-graduate check could not be run against a
 baseline already containing `tgp_delta_7d` (R0 and the candidate arm would be identical
-and batch 1 would test nothing). Both halves are now settled and the gate is void:
+and `batch0` would test nothing). Both halves are now settled and the gate is void:
 
-- **Batch 1 ran and reached a verdict** on 2026-08-19 (the `experiments/batches/batch0`
-  dir — note the off-by-one against this section's numbering). That verdict was the
-  actual gate, and it held.
+- **`batch0` ran and reached a verdict** on 2026-08-19. That verdict was the actual
+  gate, and it held.
 - **The TGP re-lock will never happen.** #271 is closed as superseded and no TGP feature
   is in the lock, so there is no proven-but-missing feature for the next batch to be
   unfairly judged against — which was the entire reason for the ordering. Successor is

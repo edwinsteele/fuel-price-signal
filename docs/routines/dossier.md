@@ -51,7 +51,7 @@ module filed against it). Before this fix, candidate 2+ in any batch would overw
 `results.json`/`rowpreds.parquet`/`fills.parquet` in place, and once this routine had written a
 `README.md` into that shared directory for candidate 1, the directory would be permanently
 excluded from the queue — candidate 2+ silently never dossiered. `find_pending_runs`'s
-`root.rglob(RESULTS_FILENAME)` already recurses into per-candidate subdirectories, so batch 2
+`root.rglob(RESULTS_FILENAME)` already recurses into per-candidate subdirectories, so `batch1`
 (5 candidates) is expected to dossier correctly.
 
 If `--scan` reports nothing to process, **exit quietly** — this mirrors the launch routine's "if

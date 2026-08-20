@@ -115,7 +115,7 @@ Commit `RETROSPECTIVE.md` + `retrospective_facts.json` together, straight to `ma
   candidate; `family_wise_percentile_threshold(1)` reduces to the plain 95th percentile.
   The mechanism is exercised end-to-end from batch 0, but the real payoff (a leaderboard
   that actually differentiates candidates, and the start of a real confidence-calibration
-  read) arrives with batch 2 (5 candidates) and beyond.
+  read) arrives with `batch1` (5 candidates) and beyond.
 
 ## The shim
 
