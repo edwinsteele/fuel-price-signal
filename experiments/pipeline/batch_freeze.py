@@ -262,7 +262,28 @@ def freeze_batch(
 
     batch_dir = pathlib.Path(batches_dir) / batch_name
     if batch_dir.exists():
-        raise FileExistsError(f"Batch dir already exists: {batch_dir}. Batches are frozen once.")
+        # Local import: dossier_tables -> runner -> batch_freeze already forms a cycle at
+        # module load time, so this can't be a top-level import (same reason as the
+        # compute_noise_floor import below). Deferred to call time, by which every
+        # module in that chain is already fully loaded.
+        from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
+
+        noise_floor_hint = ""
+        if not (batch_dir / NOISE_FLOOR_FILENAME).exists():
+            # fps-cf8: the noise floor is now the last freeze step, so a crash/interrupt
+            # partway through (it's a ~10-fit, 10-25min step) leaves everything else
+            # already pinned — re-running batch_freeze on this dir would otherwise look
+            # like the same "batch frozen twice by mistake" case this guard exists to
+            # catch. Point at the actual, safe recovery instead of just refusing.
+            noise_floor_hint = (
+                " It looks like everything but the noise floor is already pinned (no "
+                f"{NOISE_FLOOR_FILENAME} yet) — if setup was interrupted after freezing, "
+                "finish it with `PYTHONPATH=. uv run python -m experiments.pipeline."
+                f"noise_floor {batch_name}` (no --force needed, the file doesn't exist yet)."
+            )
+        raise FileExistsError(
+            f"Batch dir already exists: {batch_dir}. Batches are frozen once.{noise_floor_hint}"
+        )
     batch_dir.mkdir(parents=True)
 
     shutil.copy2(parquet_src, batch_dir / FROZEN_FEATURES_FILENAME)

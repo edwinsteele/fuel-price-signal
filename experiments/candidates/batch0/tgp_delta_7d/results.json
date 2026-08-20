@@ -340,6 +340,8 @@
     "extra_feature_provider_hits": 822,
     "extra_feature_provider_misses": 88,
     "git_sha": "0a69c971eb4d0bf6fc0318d9565d1039cb847e00",
-    "bead_id": null
+    "bead_id": null,
+    "n_baseline_columns": 54,
+    "baseline_fingerprint": "54:1a6ec2d84a69"
   }
 }

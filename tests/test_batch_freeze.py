@@ -187,6 +187,47 @@ def test_freeze_batch_writes_snapshot_and_manifest(tmp_path):
     assert manifest["n_baseline_columns"] == len(baseline_columns)
 
 
+def test_freeze_batch_refuses_with_a_recovery_hint_when_noise_floor_is_missing(tmp_path):
+    """fps-cf8: the noise floor is the final freeze step (~10-25min), so a crash/
+    interrupt partway through leaves everything else already pinned but no
+    noise_floor.json. Re-running batch_freeze on that dir must not just say 'frozen
+    once' as though this were an ordinary refreeze mistake — point at the actual
+    (safe, no --force) recovery."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batches_dir = tmp_path / "batches"
+    freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+    )
+
+    with pytest.raises(FileExistsError, match="noise_floor batch1"):
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+        )
+
+
+def test_freeze_batch_refuses_without_the_hint_when_noise_floor_already_exists(tmp_path):
+    """A batch that already has its noise_floor.json is a genuine full refreeze
+    attempt, not a crash-recovery case — no recovery hint to show."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batches_dir = tmp_path / "batches"
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+    )
+    (batch_dir / "noise_floor.json").write_text("{}")
+
+    with pytest.raises(FileExistsError) as exc_info:
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True,
+        )
+    assert "noise_floor batch1" not in str(exc_info.value)
+
+
 def test_freeze_batch_computes_the_noise_floor_as_its_final_step(tmp_path, monkeypatch):
     """fps-cf8: batch setup is one command — the noise floor is no longer a second
     step the operator must remember to run, in order, after freeze."""
