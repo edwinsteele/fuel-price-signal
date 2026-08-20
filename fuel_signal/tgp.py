@@ -2,10 +2,16 @@
 
 Source: aip.com.au "Historical ULP and Diesel TGP Data" — a single xlsx holding
 the full daily-weekday history (2004→present, c/L GST-inclusive, same units as
-our pump data). The download URL is date-stamped in both path and filename
-(``.../download-files/2026-06/AIP_TGP_Data_19-Jun-2026.xlsx``), so we scrape the
-landing page for the current ``AIP_TGP_Data_*.xlsx`` href, download it, and
+our pump data). The download filename is date-stamped
+(``.../wp-content/uploads/2026-08/AIP_TGP_Data_14-Aug-2026.xlsx``), so we scrape
+the landing page for the current ``AIP_TGP_Data_*.xlsx`` href, download it, and
 maintain a canonical single-column CSV of the Sydney series.
+
+The site moved from ``www.aip.com.au/historical-ulp-and-diesel-tgp-data`` to
+``aip.com.au/resources/historical-ulp-and-diesel-tgp-data/`` around 2026-08
+(fps-8qc); the landing page still links the same ``AIP_TGP_Data_*.xlsx``
+filename convention with an unchanged xlsx layout, just now with absolute
+hrefs on a new domain/path rather than relative ones.
 
 Storage rationale (#271): the source always serves the *full* history, so the
 daily action downloads it, parses the Sydney column, and **overwrites**
@@ -37,7 +43,7 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-LANDING_URL = "https://www.aip.com.au/historical-ulp-and-diesel-tgp-data"
+LANDING_URL = "https://aip.com.au/resources/historical-ulp-and-diesel-tgp-data/"
 
 # The weekly history file. Matches ``AIP_TGP_Data_19-Jun-2026.xlsx`` but NOT the
 # separate ``AIP_Annual_TGP_Data.xlsx`` summary file on the same page.
