@@ -6,8 +6,16 @@ on:
     # is committed first. The tgp_delta_7d feature is shift(1) — inference at day
     # T needs T-1's TGP (available since T-1 closed), not today's. 17:00 UTC is
     # ~3-4am Sydney: before 5am in both AEST (19:00 UTC) and AEDT (18:00 UTC),
-    # with buffer. TODO(#271): AIP's own publish time is unknown — confirm from
-    # the tgp.py data_lag_days logs that T-1 is reliably present by this slot.
+    # with buffer.
+    #
+    # The xlsx source (fuel_signal/tgp.py) is only refreshed WEEKLY — four
+    # consecutive fetches in Aug 2026 all landed on Fridays (24/31 Jul, 7/14 Aug),
+    # each adding exactly 5 weekday rows — so data_lag_days climbs from 0 right
+    # after a Friday refresh up to 6 by the following Thursday before resetting.
+    # The daily cron still makes sense (it picks up the new file the day it
+    # lands), but T-1 is NOT reliably present at this slot; the fresher
+    # api.aip.com.au/public/tgpTables endpoint (~1-2 day lag) is tracked in
+    # fps-3fn as a lower-latency source to backfill the gap.
     - cron: "0 17 * * *"
   workflow_dispatch:
 

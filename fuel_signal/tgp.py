@@ -13,6 +13,15 @@ The site moved from ``www.aip.com.au/historical-ulp-and-diesel-tgp-data`` to
 filename convention with an unchanged xlsx layout, just now with absolute
 hrefs on a new domain/path rather than relative ones.
 
+The xlsx itself is only refreshed **weekly**, not daily: four consecutive
+fetches confirmed the publish date jumping every Friday (24/31 Jul, 7/14 Aug
+2026), each adding exactly 5 new weekday rows. So despite the daily fetch
+cron, the latest available row lags "today" by 0-6 days depending on where in
+the week the job runs — see the cron comment in
+``.github/workflows/tgp-fetch.yml``. ``api.aip.com.au/public/tgpTables`` is a
+lower-latency (~1-2 day lag) HTML source AIP also serves, not yet ingested
+here; tracked as fps-3fn.
+
 Storage rationale (#271): the source always serves the *full* history, so the
 daily action downloads it, parses the Sydney column, and **overwrites**
 ``data/tgp/tgp_sydney.csv``. In the steady state git sees a one-line append (or
