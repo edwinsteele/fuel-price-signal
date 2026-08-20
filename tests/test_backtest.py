@@ -23,6 +23,7 @@ from fuel_signal.backtest import (
     _evaluation_dates,
     run_backtest,
     run_oracle_backtest,
+    validate_never_dry,
 )
 from fuel_signal.features import FEATURE_COLUMNS
 
@@ -214,6 +215,108 @@ def test_no_emergency_when_tank_above_floor():
         history, AlwaysWaitStrategy(), 21, "2020-01-01", "2020-01-14", tank
     )
     assert result.fill_events == 0
+
+
+def test_waiting_strategy_cannot_strand_tank_at_3d_cadence():
+    """Regression for fps-5mn: an always-wait strategy on the default tank at
+    3-day cadence used to run dry (fps-fii found 109 dry events / 389L under the
+    old floor-only emergency rule). With the fix, run_backtest must complete
+    without tripping the never-dry assertion, and every emergency fill must
+    actually cover the next interval (no fill of 0 litres leaving a level below
+    the next depletion)."""
+
+    class AlwaysWaitStrategy:
+        name = "always_wait"
+
+        def decide(self, *_):
+            return False
+
+    history = _constant_history(60, "2020-01-01", 400, 190.0)
+    tank = TankParams(evaluation_interval_days=3)
+    result = run_backtest(
+        history, AlwaysWaitStrategy(), 60, "2020-01-01", "2020-12-01", tank,
+        collect_fills=True,
+    )
+    # No exception raised above == the assertion never fired. Every fill on an
+    # always-wait strategy must be an emergency half-fill that actually bought
+    # litres (a 0-litre "emergency" would leave the tank exactly as stranded as
+    # before the fix).
+    assert result.fill_events > 0
+    assert all(f.emergency and f.litres > 0 for f in result.fills)
+
+
+# ---------------------------------------------------------------------------
+# validate_never_dry (fps-5mn)
+# ---------------------------------------------------------------------------
+
+def test_validate_never_dry_default_tank_safe_at_canonical_cadences():
+    """Default tank (50L, 50/14 L/day) is never-dry for every cadence 1-7 days —
+    the fix closes the gap that made 3-6d unsafe under the old floor-only rule."""
+    for cadence in range(1, 8):
+        tank = TankParams(evaluation_interval_days=cadence)
+        assert validate_never_dry(tank) == [], f"cadence {cadence}d should be safe"
+
+
+def test_validate_never_dry_default_tank_unsafe_beyond_7d():
+    """Beyond 7 days, one interval's depletion exceeds the emergency half-fill
+    target (0.5 * tank_size), so even the fixed emergency rule can't rescue it."""
+    for cadence in range(8, 15):
+        tank = TankParams(evaluation_interval_days=cadence)
+        assert validate_never_dry(tank) != [], f"cadence {cadence}d should be unsafe"
+
+
+def test_validate_never_dry_rejects_old_readme_example():
+    """README.md used to document --tank-size 60 --daily-use 4.5 --eval-interval 7.
+    D=31.5L, and the 50%-full starting level (30L) is already inside the gap: it
+    is above the floor (6L) yet cannot survive one interval, and the emergency
+    half-fill target (30L) equals the starting level so it buys nothing. This
+    stays a regression test for that exact known-bad config."""
+    bad_tank = TankParams(
+        tank_size_litres=60.0, daily_consumption_litres=4.5, evaluation_interval_days=7,
+    )
+    violations = validate_never_dry(bad_tank)
+    assert violations != []
+
+
+def test_validate_never_dry_catches_starting_level_not_just_wait_chain():
+    """A config broken at the very first decision (starting level == emergency
+    target, which buys 0 litres) must be caught even though no multi-step wait
+    chain is ever explored — this is what a lattice-only check that started from
+    an assumed-safe state, rather than the true 50%-full start, would miss."""
+    bad_tank = TankParams(
+        tank_size_litres=60.0, daily_consumption_litres=4.5, evaluation_interval_days=7,
+    )
+    violations = validate_never_dry(bad_tank)
+    start_level = 0.5 * bad_tank.tank_size_litres
+    assert any(abs(v.level - start_level) < 1e-6 for v in violations)
+
+
+def test_validate_never_dry_accepts_replacement_readme_config():
+    """The README's replacement example (--tank-size 60 --daily-use 4.0
+    --eval-interval 7) must actually pass the validator it's meant to satisfy."""
+    tank = TankParams(
+        tank_size_litres=60.0, daily_consumption_litres=4.0, evaluation_interval_days=7,
+    )
+    assert validate_never_dry(tank) == []
+
+
+def test_cli_rejects_unsafe_tank_config_before_touching_db():
+    """The old README example (--tank-size 60 --daily-use 4.5 --eval-interval 7)
+    must be rejected with a UsageError up front — before the DB-existence check —
+    so a bad tank config can't silently produce a wrong CPL. A nonexistent
+    --db path proves the rejection happens before any DB access is attempted."""
+    from click.testing import CliRunner
+
+    from fuel_signal.backtest import main
+
+    result = CliRunner().invoke(main, [
+        "--preferred", "--strategy", "rule_based",
+        "--start", "2023-01-01", "--end", "2023-01-31",
+        "--tank-size", "60", "--daily-use", "4.5", "--eval-interval", "7",
+        "--db", "/nonexistent/path/does-not-exist.db",
+    ])
+    assert result.exit_code != 0
+    assert "can run dry" in result.output
 
 
 # ---------------------------------------------------------------------------
