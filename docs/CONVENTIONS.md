@@ -129,12 +129,20 @@ realised-CPL row, since none of them predate the 7-day default. This was the
 precondition for `fps-929`: without it, a daily-cadence re-lock's own row would be
 indistinguishable from the 7-day rows it must be compared against.
 
-**And cadence is not free to sweep.** `run_backtest` clamps a dry tank to 0 and
-continues while `run_oracle_backtest` prunes run-dry paths, so a cadence whose
-reachable lattice puts a level in the open `(floor*size, D)` interval silently
-understates CPL. Default tank: 1, 2 and 7 days are safe; 3, 4, 5, 6 and 8-14 are
-not. Check the *starting* level (50% of tank) too, not only the wait-chain — the
-example at `README.md:756` fails there and nowhere else. See bd `fps-5mn`.
+**And cadence is not free to sweep.** `run_backtest`'s emergency rule forces a
+half-fill whenever a wait would leave `tank_level < depletion` (bd `fps-5mn`,
+fixed 2026-08-20 — it previously tested only `tank_level / size < floor_fraction`,
+which left a gap: a level above the floor could still fail to survive one
+interval, and the tank silently ran dry via a `max(0.0, ...)` clamp). A tank
+config can still be unsafe if the emergency half-fill target itself
+(`0.5 * size`) can't cover one interval's depletion — `fuel_signal.backtest
+.validate_never_dry(tank)` enumerates the reachable decide-point lattice
+(starting from the true 50%-full start, not just wait-chain levels — a config can
+be broken at the very first decision) and flags any config where that happens;
+the CLI runs it automatically and rejects an unsafe `--tank-size`/`--daily-use`/
+`--eval-interval` combination. Default tank: 1-7 days are safe; 8-14 are not
+(`D > 0.5 * tank_size`). Every row in `experiments/results.csv` runs at the
+canonical 7d, which is safe.
 
 ### New constants must not silently diverge from a canonical equivalent
 

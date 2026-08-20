@@ -753,10 +753,12 @@ uv run python -m fuel_signal.backtest --preferred --strategy all \
 # Custom tank size and consumption (default: 50L tank, 50L/14d)
 uv run python -m fuel_signal.backtest --preferred --strategy rule_based \
     --start 2023-01-01 --end 2024-12-31 \
-    --tank-size 60 --daily-use 4.5 --eval-interval 7
+    --tank-size 60 --daily-use 4.0 --eval-interval 7
 ```
 
 Output is a table per station showing cents-per-litre (CPL), savings vs always-buy, fill events, and total litres for each strategy. Available strategies: `always_buy` (baseline, always included), `rule_based` (four-signal heuristic), `model` (logistic regression at `--threshold`), `all` (all three side-by-side).
+
+`--tank-size`/`--daily-use`/`--eval-interval` are rejected with a `UsageError` if the combination could run the tank dry before the next evaluation — the CLI validates this up front with `validate_never_dry()` rather than silently producing a wrong CPL.
 
 ## AI-sourced feature pipeline (experiment batches)
 
