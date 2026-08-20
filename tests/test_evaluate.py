@@ -296,6 +296,18 @@ def test_log_experiment_fingerprints_the_feature_set_it_logged(tmp_path, monkeyp
     assert rows[2][idx].startswith(f"{len(LOCKED_FEATURE_COLUMNS)}:")
 
 
+def test_log_experiment_raises_on_realised_cpl_without_tank(tmp_path, monkeypatch):
+    """A realised CPL with no tank stamp is exactly the ambiguity fps-xx1 exists to
+    prevent — must fail loudly rather than write an unattributed row."""
+    results_path = tmp_path / "results.csv"
+    monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
+
+    with pytest.raises(ValueError, match="realised_spend_cpl was passed without tank"):
+        log_experiment(
+            "m", [], holdout_logloss=0.5, holdout_brier=0.2, realised_spend_cpl=190.0
+        )
+
+
 def test_log_experiment_tank_params_empty_when_no_tank_passed(tmp_path, monkeypatch):
     """No backtest ran, so tank_params must stay empty rather than assume the default —
     an empty stamp means "no backtest", not "ran at an unknown tank" (fps-xx1)."""

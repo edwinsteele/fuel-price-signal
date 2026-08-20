@@ -41,7 +41,7 @@ def _constant_history(codes: list[int], start: str, n: int, price: float) -> Pri
 
 
 _RESULTS_HEADER = [
-    "timestamp", "git_sha", "name", "features",
+    "timestamp", "git_sha", "name", "features", "tank_params",
     "train_start", "train_end", "val_start", "val_end", "test_start", "test_end",
     "holdout_logloss", "holdout_brier",
     "realised_spend_cpl", "realised_savings_vs_always_buy_pct", "notes",
@@ -66,6 +66,7 @@ def _base_row(name: str, notes: str) -> dict:
         "git_sha": "abc1234",
         "name": name,
         "features": "",
+        "tank_params": "",
         "train_start": "2016-08-01",
         "train_end": "2025-03-17",
         "val_start": "2025-03-25",
@@ -183,7 +184,7 @@ def test_patch_results_csv_patches_both_rows(tmp_path):
     ]
     _write_results_csv(csv_path, rows)
 
-    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71)
+    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71, TankParams())
 
     assert patched_b
     assert patched_p
@@ -192,8 +193,28 @@ def test_patch_results_csv_patches_both_rows(tmp_path):
     assert result[0]["realised_savings_vs_always_buy_pct"] == "0.00"
     assert result[1]["realised_spend_cpl"] == "172.00"
     assert result[1]["realised_savings_vs_always_buy_pct"] == "1.71"
+    assert result[0]["tank_params"] == "50/3.571/7d/10%"
+    assert result[1]["tank_params"] == "50/3.571/7d/10%"
     # tau=0.35 row should not be patched
     assert result[2]["realised_spend_cpl"] == ""
+    assert result[2]["tank_params"] == ""
+
+
+def test_patch_results_csv_stamps_the_tank_it_ran_with(tmp_path):
+    """A second writer of realised_spend_cpl must stay under the same
+    stamp-can't-disagree-with-what-ran invariant as log_experiment (fps-xx1):
+    if the tank the sweep ran with isn't the 7-day default, the patched row
+    must say so, not silently keep whatever stamp (or lack of one) it had."""
+    csv_path = tmp_path / "results.csv"
+    _write_results_csv(
+        csv_path,
+        [_base_row("marginal_rate_baseline", "constant predictor")],
+    )
+    patch_results_csv(
+        csv_path, 175.0, 172.0, 1.71, TankParams(evaluation_interval_days=1)
+    )
+    result = _read_results_csv(csv_path)
+    assert result[0]["tank_params"] == "50/3.571/1d/10%"
 
 
 def test_patch_results_csv_missing_baseline(tmp_path):
@@ -202,7 +223,7 @@ def test_patch_results_csv_missing_baseline(tmp_path):
         csv_path,
         [_base_row("logreg_cycle_features", "tau=0.40; criterion=max_expected")],
     )
-    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71)
+    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71, TankParams())
     assert not patched_b
     assert patched_p
 
@@ -213,7 +234,7 @@ def test_patch_results_csv_missing_phase2(tmp_path):
         csv_path,
         [_base_row("marginal_rate_baseline", "constant predictor")],
     )
-    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71)
+    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71, TankParams())
     assert patched_b
     assert not patched_p
 
@@ -226,7 +247,7 @@ def test_patch_results_csv_does_not_match_tau_035(tmp_path):
         _base_row("logreg_cycle_features", "tau=0.35; criterion=max_expected"),
     ]
     _write_results_csv(csv_path, rows)
-    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71)
+    patched_b, patched_p = patch_results_csv(csv_path, 175.0, 172.0, 1.71, TankParams())
     assert patched_b
     assert not patched_p  # tau=0.35 is not the Phase 2 row
 
@@ -237,7 +258,7 @@ def test_patch_results_csv_preserves_other_fields(tmp_path):
         csv_path,
         [_base_row("marginal_rate_baseline", "constant predictor")],
     )
-    patch_results_csv(csv_path, 175.0, 172.0, 1.71)
+    patch_results_csv(csv_path, 175.0, 172.0, 1.71, TankParams())
     result = _read_results_csv(csv_path)
     assert result[0]["holdout_logloss"] == "0.400000"
     assert result[0]["notes"] == "constant predictor"
@@ -251,7 +272,7 @@ def test_patch_results_csv_atomic(tmp_path):
         csv_path,
         [_base_row("marginal_rate_baseline", "constant predictor")],
     )
-    patch_results_csv(csv_path, 175.0, 172.0, 1.71)
+    patch_results_csv(csv_path, 175.0, 172.0, 1.71, TankParams())
     remaining = list(tmp_path.iterdir())
     assert len(remaining) == 1
     assert remaining[0] == csv_path
@@ -265,7 +286,7 @@ def test_patch_results_csv_only_patches_first_matching_row(tmp_path):
         _base_row("marginal_rate_baseline", "constant predictor v2"),
     ]
     _write_results_csv(csv_path, rows)
-    patch_results_csv(csv_path, 175.0, 172.0, 1.71)
+    patch_results_csv(csv_path, 175.0, 172.0, 1.71, TankParams())
     result = _read_results_csv(csv_path)
     assert result[0]["realised_spend_cpl"] == "175.00"
     assert result[1]["realised_spend_cpl"] == ""  # second match left alone

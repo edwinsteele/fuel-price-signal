@@ -27,6 +27,7 @@ from fuel_signal.backtest import (
     ModelStrategy,
     PriceHistory,
     TankParams,
+    format_tank_params,
     load_history,
     run_backtest,
 )
@@ -116,6 +117,7 @@ def patch_results_csv(
     always_buy_cpl: float,
     phase2_cpl: float,
     phase2_savings_pct: float,
+    tank: TankParams,
 ) -> tuple[bool, bool]:
     """Patch realised-spend columns for the baseline and Phase 2 rows.
 
@@ -123,12 +125,21 @@ def patch_results_csv(
     - baseline:  name == 'marginal_rate_baseline' (first occurrence)
     - Phase 2:   name == 'logreg_cycle_features' AND 'tau=0.40;' in notes (first match)
 
+    `tank` is the TankParams the sweep actually ran with — stamped into
+    tank_params on every patched row alongside the CPL/savings it produced, so
+    this second writer of the realised-spend columns stays under the same
+    stamp-can't-disagree-with-what-ran invariant log_experiment enforces
+    (fps-xx1). Without this, a future cadence re-lock (fps-929) that changes
+    TankParams' default would silently overwrite these rows' CPLs at the new
+    cadence while their stamp still read the old one.
+
     Write is atomic: written to a temp file, then renamed over csv_path.
     Returns (patched_baseline, patched_phase2).
     """
     rows = []
     patched_baseline = False
     patched_phase2 = False
+    tank_stamp = format_tank_params(tank)
 
     with csv_path.open("r", newline="") as fh:
         reader = csv.DictReader(fh)
@@ -137,6 +148,7 @@ def patch_results_csv(
             if row["name"] == "marginal_rate_baseline" and not patched_baseline:
                 row["realised_spend_cpl"] = f"{always_buy_cpl:.2f}"
                 row["realised_savings_vs_always_buy_pct"] = "0.00"
+                row["tank_params"] = tank_stamp
                 patched_baseline = True
             elif (
                 row["name"] == "logreg_cycle_features"
@@ -145,6 +157,7 @@ def patch_results_csv(
             ):
                 row["realised_spend_cpl"] = f"{phase2_cpl:.2f}"
                 row["realised_savings_vs_always_buy_pct"] = f"{phase2_savings_pct:.2f}"
+                row["tank_params"] = tank_stamp
                 patched_phase2 = True
             rows.append(row)
 
@@ -308,7 +321,7 @@ def main(model_path: pathlib.Path, db_path: str, no_patch: bool) -> None:
         return
 
     patched_baseline, patched_phase2 = patch_results_csv(
-        _RESULTS_CSV, always_buy_cpl, phase2_cpl, phase2_savings_pct
+        _RESULTS_CSV, always_buy_cpl, phase2_cpl, phase2_savings_pct, tank
     )
     if patched_baseline and patched_phase2:
         click.echo("\nPatched experiments/results.csv:")

@@ -294,6 +294,12 @@ def log_experiment(
     fps-fii measured realised CPL moving 189.67/187.85/187.82 c/L across 7/2/1-day
     cadence on an otherwise identical run).
     """
+    if realised_spend_cpl is not None and tank is None:
+        raise ValueError(
+            "realised_spend_cpl was passed without tank — a row with a realised CPL "
+            "and no tank_params stamp is exactly the ambiguity fps-xx1 exists to "
+            "prevent. Pass the TankParams the backtest ran with."
+        )
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
     if not write_header:
