@@ -18,6 +18,7 @@ import pandas as pd
 import pytest
 
 import experiments.pipeline.runner as runner_module
+from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT
 from experiments.lib.realised import BaselineCache, BaselineCacheMismatch
 from experiments.pipeline import batch_freeze
 from experiments.pipeline.batch_freeze import resolve_baseline_columns
@@ -584,6 +585,8 @@ def test_resolve_zone_by_folds_resolves_true_when_target_cell_is_cheaper():
     target = {"folds": [4], "axis": None, "expect_concentration_in": []}
     result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
     assert result["resolved"] is True
+    # A fold cut is a sum of complete independent simulations — identified, no caveat.
+    assert "identification_caveat" not in result
 
 
 def test_resolve_zone_by_folds_resolves_false_when_target_cell_is_not_cheaper():
@@ -599,6 +602,8 @@ def test_resolve_zone_regime_axis_uses_shock_folds():
     target = {"axis": "regime", "expect_concentration_in": ["shock"]}
     result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
     assert result["resolved"] is True
+    # SHOCK_FOLDS groups WHOLE folds, so this is identified too.
+    assert "identification_caveat" not in result
 
 
 def test_resolve_zone_inconclusive_below_min_row_cell_n():
@@ -619,6 +624,28 @@ def test_resolve_zone_custom_axis_via_lookup():
     target = {"axis": "weekday", "expect_concentration_in": ["weekday_X"]}
     result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=axis_lookup, min_row_cell_n=30)
     assert result["resolved"] is True
+    # fps-grp: a row-level axis slices THROUGH a window, so the graded delta allocates a
+    # path-coupled cost to a sub-period. It still grades, but must say it is unidentified.
+    assert result["identification_caveat"] == ROW_AXIS_ECONOMICS_CAVEAT
+
+
+def test_resolve_zone_flags_a_row_level_axis_even_when_folds_also_match():
+    """A mixed TARGET (folds OR axis) is unidentified as soon as the axis contributes.
+
+    The runner ORs the two masks together, so a row-level label can pull extra fills
+    into the target cell even when the fold list alone would have graded cleanly —
+    which means the caveat has to key off the axis being *used*, not off the fold list
+    being empty.
+    """
+    fills = _fills(35, 35, cheaper_in_target=True)
+    axis_lookup = pd.DataFrame([
+        {"station_code": 1, "date": "2026-01-01", "axis": "weekday_X"},
+        {"station_code": 1, "date": "2026-02-01", "axis": "weekday_Y"},
+    ])
+    target = {"folds": [4], "axis": "weekday", "expect_concentration_in": ["weekday_X"]}
+    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=axis_lookup, min_row_cell_n=30)
+    assert result["resolved"] is True
+    assert result["identification_caveat"] == ROW_AXIS_ECONOMICS_CAVEAT
 
 
 def test_resolve_zone_custom_axis_without_add_axis_is_inconclusive():

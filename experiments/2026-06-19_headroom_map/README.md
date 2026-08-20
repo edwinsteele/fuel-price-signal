@@ -3,7 +3,57 @@
 - **Date:** 2026-06-19
 - **Branch:** main (oracle code landed via PR #263, merged)
 - **SHA:** de3934a (oracle); run on the same tree
-- **Status:** open — ran 2026-06-19; cycle/regime thread rests, external-data (#215) is the surviving lead
+- **Status:** done (per-zone withdrawn) — **every PER-ZONE row below is withdrawn**; the window-level number stands, with a cadence caveat
+
+> ## ⚠️ WITHDRAWN 2026-08-20 — per-zone headroom is NOT IDENTIFIED
+>
+> Withdrawn by `experiments/2026-08-20_headroom_attribution/` (bd
+> `fps-1785999730023-4-264564ac`); re-confirmed and cross-referenced by
+> `experiments/2026-08-21_path_coupling_audit/` (bd `fps-grp`). Rule recorded in
+> `docs/CONVENTIONS.md` § *Bucketed results — check the convention spread before believing
+> an ordering*. **Read this banner before any number below it.**
+>
+> **Withdrawn — every per-zone row:**
+> - **"Regime axis — FLAT"** (`late_descent 1.00 / normal 1.50 / overdue 1.33`) — this is
+>   the row that rested the late-descent thread. It is gone, so that closure argument is
+>   gone with it, independently of whether the conclusion was right.
+> - **The volatility HUMP** (`<8c −0.07 / 8–12c 2.67 / 12–16c 7.09 / ≥16c −0.53`) — both
+>   the 7.09 magnitude *and* the claim that 12–16c is the peak. Under `average/fifo` ×
+>   `start/mid/end`, `≥16c` alone spans −0.11 to 5.02.
+> - **The monthly episode clustering** (2022-05 13.2, 2023-08+09 5.2/5.8, 2024-03 4.8) and
+>   the **±3 c/L monthly noise floor**.
+> - **The ±0.5 c/L per-band noise floor** — it was derived *from* the negative cells, which
+>   are an artifact of the allocation, not a measurement of noise.
+>
+> **Why.** `model_cpl − oracle_cpl` is a tank-path total. Allocating it to a sub-period has
+> no unique answer: the oracle buys cheaply just *before* an expensive stretch and coasts
+> through it, so which period gets the credit is a free choice. Two conventions with no
+> physical content — cost basis (`fifo`/`average`) and interval label (`start`/`mid`/`end`)
+> — move each zone 2.53–2.95 c/L on the regime axis and up to 5.13 on volatility, while the
+> zones differ by only 0.90–3.36 and 1.78–4.49. The "worst zone" changes three times across
+> six estimators; no contrast separates on either axis (best: `late_descent > normal`,
+> p=0.90, CI [−0.77, +3.49]). The impossible negatives are not robustly fixed either — they
+> vanish at `start` labelling and return at `average/end` and `average/mid`. **Not a
+> variance problem:** convention spread is a bias/identification term, so more stations,
+> folds or seeds shrink the error bars and do nothing to it.
+>
+> **What still stands:**
+> - **Window-level headroom** — `model 189.79 − oracle 188.14 = 1.66 c/L`, and "the model
+>   has closed ~⅔ of the always-buy→oracle distance". No allocation is performed at window
+>   level and `oracle <= model` holds by construction. **But it is not a constant:**
+>   `experiments/2026-08-20_cadence_ceiling/` (bd `fps-fii`) showed it is conditional on
+>   the 7-day `TankParams.evaluation_interval_days` default — **1.54 c/L at 7-day cadence
+>   (189.67 on the current features.csv vintage, so 189.79 does not reproduce), 2.97 c/L at
+>   daily**. Quote it with its cadence attached.
+> - **The leaky-ceiling / necessary-not-sufficient caveat** — unaffected, and still governs
+>   any next move.
+>
+> **Also affected:** the conclusion "the surviving lead is external wholesale/crude, not a
+> cycle-phase feature" drew partly on the now-withdrawn flat regime axis. Its other support
+> (#214/#231, log-loss based) is unaffected, so the conclusion is weakened, not withdrawn.
+>
+> Reopened as bd `fps-x0f`; `docs/routines/generator.md` no longer quotes the per-zone rows
+> as standing guidance.
 
 ## Hypothesis
 

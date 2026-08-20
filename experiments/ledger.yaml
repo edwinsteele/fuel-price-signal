@@ -39,6 +39,90 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: per-zone economics cut on a ROW LABEL rather than on folds (per_axis
+    delta_cpl_own, CONFIDENCE_ZONE graded on a candidate's own add_axis)
+  inputs: [realised fill ledgers, any per-row grouping label a candidate declares]
+  claim: >-
+    A candidate can declare an arbitrary per-row axis (add_axis: day-of-week, TGP
+    direction, competition density, cycle amplitude, brand class...) and the
+    pipeline will grade "the effect concentrates where TARGET says" by pooling
+    realised CPL within each axis label.
+  falsified: >-
+    Not for a COST axis. Pooled CPL is a tank-path total, so cutting it on a
+    row-level label allocates a path-coupled cost to a sub-period, which has no
+    unique answer -- the same defect that withdrew every per-zone row of #262.
+    The fold-based cuts the pipeline uses by default (per_fold, and per_regime =
+    SHOCK_FOLDS, a grouping of WHOLE folds) are safe for the opposite reason,
+    and the reason is mechanical rather than a judgement call: realised.py calls
+    aggregate_backtest once per fold and aggregate_backtest calls run_backtest
+    once per station with a fresh tank, so each (fold, station) is an independent
+    simulation and a fold-cut number is a sum of complete windows. A row label is
+    a slice through one. Not yet triggered in any published dossier -- batch0
+    declared no add_axis, so per_axis is null in the only facts.json on disk --
+    but it is wired in, and CONFIDENCE_ZONE resolves a SCORED PRIOR off it, so an
+    unidentified number would propagate into the cross-batch calibration record.
+  not_tested: >-
+    Whether a per-row axis can carry a NON-cost claim safely. It can, and this is
+    the constructive route: quantities natively stamped at a moment (per-row
+    log-loss, per-decision accuracy, "did the model pick a worse week than the
+    oracle?", buy/wait agreement rates) are unaffected by path coupling and may
+    be cut on any label. A candidate that wants a row-label zone claim should
+    make it on one of those, or express the zone as a set of folds. Whether the
+    min_row_cell_n guard should be raised for axis cells specifically -- it
+    guards thin cells, not unidentified ones, and does nothing here.
+  outcome: disqualified
+  evidence: experiments/2026-08-21_path_coupling_audit/
+
+- candidate: realised saving% by cycle regime (purchase-event attribution against a
+    regime-matched always-buy denominator)
+  inputs: [model/always-buy realised fill ledgers, cycle_pct_through]
+  claim: >-
+    Realised buyer economics is materially worse in the late-descent / elongated
+    zone than in normal rows (#259 gate 1), measurable as saving% vs a
+    regime-matched always-buy baseline with every fill tagged by the cycle regime
+    at its fill date.
+  falsified: >-
+    The QUANTITY, in both directions -- the Layer-2 gradient (normal 0.64% /
+    late_descent 2.13% / overdue 4.06%) AND the Layer-3 chosen-only reading that
+    overturned it (11.45% / 6.45% / 11.03%, flat CPL 174.5 / 176.4 / 174.9).
+    Realised CPL is a tank-path total, so tagging a fill by the regime at its own
+    date allocates a path-coupled cost to a sub-period -- no unique answer, the
+    same defect that withdrew #262's per-zone rows. Demonstrated on the committed
+    numbers alone, no re-run: emergency-fill inclusion is a free bookkeeping
+    convention (Layer 2 includes forced fills, Layer 3 excludes them; both
+    defensible, nothing physical decides it) and is the path-coupling carrier in
+    its purest form, since an emergency fill stamped in `normal` settles a wait
+    chosen in another regime. Spread ACROSS that one convention is 21.30 / 8.15 /
+    13.69 c/L per bucket against a spread BETWEEN buckets of 6.73 (all fills) and
+    10.40 (chosen only) -- larger on every bucket -- and the ordering REVERSES,
+    best-to-worst going overdue,late_descent,normal to normal,overdue,late_descent.
+    Worse coupled than #262's: the arms' denominators are wholly unpaired (always-buy
+    fills every evaluation date, so its per-regime litres bear no relation to the
+    model's; the attribution experiment measured ~30% fill-count differences under
+    purchase-event attribution vs 0.0-1.7% litre differences under consumption-interval),
+    and realised_by_regime.csv stores no always_litres, so the pairing is not even
+    checkable from the committed record. Measured against always-buy rather than an
+    oracle, it produces no impossible negatives -- the defect is SILENT, and absence
+    of negatives was never evidence of safety. STANDS: the Layer-1 proxy regret
+    (1.05 / 1.72 / 1.32), a per-row TP/FP/FN classification score with no tank and
+    no path; the Layer-3 DIAGNOSIS that emergency dilution plus a regime-varying
+    always-buy denominator drove the gradient (strengthened, not withdrawn); the
+    overdue drop censor; and "always-buy is the wrong yardstick".
+  not_tested: >-
+    Whether the regime axis carries realised economics at all -- it has never been
+    measured with an identified instrument, in EITHER direction, so this is an open
+    question rather than a closed one. Note what this does to fps-x0f: of its three
+    mutually-inconsistent late-descent findings, the two that DISAGREED WITH EACH
+    OTHER are now both withdrawn (this entry, and #262's per-regime headroom), leaving
+    one un-contradicted proxy reading which says late descent is the WORST zone --
+    cut, however, on the known-defective expanding-mean cycle_mean_length axis. Also
+    still untested: whether a measure that never allocates cost to a period (decision
+    timing vs the oracle, week-choice agreement) can carry the regime comparison
+    instead; that is the fps-x0f step-2 redirect and it is unchanged.
+  outcome: disqualified
+  evidence: experiments/2026-06-18_late_descent_gate1/ (withdrawn by
+    experiments/2026-08-21_path_coupling_audit/)
+
 - candidate: evaluation cadence (TankParams.evaluation_interval_days) as a free parameter
   inputs: [station daily prices, model/oracle realised fill ledgers]
   claim: >-
@@ -144,8 +228,15 @@
     Whether the window-level 1.66 c/L ceiling itself moves under a finer
     evaluation cadence (the 7-day interval is a TankParams default, not a fact
     about the world; the oracle is fit-free so this is cheap to resize).
-    Whether any OTHER path-coupled quantity in the repo is sliced by period the
-    same way.
+    RESOLVED 2026-08-21 by experiments/2026-08-21_path_coupling_audit/ (bd
+    fps-grp) (was: whether any OTHER path-coupled quantity in the repo is sliced
+    by period the same way) -- 6 at-risk, 10 safe. The 2026-06-18 gate1
+    per-regime realised saving% is the same defect and is now withdrawn (entry
+    below); results.csv, evaluate.py, score_phase2.py and every per-fold /
+    per-fold-group economics figure are safe, because a fold is an independent
+    simulation with its own tank rather than a slice through one. Live
+    prospective risk is in the AI-feature pipeline (per_axis deltas +
+    CONFIDENCE_ZONE on a candidate add_axis row label) -- see the entry below.
   outcome: rejected
   evidence: experiments/2026-08-20_headroom_attribution/
 

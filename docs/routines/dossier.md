@@ -85,9 +85,17 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      delta and its `effect_resolved` verdict, the WFCV log-loss delta labelled as descriptive
      colour, the per-fold / per-regime / per-axis breakdown tables (mark suppressed cells plainly —
      "n=18, below the min-cell-n guard, not a finding"; if `per_axis` is present, also carry
-     `breakdowns["per_axis_coverage_note"]` verbatim — the axis lookup is built from
+     BOTH `breakdowns["per_axis_identification_note"]` and `breakdowns["per_axis_coverage_note"]`
+     verbatim — the first says the per-axis **CPL** cells are a path-coupled cost allocated to a
+     sub-period and so are **not identified** (report them as colour, never as a finding; the
+     `per_fold` and `per_regime` cells beside them are fine, because a fold is an independent
+     simulation rather than a slice through one — see `experiments/2026-08-21_path_coupling_audit/`
+     and `docs/CONVENTIONS.md` § *Bucketed results*), the second says the axis lookup is built from
      `rowpreds.parquet`'s WFCV-validation-window rows, not the full frame, so it can under-cover
-     relative to `headline.zone` and the note says by how much), the `seed_flags` list (if empty,
+     relative to `headline.zone` and by how much. Never let a per-axis delta reach the Judgement
+     section as evidence — if a candidate's whole claim rests on one, say plainly that the claim is
+     untestable as posed and that the zone should be re-expressed as a set of folds), the
+     `seed_flags` list (if empty,
      say so — "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating),
      validation (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
      (`facts["noise_band"]`) — if `available: false`, say plainly "noise-floor band: not

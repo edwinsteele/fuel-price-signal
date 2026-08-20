@@ -2,7 +2,54 @@
 
 - **Date:** 2026-06-18
 - **Branch:** main (proxy pre-read); realised gate rides a `fuel_signal/backtest.py` PR
-- **Status:** open — **Gate-1 pre-read FIRED** (directional); realised gate in progress
+- **Status:** done — **every per-regime REALISED figure withdrawn 2026-08-21** (see banner); the Layer-1 proxy pre-read stands
+
+> ## ⚠️ WITHDRAWN 2026-08-21 — the per-regime realised economics are NOT IDENTIFIED
+>
+> Withdrawn by `experiments/2026-08-21_path_coupling_audit/` (bd `fps-grp`), applying the
+> rule established in `experiments/2026-08-20_headroom_attribution/` (bd
+> `fps-1785999730023-4-264564ac`) and recorded in `docs/CONVENTIONS.md` § *Bucketed results*.
+>
+> **Withdrawn — Layer 2 AND Layer 3, both directions:**
+> - the saving% gradient `normal 0.64% / late_descent 2.13% / overdue 4.06%`;
+> - the chosen-only saving% `11.45% / 6.45% / 11.03%`;
+> - the flat chosen-only CPL `174.5 / 176.4 / 174.9` and the claim it carried,
+>   "the model pays ~175 c/L wherever it chooses to buy, in every regime".
+>
+> **Why.** Realised CPL is a tank-path total: a buy now changes what is possible later,
+> so allocating it to a sub-period has no unique answer. Every figure above tags a fill
+> by the regime at *its own date* — purchase-event attribution, the exact estimator #262
+> used and which the attribution experiment showed moves further under free bookkeeping
+> conventions than the buckets differ from each other. Measured against always-buy rather
+> than an oracle, this cannot produce impossible negatives, so the defect is **silent** —
+> absence of negatives was never evidence of safety.
+>
+> **The demonstration is already in this file.** Emergency-fill inclusion is one such free
+> convention (Layer 2 includes forced fills, Layer 3 excludes them; both defensible,
+> nothing physical decides it) — and it is the path-coupling carrier in its purest form,
+> since an emergency fill stamped in `normal` settles a wait chosen in another regime.
+> In c/L, spread ACROSS the two conventions is `normal 21.30 / late_descent 8.15 /
+> overdue 13.69`, against a spread BETWEEN buckets of `6.73` (all fills) and `10.40`
+> (chosen only). The convention spread is larger on every bucket, and the ordering
+> **reverses**: best→worst goes `overdue, late_descent, normal` → `normal, overdue,
+> late_descent`. This is a bias term — more folds, stations or seeds cannot fix it.
+>
+> **What still stands:**
+> - **Layer 1 (proxy regret `1.05 / 1.72 / 1.32`)** — safe. `expected_cents_per_row` is a
+>   per-row TP/FP/FN classification score: no tank, no ledger, no path. Its own separate
+>   caveats (proxy-not-arbiter; τ re-picked inside each bucket; the `cycle_mean_length`
+>   axis defect) are unchanged, and are `fps-x0f`'s business.
+> - **The Layer-3 diagnosis** — the Layer-2 gradient really is driven by emergency
+>   dilution plus a regime-varying always-buy denominator, not model skill. Strengthened,
+>   not withdrawn. It is the positive claim built on top of it that goes.
+> - **Check 2** (the overdue drop censor, `cleanup_drop_mix.csv`) — row counts, not costs.
+> - **"Always-buy is the wrong yardstick"** — the structural argument that motivated #262.
+>
+> **Net position:** the realised regime axis has never been measured with an identified
+> instrument, in either direction. Layer 3 is not the corrected version of Layer 2 — it is
+> a second draw from the same unidentified quantity, which is why they disagree.
+> `realised_by_regime.csv` records `model_litres` but no `always_litres`, so the
+> denominator's pairing is not even checkable from the committed record.
 
 ## Question
 

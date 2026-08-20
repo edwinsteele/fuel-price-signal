@@ -74,7 +74,12 @@ Two CONFIDENCE fields (fps-3jj.4 DECIDED 2026-08-17):
     fill counts as "in target" if it matches EITHER a named fold OR the axis —
     the parent design's "conflation is harmless" call. Cells below
     min_row_cell_n are excluded, never reported as findings (fps-3jj slicing-
-    axes decision).
+    axes decision). A grade that used a row-level add_axis label carries an
+    "identification_caveat" key (fps-grp): pooled CPL is a path-coupled total,
+    so cutting it on a per-row label allocates that total to a sub-period and
+    has no unique answer, while a fold or SHOCK_FOLDS-regime cut is a sum of
+    complete independent simulations and is fine. The key's PRESENCE is the
+    signal — it is absent, not None, for an identified grade.
 """
 from __future__ import annotations
 
@@ -92,7 +97,7 @@ import pandas as pd
 
 from experiments.lib.aggregate import aggregate_with_deltas
 from experiments.lib.cohorts import hard_quantile_mask
-from experiments.lib.constants import SEEDS, SHOCK_FOLDS
+from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SEEDS, SHOCK_FOLDS
 from experiments.lib.fit import fit_score, per_row_log_loss
 from experiments.lib.folds import iter_folds_with_baseline_fit
 from experiments.lib.gates import seed_variance_gate
@@ -892,6 +897,13 @@ def _resolve_zone(
         return {"resolved": None, "reason": "TARGET declared neither folds nor axis/expect_concentration_in"}
 
     in_target = pd.Series(False, index=fills.index)
+    # A fold cut is a sum of COMPLETE independent simulations (realised.py runs
+    # aggregate_backtest once per fold; aggregate_backtest runs run_backtest once per
+    # station with a fresh tank), so grading on it allocates nothing. A per-row add_axis
+    # label slices THROUGH a window, so grading on it allocates a path-coupled cost to a
+    # sub-period — which has no unique answer (fps-grp). Both still grade, but the caller
+    # must be told which kind of quantity it got.
+    row_level_axis = False
     if folds_wanted:
         in_target |= fills["fold"].isin(folds_wanted)
     if axis_name and expect:
@@ -903,6 +915,7 @@ def _resolve_zone(
         else:
             tagged = fills.merge(axis_lookup, on=["station_code", "date"], how="left", validate="many_to_one")
             in_target |= tagged["axis"].isin(expect).to_numpy()
+            row_level_axis = True
 
     if not in_target.any() or in_target.all():
         return {"resolved": None, "reason": "TARGET's named cells matched none or all of the fills"}
@@ -929,6 +942,10 @@ def _resolve_zone(
         "other_delta_cpl_own": other_delta,
         "n_target_candidate_fills": n_target_cand,
         "n_other_candidate_fills": n_other_cand,
+        # Only present when a row-level add_axis label contributed to the cut. Absent (not
+        # False/None) for a pure fold or SHOCK_FOLDS-regime grade, so the retrospective can
+        # tell an identified zone grade from an unidentified one by key presence alone.
+        **({"identification_caveat": ROW_AXIS_ECONOMICS_CAVEAT} if row_level_axis else {}),
     }
 
 

@@ -61,7 +61,7 @@ import matplotlib.pyplot as plt  # noqa: E402 — backend must be set before thi
 import numpy as np
 import pandas as pd
 
-from experiments.lib.constants import SHOCK_FOLDS
+from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
 from experiments.pipeline.runner import (
@@ -421,7 +421,14 @@ def _breakdowns(
 
     return {
         "per_fold": per_fold, "per_regime": per_regime, "per_axis": per_axis,
-        "per_axis_coverage_note": per_axis_coverage_note, "min_row_cell_n": min_row_cell_n,
+        "per_axis_coverage_note": per_axis_coverage_note,
+        # per_fold and per_regime cut on WHOLE folds, each of which is an independent
+        # simulation with its own tank, so they are sums of complete windows. per_axis cuts
+        # on a per-row label, which slices through a window and allocates a path-coupled
+        # cost — not identified (fps-grp). The caveat ships WITH the number so the dossier
+        # reader cannot meet the delta without it; None when no axis was declared.
+        "per_axis_identification_note": ROW_AXIS_ECONOMICS_CAVEAT if per_axis else None,
+        "min_row_cell_n": min_row_cell_n,
     }
 
 

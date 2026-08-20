@@ -62,22 +62,43 @@ Read all of the following before proposing anything:
    - **Redundancy against a combination** of existing columns — also mechanical
      and free.
 3. **`docs/STATUS.md`** — current model state, what's shipped, what's pending.
-4. **The #262 headroom map** (`experiments/INDEX.md`, `2026-06-19_headroom_map`
-   row) — where recoverable value (`model_cpl − oracle_cpl`) actually concentrates.
-   Verbatim findings the generator must internalise:
-   - **Regime axis is FLAT**: headroom by cycle regime is `late_descent 1.00 /
-     normal 1.50 / overdue 1.33` c/L. Cycle-phase framing is not where the next win
-     lives — don't propose another cycle-phase variant expecting it to move this.
-   - **Volatility is a HUMP, not a ramp**: headroom by `network_px_std` band is
-     `<8c −0.07 / 8–12c 2.67 / 12–16c 7.09 / ≥16c −0.53`. The 12–16c band is the one
-     concentration of real headroom found so far. A candidate whose mechanism
-     predicts it helps specifically in that band has a sharper, falsifiable claim
-     than one that predicts a uniform improvement.
+4. **Headroom — where recoverable value (`model_cpl − oracle_cpl`) lives.**
+   **The #262 per-zone map no longer answers this. Every per-zone row of it was
+   withdrawn** on 2026-08-20 (`experiments/2026-08-20_headroom_attribution/`, bd
+   `fps-1785999730023-4-264564ac`; re-confirmed by
+   `experiments/2026-08-21_path_coupling_audit/`, bd `fps-grp`). If you have seen
+   `regime axis is FLAT`, `late_descent 1.00 / normal 1.50 / overdue 1.33`, or
+   `12–16c 7.09` quoted as guidance — including in an older copy of this file —
+   **those numbers are withdrawn and must not steer a candidate.** What is left:
+   - **Window-level headroom stands, with its cadence attached.** The model is
+     ~⅔ of the way from always-buy to the perfect-foresight floor: **1.54 c/L on
+     the production 7-day decision grid, 2.97 c/L on a daily one**
+     (`experiments/2026-08-20_cadence_ceiling/`, bd `fps-fii`). It is not a
+     constant, so never quote a headroom number without its cadence.
+   - **There is no known zone of concentration.** Not "the concentration is
+     elsewhere" — the per-zone question is **not identified**, so no axis tried so
+     far can name one. A candidate is therefore *not* expected to aim at a
+     headroom hot spot, and "helps in the 12–16c band" is no longer a sharper
+     claim than a uniform one; it is a claim about a withdrawn measurement.
+   - **The cycle-phase axis is open, not closed.** The finding that rested the
+     late-descent thread ("regime axis FLAT") is one of the withdrawn rows, so
+     that closure argument is gone. Don't treat cycle-phase as settled dead
+     ground *or* as a known win — see bd `fps-x0f`, which is re-opening it, and
+     note the axis itself has a known unfixed defect (`cycle_mean_length` is an
+     expanding all-history mean).
    - **Surviving lead is external wholesale/crude, not more cycle-derived features**
-     — "signal-from-cycle in diminishing returns" per the same analysis. Weigh this
-     against the no-new-datasets constraint below: it's a reason to look harder at
-     what's derivable from the TGP series already in the frame, not a licence to
-     pull in a new series.
+     — "signal-from-cycle in diminishing returns". Weigh this against the
+     no-new-datasets constraint below: it's a reason to look harder at what's
+     derivable from the TGP series already in the frame, not a licence to pull in
+     a new series. **Weakened but not withdrawn:** it drew partly on the
+     now-withdrawn flat regime axis; its other support (#214/#231, log-loss based)
+     is unaffected. Note also that no TGP feature is in the lock — `tgp_delta_7d`'s
+     June graduation was retracted 2026-08-19 as inert.
+   - **The rule underneath all of this**, because it constrains what a candidate
+     may claim: `docs/CONVENTIONS.md` § *Bucketed results — check the convention
+     spread before believing an ordering*. Allocating a **path-coupled total cost**
+     (any tank-backtest CPL) to a sub-period has no unique answer, so per-zone
+     economics is unidentified while window-level and per-fold economics are fine.
 5. **The no-new-datasets constraint.** A candidate's `INPUTS` must be columns already
    present in the frozen features frame (`features.csv`) plus `price_date` — nothing
    that requires a new downloader, a new table, or a new API. This is enforced
@@ -99,6 +120,25 @@ Read all of the following before proposing anything:
      already in the frame, and goes through the same differential PIT test as
      `add_columns` (an axis leaks into the *conclusion*, not the model, if it uses
      future information — e.g. "days that turned out to be near the trough").
+   - **A row-level axis cannot carry a COST claim.** `CONFIDENCE_ZONE` and the
+     dossier's `per_axis` table grade a zone claim on pooled realised CPL, and
+     pooled CPL is a **path-coupled total** — a buy now changes what is possible
+     later — so cutting it on a per-row label allocates that total to a
+     sub-period, which has no unique answer. This is the defect that withdrew
+     every per-zone row of #262 (`docs/CONVENTIONS.md` § *Bucketed results*;
+     `experiments/2026-08-21_path_coupling_audit/`, bd `fps-grp`). The fold cuts
+     above are safe for a mechanical reason, not a stylistic one: each (fold,
+     station) is an **independent simulation with its own tank**, so a fold-cut
+     number is a sum of complete windows, while a row label is a slice through
+     one. So:
+     - **Prefer expressing a zone claim as a set of folds** (`TARGET["folds"]`)
+       or as the built-in `regime` (a grouping of whole folds). These are graded
+       on identified quantities.
+     - **If the mechanism really is row-level**, declare `add_axis` — it is still
+       genuinely useful for the *descriptive* per-axis tables (feature values,
+       NaN rates, log-loss) — but expect the per-axis **CPL** cell to be reported
+       with an identification caveat and treat it as colour, not as a result.
+       Don't build the candidate's headline claim on it.
 7. **The arbiter is realised CPL, a decision-timing objective — not accuracy.**
    WFCV log-loss is descriptive colour, not the gate. Verbatim, from
    `docs/CONVENTIONS.md` (the cautionary example — read it as written, don't
@@ -213,7 +253,11 @@ State two priors per candidate, not one:
 - **`CONFIDENCE_EFFECT`** — P(pooled realised CPL delta < 0). "Does it move the
   arbiter at all?"
 - **`CONFIDENCE_ZONE`** — P(the effect concentrates where `TARGET` says). Scored only
-  on candidates where `CONFIDENCE_EFFECT` resolved true.
+  on candidates where `CONFIDENCE_EFFECT` resolved true. **Gradeable on an identified
+  quantity only when `TARGET` names folds or `axis: "regime"`** — a row-level
+  `add_axis` grade is a path-coupled cost allocated to a sub-period and the runner
+  marks it as such (see the fold/regime taxonomy above). Prefer a fold-expressed zone
+  claim if you want this prior to actually mean something in the calibration record.
 
 Both are scored against outcomes in the batch retrospective (`fps-3jj.8`) — this is
 the payoff artifact for aim (b) (gaining experience with an AI-sourced pipeline), so
