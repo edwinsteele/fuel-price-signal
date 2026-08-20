@@ -21,8 +21,8 @@ from fuel_signal.tgp import (
 
 LANDING_HTML = """
 <html><body>
-  <a href="/sites/default/files/download-files/2026-01/AIP_Annual_TGP_Data.xlsx">Annual</a>
-  <a href="/sites/default/files/download-files/2026-06/AIP_TGP_Data_19-Jun-2026.xlsx">Weekly</a>
+  <a href="https://aip.com.au/wp-content/uploads/2026/01/AIP_Annual_TGP_Data.xlsx">Annual</a>
+  <a href="https://aip.com.au/wp-content/uploads/2026/06/AIP_TGP_Data_19-Jun-2026.xlsx">Weekly</a>
 </body></html>
 """
 
@@ -45,7 +45,7 @@ def _make_xlsx(path: pathlib.Path, dates: list[str], sydney: list[float]) -> Non
 
 def test_extract_tgp_href_picks_weekly_not_annual():
     href = extract_tgp_href(LANDING_HTML)
-    assert href == "/sites/default/files/download-files/2026-06/AIP_TGP_Data_19-Jun-2026.xlsx"
+    assert href == "https://aip.com.au/wp-content/uploads/2026/06/AIP_TGP_Data_19-Jun-2026.xlsx"
 
 
 def test_extract_tgp_href_none_when_absent():
@@ -120,12 +120,12 @@ def test_write_series_csv_counts_new_and_is_idempotent(tmp_path):
 def test_discover_tgp_url_resolves_absolute():
     rsps.add(rsps.GET, LANDING_URL, body=LANDING_HTML, status=200)
     url = discover_tgp_url()
-    assert url == "https://www.aip.com.au/sites/default/files/download-files/2026-06/AIP_TGP_Data_19-Jun-2026.xlsx"
+    assert url == "https://aip.com.au/wp-content/uploads/2026/06/AIP_TGP_Data_19-Jun-2026.xlsx"
 
 
 @rsps.activate
 def test_download_xlsx_returns_bytes():
-    url = "https://www.aip.com.au/x/AIP_TGP_Data_19-Jun-2026.xlsx"
+    url = "https://aip.com.au/x/AIP_TGP_Data_19-Jun-2026.xlsx"
     rsps.add(rsps.GET, url, body=b"\x50\x4b\x03\x04payload", status=200)
     assert download_xlsx(url) == b"\x50\x4b\x03\x04payload"
 
