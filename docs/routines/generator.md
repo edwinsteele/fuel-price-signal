@@ -41,9 +41,17 @@ Read all of the following before proposing anything:
      trained model).
    - `NETWORK_FEATURE_COLUMNS` (4: `network_px_std`, `network_px_std_delta_3d`,
      `lga_phase_std`, `lga_phase_std_delta_3d`, in the trained model, #216).
-   - `TGP_FEATURE_COLUMNS` (`tgp_delta_7d` — **computed into `features.csv`, graduated
-     the realised arbiter, but deliberately NOT yet in `FEATURE_COLUMNS`**; see
-     "Ordering constraint" below).
+   - `TGP_FEATURE_COLUMNS` (`tgp_delta_7d` — **computed into `features.csv`, NOT in
+     `FEATURE_COLUMNS`, and no longer on a path to it.** Its June 2026 realised-arbiter
+     graduation was **retracted 2026-08-19 as inert**: −0.039 c/L does not reproduce
+     (+0.0059 c/L on identical columns, folds and seed), and it was never resolvable
+     either way, being smaller than the ~0.05 c/L value of one buy/wait decision flip.
+     Against the batch0 noise floor it sits at the 40th percentile of pure fit noise.
+     The column is registered in `features.NON_MODEL_COLUMNS` under
+     `NON_MODEL_REASON_INCONCLUSIVE` — measured below the arbiter's resolution, so
+     neither graduated nor dead ground. #271 is closed as superseded; the successor,
+     bd `fps-x0f`, asks whether *any* TGP expression earns a place rather than assuming
+     one has. Fair game as an `INPUTS` read; do **not** cite it as a proven feature.
    - Brand trough columns (`days_since_trough_entry_<brand>`) — computed, evaluated
      and rejected for the trained model (#187, Phase 4b), but still present in
      `features.csv`. Not part of the model contract; fair game as an `INPUTS` read,
@@ -285,13 +293,24 @@ batch 2 alone.
   costs 5 nights, not 10; re-freezes onto fresher data sooner.
 - **Batch 3+ = 10–15.**
 
-**Ordering constraint — do not let batch 1 and the TGP re-lock overlap.** `tgp_delta_7d`
-graduated the arbiter but is deliberately held out of `FEATURE_COLUMNS` (see
-`fuel_signal/features.py` comment on `TGP_FEATURE_COLUMNS`). Batch 1 uses it as the
-known-graduate check; if it's already in the trained baseline by the time batch 1
-runs, R0 and the candidate arm are identical and batch 1 tests nothing. Required
-order: **batch 1 → finish the TGP re-lock (`fps-1785999729707-1` / gh#271) →
-batch 2.** Don't invoke this session for batch 2 candidates until that order has held.
+**Ordering constraint — DISCHARGED 2026-08-21. It no longer gates this session.**
+
+This file used to require **batch 1 → finish the TGP re-lock (`fps-1785999729707-1` /
+gh#271) → batch 2**, so that batch 1's known-graduate check could not be run against a
+baseline already containing `tgp_delta_7d` (R0 and the candidate arm would be identical
+and batch 1 would test nothing). Both halves are now settled and the gate is void:
+
+- **Batch 1 ran and reached a verdict** on 2026-08-19 (the `experiments/batches/batch0`
+  dir — note the off-by-one against this section's numbering). That verdict was the
+  actual gate, and it held.
+- **The TGP re-lock will never happen.** #271 is closed as superseded and no TGP feature
+  is in the lock, so there is no proven-but-missing feature for the next batch to be
+  unfairly judged against — which was the entire reason for the ordering. Successor is
+  bd `fps-x0f`.
+
+Nothing now orders the next batch behind anything else in the TGP thread. **If you are
+reading a copy of this file that still states that order as a precondition, it is stale
+— proceed.**
 
 ## Filing
 
