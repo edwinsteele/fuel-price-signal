@@ -181,6 +181,33 @@ Every candidate must:
   "competition-density", "cycle-shape"). This is a **disclosure, not a gate** — see
   below.
 
+### A candidate is one MECHANISM — it may be one column or a group of related columns
+
+**Both shapes are explicitly fine. Do not constrain yourself to one column per
+candidate.** `COLUMNS` is a list. A candidate that expresses its mechanism as 2–4
+related columns is as legitimate a proposal as a single column, and should be filed as
+one candidate with one `HYPOTHESIS`, one `TARGET` and one pair of `CONFIDENCE` fields —
+because it is one idea.
+
+**Why this is stated so plainly:** every feature win in this project's history arrived as
+a *group*, not a lone column. The 35 LGA event features went in together; the 4
+`NETWORK_FEATURE_COLUMNS` went in together and moved realised CPL by ~1 c/L. The only
+feature ever measured alone on the paired realised arbiter (`tgp_delta_7d`) came in at
++0.006 c/L. An earlier reading of this file implied one column per candidate; that would
+have cut out the only shape of feature work that has actually worked here.
+
+Pick the shape the mechanism needs. If the story is "the network is converging and here
+is how you can tell", and telling it honestly takes a level, a velocity and a dispersion
+term, propose all three as one candidate. If the story is one number, propose one number.
+Padding a single idea out to three columns to look substantial is the failure mode in the
+other direction — the test is whether removing a column breaks the *mechanism*, not
+whether it lowers the score.
+
+**A candidate is a proposal, not a commitment.** Iterating on a candidate — or discarding
+it outright — after its run is normal and expected; a group that wins can be ablated
+afterwards to find which column carried it, as its own follow-up. That is a reason to
+propose the honest version of an idea rather than the safest one.
+
 ## Diversity: |rho| is a hard gate, mechanism family is a disclosure
 
 **Decided 2026-08-17.** The original rule required both "≥3 mechanism families" and
@@ -197,8 +224,10 @@ But only rho is actually checkable — "mechanism family" has no definition that
 the generator's own say-so, and a generator that wants five slots will assert three
 families. So:
 
-- **Pairwise |rho| is a HARD GATE.** A batch cannot be filed with a pair above the
-  threshold (see Redundancy checks — same mechanism, same run).
+- **Pairwise |rho| is a HARD GATE — across candidates.** A batch cannot be filed with a
+  *cross-candidate* pair above the threshold (see Redundancy checks — same mechanism,
+  same run). Correlation between columns *inside* one multi-column candidate is
+  disclosed, not gated.
 - **Mechanism family is a REQUIRED DISCLOSURE, not a threshold.** Name it per
   candidate; it is stored in the batch record. If all five land in one family, that
   is visible in the dossier and the retrospective and becomes a *finding about the
@@ -212,13 +241,23 @@ bead is filed, against **live `data/features.parquet`** (NOT the frozen batch
 snapshot — a redundancy screen doesn't depend on which day's data it uses; a column
 0.95-correlated with `tgp_delta_7d` on Monday is 0.95-correlated on Thursday):
 
-1. **Pairwise |rho| across the batch.** Compute each candidate's column(s) via its
-   `add_columns` against live data, then the full pairwise correlation matrix across
-   the batch. Reject/redesign any pair above threshold before filing either.
+1. **Pairwise |rho| ACROSS candidates.** Compute each candidate's column(s) via its
+   `add_columns` against live data, then the pairwise correlation matrix. Reject/redesign
+   any *cross-candidate* pair above threshold before filing either.
+
+   **Correlation WITHIN a multi-column candidate is not gated.** A group whose members
+   are related is the normal case — that is usually what makes them one mechanism rather
+   than three — and gating it would ban the group shape by the back door. Report the
+   within-candidate correlations in the batch record as a disclosure; only cross-candidate
+   pairs are a hard gate. Two *different* candidates that are 0.95 correlated waste a
+   slot; two columns inside one candidate do not.
 2. **R² of each candidate regressed on the existing column set.** A candidate that's
    90% reconstructible from `FEATURE_COLUMNS + LGA_FEATURE_COLUMNS +
    NETWORK_FEATURE_COLUMNS + TGP_FEATURE_COLUMNS` should be reworked now, not filed,
-   queued, and disqualified five nights later.
+   queued, and disqualified five nights later. **For a multi-column candidate, regress the
+   group as a block** (its columns jointly against the existing set) — that matches how it
+   will be evaluated. A member that is individually reconstructible is not disqualifying
+   if the group as a whole is not.
 
 Reasons these run here and not in the launch routine: pairwise rho is a **batch-level**
 property — launch validation sees one candidate per night and structurally cannot
@@ -242,7 +281,7 @@ PREDICTED_SIGNATURE = "..."     # what the numbers should look like if the mecha
 CONFIDENCE_EFFECT = 0.35        # P(pooled realised CPL delta < 0) — does it move the arbiter at all?
 CONFIDENCE_ZONE = 0.20          # P(the effect concentrates where TARGET says) — scored only if EFFECT resolves true
 MECHANISM_FAMILY = "wholesale-lead"   # disclosure, not a gate — see Diversity above
-COLUMNS = ["tgp_accel_7d"]
+COLUMNS = ["tgp_accel_7d"]       # one column, or several — see "A candidate is one MECHANISM"
 INPUTS = ["tgp_delta_7d", "price_date"]   # declared reads -> restricted-frame check + correlation/R^2
 PRIOR_ART = "adjacent to station_minus_tgp_cents (rejected, ledger) — differs in ..."
 
@@ -344,6 +383,8 @@ For each candidate that clears the diversity gate and the redundancy checks:
 
 Store, alongside the batch (e.g. `experiments/candidates/<batch>/batch.md` or the
 batch dir's own note): every candidate's `MECHANISM_FAMILY` (so a same-family batch is
-visible per the Diversity decision above), the computed pairwise |rho| matrix, and the
-R² of each candidate against the existing column set. This is what makes "the
+visible per the Diversity decision above), the computed pairwise |rho| matrix (marking
+which pairs are cross-candidate — the gated ones — and which are within a single
+multi-column candidate, which are disclosure only), and the R² of each candidate against
+the existing column set (as a block, for a multi-column candidate). This is what makes "the
 generator produced five variants of one idea" legible later, rather than lost.
