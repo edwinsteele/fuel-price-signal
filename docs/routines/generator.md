@@ -78,11 +78,15 @@ Read all of the following before proposing anything:
    `regime axis is FLAT`, `late_descent 1.00 / normal 1.50 / overdue 1.33`, or
    `12–16c 7.09` quoted as guidance — including in an older copy of this file —
    **those numbers are withdrawn and must not steer a candidate.** What is left:
-   - **Window-level headroom stands, with its cadence attached.** The model is
-     ~⅔ of the way from always-buy to the perfect-foresight floor: **1.54 c/L on
-     the production 7-day decision grid, 2.97 c/L on a daily one**
-     (`experiments/2026-08-20_cadence_ceiling/`, bd `fps-fii`). It is not a
-     constant, so never quote a headroom number without its cadence.
+   - **Window-level headroom stands, with its cadence attached.** The production
+     decision grid is **daily** since the 2026-08-22 re-lock (bd `fps-oqz`), so the
+     headroom a candidate aims at is **2.97 c/L at 1-day cadence** — not the 1.54
+     c/L that the same measurement gives on the retired 7-day grid
+     (`experiments/2026-08-20_cadence_ceiling/`, bd `fps-fii`). At 1d the model
+     captures ~64% of the always-buy → perfect-foresight distance, down from ~71%
+     at 7d: the target got bigger *and* the model's share of it got smaller,
+     because at 7d the TANK was the binding constraint and at 1d the SIGNAL is.
+     Headroom is not a constant, so never quote one without its cadence.
    - **There is no known zone of concentration.** Not "the concentration is
      elsewhere" — the per-zone question is **not identified**, so no axis tried so
      far can name one. A candidate is therefore *not* expected to aim at a

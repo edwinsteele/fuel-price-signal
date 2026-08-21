@@ -172,7 +172,7 @@ def test_freeze_manifest_records_the_default_tank_params(tmp_path):
         batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
     )
     manifest = json.loads((batch_dir / "freeze.json").read_text())
-    assert manifest["tank_params"] == "50/3.571/7d/10%"
+    assert manifest["tank_params"] == "50/3.571/1d/10%"
 
 
 def test_freeze_batch_passes_its_tank_through_to_the_noise_floor(tmp_path, monkeypatch):
@@ -189,7 +189,7 @@ def test_freeze_batch_passes_its_tank_through_to_the_noise_floor(tmp_path, monke
 
     df = _features_df()
     features_path, db_path = _write_source(tmp_path, df)
-    tank = TankParams(evaluation_interval_days=1)
+    tank = TankParams(evaluation_interval_days=7)
     freeze_batch(
         "batch1", features_path=features_path, db_path=db_path,
         batches_dir=tmp_path / "batches", skip_refresh=True, tank=tank,

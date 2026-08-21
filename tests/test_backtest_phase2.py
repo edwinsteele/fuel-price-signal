@@ -193,8 +193,8 @@ def test_patch_results_csv_patches_both_rows(tmp_path):
     assert result[0]["realised_savings_vs_always_buy_pct"] == "0.00"
     assert result[1]["realised_spend_cpl"] == "172.00"
     assert result[1]["realised_savings_vs_always_buy_pct"] == "1.71"
-    assert result[0]["tank_params"] == "50/3.571/7d/10%"
-    assert result[1]["tank_params"] == "50/3.571/7d/10%"
+    assert result[0]["tank_params"] == "50/3.571/1d/10%"
+    assert result[1]["tank_params"] == "50/3.571/1d/10%"
     # tau=0.35 row should not be patched
     assert result[2]["realised_spend_cpl"] == ""
     assert result[2]["tank_params"] == ""
@@ -203,7 +203,7 @@ def test_patch_results_csv_patches_both_rows(tmp_path):
 def test_patch_results_csv_stamps_the_tank_it_ran_with(tmp_path):
     """A second writer of realised_spend_cpl must stay under the same
     stamp-can't-disagree-with-what-ran invariant as log_experiment (fps-xx1):
-    if the tank the sweep ran with isn't the 7-day default, the patched row
+    if the tank the sweep ran with isn't the 1-day default, the patched row
     must say so, not silently keep whatever stamp (or lack of one) it had."""
     csv_path = tmp_path / "results.csv"
     _write_results_csv(
@@ -211,10 +211,10 @@ def test_patch_results_csv_stamps_the_tank_it_ran_with(tmp_path):
         [_base_row("marginal_rate_baseline", "constant predictor")],
     )
     patch_results_csv(
-        csv_path, 175.0, 172.0, 1.71, TankParams(evaluation_interval_days=1)
+        csv_path, 175.0, 172.0, 1.71, TankParams(evaluation_interval_days=7)
     )
     result = _read_results_csv(csv_path)
-    assert result[0]["tank_params"] == "50/3.571/1d/10%"
+    assert result[0]["tank_params"] == "50/3.571/7d/10%"
 
 
 def test_patch_results_csv_missing_baseline(tmp_path):

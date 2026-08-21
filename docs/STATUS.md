@@ -62,6 +62,22 @@ Project-level state for agents picking up cold. Update this file when a phase co
 
 On-disk artifact: **54-feat LightGBM, isotonic-calibrated, τ=0.25.** Last feature column `lga_phase_std_delta_3d`.
 
+**Decision cadence: 1 day** (`TankParams.evaluation_interval_days`, stamp
+`50/3.571/1d/10%`) — re-locked from 7 days on 2026-08-22, bd `fps-oqz`. Cadence is a
+declared lock parameter, not a knob: see
+[CONVENTIONS.md § The decision cadence is a lock parameter](CONVENTIONS.md#the-decision-cadence-is-a-lock-parameter-declared--not-a-default)
+for the rationale and the full before/after. Two consequences for reading this file:
+
+- **The re-lock is not a retrain and not a τ change.** The on-disk artifact and τ=0.25
+  are unchanged — the fit takes no `TankParams`. Nor is it a production code change:
+  `evaluation_interval_days` is consumed only by the backtest engines, and the live
+  daily signal (`fuel_signal/signal.py`) is rule-based and already emits daily.
+- **Every realised-CPL figure in the historical tables below was measured at 7 days**
+  and has not been restated. They remain correct as lock records; they are not
+  comparable to a number produced after 2026-08-22 without re-running at 1d. On the
+  cadence-ceiling folds the same model reads 189.67 at 7d and 187.82 at 1d, and
+  headroom vs the perfect-foresight oracle goes 1.54 → 2.97 c/L.
+
 - **#216** (2026-06-09) — graduated the RAC_full network group (4 cols: `network_px_std`, `network_px_std_delta_3d`, `lga_phase_std`, `lga_phase_std_delta_3d`), retraining the 50-feat Phase 4 baseline to 54. Δh25 −0.045 over LGA-only. See [AGENTS.md § Canonical feature set](../AGENTS.md#canonical-feature-set-54-feat-baseline-locked-issue-216).
 - **#236** (2026-06-13, commit 740b601) — calibration + threshold selection moved to OOF CV over train with an 80/20 eval split; isotonic chosen over raw; τ=0.25. Realised backtest 3.04% (185.94 c/L) vs always-buy 191.78 at the time (prior raw/τ=0.55 was 1.98%).
 - **#250 cycle-fix rebuild** (2026-06-15, commit 7bee0e8) — re-cut the same 54-feat pipeline on the merged #250 whipsaw fix (sticky causal `find_peaks`), changing two cycle inputs (`cycle_days_since_peak`, `cycle_pct_through`). Isotonic re-chosen on OOF (0.3036 < raw 0.3051), **τ held at 0.25**. Realised backtest moved forward to **3.37% (185.32 c/L)** vs always-buy 191.78; test logloss flat (0.2629→0.2626). This rebuild is what's on disk now. Single window/seed; a multi-fold paired CV of realised CPL was scoped but not run.

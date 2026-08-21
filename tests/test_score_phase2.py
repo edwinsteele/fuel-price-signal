@@ -366,7 +366,7 @@ def test_score_phase2_with_db_populates_realised_spend(tmp_path, monkeypatch):
     assert rows[0]["realised_savings_vs_always_buy_pct"] != "", (
         "realised_savings_vs_always_buy_pct must be non-empty when --db is provided"
     )
-    assert rows[0]["tank_params"] == "50/3.571/7d/10%", (
+    assert rows[0]["tank_params"] == "50/3.571/1d/10%", (
         "tank_params must be stamped whenever a realised backtest ran (fps-xx1)"
     )
 

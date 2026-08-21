@@ -237,7 +237,7 @@ def test_meta_carries_the_default_tank_params_stamp(monkeypatch):
         outer_fold_params=outer, inner_fold_params=inner, verbose=False,
     )
 
-    assert result.meta["tank_params"] == "50/3.571/7d/10%"
+    assert result.meta["tank_params"] == "50/3.571/1d/10%"
 
 
 def test_meta_tank_params_reflects_a_non_default_tank(monkeypatch):
@@ -248,10 +248,10 @@ def test_meta_tank_params_reflects_a_non_default_tank(monkeypatch):
     result = run_paired_realised_backtest(
         arms, baseline_cols, station_codes=[1], seed=42,
         outer_fold_params=outer, inner_fold_params=inner, verbose=False,
-        tank=TankParams(evaluation_interval_days=1),
+        tank=TankParams(evaluation_interval_days=7),
     )
 
-    assert result.meta["tank_params"] == "50/3.571/1d/10%"
+    assert result.meta["tank_params"] == "50/3.571/7d/10%"
 
 
 def test_baseline_cache_reuse_skips_baseline_refit_and_history_load(monkeypatch):

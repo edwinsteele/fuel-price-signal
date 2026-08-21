@@ -21,6 +21,8 @@ from fuel_signal.backtest import (
     RuleBasedSignalStrategy,
     TankParams,
     _evaluation_dates,
+    format_tank_params,
+    main,
     run_backtest,
     run_oracle_backtest,
     validate_never_dry,
@@ -292,6 +294,30 @@ def test_final_evaluation_does_not_force_unnecessary_emergency_fill():
         history, AlwaysWaitStrategy(), 72, "2020-01-01", "2020-01-02", tank,
     )
     assert result.fill_events == 0
+
+
+# ---------------------------------------------------------------------------
+# The declared cadence lock (fps-oqz)
+# ---------------------------------------------------------------------------
+
+def test_canonical_cadence_is_daily():
+    """The decision cadence is a declared lock parameter, not a knob
+    (docs/CONVENTIONS.md § The decision cadence is a lock parameter). Re-locked
+    7d -> 1d on 2026-08-22. Changing this literal is a re-lock, not a tweak: it
+    silently redefines every realised CPL and headroom figure the project quotes,
+    so it must come with a recorded rationale and a stated before/after."""
+    assert TankParams().evaluation_interval_days == 1
+    assert format_tank_params(TankParams()) == "50/3.571/1d/10%"
+
+
+def test_cli_eval_interval_default_tracks_tankparams():
+    """The CLI must not carry its own copy of the cadence. It did (a hard-coded
+    default=7) and was missed by the fps-oqz re-lock's own change list, so a
+    --eval-interval-less CLI run would have kept using 7 while every other caller
+    moved to 1 — the two-defaults-disagree failure the tank_params stamp exists to
+    make visible. Pinned to the dataclass so the next re-lock cannot repeat it."""
+    param = next(p for p in main.params if p.name == "eval_interval")
+    assert param.default == TankParams().evaluation_interval_days
 
 
 # ---------------------------------------------------------------------------

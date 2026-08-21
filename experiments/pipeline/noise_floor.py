@@ -167,8 +167,8 @@ def compute_noise_floor(
 
     tank (fps-15c): the TankParams every draw runs at, and the cadence stamped into the
     payload's `tank_params`. None (default) resolves to `TankParams()` — the canonical
-    7-day cadence (docs/CONVENTIONS.md) — same default every other call in this pipeline
-    resolves to when not overridden.
+    1-day cadence (docs/CONVENTIONS.md, re-locked from 7d 2026-08-22, fps-oqz) — same
+    default every other call in this pipeline resolves to when not overridden.
 
     Reads the frozen batch's own features + baseline column contract (declared, never
     discovered — same `baseline_columns.json` every candidate run reads, fps-sa1) and its

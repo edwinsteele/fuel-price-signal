@@ -750,7 +750,7 @@ uv run python -m fuel_signal.backtest --preferred --strategy all \
     --model-path data/models/logreg.joblib \
     --start 2023-01-01 --end 2024-12-31
 
-# Custom tank size and consumption (default: 50L tank, 50L/14d)
+# Custom tank size and consumption (default: 50L tank, 50L/14d, decide daily)
 uv run python -m fuel_signal.backtest --preferred --strategy rule_based \
     --start 2023-01-01 --end 2024-12-31 \
     --tank-size 60 --daily-use 4.0 --eval-interval 7

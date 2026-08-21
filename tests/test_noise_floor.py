@@ -61,7 +61,7 @@ def _write_batch_dir(tmp_path: pathlib.Path, df: pd.DataFrame, name: str = "batc
     return batch_dir
 
 
-_DEFAULT_TANK_PARAMS = "50/3.571/7d/10%"
+_DEFAULT_TANK_PARAMS = "50/3.571/1d/10%"
 _CACHE_SENTINEL = "fake-baseline-cache"
 
 
@@ -226,7 +226,7 @@ def test_compute_noise_floor_stamps_the_default_tank_params(tmp_path, monkeypatc
 
     payload = compute_noise_floor(batch_dir, n_draws=2, verbose=False)
 
-    assert payload["tank_params"] == "50/3.571/7d/10%"
+    assert payload["tank_params"] == "50/3.571/1d/10%"
     from fuel_signal.backtest import TankParams
 
     assert all(call["tank"] == TankParams() for call in calls)
@@ -237,12 +237,12 @@ def test_compute_noise_floor_stamps_a_non_default_tank(tmp_path, monkeypatch):
 
     df = _baseline_features_df()
     batch_dir = _write_batch_dir(tmp_path, df)
-    tank = TankParams(evaluation_interval_days=1)
-    calls = _stub_realised_by_draw(monkeypatch, [1.0, 2.0], tank_params="50/3.571/1d/10%")
+    tank = TankParams(evaluation_interval_days=7)
+    calls = _stub_realised_by_draw(monkeypatch, [1.0, 2.0], tank_params="50/3.571/7d/10%")
 
     payload = compute_noise_floor(batch_dir, n_draws=2, tank=tank, verbose=False)
 
-    assert payload["tank_params"] == "50/3.571/1d/10%"
+    assert payload["tank_params"] == "50/3.571/7d/10%"
     assert all(call["tank"] == tank for call in calls)
 
 
@@ -485,7 +485,7 @@ def test_dossier_tables_refuses_a_mismatched_tank_params(tmp_path, monkeypatch):
     fp = _matching_fingerprint(batch_dir)
 
     band = dt._noise_band(
-        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp, "tank_params": "50/3.571/1d/10%"}},
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp, "tank_params": "50/3.571/7d/10%"}},
         batch_dir,
     )
 
