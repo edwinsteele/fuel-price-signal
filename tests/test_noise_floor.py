@@ -37,13 +37,16 @@ from fuel_signal.features import (
 
 
 def _baseline_features_df(n: int = 8) -> pd.DataFrame:
-    """One row per date (no station dimension — placebo axis-detection logic itself is
-    covered by test_placebo.py's multi-station fixture; every column here is trivially
-    market-wide since there's only one row per date group). Non-constant values so a
-    circular shift is well-defined (a constant column has zero variance, which would make
-    the shift-autocorrelation self-check NaN)."""
+    """One row per date, single station (placebo axis-detection logic itself is covered by
+    test_placebo.py's multi-station fixture; every column here is trivially market-wide
+    since there's only one row per (date, station) group). A `station_code` column is still
+    required — `_make_lookup_provider` (reused from runner.py for the placebo arm's
+    extra_feature_provider) keys its lookup on (station_code, date) unconditionally, even
+    for a single-station fixture. Non-constant column values so a circular shift is
+    well-defined (a constant column has zero variance, which would make the
+    shift-autocorrelation self-check NaN and fail the enforced bound)."""
     dates = [20260801 + i for i in range(n)]
-    cols = {"price_date": dates}
+    cols = {"price_date": dates, "station_code": [12345] * n}
     for c in FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS:
         cols[c] = [float(i) for i in range(n)]
     return pd.DataFrame(cols)
@@ -134,6 +137,11 @@ def test_compute_noise_floor_uses_two_arms_baseline_and_placebo(tmp_path, monkey
         assert c["arms"][1].name == noise_floor_module.PLACEBO_ARM_NAME
         assert c["arms"][1].feature_columns == [*baseline_columns, PLACEBO_COLUMN_NAME]
         assert PLACEBO_COLUMN_NAME in c["arms"][1].df.columns
+        # ModelStrategy's live-replay path never reads an arm's df directly — a placebo
+        # arm without an extra_feature_provider would KeyError on PLACEBO_COLUMN_NAME the
+        # first time a real (non-monkeypatched) backtest runs.
+        assert c["arms"][1].extra_feature_provider is not None
+        assert c["arms"][0].extra_feature_provider is None
         assert c["feature_columns"] == baseline_columns
         assert c["seed"] == noise_floor_module.PLACEBO_SEED_DEFAULT
         assert c["held_tau"] is None
@@ -166,6 +174,29 @@ def test_compute_noise_floor_draws_distinct_columns_and_shifts(tmp_path, monkeyp
     shifts = [d["shift_days"] for d in payload["placebo_draws"]]
     assert len(set(columns)) == 4
     assert len(set(shifts)) == 4
+
+
+def test_compute_noise_floor_raises_if_placebo_provider_never_hits(tmp_path, monkeypatch):
+    """A real (non-monkeypatched) run_paired_realised_backtest calls each arm's
+    extra_feature_provider during the live replay. If every lookup misses (a
+    (station_code, date) key-format mismatch), the draw's delta was computed with the
+    placebo column silently NaN throughout — this must raise, not read as a legitimate
+    'the column does nothing' result. Exercises the REAL _make_lookup_provider /
+    _check_provider_health (only run_paired_realised_backtest itself is faked here) by
+    having the fake caller invoke the provider with a station_code it can't match."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+
+    def _fake(arms, feature_columns, **kwargs):
+        placebo_arm = arms[1]
+        # The fixture's only station is 12345 — an unmatched code guarantees a miss.
+        placebo_arm.extra_feature_provider("2026-08-01", 99999, 100.0)
+        return _fake_two_arm_result(100.0, 101.0)
+
+    monkeypatch.setattr(noise_floor_module, "run_paired_realised_backtest", _fake)
+
+    with pytest.raises(RuntimeError, match="missed on all"):
+        compute_noise_floor(batch_dir, n_draws=1, verbose=False)
 
 
 def test_compute_noise_floor_stamps_the_default_tank_params(tmp_path, monkeypatch):
@@ -277,6 +308,23 @@ def test_compute_noise_floor_stamps_provenance(tmp_path, monkeypatch):
     for draw in payload["placebo_draws"]:
         assert set(draw) == {"source_column", "shift_days", "shift_autocorrelation"}
         assert isinstance(draw["shift_autocorrelation"], float)
+
+
+def test_compute_noise_floor_raises_on_near_no_op_shift(tmp_path, monkeypatch):
+    """The shift_autocorrelation self-check is ENFORCED, not just recorded: a degenerate
+    near-no-op shift (placebo ~= its own source column) must raise rather than silently
+    narrow the floor with a draw that still carries the source column's own signal."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [1.0])
+    # The source column's own unshifted values, verbatim — correlation with itself is 1.0.
+    monkeypatch.setattr(
+        noise_floor_module, "make_placebo_series",
+        lambda frame, source_column, shift_days: frame[source_column].rename(PLACEBO_COLUMN_NAME),
+    )
+
+    with pytest.raises(ValueError, match="shift_autocorrelation"):
+        compute_noise_floor(batch_dir, n_draws=1, verbose=False)
 
 
 def test_compute_noise_floor_raises_on_n_windows_mismatch_across_draws(tmp_path, monkeypatch):

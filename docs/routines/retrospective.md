@@ -122,8 +122,9 @@ Commit `RETROSPECTIVE.md` + `retrospective_facts.json` together, straight to `ma
   payoff (a leaderboard that actually differentiates candidates, and the start of a real
   confidence-calibration read) arrives with `batch1` (5 candidates) and beyond.
 - **`family_wise_z_threshold` needs `n_draws >= 2`.** With fewer draws the band's std can't
-  be estimated at all (no degrees of freedom for a t-critical value) — `noise_floor` (a
-  scalar) is `None` and every row's `clears_family_wise_threshold` is `False`, the same
+  be estimated at all (no degrees of freedom for a t-critical value) — the payload's
+  top-level `family_wise_z_threshold` (a scalar) is `None` and every row's
+  `clears_family_wise_threshold` is `False`, the same
   condition under which `dossier_tables._noise_band()` already returns
   `candidate_z_vs_band: None`. Not reachable at the fps-awz default of ~20 draws; only
   matters if a batch's `noise_floor.json` was hand-computed with a very small `--n-draws`.

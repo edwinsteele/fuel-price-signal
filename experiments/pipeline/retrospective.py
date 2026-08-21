@@ -190,21 +190,25 @@ def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
     }
 
 
-def build_leaderboard(
-    entries: list[dict], *, family_wise_threshold: float, family_wise_z_gate: float | None,
-) -> list[dict]:
-    """Rank dossiered candidates by noise-band percentile when available (higher = better,
-    already oriented that way by dossier_tables._noise_band), falling back to raw delta_cpl_held
-    ascending (a COST — more negative is better) when the batch has no noise floor yet.
+def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) -> list[dict]:
+    """Rank dossiered candidates by noise-band z (lower/more-negative = better — delta_cpl_held
+    is a COST, oriented that way by dossier_tables._noise_band) when available, falling back to
+    raw delta_cpl_held ascending when the batch has no noise floor yet.
 
-    family_wise_threshold: the OLD percentile-space Bonferroni bar — still reported per row
-    as descriptive colour (`noise_band_percentile`), no longer the gate.
     family_wise_z_gate: `family_wise_z_threshold(...)`'s output, a POSITIVE distance in band
     standard deviations. `clears_family_wise_threshold` fires when a row's `noise_band_z` is
     <= its negation (delta_cpl_held is a cost, so "surprisingly better" is very negative z).
     None when the batch's noise band can't support a z estimate (fewer than 2 draws, or
     unavailable) — every row's gate is then False rather than computed against a bar that
     doesn't exist.
+
+    `noise_band_percentile` is still reported per row as descriptive colour, but no longer
+    drives either the gate or the sort order — at the fps-awz draw count (~20) the empirical
+    percentile only has `n_draws + 1` distinct values, so sorting by it (as this function used
+    to) produces ties a continuous `noise_band_z` doesn't have, and could disagree with the
+    gate's own ordering. There is no `family_wise_threshold` (percentile-space) parameter here
+    any more — the caller (`compute_retrospective`) still computes and reports it at the
+    payload's top level, but this function has no use for it.
     """
     rows = []
     for entry in entries:
@@ -239,10 +243,15 @@ def build_leaderboard(
                 ),
             }
         )
-    has_noise_band = any(r["noise_band_available"] for r in rows)
-    if has_noise_band:
-        # Higher percentile = better; candidates without a percentile (noise band unavailable
-        # for that one, shouldn't happen within one batch but not assumed) sort last.
+    has_z = any(r["noise_band_z"] is not None for r in rows)
+    if has_z:
+        # Lower/more-negative z = better (delta_cpl_held is a cost). A row with no z
+        # (noise band unavailable for that one specifically, or too few draws to estimate a
+        # std) sorts last rather than being assumed best-or-worst.
+        rows.sort(key=lambda r: (r["noise_band_z"] is None, r["noise_band_z"] if r["noise_band_z"] is not None else 0.0))
+    elif any(r["noise_band_available"] for r in rows):
+        # z unavailable batch-wide (e.g. < 2 draws) but the band itself is — percentile is
+        # still a real, if coarser, ordering signal, so fall back to it rather than raw delta.
         rows.sort(key=lambda r: (r["noise_band_percentile"] is None, -(r["noise_band_percentile"] or 0.0)))
     else:
         rows.sort(
@@ -386,7 +395,7 @@ def compute_retrospective(
         "noise_floor": noise_floor_summary,
         "family_wise_percentile_threshold": threshold,
         "family_wise_z_threshold": z_gate,
-        "leaderboard": build_leaderboard(entries, family_wise_threshold=threshold, family_wise_z_gate=z_gate),
+        "leaderboard": build_leaderboard(entries, family_wise_z_gate=z_gate),
         "outcome_tally": build_outcome_tally(entries),
         "confidence_calibration": build_confidence_calibration(candidates_root),
     }

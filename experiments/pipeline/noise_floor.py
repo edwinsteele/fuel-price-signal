@@ -32,6 +32,18 @@ Cost: every draw shares the exact same baseline arm (same frame, columns, seed, 
 Draw 1 pays a full baseline + placebo fit; every later draw pays only the placebo arm. This
 keeps `DEFAULT_N_DRAWS = 20` roughly "1 baseline fit + 20 placebo fits", not "40 fits".
 
+The placebo arm needs an `extra_feature_provider` (`experiments.pipeline.runner.
+_make_lookup_provider`, reused, not reimplemented). `fuel_signal.backtest.ModelStrategy
+.decide()` — the LIVE realised-replay path, distinct from the DataFrame-slicing fold-training
+path — never reads an arm's `df` directly; it rebuilds every canonical feature fresh from
+the DB-backed `PriceHistory` and only consults `extra_feature_provider` for anything beyond
+that. A placebo column has no production `PriceHistory` source (it's synthetic), so without
+a provider the replay raises `KeyError` on `PLACEBO_COLUMN_NAME` the moment it runs against
+real data — the same wiring runner.py already needs for a real candidate's added column (the
+`tgp_delta_7d` precedent). `_check_provider_health` (also reused) raises if a draw's provider
+missed on every lookup — a 100%-miss placebo silently reads as "the column does nothing"
+when it's actually a (station_code, date) key-format mismatch.
+
 The OLD seed-swap null is NOT deleted — it measures something real (pure fit-instability
 from the seed alone), just not the quantity the gate needs. It's retained as a separate,
 explicitly-invoked diagnostic: `compute_fit_stability_diagnostic()` below, writing its own
@@ -76,7 +88,11 @@ from experiments.pipeline.placebo import (
     make_placebo_series,
     select_draws,
 )
-from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
+from experiments.pipeline.runner import (
+    DEFAULT_INNER_FOLD_PARAMS,
+    _check_provider_health,
+    _make_lookup_provider,
+)
 from fuel_signal.backtest import TankParams
 from fuel_signal.features import baseline_fingerprint, load_features
 
@@ -95,6 +111,13 @@ DEFAULT_N_DRAWS = 20
 PLACEBO_SEED_DEFAULT: int = SEEDS[0]
 
 FIT_STABILITY_FILENAME = "fit_stability.json"
+
+# Enforced bound on each draw's shift_autocorrelation self-check (see the draw loop below).
+# Deliberately generous rather than measured against real data (no real batch run has
+# happened yet at review time) — chosen to catch a genuinely degenerate near-no-op shift
+# (typically correlation well above this) without false-positiving on ordinary smooth
+# real-feature autocorrelation. Revisit once a real batch run shows the typical distribution.
+MAX_SHIFT_AUTOCORRELATION = 0.6
 
 # Retained diagnostic only (see module docstring) — the original fps-3jj.9 seed pairing.
 SEEDS_A: tuple[int, ...] = SEEDS
@@ -180,11 +203,21 @@ def compute_noise_floor(
     for i, (source_column, shift_days) in enumerate(draws, start=1):
         placebo_series = make_placebo_series(frame, source_column, shift_days)
         placebo_frame = frame.assign(**{PLACEBO_COLUMN_NAME: placebo_series})
+        # ModelStrategy.decide() (the LIVE realised-replay path) never reads an arm's df
+        # directly — it rebuilds every canonical feature fresh from the DB-backed
+        # PriceHistory and only consults extra_feature_provider for anything beyond that
+        # (fuel_signal/backtest.py). A placebo column has no PriceHistory source (it's
+        # synthetic, computed here), so without a provider the replay would KeyError on
+        # PLACEBO_COLUMN_NAME. Same lookup-provider mechanism runner.py already uses for a
+        # real candidate's added column (e.g. the tgp_delta_7d precedent) — reused, not
+        # reimplemented, so both sites agree on the (station_code, date)-keyed lookup.
+        provider = _make_lookup_provider(placebo_frame, [PLACEBO_COLUMN_NAME])
         arms = [
             ArmSpec(BASELINE_ARM_NAME, frame, feature_columns=baseline_columns),
             ArmSpec(
                 PLACEBO_ARM_NAME, placebo_frame,
                 feature_columns=[*baseline_columns, PLACEBO_COLUMN_NAME],
+                extra_feature_provider=provider,
             ),
         ]
         result = run_paired_realised_backtest(
@@ -203,6 +236,15 @@ def compute_noise_floor(
         )
         if result.baseline_cache is not None:
             baseline_cache = result.baseline_cache
+
+        # A 100%-miss provider means the placebo column was NaN for the entire replay —
+        # that would read as a legitimate "the column does nothing" delta when it's
+        # actually a (station_code, date) key-format mismatch, silently narrowing the
+        # floor with a draw that measured nothing. Same check runner.py runs for a real
+        # candidate's provider, reused here rather than re-derived.
+        health = _check_provider_health(provider)
+        if health is not None:
+            raise RuntimeError(f"draw {i} ({source_column!r}): {health}")
 
         agg = result.aggregate.set_index("arm")
         delta = float(agg.loc[PLACEBO_ARM_NAME, "cpl_held"] - agg.loc[BASELINE_ARM_NAME, "cpl_held"])
@@ -231,9 +273,20 @@ def compute_noise_floor(
         # column's own unshifted values. Should sit near 0 — a value close to 1 would mean
         # the "shift" accidentally no-opped (e.g. a degenerate _effective_shift), silently
         # narrowing the floor with a column that still carries its original signal.
+        # ENFORCED, not just recorded: a NaN (e.g. a zero-variance source column, which
+        # can't be verified either way) or a correlation past MAX_SHIFT_AUTOCORRELATION
+        # raises rather than silently accepting a placebo that might still carry its
+        # source column's signal.
         shift_autocorrelation = float(
             np.corrcoef(placebo_series.to_numpy(dtype=float), frame[source_column].to_numpy(dtype=float))[0, 1]
         )
+        if not np.isfinite(shift_autocorrelation) or shift_autocorrelation > MAX_SHIFT_AUTOCORRELATION:
+            raise ValueError(
+                f"draw {i} ({source_column!r}, shift={shift_days}): shift_autocorrelation "
+                f"{shift_autocorrelation!r} is not finite and < {MAX_SHIFT_AUTOCORRELATION} — "
+                "the placebo may still carry the source column's own signal (a zero-variance "
+                "source column, or a degenerate near-zero effective shift). Not a valid draw."
+            )
         deltas.append(delta)
         placebo_draws.append(
             {

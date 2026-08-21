@@ -228,17 +228,36 @@ def test_family_wise_z_threshold_rejects_too_few_draws():
 
 # ── build_leaderboard ────────────────────────────────────────────────────
 
-def test_build_leaderboard_ranks_by_noise_percentile_descending():
-    low_band = {"available": True, "candidate_percentile_better_than_noise": 20.0, "candidate_z_vs_band": 1.0}
-    high_band = {"available": True, "candidate_percentile_better_than_noise": 90.0, "candidate_z_vs_band": -1.5}
+def test_build_leaderboard_ranks_by_noise_band_z_ascending():
+    """fps-awz: ranking is z-based (more negative = better, delta_cpl_held is a cost), not
+    percentile-based — percentile only has n_draws+1 distinct values and could tie/disagree
+    with the gate's own ordering at the ~20-draw default."""
+    worse_z = {"available": True, "candidate_percentile_better_than_noise": 20.0, "candidate_z_vs_band": 1.0}
+    better_z = {"available": True, "candidate_percentile_better_than_noise": 90.0, "candidate_z_vs_band": -1.5}
     entries = [
-        {"candidate": "low", "state": "dossiered", "facts": _facts("low", delta=0.02, noise_band=low_band)},
-        {"candidate": "high", "state": "dossiered", "facts": _facts("high", delta=-0.05, noise_band=high_band)},
+        {"candidate": "worse", "state": "dossiered", "facts": _facts("worse", delta=0.02, noise_band=worse_z)},
+        {"candidate": "better", "state": "dossiered", "facts": _facts("better", delta=-0.05, noise_band=better_z)},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0, family_wise_z_gate=2.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
-    assert [r["candidate"] for r in rows] == ["high", "low"]
+    assert [r["candidate"] for r in rows] == ["better", "worse"]
+
+
+def test_build_leaderboard_falls_back_to_percentile_when_z_unavailable_batch_wide():
+    """When z can't be computed for the whole batch (e.g. noise_band_z is None on every
+    row) but the band itself is available, percentile is still a real ordering signal —
+    fall back to it rather than raw delta."""
+    band = {"available": True, "candidate_percentile_better_than_noise": 20.0, "candidate_z_vs_band": None}
+    band_high = {"available": True, "candidate_percentile_better_than_noise": 90.0, "candidate_z_vs_band": None}
+    entries = [
+        {"candidate": "worse", "state": "dossiered", "facts": _facts("worse", delta=0.02, noise_band=band)},
+        {"candidate": "better", "state": "dossiered", "facts": _facts("better", delta=-0.05, noise_band=band_high)},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert [r["candidate"] for r in rows] == ["better", "worse"]
 
 
 def test_build_leaderboard_falls_back_to_raw_delta_when_no_noise_band():
@@ -247,7 +266,7 @@ def test_build_leaderboard_falls_back_to_raw_delta_when_no_noise_band():
         {"candidate": "better", "state": "dossiered", "facts": _facts("better", delta=-0.05)},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0, family_wise_z_gate=2.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
     # delta_cpl_held is a COST: more negative is better, so ascending sort.
     assert [r["candidate"] for r in rows] == ["better", "worse"]
@@ -267,7 +286,7 @@ def test_build_leaderboard_clears_family_wise_threshold_flag_reads_z_not_percent
         },
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0, family_wise_z_gate=2.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
     clears_row = next(r for r in rows if r["candidate"] == "clears")
     percentile_only_row = next(r for r in rows if r["candidate"] == "percentile_only")
@@ -287,7 +306,7 @@ def test_build_leaderboard_gate_false_when_z_gate_unavailable():
         {"candidate": "cand", "state": "dossiered", "facts": _facts("cand", noise_band=band)},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0, family_wise_z_gate=None)
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
 
     assert rows[0]["clears_family_wise_threshold"] is False
 
@@ -298,7 +317,7 @@ def test_build_leaderboard_skips_non_dossiered_entries():
         {"candidate": "not_yet", "state": "never_run", "facts": None},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0, family_wise_z_gate=2.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
     assert [r["candidate"] for r in rows] == ["ran"]
 
@@ -312,7 +331,7 @@ def test_build_leaderboard_handles_disqualified_candidate_with_null_headline():
         {"candidate": "ok", "state": "dossiered", "facts": _facts("ok", delta=-0.02)},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0, family_wise_z_gate=2.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
     assert {r["candidate"] for r in rows} == {"dq", "ok"}
     dq_row = next(r for r in rows if r["candidate"] == "dq")
