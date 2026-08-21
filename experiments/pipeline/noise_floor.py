@@ -63,6 +63,7 @@ from experiments.pipeline.batch_freeze import (
 )
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
+from fuel_signal.backtest import TankParams
 from fuel_signal.features import baseline_fingerprint, load_features
 
 BASELINE_ARM_NAME = "baseline"
@@ -85,9 +86,11 @@ def _baseline_cpl_held(
     fold_subset: Iterable[int] | None,
     station_codes: list[int] | None,
     db_path: pathlib.Path,
+    tank: TankParams,
     verbose: bool,
-) -> tuple[float, int]:
-    """Fit the baseline alone (no candidate arm) at `seed`; return (cpl_held, n_windows).
+) -> tuple[float, int, str]:
+    """Fit the baseline alone (no candidate arm) at `seed`; return (cpl_held,
+    n_windows, tank_params).
 
     held_tau=None means the baseline's own per-fold τ IS the held τ (see
     experiments/lib/realised.py's module docstring), so with a single arm cpl_held
@@ -99,6 +102,10 @@ def _baseline_cpl_held(
     batch_freeze.py already pins (features, DB, baseline columns), so a later fold-
     geometry change is visible in noise_floor.json rather than silently drifting the
     ruler out from under it.
+
+    tank_params (fps-15c) is read back off the SAME RealisedResult.meta, not
+    reformatted from `tank` here — so it cannot disagree with the cadence the
+    deltas were actually produced at.
     """
     result = run_paired_realised_backtest(
         [ArmSpec(BASELINE_ARM_NAME, frame, feature_columns=baseline_columns)],
@@ -110,11 +117,12 @@ def _baseline_cpl_held(
         inner_fold_params=inner_fold_params,
         fold_subset=fold_subset,
         db_path=db_path,
+        tank=tank,
         collect_fills=False,
         verbose=verbose,
     )
     cpl_held = float(result.aggregate.set_index("arm").loc[BASELINE_ARM_NAME, "cpl_held"])
-    return cpl_held, int(result.meta["n_windows"])
+    return cpl_held, int(result.meta["n_windows"]), result.meta["tank_params"]
 
 
 def compute_noise_floor(
@@ -126,11 +134,17 @@ def compute_noise_floor(
     inner_fold_params: dict | None = None,
     fold_subset: Iterable[int] | None = None,
     station_codes: list[int] | None = None,
+    tank: TankParams | None = None,
     force: bool = False,
     verbose: bool = True,
 ) -> dict:
     """Compute `len(seeds_a)` R0-vs-R0 realised-CPL deltas and persist them to
     `<batch_dir>/noise_floor.json`.
+
+    tank (fps-15c): the TankParams every draw runs at, and the cadence stamped
+    into the payload's `tank_params`. None (default) resolves to `TankParams()`
+    — the canonical 7-day cadence (docs/CONVENTIONS.md) — same default every
+    other call in this pipeline resolves to when not overridden.
 
     Reads the frozen batch's own features + baseline column contract (declared,
     never discovered — same `baseline_columns.json` every candidate run reads,
@@ -178,6 +192,7 @@ def compute_noise_floor(
     # Merged, not replaced — same rationale as runner.py's run_candidate: a caller
     # overriding one key (say val_days) still gets a workable train_min_days.
     inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
+    tank = tank or TankParams()
 
     frame = load_features(batch_dir / "features.csv")  # .parquet sibling, batch_freeze convention
     check_baseline_contract(batch_dir, frame)
@@ -187,6 +202,7 @@ def compute_noise_floor(
     t0 = time.perf_counter()
     deltas: list[float] = []
     n_windows: int | None = None
+    tank_params: str | None = None
     for i, (seed_a, seed_b) in enumerate(zip(seeds_a, seeds_b, strict=True), start=1):
         kwargs = dict(
             outer_fold_params=outer_fold_params,
@@ -194,10 +210,11 @@ def compute_noise_floor(
             fold_subset=fold_subset,
             station_codes=station_codes,
             db_path=db_path,
+            tank=tank,
             verbose=verbose,
         )
-        cpl_a, n_windows_a = _baseline_cpl_held(frame, baseline_columns, seed_a, **kwargs)
-        cpl_b, n_windows_b = _baseline_cpl_held(frame, baseline_columns, seed_b, **kwargs)
+        cpl_a, n_windows_a, tank_params_a = _baseline_cpl_held(frame, baseline_columns, seed_a, **kwargs)
+        cpl_b, n_windows_b, tank_params_b = _baseline_cpl_held(frame, baseline_columns, seed_b, **kwargs)
         # Every draw walks the same frozen data + fold geometry, so both halves of a
         # pair — and every pair — must agree on how many windows they walked. A
         # mismatch means the two calls silently saw different fold geometry (e.g. a
@@ -214,6 +231,15 @@ def compute_noise_floor(
                 f"pair {i}: walked {n_windows_a} windows but pair 1 walked {n_windows} — "
                 "fold geometry must be identical across every draw."
             )
+        # Same shape as the n_windows check (fps-15c): both halves of a pair share
+        # one `tank`, so a mismatch here means run_paired_realised_backtest didn't
+        # actually run at the tank it was passed.
+        if tank_params_a != tank_params_b:
+            raise ValueError(
+                f"pair {i}: seed {seed_a} ran at tank_params {tank_params_a!r} but seed "
+                f"{seed_b} ran at {tank_params_b!r} — cadence must match within a pair."
+            )
+        tank_params = tank_params_a
         delta = cpl_b - cpl_a
         deltas.append(delta)
         if verbose:
@@ -243,6 +269,11 @@ def compute_noise_floor(
         # carry this). dossier_tables._noise_band() refuses to grade a candidate
         # whose own baseline_fingerprint doesn't match this one.
         "baseline_fingerprint": baseline_fingerprint(baseline_columns),
+        # The cadence every deltas_cpl_held value was produced at (fps-15c), read
+        # back off RealisedResult.meta rather than reformatted from `tank` here —
+        # the tank_params_a/tank_params_b cross-check above already confirmed both
+        # halves of every pair agree with it.
+        "tank_params": tank_params,
         # Fold geometry (fps-cf8's fourth pinned dependency, alongside the three
         # batch_freeze.py already pins): how many windows were walked, and the params
         # that produced that geometry.

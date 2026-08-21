@@ -43,6 +43,7 @@ import click
 import numpy as np
 import pandas as pd
 
+from fuel_signal.backtest import TankParams, require_tank_stamp
 from fuel_signal.dates import date_from_int
 from fuel_signal.db import DEFAULT_DB_PATH
 from fuel_signal.features import (
@@ -228,6 +229,7 @@ def freeze_batch(
     batches_dir: pathlib.Path = DEFAULT_BATCHES_DIR,
     skip_refresh: bool = False,
     skip_noise_floor: bool = False,
+    tank: TankParams | None = None,
 ) -> pathlib.Path:
     """Freeze one batch: refresh (hard-gated) -> snapshot data + DB -> pin the column
     contract -> compute the noise floor (fps-cf8).
@@ -235,6 +237,15 @@ def freeze_batch(
     Returns the batch directory. Raises FileExistsError if the batch dir already
     exists — a batch is frozen once; re-freezing an existing batch is very likely a
     mistake, not an update.
+
+    tank (fps-15c): the cadence this batch declares for every candidate run against
+    it, stamped into freeze.json's `tank_params` and passed straight through to
+    compute_noise_floor so the floor can never silently disagree with it. None
+    (default) resolves to `TankParams()` — the canonical 7-day cadence
+    (docs/CONVENTIONS.md) every other call in this pipeline resolves to when not
+    overridden. Not yet exposed as a CLI flag: moving it is a deliberate re-lock
+    (docs/CONVENTIONS.md § The decision cadence is a lock parameter), not a
+    per-batch knob.
 
     The noise floor (~10 single-arm fits, experiments/pipeline/noise_floor.py) is the
     final step so batch setup is one command instead of two that must be run in the
@@ -295,6 +306,7 @@ def freeze_batch(
         json.dumps(baseline_columns, indent=2) + "\n"
     )
 
+    tank = tank or TankParams()
     snapshot_date = _snapshot_date(df)
     manifest = {
         "batch": batch_name,
@@ -307,6 +319,12 @@ def freeze_batch(
         # run in the batch stamps the same value into its results.json, so two runs
         # can be checked for commensurability mechanically instead of by eye.
         "baseline_fingerprint": baseline_fingerprint(baseline_columns),
+        # The cadence this batch declares for every candidate run against it
+        # (fps-15c) — the same role baseline_fingerprint plays for column identity.
+        # `tank` is already resolved (never None) above, so this can never actually
+        # raise; routed through the shared guard anyway so every writer in this
+        # pipeline stamps the same way.
+        "tank_params": require_tank_stamp(tank, what="freeze_batch"),
     }
     (batch_dir / FREEZE_MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2) + "\n")
 
@@ -316,7 +334,7 @@ def freeze_batch(
         # call time, by which this module is always fully loaded.
         from experiments.pipeline.noise_floor import compute_noise_floor
 
-        compute_noise_floor(batch_dir)
+        compute_noise_floor(batch_dir, tank=tank)
 
     return batch_dir
 

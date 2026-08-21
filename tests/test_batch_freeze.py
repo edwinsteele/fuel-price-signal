@@ -161,6 +161,43 @@ def test_freeze_manifest_records_the_baseline_fingerprint(tmp_path):
     assert manifest["baseline_fingerprint"].startswith(f"{manifest['n_baseline_columns']}:")
 
 
+def test_freeze_manifest_records_the_default_tank_params(tmp_path):
+    """fps-15c: freeze.json declares the batch's cadence contract the same way
+    it declares baseline_fingerprint — the identity every run in the batch is
+    expected to agree with."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
+    )
+    manifest = json.loads((batch_dir / "freeze.json").read_text())
+    assert manifest["tank_params"] == "50/3.571/7d/10%"
+
+
+def test_freeze_batch_passes_its_tank_through_to_the_noise_floor(tmp_path, monkeypatch):
+    """The noise floor must be computed at the SAME tank freeze.json declares —
+    two independently-constructed TankParams() only agree by luck; passing the
+    one object through is what actually guarantees it."""
+    import experiments.pipeline.noise_floor as noise_floor_module
+    from fuel_signal.backtest import TankParams
+
+    calls: list[TankParams] = []
+    monkeypatch.setattr(
+        noise_floor_module, "compute_noise_floor", lambda batch_dir, **kw: calls.append(kw.get("tank"))
+    )
+
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    tank = TankParams(evaluation_interval_days=1)
+    freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True, tank=tank,
+    )
+
+    assert calls[-1] == tank
+
+
 def test_freeze_batch_writes_snapshot_and_manifest(tmp_path):
     df = _features_df()
     features_path, db_path = _write_source(tmp_path, df)

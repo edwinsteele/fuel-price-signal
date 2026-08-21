@@ -36,7 +36,8 @@
     "status": "rejected",
     "bead_id": null,
     "n_baseline_columns": 54,
-    "baseline_fingerprint": "54:1a6ec2d84a69"
+    "baseline_fingerprint": "54:1a6ec2d84a69",
+    "tank_params": "50/3.571/7d/10%"
   },
   "headline": {
     "realised": {

@@ -65,6 +65,7 @@ from fuel_signal.backtest import (
     TankParams,
     _evaluation_dates,
     load_history,
+    require_tank_stamp,
 )
 from fuel_signal.backtest_phase2 import aggregate_backtest
 from fuel_signal.calibrate import _CalibratedPipeline, pool_oof_predictions
@@ -640,6 +641,12 @@ def run_paired_realised_backtest(
         "arm_feature_columns": {a.name: list(_arm_cols(a, feature_columns)) for a in arms},
         "station_codes": station_codes,
         "seed": seed,
+        # The cadence every cpl_own/cpl_held value in per_window/aggregate/deltas was
+        # produced at (fps-15c) — `tank` is already resolved (never None) above, so
+        # this can never actually raise; the call still goes through the shared guard
+        # so every downstream reader can rely on the SAME stamping path, not a
+        # bespoke format_tank_params(tank) call that could drift from it.
+        "tank_params": require_tank_stamp(tank, what="run_paired_realised_backtest"),
         "held_tau": held_tau,
         "outer_fold_params": outer_fold_params,
         "inner_fold_params": inner_fold_params,
