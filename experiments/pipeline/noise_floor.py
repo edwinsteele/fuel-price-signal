@@ -1,46 +1,54 @@
-"""Noise-floor calibration (fps-3jj.9) — R0-vs-R0 pipeline noise, persisted once per batch.
+"""Noise-floor calibration (fps-3jj.9, reworked fps-awz) — a placebo-column null, persisted
+once per batch.
 
 The dossier (experiments/pipeline/dossier_tables.py's `_noise_band()`) already reads
-`<batch_dir>/noise_floor.json` and grades every candidate's realised delta against it;
-until this module ran, that file didn't exist and every dossier reported
-`facts["noise_band"]["available"] = False`. This module is the producer that satisfies
-that contract — the required key (`"deltas_cpl_held": [<float>, ...]`) and filename
-(`NOISE_FLOOR_FILENAME`) are fixed by dossier_tables.py, not redefined here. The payload
-also carries provenance (seeds, fold_subset, a "partial" flag, timestamp, git SHA,
-`baseline_fingerprint`, fold geometry, wall_seconds) — `baseline_fingerprint` IS required
-by dossier_tables.py's `_noise_band()` (fps-cf8: it refuses to grade a candidate against a
-floor whose fingerprint doesn't match the candidate's own), the rest is for a human
-debugging a batch later.
+`<batch_dir>/noise_floor.json` and grades every candidate's realised delta against it — the
+required key (`"deltas_cpl_held": [<float>, ...]`) and filename (`NOISE_FLOOR_FILENAME`) are
+fixed by dossier_tables.py, not redefined here. The payload also carries provenance (seed,
+draw construction, a "partial" flag, timestamp, git SHA, `baseline_fingerprint`, fold
+geometry, wall_seconds) — `baseline_fingerprint` IS required by dossier_tables.py's
+`_noise_band()` (fps-cf8: it refuses to grade a candidate against a floor whose fingerprint
+doesn't match the candidate's own), the rest is for a human debugging a batch later.
 
-Why this shape (see fps-3jj.9's bd description for the full history): a placebo arm
-compares a noisy number against a noisy ruler; a permuted-column null needs a
-permutation axis matching the axis the candidate claims to carry information on, and
-for a market-wide series like tgp_delta_7d (one value per date, shared by every
-station) a within-date permutation is a no-op — so neither approach gives a single
-universal ruler. The owner's replacement, implemented here: fit the SAME frozen
-baseline (same 54 columns, same data) at two different seeds and take the realised-CPL
-delta. That delta is pure pipeline fit noise by construction — no definition of an
-"uninformative column" is needed, so the market-wide-series problem never arises.
+Why this shape (fps-awz, reopening fps-3jj.9's original seed-swap design — see that bead's
+own "Why 1"): a real candidate's `effect_delta_cpl_held` holds seed, data, and folds fixed
+and adds ONE column, so the fit's idiosyncrasy is common-mode and cancels in the difference.
+The seed-swap null this replaces held columns fixed and re-rolled the SEED instead — a
+different, unpaired perturbation with no fixed ratio to the one a candidate actually
+measures (batch0: baseline and candidate arms agreed on 741/752 fills, a near-total
+cancellation the seed-swap null can't reproduce). The replacement here fits the SAME frozen
+baseline at a SINGLE fixed seed (`PLACEBO_SEED_DEFAULT`, matching `runner.py`'s own
+`realised_seed` default for the realised arbiter) across every draw, adding one PLACEBO
+column each time — `experiments/pipeline/placebo.py` builds it as a circular time-shift of a
+real baseline column along whichever axis that column actually varies on, so it resembles a
+real feature in distribution/autocorrelation while its alignment to the target is destroyed,
+and — unlike a naive within-date shuffle — never degenerates to a no-op against a market-wide
+column (see placebo.py's module docstring for why that matters: 39 of the 54 locked columns
+are market-wide).
 
-Limit (explicit in the bd issue, repeated here so a reader of noise_floor.json alone
-gets it too): this measures fit instability from the seed alone, not the specific
-perturbation of adding a candidate column. A candidate delta inside this floor is
-noise; one just outside it is not necessarily signal — a floor, not the true band.
+Cost: every draw shares the exact same baseline arm (same frame, columns, seed, tank, folds)
+— only the placebo arm changes — so `run_paired_realised_backtest`'s existing
+`baseline_cache` mechanism (fps-e2l) lets draws 2..N skip refitting the baseline entirely.
+Draw 1 pays a full baseline + placebo fit; every later draw pays only the placebo arm. This
+keeps `DEFAULT_N_DRAWS = 20` roughly "1 baseline fit + 20 placebo fits", not "40 fits".
 
-`SEEDS_A`/`SEEDS_B` pair index-wise (42↔47, 43↔48, ...) into `len(SEEDS_A)` independent
-draws, each costing one single-arm (baseline only, no candidate) full walk-forward fit
-per seed — 10 fits total for the 5-pair default. Because a batch is frozen (data + DB
-pinned), every draw is deterministic, so this runs once at batch-setup time and is
-cached to disk from then on.
+The OLD seed-swap null is NOT deleted — it measures something real (pure fit-instability
+from the seed alone), just not the quantity the gate needs. It's retained as a separate,
+explicitly-invoked diagnostic: `compute_fit_stability_diagnostic()` below, writing its own
+`fit_stability.json`. It is NOT called automatically by `compute_noise_floor()` or
+`batch_freeze.freeze_batch()` — wiring it into the automatic path would roughly double batch
+setup's wall-clock for a number the gate doesn't consume.
 
-fps-cf8: `batch_freeze.py`'s `freeze_batch()` now calls `compute_noise_floor()` as its
-own final step, so batch setup is one command and the floor cannot be forgotten or run
-against a different snapshot than the one it grades. This module's CLI remains for
-recomputing a floor on its own (e.g. after `--skip-noise-floor`, or with `--force`
-after a re-lock invalidates the existing one — see docs/CONVENTIONS.md).
+fps-cf8: `batch_freeze.py`'s `freeze_batch()` calls `compute_noise_floor()` as its own final
+step, so batch setup is one command and the floor cannot be forgotten or run against a
+different snapshot than the one it grades. This module's CLI remains for recomputing a floor
+on its own (e.g. after `--skip-noise-floor`, or with `--force` after a re-lock invalidates
+the existing one — see docs/CONVENTIONS.md).
 
 Usage (recompute a floor for an already-frozen batch):
   PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch-name> --force
+Usage (recompute the fit-stability diagnostic, a separate opt-in artifact):
+  PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch-name> --fit-stability --force
 """
 from __future__ import annotations
 
@@ -51,10 +59,11 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 
 import click
+import numpy as np
 
 from experiments.lib.constants import SEEDS
-from experiments.lib.io import current_git_sha
-from experiments.lib.realised import ArmSpec, run_paired_realised_backtest
+from experiments.lib.io import current_git_sha, to_jsonable
+from experiments.lib.realised import ArmSpec, BaselineCache, run_paired_realised_backtest
 from experiments.pipeline.batch_freeze import (
     BASELINE_COLUMNS_FILENAME,
     DEFAULT_BATCHES_DIR,
@@ -62,18 +71,211 @@ from experiments.pipeline.batch_freeze import (
     check_baseline_contract,
 )
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
+from experiments.pipeline.placebo import (
+    PLACEBO_COLUMN_NAME,
+    make_placebo_series,
+    select_draws,
+)
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
 from fuel_signal.backtest import TankParams
 from fuel_signal.features import baseline_fingerprint, load_features
 
 BASELINE_ARM_NAME = "baseline"
+PLACEBO_ARM_NAME = "placebo"
 
-# The starting idea recorded on fps-3jj.9: fit R0 with SEEDS (42..46), fit it again
-# with a disjoint second group, take the realised-CPL delta. Paired index-wise here
-# (42 vs 47, 43 vs 48, ...) rather than as two 5-seed ensembles, so the result is a
-# BAND of 5 draws (the acceptance criterion) rather than a single point.
+# ~20 draws (fps-awz "Why 3"): the gate now reads a t-based distance from the band, which
+# needs enough points that the band's own std is worth trusting — 5 draws (the old default)
+# gives only 4 degrees of freedom.
+DEFAULT_N_DRAWS = 20
+
+# The realised arbiter's own single-seed default (runner.py's `realised_seed: int =
+# SEEDS[0]`) — held fixed across every draw, matching what a real candidate's
+# effect_delta_cpl_held is actually measured at, rather than varying it the way the old
+# seed-swap null did.
+PLACEBO_SEED_DEFAULT: int = SEEDS[0]
+
+FIT_STABILITY_FILENAME = "fit_stability.json"
+
+# Retained diagnostic only (see module docstring) — the original fps-3jj.9 seed pairing.
 SEEDS_A: tuple[int, ...] = SEEDS
 SEEDS_B: tuple[int, ...] = (47, 48, 49, 50, 51)
+
+
+def _load_batch(batch_dir: pathlib.Path):
+    """Common batch-loading + contract check shared by both artifacts below."""
+    frame = load_features(batch_dir / "features.csv")  # .parquet sibling, batch_freeze convention
+    check_baseline_contract(batch_dir, frame)
+    baseline_columns = json.loads((batch_dir / BASELINE_COLUMNS_FILENAME).read_text())
+    db_path = batch_dir / FROZEN_DB_FILENAME
+    return frame, baseline_columns, db_path
+
+
+def compute_noise_floor(
+    batch_dir: pathlib.Path,
+    *,
+    n_draws: int = DEFAULT_N_DRAWS,
+    seed: int = PLACEBO_SEED_DEFAULT,
+    outer_fold_params: dict | None = None,
+    inner_fold_params: dict | None = None,
+    fold_subset: Iterable[int] | None = None,
+    station_codes: list[int] | None = None,
+    tank: TankParams | None = None,
+    force: bool = False,
+    verbose: bool = True,
+) -> dict:
+    """Compute `n_draws` placebo-column realised-CPL deltas and persist them to
+    `<batch_dir>/noise_floor.json`.
+
+    Every draw is a two-arm `run_paired_realised_backtest` call: the frozen baseline vs the
+    SAME baseline plus one placebo column (`experiments.pipeline.placebo`), at the SAME
+    fixed `seed` throughout, `held_tau=None` (baseline's own per-fold τ is the held τ — the
+    same contract runner.py's real candidate runs use). `delta = placebo.cpl_held -
+    baseline.cpl_held` is exactly the operation `effect_delta_cpl_held` measures for a real
+    candidate, so the resulting band is commensurable with it.
+
+    tank (fps-15c): the TankParams every draw runs at, and the cadence stamped into the
+    payload's `tank_params`. None (default) resolves to `TankParams()` — the canonical
+    7-day cadence (docs/CONVENTIONS.md) — same default every other call in this pipeline
+    resolves to when not overridden.
+
+    Reads the frozen batch's own features + baseline column contract (declared, never
+    discovered — same `baseline_columns.json` every candidate run reads, fps-sa1) and its
+    cloned DB, so this reproduces the exact fit + realised-backtest path a candidate run
+    takes, minus the candidate's own feature. Also re-checks that contract against the
+    current code (`check_baseline_contract`, same call every candidate run makes) so a
+    code-side FEATURE_COLUMNS drift since freeze is caught here too, not just silently fit
+    against a stale list.
+
+    Returns the written payload. Raises:
+      - FileExistsError if `<batch_dir>/noise_floor.json` already exists and `force` is not
+        set — a full calibration already sitting there is the ruler every dossier so far was
+        graded against; overwriting it silently (e.g. from a re-run) would move that ruler
+        under them after the fact.
+      - BaselineContractMismatch (via check_baseline_contract) on column drift.
+      - ValueError (via placebo.select_draws) if n_draws exceeds the baseline column count
+        or the shift-day pool size.
+    """
+    batch_dir = pathlib.Path(batch_dir)
+    out_path = batch_dir / NOISE_FLOOR_FILENAME
+    if out_path.exists() and not force:
+        raise FileExistsError(
+            f"{out_path} already exists. Every dossier written so far was graded against it — "
+            "pass force=True (CLI: --force) only if you intend to replace that ruler for the "
+            "whole batch, not just for this run."
+        )
+
+    outer_fold_params = dict(outer_fold_params or {})
+    inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
+    tank = tank or TankParams()
+
+    frame, baseline_columns, db_path = _load_batch(batch_dir)
+    draws = select_draws(baseline_columns, n_draws)
+
+    t0 = time.perf_counter()
+    deltas: list[float] = []
+    placebo_draws: list[dict] = []
+    n_windows: int | None = None
+    tank_params: str | None = None
+    baseline_cache: BaselineCache | None = None
+    for i, (source_column, shift_days) in enumerate(draws, start=1):
+        placebo_series = make_placebo_series(frame, source_column, shift_days)
+        placebo_frame = frame.assign(**{PLACEBO_COLUMN_NAME: placebo_series})
+        arms = [
+            ArmSpec(BASELINE_ARM_NAME, frame, feature_columns=baseline_columns),
+            ArmSpec(
+                PLACEBO_ARM_NAME, placebo_frame,
+                feature_columns=[*baseline_columns, PLACEBO_COLUMN_NAME],
+            ),
+        ]
+        result = run_paired_realised_backtest(
+            arms, baseline_columns,
+            seed=seed,
+            held_tau=None,
+            station_codes=station_codes,
+            outer_fold_params=outer_fold_params,
+            inner_fold_params=inner_fold_params,
+            fold_subset=fold_subset,
+            db_path=db_path,
+            tank=tank,
+            collect_fills=False,
+            baseline_cache=baseline_cache,
+            verbose=verbose,
+        )
+        if result.baseline_cache is not None:
+            baseline_cache = result.baseline_cache
+
+        agg = result.aggregate.set_index("arm")
+        delta = float(agg.loc[PLACEBO_ARM_NAME, "cpl_held"] - agg.loc[BASELINE_ARM_NAME, "cpl_held"])
+        draw_n_windows = int(result.meta["n_windows"])
+        draw_tank_params = result.meta["tank_params"]
+
+        # Every draw walks the same frozen data + fold geometry and the same tank, so all
+        # of them must agree — a mismatch means something changed mid-run (config drift),
+        # which would make the deltas incomparable (fps-15c: cadence must match, same shape
+        # as the n_windows check).
+        if n_windows is None:
+            n_windows = draw_n_windows
+            tank_params = draw_tank_params
+        elif draw_n_windows != n_windows:
+            raise ValueError(
+                f"draw {i} ({source_column!r}): walked {draw_n_windows} windows but draw 1 "
+                f"walked {n_windows} — fold geometry must be identical across every draw."
+            )
+        elif draw_tank_params != tank_params:
+            raise ValueError(
+                f"draw {i} ({source_column!r}): ran at tank_params {draw_tank_params!r} but "
+                f"draw 1 ran at {tank_params!r} — cadence must match across every draw."
+            )
+
+        # Cheap, label-free self-check: correlation between the shifted series and the
+        # column's own unshifted values. Should sit near 0 — a value close to 1 would mean
+        # the "shift" accidentally no-opped (e.g. a degenerate _effective_shift), silently
+        # narrowing the floor with a column that still carries its original signal.
+        shift_autocorrelation = float(
+            np.corrcoef(placebo_series.to_numpy(dtype=float), frame[source_column].to_numpy(dtype=float))[0, 1]
+        )
+        deltas.append(delta)
+        placebo_draws.append(
+            {
+                "source_column": source_column,
+                "shift_days": shift_days,
+                "shift_autocorrelation": shift_autocorrelation,
+            }
+        )
+        if verbose:
+            print(
+                f"[noise_floor] draw {i}/{len(draws)} ({source_column}, shift={shift_days}): "
+                f"delta_cpl_held={delta:+.4f} shift_autocorr={shift_autocorrelation:+.3f}",
+                flush=True,
+            )
+
+    wall_seconds = time.perf_counter() - t0
+    payload = {
+        "deltas_cpl_held": deltas,
+        "n_draws": len(draws),
+        "seed": seed,
+        "placebo_draws": placebo_draws,
+        "fold_subset": list(fold_subset) if fold_subset is not None else None,
+        # fold_subset is documented as an iteration/smoke speed-up, not a real calibration —
+        # a partial-fold floor is not comparable to effect_delta_cpl_held, which always pools
+        # every fold. dossier_tables._noise_band() refuses a "partial": true floor outright.
+        "partial": fold_subset is not None,
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "git_sha": current_git_sha(),
+        "baseline_fingerprint": baseline_fingerprint(baseline_columns),
+        "tank_params": tank_params,
+        "n_windows": n_windows,
+        "outer_fold_params": outer_fold_params,
+        "inner_fold_params": inner_fold_params,
+        "wall_seconds": wall_seconds,
+    }
+    out_path.write_text(json.dumps(to_jsonable(payload), indent=2) + "\n")
+    if verbose:
+        print(
+            f"[noise_floor] wrote {len(deltas)} draws to {out_path} in {wall_seconds:.1f}s",
+            flush=True,
+        )
+    return payload
 
 
 def _baseline_cpl_held(
@@ -89,23 +291,9 @@ def _baseline_cpl_held(
     tank: TankParams,
     verbose: bool,
 ) -> tuple[float, int, str]:
-    """Fit the baseline alone (no candidate arm) at `seed`; return (cpl_held,
-    n_windows, tank_params).
-
-    held_tau=None means the baseline's own per-fold τ IS the held τ (see
-    experiments/lib/realised.py's module docstring), so with a single arm cpl_held
-    equals cpl_own — this is exactly the R0 fit + realised-backtest path every
-    candidate run pays for, just without a candidate arm alongside it.
-
-    n_windows is the fold geometry actually walked (experiments/lib/realised.py's
-    RealisedResult.meta) — a fourth dependency the floor pins alongside the three
-    batch_freeze.py already pins (features, DB, baseline columns), so a later fold-
-    geometry change is visible in noise_floor.json rather than silently drifting the
-    ruler out from under it.
-
-    tank_params (fps-15c) is read back off the SAME RealisedResult.meta, not
-    reformatted from `tank` here — so it cannot disagree with the cadence the
-    deltas were actually produced at.
+    """Fit the baseline alone (no candidate/placebo arm) at `seed`; return (cpl_held,
+    n_windows, tank_params). Used only by `compute_fit_stability_diagnostic` below — the
+    retained seed-swap diagnostic, not the noise-floor gate.
     """
     result = run_paired_realised_backtest(
         [ArmSpec(BASELINE_ARM_NAME, frame, feature_columns=baseline_columns)],
@@ -125,7 +313,7 @@ def _baseline_cpl_held(
     return cpl_held, int(result.meta["n_windows"]), result.meta["tank_params"]
 
 
-def compute_noise_floor(
+def compute_fit_stability_diagnostic(
     batch_dir: pathlib.Path,
     *,
     seeds_a: tuple[int, ...] = SEEDS_A,
@@ -138,33 +326,21 @@ def compute_noise_floor(
     force: bool = False,
     verbose: bool = True,
 ) -> dict:
-    """Compute `len(seeds_a)` R0-vs-R0 realised-CPL deltas and persist them to
-    `<batch_dir>/noise_floor.json`.
+    """The ORIGINAL fps-3jj.9 seed-swap null, kept as an explicitly-invoked diagnostic —
+    NOT the noise-floor gate `dossier_tables._noise_band()` reads (that's
+    `compute_noise_floor()` above). Writes `<batch_dir>/fit_stability.json`.
 
-    tank (fps-15c): the TankParams every draw runs at, and the cadence stamped
-    into the payload's `tank_params`. None (default) resolves to `TankParams()`
-    — the canonical 7-day cadence (docs/CONVENTIONS.md) — same default every
-    other call in this pipeline resolves to when not overridden.
+    Measures pure fit instability from the seed alone: the SAME frozen baseline (same
+    columns, same data), fit at two different seed groups, realised-CPL delta. Real — this
+    is a legitimate reproducibility check on the pipeline itself — but a DIFFERENT,
+    unpaired perturbation from "add one column at a fixed seed", which is why fps-awz moved
+    the gate off it (see this module's docstring). Not called by `compute_noise_floor()` or
+    `batch_freeze.freeze_batch()`: wiring it into the automatic path would roughly double
+    batch-setup wall-clock for a number nothing downstream consumes.
 
-    Reads the frozen batch's own features + baseline column contract (declared,
-    never discovered — same `baseline_columns.json` every candidate run reads,
-    fps-sa1) and its cloned DB, so this reproduces the exact fit + realised-backtest
-    path a candidate run takes, minus the candidate arm. Also re-checks that
-    contract against the current code (`check_baseline_contract`, same call every
-    candidate run makes) so a code-side FEATURE_COLUMNS drift since freeze is
-    caught here too, not just silently fit against a stale list.
-
-    Returns the written payload. Raises:
-      - ValueError if seeds_a/seeds_b aren't the same length (they pair 1:1 into
-        one draw per pair, so a length mismatch means some seed has no partner),
-        or if either group has a repeated seed, or the two groups overlap — a
-        shared/repeated seed pairs a fit against itself and writes a zero delta,
-        silently narrowing the floor.
-      - FileExistsError if `<batch_dir>/noise_floor.json` already exists and
-        `force` is not set — a full calibration already sitting there is the
-        ruler every dossier so far was graded against; overwriting it silently
-        (e.g. from a re-run) would move that ruler under them after the fact.
-      - BaselineContractMismatch (via check_baseline_contract) on column drift.
+    Raises the same shape of errors as the old `compute_noise_floor` did: mismatched/
+    repeated/overlapping seed groups, an existing file without `force`, or a baseline
+    contract drift.
     """
     if len(seeds_a) != len(seeds_b):
         raise ValueError(
@@ -180,24 +356,18 @@ def compute_noise_floor(
         )
 
     batch_dir = pathlib.Path(batch_dir)
-    out_path = batch_dir / NOISE_FLOOR_FILENAME
+    out_path = batch_dir / FIT_STABILITY_FILENAME
     if out_path.exists() and not force:
         raise FileExistsError(
-            f"{out_path} already exists. Every dossier written so far was graded against it — "
-            "pass force=True (CLI: --force) only if you intend to replace that ruler for the "
-            "whole batch, not just for this run."
+            f"{out_path} already exists. Pass force=True (CLI: --force) only if you intend "
+            "to replace it."
         )
 
     outer_fold_params = dict(outer_fold_params or {})
-    # Merged, not replaced — same rationale as runner.py's run_candidate: a caller
-    # overriding one key (say val_days) still gets a workable train_min_days.
     inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
     tank = tank or TankParams()
 
-    frame = load_features(batch_dir / "features.csv")  # .parquet sibling, batch_freeze convention
-    check_baseline_contract(batch_dir, frame)
-    baseline_columns = json.loads((batch_dir / BASELINE_COLUMNS_FILENAME).read_text())
-    db_path = batch_dir / FROZEN_DB_FILENAME
+    frame, baseline_columns, db_path = _load_batch(batch_dir)
 
     t0 = time.perf_counter()
     deltas: list[float] = []
@@ -215,10 +385,6 @@ def compute_noise_floor(
         )
         cpl_a, n_windows_a, tank_params_a = _baseline_cpl_held(frame, baseline_columns, seed_a, **kwargs)
         cpl_b, n_windows_b, tank_params_b = _baseline_cpl_held(frame, baseline_columns, seed_b, **kwargs)
-        # Every draw walks the same frozen data + fold geometry, so both halves of a
-        # pair — and every pair — must agree on how many windows they walked. A
-        # mismatch means the two calls silently saw different fold geometry (e.g. a
-        # config change mid-run), which would make the deltas incomparable.
         if n_windows_a != n_windows_b:
             raise ValueError(
                 f"pair {i}: seed {seed_a} walked {n_windows_a} windows but seed {seed_b} "
@@ -231,9 +397,6 @@ def compute_noise_floor(
                 f"pair {i}: walked {n_windows_a} windows but pair 1 walked {n_windows} — "
                 "fold geometry must be identical across every draw."
             )
-        # Same shape as the n_windows check (fps-15c): both halves of a pair share
-        # one `tank`, so a mismatch here means run_paired_realised_backtest didn't
-        # actually run at the tank it was passed.
         if tank_params_a != tank_params_b:
             raise ValueError(
                 f"pair {i}: seed {seed_a} ran at tank_params {tank_params_a!r} but seed "
@@ -244,16 +407,11 @@ def compute_noise_floor(
         deltas.append(delta)
         if verbose:
             print(
-                f"[noise_floor] pair {i}/{len(seeds_a)} (seed {seed_a} vs {seed_b}): "
+                f"[fit_stability] pair {i}/{len(seeds_a)} (seed {seed_a} vs {seed_b}): "
                 f"delta_cpl_held={delta:+.4f}",
                 flush=True,
             )
 
-    # fold_subset is documented as an iteration/smoke speed-up, not a real calibration —
-    # a partial-fold floor is not comparable to effect_delta_cpl_held, which always pools
-    # every fold. Tagging it "partial" (rather than just omitting the metadata) means
-    # dossier_tables._noise_band() can refuse it outright instead of silently grading
-    # every candidate against a ruler that only covers some folds.
     wall_seconds = time.perf_counter() - t0
     payload = {
         "deltas_cpl_held": deltas,
@@ -263,29 +421,17 @@ def compute_noise_floor(
         "partial": fold_subset is not None,
         "computed_at": datetime.now(timezone.utc).isoformat(),
         "git_sha": current_git_sha(),
-        # Identity of the R0 these draws were fit against (fps-cf8, closing the gap
-        # left by fps-zci item 5: the noise floor is a run whose number is compared
-        # against EVERY candidate's, and until now it was the one run that didn't
-        # carry this). dossier_tables._noise_band() refuses to grade a candidate
-        # whose own baseline_fingerprint doesn't match this one.
         "baseline_fingerprint": baseline_fingerprint(baseline_columns),
-        # The cadence every deltas_cpl_held value was produced at (fps-15c), read
-        # back off RealisedResult.meta rather than reformatted from `tank` here —
-        # the tank_params_a/tank_params_b cross-check above already confirmed both
-        # halves of every pair agree with it.
         "tank_params": tank_params,
-        # Fold geometry (fps-cf8's fourth pinned dependency, alongside the three
-        # batch_freeze.py already pins): how many windows were walked, and the params
-        # that produced that geometry.
         "n_windows": n_windows,
         "outer_fold_params": outer_fold_params,
         "inner_fold_params": inner_fold_params,
         "wall_seconds": wall_seconds,
     }
-    out_path.write_text(json.dumps(payload, indent=2) + "\n")
+    out_path.write_text(json.dumps(to_jsonable(payload), indent=2) + "\n")
     if verbose:
         print(
-            f"[noise_floor] wrote {len(deltas)} draws to {out_path} in {wall_seconds:.1f}s",
+            f"[fit_stability] wrote {len(deltas)} draws to {out_path} in {wall_seconds:.1f}s",
             flush=True,
         )
     return payload
@@ -317,6 +463,16 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     help="Parent directory for batch snapshots.",
 )
 @click.option(
+    "--n-draws", default=DEFAULT_N_DRAWS, show_default=True,
+    help="Number of placebo draws. Ignored with --fit-stability (that diagnostic is always "
+    "seed-paired at the module's SEEDS_A/SEEDS_B defaults — not a CLI-overridable option).",
+)
+@click.option(
+    "--fit-stability", is_flag=True, default=False,
+    help="Compute the retained seed-swap diagnostic (fit_stability.json) instead of the "
+    "noise-floor gate (noise_floor.json). Not part of the automatic batch-freeze path.",
+)
+@click.option(
     "--fold-subset", default=None,
     help="Comma-separated 1-indexed outer folds, e.g. '1,2'. Iteration/smoke speed-up ONLY — "
     "the result covers a partial fold set and is written as 'partial': true, which the "
@@ -324,14 +480,22 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
 )
 @click.option(
     "--force", is_flag=True, default=False,
-    help="Overwrite an existing noise_floor.json for this batch. Every dossier written so "
-    "far was graded against it — only pass this if you intend to replace that ruler.",
+    help="Overwrite an existing output file for this batch. Every dossier written so far "
+    "was graded against the noise floor — only pass this if you intend to replace that "
+    "ruler.",
 )
-def main(batch_name: str, batches_dir: str, fold_subset: str | None, force: bool) -> None:
+def main(
+    batch_name: str, batches_dir: str, n_draws: int, fit_stability: bool,
+    fold_subset: str | None, force: bool,
+) -> None:
     """Compute and persist the noise-floor calibration for an already-frozen batch."""
     batch_dir = pathlib.Path(batches_dir) / batch_name
     subset = _parse_fold_subset(fold_subset)
-    compute_noise_floor(batch_dir, fold_subset=subset, force=force)
+    if fit_stability:
+        compute_fit_stability_diagnostic(batch_dir, fold_subset=subset, force=force)
+        click.echo(f"Wrote fit-stability diagnostic for batch '{batch_name}' -> {batch_dir / FIT_STABILITY_FILENAME}")
+        return
+    compute_noise_floor(batch_dir, n_draws=n_draws, fold_subset=subset, force=force)
     click.echo(f"Wrote noise floor for batch '{batch_name}' -> {batch_dir / NOISE_FLOOR_FILENAME}")
 
 

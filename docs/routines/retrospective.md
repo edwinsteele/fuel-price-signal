@@ -49,16 +49,20 @@ Four sections, matching the parent bead's acceptance criteria:
    don't silently read their absence as "these did nothing," they simply have no result.
 
 2. **Noise-band comparison, with the multiple-comparisons correction already applied.**
-   `family_wise_percentile_threshold` is a Bonferroni correction on the raw 95th
-   percentile, computed over the number of DOSSIERED candidates in this batch: with N
-   candidates graded against the same noise band, picking the best of N is a different,
-   easier-to-satisfy-by-chance question than grading one candidate alone (order
-   statistics) — the bead body calls this out explicitly ("the ranking step is exactly
-   where a noise delta gets promoted to a finding"). Each leaderboard row's
-   `clears_family_wise_threshold` uses this corrected bar, not the raw percentile. A
-   candidate sitting at, say, the 92nd percentile in a 5-candidate batch is NOT
-   surprising at the batch level even though it would be in a 1-candidate batch — say so
-   plainly if writing this up, rather than reporting the raw percentile alone.
+   `family_wise_z_threshold` (fps-awz) is a Bonferroni correction, computed over the number
+   of DOSSIERED candidates in this batch, on a t-distributed critical value in
+   band-standard-deviation space rather than percentile space — with N candidates graded
+   against the same noise band, picking the best of N is a different, easier-to-satisfy-by-
+   chance question than grading one candidate alone (order statistics) — the bead body calls
+   this out explicitly ("the ranking step is exactly where a noise delta gets promoted to a
+   finding"). Each leaderboard row's `clears_family_wise_threshold` uses this corrected bar
+   against `noise_band_z`, not `noise_band_percentile`. **`family_wise_percentile_threshold`
+   and `noise_band_percentile` are still in the payload, but are descriptive colour only** —
+   with the noise floor's draw count in the tens, not thousands, the empirical-rank
+   percentile only has `n_draws + 1` distinct values, which at the old 5-draw default meant
+   "gate on percentile" had silently collapsed to "beat every single draw" regardless of the
+   nominal threshold (fps-awz). Report the percentile as colour if it reads well, but the
+   verdict is `clears_family_wise_threshold`, not "candidate X sat at the 92nd percentile."
 
 3. **`outcome_tally`** — `total_candidates_filed` is the universe (every `.py` module
    under `experiments/candidates/<batch>/`), not just the ones that finished.
@@ -112,10 +116,17 @@ Commit `RETROSPECTIVE.md` + `retrospective_facts.json` together, straight to `ma
   permanently `blocked` in bd (`fps-rtd`'s mechanism). Telling these apart needs
   `bd show <id>` on the candidate's bead. Don't assume either state without checking.
 - **Small-N leaderboards are still correct, just not very informative.** Batch 0 has one
-  candidate; `family_wise_percentile_threshold(1)` reduces to the plain 95th percentile.
-  The mechanism is exercised end-to-end from batch 0, but the real payoff (a leaderboard
-  that actually differentiates candidates, and the start of a real confidence-calibration
-  read) arrives with `batch1` (5 candidates) and beyond.
+  candidate; `family_wise_percentile_threshold(1)` reduces to the plain 95th percentile, and
+  `family_wise_z_threshold(1, n_draws)` reduces to the plain one-tailed critical value at the
+  band's own draw count. The mechanism is exercised end-to-end from batch 0, but the real
+  payoff (a leaderboard that actually differentiates candidates, and the start of a real
+  confidence-calibration read) arrives with `batch1` (5 candidates) and beyond.
+- **`family_wise_z_threshold` needs `n_draws >= 2`.** With fewer draws the band's std can't
+  be estimated at all (no degrees of freedom for a t-critical value) — `noise_floor` (a
+  scalar) is `None` and every row's `clears_family_wise_threshold` is `False`, the same
+  condition under which `dossier_tables._noise_band()` already returns
+  `candidate_z_vs_band: None`. Not reachable at the fps-awz default of ~20 draws; only
+  matters if a batch's `noise_floor.json` was hand-computed with a very small `--n-draws`.
 
 ## The shim
 
