@@ -329,7 +329,7 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     def add_noise_floor(batch_dir):
         (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
             "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:deadbeef1234",
-            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
         }))
 
     run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
@@ -389,6 +389,27 @@ def test_build_facts_noise_band_refuses_a_mismatched_baseline_fingerprint(tmp_pa
     band = facts["noise_band"]
     assert band["available"] is False
     assert "fingerprint" in band["reason"]
+
+
+def test_build_facts_noise_band_refuses_a_mismatched_tank_params(tmp_path):
+    """fps-v8o: the consuming-side half of fps-15c's stamping work — a floor computed at
+    one cadence must not silently grade a run at a different cadence, the same failure
+    class the baseline_fingerprint check guards along the feature-set axis."""
+    noise_deltas = list(np.random.default_rng(2).normal(0, 0.02, size=20))
+
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/1d/10%",
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor, tank_params="50/3.571/7d/10%")
+
+    facts = dt.build_facts(run_dir)
+
+    band = facts["noise_band"]
+    assert band["available"] is False
+    assert "tank_params" in band["reason"]
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────
@@ -549,7 +570,7 @@ def test_process_run_facts_json_is_strictly_valid_even_with_a_single_draw_noise_
     def add_noise_floor(batch_dir):
         (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
             "deltas_cpl_held": [0.01], "baseline_fingerprint": "54:deadbeef1234",
-            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
         }))
 
     run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
