@@ -181,6 +181,11 @@ variable there, just under a different key name than this scan looks for — and
 `retrospective_facts.json`, a derived artifact built entirely from already-stamped
 `facts.json`/`noise_floor.json` whose own propagation is `fps-aam`.
 
+The consuming side of this contract lives in `dossier_tables._noise_band()`
+(`fps-v8o`): it refuses (`available: false`) whenever a candidate run's
+`tank_params` doesn't match `noise_floor.json`'s, mirroring the existing
+`baseline_fingerprint`-mismatch refusal (`fps-cf8`) along the cadence axis.
+
 `batch0`'s `freeze.json`, `noise_floor.json`, and `tgp_delta_7d`'s `results.json` /
 `facts.json` were backfilled with `tank_params: "50/3.571/7d/10%"` — the batch was
 frozen and every candidate in it ran before this field existed, entirely at the

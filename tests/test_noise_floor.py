@@ -427,7 +427,8 @@ def test_dossier_tables_consumes_the_written_file(tmp_path, monkeypatch):
     fp = _matching_fingerprint(batch_dir)
 
     band = dt._noise_band(
-        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp}}, batch_dir
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp, "tank_params": _DEFAULT_TANK_PARAMS}},
+        batch_dir,
     )
 
     assert band["available"] is True
@@ -445,7 +446,8 @@ def test_dossier_tables_refuses_a_partial_fold_subset_file(tmp_path, monkeypatch
     fp = _matching_fingerprint(batch_dir)
 
     band = dt._noise_band(
-        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp}}, batch_dir
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp, "tank_params": _DEFAULT_TANK_PARAMS}},
+        batch_dir,
     )
 
     assert band["available"] is False
@@ -469,6 +471,26 @@ def test_dossier_tables_refuses_a_mismatched_fingerprint(tmp_path, monkeypatch):
 
     assert band["available"] is False
     assert "fingerprint" in band["reason"]
+
+
+def test_dossier_tables_refuses_a_mismatched_tank_params(tmp_path, monkeypatch):
+    """fps-v8o: a floor computed at one cadence must not silently grade a candidate
+    run stamped with a different tank_params — the consuming-side half of fps-15c."""
+    import experiments.pipeline.dossier_tables as dt
+
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [1.0], tank_params=_DEFAULT_TANK_PARAMS)
+    compute_noise_floor(batch_dir, n_draws=1, verbose=False)
+    fp = _matching_fingerprint(batch_dir)
+
+    band = dt._noise_band(
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp, "tank_params": "50/3.571/1d/10%"}},
+        batch_dir,
+    )
+
+    assert band["available"] is False
+    assert "tank_params" in band["reason"]
 
 
 def test_dossier_tables_refuses_a_floor_with_no_fingerprint(tmp_path, monkeypatch):

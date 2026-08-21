@@ -280,9 +280,10 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     """`check_fingerprint=False` is for retrospective.py's `_batch_noise_summary`,
     which reuses this function's math to summarise a batch's floor on its own
     (mean/std/n_draws) rather than to grade any one candidate run against it — it
-    calls with a dummy `results` that has no real `meta.baseline_fingerprint` to
-    compare, so the per-run identity check below would always (mis)fire as a
-    mismatch. `build_facts()`, which DOES grade a real run, always uses the default.
+    calls with a dummy `results` that has no real `meta.baseline_fingerprint` or
+    `meta.tank_params` to compare, so the per-run identity checks below (fingerprint
+    AND tank_params/cadence, fps-v8o) would always (mis)fire as a mismatch.
+    `build_facts()`, which DOES grade a real run, always uses the default.
     """
     if batch_dir is None:
         return {"available": False, "reason": "no batch_dir recorded in results.json meta"}
@@ -328,6 +329,26 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             "rework (or was computed some other way) and does not grade this run. Recompute "
             "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
             "--force`.",
+        }
+    floor_tank_params = noise_floor.get("tank_params")
+    run_tank_params = results.get("meta", {}).get("tank_params")
+    if check_fingerprint and floor_tank_params != run_tank_params:
+        # fps-v8o: the consuming-side half of fps-15c's stamping work. A floor computed
+        # at one cadence (e.g. 7d) grades every draw's delta_cpl_held in that cadence's
+        # units — comparing a candidate run at a different cadence against it would
+        # silently misjudge the delta the same way a baseline_fingerprint mismatch would
+        # (fps-cf8), just along the cadence axis instead of the feature-set axis. A floor
+        # with no tank_params at all (pre-fps-v8o) is treated as a mismatch, not a pass —
+        # same "cannot be shown to match, so cannot be trusted" rule as the checks above.
+        # Gated on check_fingerprint like the fingerprint check itself: retrospective.py's
+        # `_batch_noise_summary` reuses this function's math with a dummy `results` that
+        # has no real meta.tank_params to compare.
+        return {
+            "available": False,
+            "reason": f"noise_floor.json's tank_params ({floor_tank_params!r}) does not match "
+            f"this run's ({run_tank_params!r}) — the floor was computed at a different cadence "
+            "(or predates tank_params entirely) and does not grade this run. Recompute with "
+            "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> --force`.",
         }
     if noise_floor.get("partial"):
         # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover
