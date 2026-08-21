@@ -67,6 +67,7 @@ by a human (or an interactive Claude session) at batch boundaries, not on a time
 experiments/
   batches/<batch>/            frozen snapshot: features.parquet, fuel_signal.db,
                                baseline_columns.json, freeze.json, noise_floor.json,
+                               fit_stability.json (opt-in diagnostic, not auto-computed),
                                r0_cache.joblib, retrospective_facts.json
   candidates/<batch>/
     <name>.py                 the candidate module itself (generator output)
@@ -114,11 +115,42 @@ the judgement session can crash and resume without losing the facts.
   deliberate PR. The pipeline's own terminal verdict for a feature that clears the arbiter is
   still just `rejected`/`disqualified` from ITS run; a human updates the ledger entry by hand
   once the graduation PR lands.
-- **Noise floor, not a placebo.** `noise_floor.py` fits the SAME frozen baseline at
-  paired seeds (production `SEEDS` 42–46 vs a disjoint 47–51) and takes the realised-CPL
-  delta — pure fit noise by construction, no definition of an "uninformative column" needed
-  (a per-night placebo/permuted-column null was considered and rejected: for a market-wide
-  series shared by every station, a within-date permutation is a no-op).
+- **Noise floor is now a placebo-column null (`fps-awz`, reopening the decision this bullet
+  used to record).** `noise_floor.py` fits the SAME frozen baseline at a SINGLE fixed seed
+  (matching the realised arbiter's own `realised_seed` default) ~20 times, adding one PLACEBO
+  column each draw — `experiments/pipeline/placebo.py` builds it as a circular time-shift of
+  a real baseline column along whichever axis that column actually varies on (market-wide/
+  per-date, or per-station), so it resembles a real feature in distribution and
+  autocorrelation while its date-alignment to the target is destroyed. This measures the SAME
+  operation a real candidate's `effect_delta_cpl_held` measures (hold seed/data/folds fixed,
+  add one column) — the earlier seed-swap null held columns fixed and varied the seed
+  instead, a different, unpaired perturbation with no fixed ratio to what candidates are
+  judged on. Seed-swap is retained, not deleted, as a separate opt-in diagnostic
+  (`noise_floor.py --fit-stability`, writing `fit_stability.json`, NOT part of the automatic
+  `batch_freeze` path) — it measures real fit instability, just not this. **The earlier
+  rejection of a per-NIGHT placebo still stands**: a fresh draw compared against a fresh
+  candidate every night is a different, noisier design than a fixed bank of ~20 draws
+  computed once at batch setup, the shape this replacement actually takes. A naive
+  within-date shuffle is also still unsafe for a market-wide series (45 of the 54 locked
+  columns are per-date, shared by every station on that date) — the construction shifts along
+  the axis a column actually varies on rather than shuffling across stations for exactly this
+  reason (see `placebo.py`'s module docstring).
+- **Named limitation: the bank systematically excludes level-like columns (`fps-d7m`,
+  filed against real batch0 data).** A circular shift cannot decorrelate a slowly-varying
+  column from itself at ANY offset, so the screen (below) doesn't reject a random subset —
+  on batch0 it excluded ALL FOUR cycle-magnitude columns and every price-level column,
+  every time, leaving a bank dominated by counters/phase/differences. A real candidate
+  feature can be level-like, so the band characterizes "adding a fast-varying column", not
+  "adding an arbitrary column" — a real gap in coverage, not a bug in the construction. See
+  `placebo.py`'s own docstring for the block-permutation alternative that would close it.
+- **The gate reads distance from the band, not empirical rank (`fps-awz`).**
+  `retrospective.py`'s `family_wise_z_threshold` is a Bonferroni-corrected, t-distributed
+  critical value in band-standard-deviation space; `clears_family_wise_threshold` compares
+  each candidate's `candidate_z_vs_band` against it. The empirical percentile
+  (`candidate_percentile_better_than_noise`) is still reported as descriptive colour but no
+  longer drives the gate — with a draw count in the tens, the empirical-rank statistic only
+  has `n_draws + 1` distinct values, so "gate on percentile" had silently collapsed to "beat
+  every single draw" at the old 5-draw default.
 - **The noise floor carries its own baseline identity, and a mismatch is refused, not
   trusted** (`fps-cf8`). `noise_floor.json` stamps `baseline_fingerprint` the same way every
   candidate run does; `dossier_tables._noise_band()` refuses (`available: False`) rather than
@@ -129,9 +161,11 @@ the judgement session can crash and resume without losing the facts.
   (`docs/CONVENTIONS.md`).
 - **Multiple comparisons in the retrospective.** Grading N candidates against the SAME noise
   band and asking "did the best one beat noise?" is a different, easier-to-satisfy-by-chance
-  question than grading one candidate alone. `retrospective.py`'s
-  `family_wise_percentile_threshold` applies a Bonferroni correction so a batch's leaderboard
-  doesn't silently promote a noise delta to a finding just because it was the best of several.
+  question than grading one candidate alone. `retrospective.py`'s `family_wise_z_threshold`
+  applies a Bonferroni correction (in band-standard-deviation space, `fps-awz`) so a batch's
+  leaderboard doesn't silently promote a noise delta to a finding just because it was the
+  best of several; `family_wise_percentile_threshold` is still computed too, purely as the
+  descriptive-colour percentile equivalent.
 
 ## Running it by hand
 

@@ -15,6 +15,7 @@ from experiments.pipeline.retrospective import (
     build_outcome_tally,
     compute_retrospective,
     family_wise_percentile_threshold,
+    family_wise_z_threshold,
     find_batch_candidates,
     main,
 )
@@ -196,19 +197,82 @@ def test_family_wise_threshold_rejects_non_positive_n():
         family_wise_percentile_threshold(0)
 
 
+# ── family_wise_z_threshold ─────────────────────────────────────────────────
+
+def test_family_wise_z_threshold_n1_matches_the_prediction_interval_formula():
+    """n_candidates=1 -> alpha unmodified; the returned threshold is the raw one-tailed
+    t-critical value inflated by sqrt(1 + 1/n_draws) — the prediction-interval correction
+    for comparing a NEW observation against a mean/std estimated from n_draws samples."""
+    import math
+
+    from scipy.stats import t as t_dist
+
+    expected = t_dist.ppf(0.95, df=19) * math.sqrt(1 + 1 / 20)
+    assert family_wise_z_threshold(1, 20) == pytest.approx(expected)
+
+
+def test_family_wise_z_threshold_exceeds_the_uncorrected_t_critical_value():
+    """The sqrt(1 + 1/n_draws) factor must make the threshold STRICTER (larger), not just
+    different — omitting it would make the gate too lax (review finding: ~2.5% lax at
+    n_draws=20, ~10% at n_draws=5)."""
+    from scipy.stats import t as t_dist
+
+    assert family_wise_z_threshold(1, 20) > t_dist.ppf(0.95, df=19)
+    assert family_wise_z_threshold(1, 5) > t_dist.ppf(0.95, df=4)
+
+
+def test_family_wise_z_threshold_rises_with_n_candidates():
+    assert family_wise_z_threshold(1, 20) < family_wise_z_threshold(5, 20)
+
+
+def test_family_wise_z_threshold_falls_with_more_draws():
+    """More draws -> more degrees of freedom -> a less extreme t-critical value (converges
+    toward the normal critical value as n_draws grows)."""
+    assert family_wise_z_threshold(5, 40) < family_wise_z_threshold(5, 5)
+
+
+def test_family_wise_z_threshold_rejects_non_positive_n_candidates():
+    with pytest.raises(ValueError, match=">= 1"):
+        family_wise_z_threshold(0, 20)
+
+
+def test_family_wise_z_threshold_rejects_too_few_draws():
+    with pytest.raises(ValueError, match=">= 2"):
+        family_wise_z_threshold(5, 1)
+
+
 # ── build_leaderboard ────────────────────────────────────────────────────
 
-def test_build_leaderboard_ranks_by_noise_percentile_descending():
-    low_band = {"available": True, "candidate_percentile_better_than_noise": 20.0, "candidate_z_vs_band": 1.0}
-    high_band = {"available": True, "candidate_percentile_better_than_noise": 90.0, "candidate_z_vs_band": -1.5}
+def test_build_leaderboard_ranks_by_noise_band_z_ascending():
+    """fps-awz: ranking is z-based (more negative = better, delta_cpl_held is a cost), not
+    percentile-based — percentile only has n_draws+1 distinct values and could tie/disagree
+    with the gate's own ordering at the ~20-draw default."""
+    worse_z = {"available": True, "candidate_percentile_better_than_noise": 20.0, "candidate_z_vs_band": 1.0}
+    better_z = {"available": True, "candidate_percentile_better_than_noise": 90.0, "candidate_z_vs_band": -1.5}
     entries = [
-        {"candidate": "low", "state": "dossiered", "facts": _facts("low", delta=0.02, noise_band=low_band)},
-        {"candidate": "high", "state": "dossiered", "facts": _facts("high", delta=-0.05, noise_band=high_band)},
+        {"candidate": "worse", "state": "dossiered", "facts": _facts("worse", delta=0.02, noise_band=worse_z)},
+        {"candidate": "better", "state": "dossiered", "facts": _facts("better", delta=-0.05, noise_band=better_z)},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
-    assert [r["candidate"] for r in rows] == ["high", "low"]
+    assert [r["candidate"] for r in rows] == ["better", "worse"]
+
+
+def test_build_leaderboard_falls_back_to_percentile_when_z_unavailable_batch_wide():
+    """When z can't be computed for the whole batch (e.g. noise_band_z is None on every
+    row) but the band itself is available, percentile is still a real ordering signal —
+    fall back to it rather than raw delta."""
+    band = {"available": True, "candidate_percentile_better_than_noise": 20.0, "candidate_z_vs_band": None}
+    band_high = {"available": True, "candidate_percentile_better_than_noise": 90.0, "candidate_z_vs_band": None}
+    entries = [
+        {"candidate": "worse", "state": "dossiered", "facts": _facts("worse", delta=0.02, noise_band=band)},
+        {"candidate": "better", "state": "dossiered", "facts": _facts("better", delta=-0.05, noise_band=band_high)},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert [r["candidate"] for r in rows] == ["better", "worse"]
 
 
 def test_build_leaderboard_falls_back_to_raw_delta_when_no_noise_band():
@@ -217,21 +281,49 @@ def test_build_leaderboard_falls_back_to_raw_delta_when_no_noise_band():
         {"candidate": "better", "state": "dossiered", "facts": _facts("better", delta=-0.05)},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
     # delta_cpl_held is a COST: more negative is better, so ascending sort.
     assert [r["candidate"] for r in rows] == ["better", "worse"]
 
 
-def test_build_leaderboard_clears_family_wise_threshold_flag():
-    band = {"available": True, "candidate_percentile_better_than_noise": 96.0, "candidate_z_vs_band": -2.0}
+def test_build_leaderboard_clears_family_wise_threshold_flag_reads_z_not_percentile():
+    """fps-awz: the gate is z <= -threshold, not percentile >= threshold. A 96th-percentile
+    candidate whose z doesn't clear the bar must NOT pass — this is exactly the failure mode
+    the rework fixes (percentile alone couldn't resolve past 'beat every draw')."""
+    clears = {"available": True, "candidate_percentile_better_than_noise": 96.0, "candidate_z_vs_band": -2.5}
+    percentile_only = {"available": True, "candidate_percentile_better_than_noise": 96.0, "candidate_z_vs_band": -1.0}
     entries = [
-        {"candidate": "borderline", "state": "dossiered", "facts": _facts("borderline", noise_band=band)},
+        {"candidate": "clears", "state": "dossiered", "facts": _facts("clears", noise_band=clears)},
+        {
+            "candidate": "percentile_only", "state": "dossiered",
+            "facts": _facts("percentile_only", noise_band=percentile_only),
+        },
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
-    assert rows[0]["clears_family_wise_threshold"] is True
+    clears_row = next(r for r in rows if r["candidate"] == "clears")
+    percentile_only_row = next(r for r in rows if r["candidate"] == "percentile_only")
+    assert clears_row["clears_family_wise_threshold"] is True
+    assert percentile_only_row["clears_family_wise_threshold"] is False
+    # Percentile is still reported, as descriptive colour, for both.
+    assert clears_row["noise_band_percentile"] == 96.0
+    assert percentile_only_row["noise_band_percentile"] == 96.0
+
+
+def test_build_leaderboard_gate_false_when_z_gate_unavailable():
+    """When the batch's noise band can't support a z estimate (e.g. < 2 draws),
+    family_wise_z_gate is None and every row's gate must be False, not computed against a
+    bar that doesn't exist."""
+    band = {"available": True, "candidate_percentile_better_than_noise": 100.0, "candidate_z_vs_band": -5.0}
+    entries = [
+        {"candidate": "cand", "state": "dossiered", "facts": _facts("cand", noise_band=band)},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert rows[0]["clears_family_wise_threshold"] is False
 
 
 def test_build_leaderboard_skips_non_dossiered_entries():
@@ -240,7 +332,7 @@ def test_build_leaderboard_skips_non_dossiered_entries():
         {"candidate": "not_yet", "state": "never_run", "facts": None},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
     assert [r["candidate"] for r in rows] == ["ran"]
 
@@ -254,7 +346,7 @@ def test_build_leaderboard_handles_disqualified_candidate_with_null_headline():
         {"candidate": "ok", "state": "dossiered", "facts": _facts("ok", delta=-0.02)},
     ]
 
-    rows = build_leaderboard(entries, family_wise_threshold=95.0)
+    rows = build_leaderboard(entries, family_wise_z_gate=2.0)
 
     assert {r["candidate"] for r in rows} == {"dq", "ok"}
     dq_row = next(r for r in rows if r["candidate"] == "dq")
@@ -408,7 +500,10 @@ def test_compute_retrospective_returned_payload_matches_written_file_with_nan_st
     batch_dir = batches_dir / "batch1"
     batch_dir.mkdir(parents=True)
     (batch_dir / "noise_floor.json").write_text(
-        json.dumps({"deltas_cpl_held": [0.01], "partial": False})
+        json.dumps({
+            "deltas_cpl_held": [0.01], "partial": False,
+            "null_method": "placebo_column",
+        })
     )
 
     payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
@@ -416,6 +511,35 @@ def test_compute_retrospective_returned_payload_matches_written_file_with_nan_st
     on_disk = json.loads((batch_dir / RETROSPECTIVE_FILENAME).read_text())
     assert payload == on_disk
     assert payload["noise_floor"]["band_std_delta_cpl_held"] is None
+    # A single-draw floor can't support a t-critical value (needs >= 1 degree of freedom) —
+    # the z-gate must be None, not computed against an undefined std.
+    assert payload["family_wise_z_threshold"] is None
+    assert payload["leaderboard"][0]["clears_family_wise_threshold"] is False
+
+
+def test_compute_retrospective_z_gate_end_to_end(tmp_path):
+    """fps-awz end-to-end: a real (fake) multi-draw noise_floor.json feeds through
+    _batch_noise_summary -> family_wise_z_threshold -> build_leaderboard, and the payload's
+    top-level family_wise_z_threshold matches what the function itself returns."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    # A candidate whose delta sits far below the band (very negative z) so it clears
+    # whatever a single-candidate Bonferroni-corrected gate resolves to.
+    band = {"available": True, "candidate_percentile_better_than_noise": 100.0, "candidate_z_vs_band": -3.0}
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1", noise_band=band))
+    batch_dir = batches_dir / "batch1"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "noise_floor.json").write_text(
+        json.dumps({
+            "deltas_cpl_held": [0.0, 0.01, -0.01, 0.02, -0.02], "partial": False,
+            "null_method": "placebo_column",
+        })
+    )
+
+    payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+    assert payload["family_wise_z_threshold"] == pytest.approx(family_wise_z_threshold(1, 5))
+    assert payload["leaderboard"][0]["clears_family_wise_threshold"] is True
 
 
 def test_compute_retrospective_force_overwrites(tmp_path):

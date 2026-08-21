@@ -82,6 +82,12 @@ FILLS_FILENAME = "fills.parquet"
 NOISE_FLOOR_FILENAME = "noise_floor.json"
 BASELINE_COLUMNS_FILENAME = "baseline_columns.json"
 FREEZE_MANIFEST_FILENAME = "freeze.json"
+
+# noise_floor.json's "null_method" value (fps-awz). Defined here, not in noise_floor.py,
+# for the same reason NOISE_FLOOR_FILENAME is: this module is the contract owner for what
+# the producer must write and what _noise_band() will accept — noise_floor.py imports this
+# name rather than the two modules each defining their own copy of the string.
+NULL_METHOD_PLACEBO_COLUMN = "placebo_column"
 FROZEN_FEATURES_FILENAME = "features.parquet"
 
 SEED_STD_FLAG_RATIO = 5.0
@@ -304,6 +310,24 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             "different baseline (or predates baseline_fingerprint entirely) and does not grade "
             "this run. Recompute with `PYTHONPATH=. uv run python -m experiments.pipeline."
             "noise_floor <batch> --force`.",
+        }
+    null_method = noise_floor.get("null_method")
+    if null_method != NULL_METHOD_PLACEBO_COLUMN:
+        # fps-awz: this PR itself changed what noise_floor.json's deltas_cpl_held MEASURE
+        # (a placebo-column null instead of a seed-swap null) without changing
+        # baseline_fingerprint (same 54 columns either way) — so the fingerprint check above
+        # would happily accept a pre-fps-awz batch's noise_floor.json (e.g. batch0's, already
+        # committed) forever, silently grading every future candidate against the OLD, wider,
+        # differently-shaped band this rework exists to replace. A floor with no null_method
+        # at all (pre-fps-awz) is treated as a mismatch, not a pass — same "cannot be shown to
+        # match, so cannot be trusted" rule the fingerprint check already applies.
+        return {
+            "available": False,
+            "reason": f"noise_floor.json's null_method ({null_method!r}) is not "
+            f"{NULL_METHOD_PLACEBO_COLUMN!r} — this floor predates the fps-awz placebo-column "
+            "rework (or was computed some other way) and does not grade this run. Recompute "
+            "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
+            "--force`.",
         }
     if noise_floor.get("partial"):
         # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover

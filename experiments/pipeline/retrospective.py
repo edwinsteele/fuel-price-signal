@@ -17,11 +17,17 @@ Four things this module produces, per the fps-3jj.8 bead body:
   2. Noise-band comparison, with the multiple-comparisons correction the bead explicitly calls
      out: "the ranking step is exactly where a noise delta gets promoted to a finding — max-of-N
      is a multiple-comparisons operation the old one-at-a-time workflow never performed." A
-     single candidate's raw percentile against the noise band (already computed per-candidate by
-     dossier_tables._noise_band) is a fair one-shot test; picking the BEST of N candidates against
-     that same band is not, and needs a higher bar. `family_wise_percentile_threshold` reports it
-     (a plain Bonferroni correction on the single-draw 95th-percentile threshold), and
-     `clears_family_wise_threshold` on each leaderboard row uses it, not the raw 95th percentile.
+     single candidate's raw distance from the noise band (already computed per-candidate by
+     dossier_tables._noise_band as `candidate_z_vs_band`) is a fair one-shot test; picking the
+     BEST of N candidates against that same band is not, and needs a higher bar.
+     `family_wise_z_threshold` reports it (fps-awz: a Bonferroni-corrected, t-distributed
+     critical value in BAND-STANDARD-DEVIATION space, honest about the band's std being
+     estimated from a finite draw count), and `clears_family_wise_threshold` on each leaderboard
+     row uses it, not the raw empirical percentile. `family_wise_percentile_threshold` and each
+     row's `noise_band_percentile` are still reported — descriptive colour, not the gate — but
+     `clears_family_wise_threshold` no longer reads them: with only 5 draws the empirical rank
+     statistic had 6 possible values, so "gate on percentile" collapsed to "beat every draw"
+     regardless of where the threshold was nominally set (fps-awz "Why 2").
 
   3. Outcome-code tally — every candidate MODULE filed against the batch
      (`experiments/candidates/<batch>/*.py`) is the universe, not just the ones that reached a
@@ -47,11 +53,13 @@ docs/routines/retrospective.md for when to invoke this):
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 from datetime import datetime, timezone
 
 import click
 import numpy as np
+from scipy.stats import t as _t_dist
 
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.pipeline.batch_freeze import DEFAULT_BATCHES_DIR
@@ -135,6 +143,50 @@ def family_wise_percentile_threshold(n_candidates: int, alpha: float = FAMILY_WI
     return 100.0 * (1.0 - alpha / n_candidates)
 
 
+def family_wise_z_threshold(n_candidates: int, n_draws: int, alpha: float = FAMILY_WISE_ALPHA) -> float:
+    """The gate fps-awz actually reads: a Bonferroni-corrected, ONE-TAILED t-critical value,
+    in band-standard-deviation units, that `dossier_tables._noise_band`'s `candidate_z_vs_band`
+    must clear to count as surprising at the BATCH level.
+
+    Same Bonferroni logic as `family_wise_percentile_threshold` (alpha split N ways across N
+    candidates so picking the best of N isn't a free pass), just in distance space instead of
+    percentile space — percentile space is where the old gate broke: with `n_draws` draws the
+    empirical-rank statistic `(deltas > delta).mean()` only has `n_draws + 1` possible values,
+    so at the old default of 5 it collapsed to "beat every single draw" (1-in-6 per candidate,
+    ~60% family-wise at n_candidates=5) no matter where the nominal threshold was set.
+
+    Uses the t distribution, not the normal, because `band_std_delta_cpl_held` is ESTIMATED
+    from `n_draws` placebo draws, not known — `df = n_draws - 1`. One-tailed because the
+    question is directional ("is the candidate SURPRISINGLY BETTER than noise", not "SURPRISING
+    in either direction"): `delta_cpl_held` is a cost, so a candidate clears the gate when its
+    `candidate_z_vs_band` is <= the NEGATIVE of this threshold (more negative = better/cheaper
+    than the band's typical draw), not when its magnitude exceeds it.
+
+    PREDICTION interval, not a one-sample t-test on the band's own mean (caught in review): a
+    candidate's `delta` is a NEW observation being compared against a band whose mean AND std
+    are both estimated from the same `n_draws` placebo draws — not a fixed, known population
+    mean. The standard error of (new observation − estimated mean) is `band_std *
+    sqrt(1 + 1/n_draws)`, not `band_std` alone (the `1` covers the new observation's own
+    within-population variance, the `1/n_draws` covers uncertainty in the estimated mean
+    itself). Omitting the `sqrt(1 + 1/n_draws)` factor makes the returned threshold too small
+    — a real but small effect: ~2.5% lax at n_draws=20, ~10% at n_draws=5. `candidate_z_vs_band`
+    itself (`dossier_tables._noise_band`) is deliberately left as the raw, unscaled z — useful
+    on its own as descriptive colour — so the correction is applied here, at the gate, not
+    baked into that shared quantity.
+
+    Raises ValueError if `n_draws < 2` (a t-critical value needs at least 1 degree of freedom;
+    `dossier_tables._noise_band` already returns `candidate_z_vs_band: None` at n_draws<2,
+    so callers should check for that before reaching here — see `build_leaderboard`).
+    """
+    if n_candidates < 1:
+        raise ValueError(f"n_candidates must be >= 1, got {n_candidates}")
+    if n_draws < 2:
+        raise ValueError(f"n_draws must be >= 2 to estimate a band std, got {n_draws}")
+    alpha_corrected = alpha / n_candidates
+    t_critical = _t_dist.ppf(1.0 - alpha_corrected, df=n_draws - 1)
+    return float(t_critical * math.sqrt(1.0 + 1.0 / n_draws))
+
+
 def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
     """Batch-level noise-band summary (mean/std/n_draws), reusing dossier_tables._noise_band's
     own math rather than re-deriving it — single-sourced the same way BASELINE_COLUMNS is
@@ -152,10 +204,25 @@ def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
     }
 
 
-def build_leaderboard(entries: list[dict], *, family_wise_threshold: float) -> list[dict]:
-    """Rank dossiered candidates by noise-band percentile when available (higher = better,
-    already oriented that way by dossier_tables._noise_band), falling back to raw delta_cpl_held
-    ascending (a COST — more negative is better) when the batch has no noise floor yet.
+def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) -> list[dict]:
+    """Rank dossiered candidates by noise-band z (lower/more-negative = better — delta_cpl_held
+    is a COST, oriented that way by dossier_tables._noise_band) when available, falling back to
+    raw delta_cpl_held ascending when the batch has no noise floor yet.
+
+    family_wise_z_gate: `family_wise_z_threshold(...)`'s output, a POSITIVE distance in band
+    standard deviations. `clears_family_wise_threshold` fires when a row's `noise_band_z` is
+    <= its negation (delta_cpl_held is a cost, so "surprisingly better" is very negative z).
+    None when the batch's noise band can't support a z estimate (fewer than 2 draws, or
+    unavailable) — every row's gate is then False rather than computed against a bar that
+    doesn't exist.
+
+    `noise_band_percentile` is still reported per row as descriptive colour, but no longer
+    drives either the gate or the sort order — at the fps-awz draw count (~20) the empirical
+    percentile only has `n_draws + 1` distinct values, so sorting by it (as this function used
+    to) produces ties a continuous `noise_band_z` doesn't have, and could disagree with the
+    gate's own ordering. There is no `family_wise_threshold` (percentile-space) parameter here
+    any more — the caller (`compute_retrospective`) still computes and reports it at the
+    payload's top level, but this function has no use for it.
     """
     rows = []
     for entry in entries:
@@ -172,6 +239,7 @@ def build_leaderboard(entries: list[dict], *, family_wise_threshold: float) -> l
         noise_band = facts.get("noise_band", {"available": False})
         candidate_conf = facts.get("candidate", {})
         percentile = noise_band.get("candidate_percentile_better_than_noise") if noise_band.get("available") else None
+        z = noise_band.get("candidate_z_vs_band") if noise_band.get("available") else None
         rows.append(
             {
                 "candidate": entry["candidate"],
@@ -183,16 +251,21 @@ def build_leaderboard(entries: list[dict], *, family_wise_threshold: float) -> l
                 "confidence_zone": candidate_conf.get("confidence_zone"),
                 "noise_band_available": noise_band.get("available", False),
                 "noise_band_percentile": percentile,
-                "noise_band_z": noise_band.get("candidate_z_vs_band") if noise_band.get("available") else None,
+                "noise_band_z": z,
                 "clears_family_wise_threshold": (
-                    percentile is not None and percentile >= family_wise_threshold
+                    z is not None and family_wise_z_gate is not None and z <= -family_wise_z_gate
                 ),
             }
         )
-    has_noise_band = any(r["noise_band_available"] for r in rows)
-    if has_noise_band:
-        # Higher percentile = better; candidates without a percentile (noise band unavailable
-        # for that one, shouldn't happen within one batch but not assumed) sort last.
+    has_z = any(r["noise_band_z"] is not None for r in rows)
+    if has_z:
+        # Lower/more-negative z = better (delta_cpl_held is a cost). A row with no z
+        # (noise band unavailable for that one specifically, or too few draws to estimate a
+        # std) sorts last rather than being assumed best-or-worst.
+        rows.sort(key=lambda r: (r["noise_band_z"] is None, r["noise_band_z"] if r["noise_band_z"] is not None else 0.0))
+    elif any(r["noise_band_available"] for r in rows):
+        # z unavailable batch-wide (e.g. < 2 draws) but the band itself is — percentile is
+        # still a real, if coarser, ordering signal, so fall back to it rather than raw delta.
         rows.sort(key=lambda r: (r["noise_band_percentile"] is None, -(r["noise_band_percentile"] or 0.0)))
     else:
         rows.sort(
@@ -319,15 +392,24 @@ def compute_retrospective(
         )
     entries = [_candidate_entry(p) for p in candidate_modules]
     n_dossiered = sum(1 for e in entries if e["state"] == "dossiered")
-    threshold = family_wise_percentile_threshold(max(n_dossiered, 1))
+    n_candidates = max(n_dossiered, 1)
+    threshold = family_wise_percentile_threshold(n_candidates)
+    noise_floor_summary = _batch_noise_summary(batch_dir)
+    n_draws = noise_floor_summary.get("n_draws") if noise_floor_summary.get("available") else None
+    # family_wise_z_threshold needs n_draws >= 2 (a t-critical value needs >= 1 degree of
+    # freedom) — the same condition dossier_tables._noise_band() already gates
+    # candidate_z_vs_band on, so z_gate is None in exactly the cases where no row could have
+    # a non-None noise_band_z to compare it against anyway.
+    z_gate = family_wise_z_threshold(n_candidates, n_draws) if n_draws and n_draws >= 2 else None
 
     payload = {
         "batch": batch_name,
         "computed_at": datetime.now(timezone.utc).isoformat(),
         "git_sha": current_git_sha(),
-        "noise_floor": _batch_noise_summary(batch_dir),
+        "noise_floor": noise_floor_summary,
         "family_wise_percentile_threshold": threshold,
-        "leaderboard": build_leaderboard(entries, family_wise_threshold=threshold),
+        "family_wise_z_threshold": z_gate,
+        "leaderboard": build_leaderboard(entries, family_wise_z_gate=z_gate),
         "outcome_tally": build_outcome_tally(entries),
         "confidence_calibration": build_confidence_calibration(candidates_root),
     }
