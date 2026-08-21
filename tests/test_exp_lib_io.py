@@ -133,8 +133,62 @@ def test_artifact_has_unstamped_cpl_recurses_into_lists():
 def test_batch0_artifacts_carry_their_cadence_stamp(path):
     """Regression coverage for the fps-15c backfill: every one of today's six
     CPL-writing sites must carry tank_params on disk, not just in the code
-    that produced it. Doubles as the generic "catches mechanism number five"
-    backstop the bead calls for — a future artifact with a CPL-shaped key and
-    no stamp anywhere in it fails this same check."""
+    that produced it. (The generic "catches the next mechanism" backstop is
+    test_every_committed_experiment_json_artifact_carries_its_cadence_stamp
+    below, which scans every committed artifact rather than this hand-picked
+    four — freeze.json has no CPL-shaped key at all, so this one line alone
+    is vacuous for it; see the value assertion in test_batch_freeze.py's
+    test_freeze_manifest_records_the_default_tank_params for that.)"""
     obj = json.loads(pathlib.Path(path).read_text())
     assert artifact_has_unstamped_cpl(obj) is False, f"{path} has a CPL-shaped key with no cadence stamp"
+
+
+def test_batch0_freeze_json_stamps_the_exact_historical_value():
+    """freeze.json carries no CPL-shaped key itself (it's a manifest, not a
+    result), so artifact_has_unstamped_cpl never exercises its stamp — assert
+    the backfilled value directly instead of relying on a vacuous scan."""
+    obj = json.loads(pathlib.Path("experiments/batches/batch0/freeze.json").read_text())
+    assert "cpl" not in json.dumps(obj).lower()  # confirms the scan above is indeed vacuous here
+    assert obj["tank_params"] == "50/3.571/7d/10%"
+
+
+# A CPL-shaped key with no cadence stamp anywhere in the SAME committed JSON file
+# — real, deliberate exceptions to the fps-15c contract, not oversights:
+_UNSTAMPED_CPL_ALLOWLIST = frozenset({
+    # A cadence-SWEEP experiment (experiments/2026-08-20_cadence_ceiling/): cadence
+    # is the deliberately-varied independent variable, recorded per row as
+    # "cadence_days" rather than "tank_params"/"tank" — self-documenting by
+    # construction, just under a different key name than this scan looks for.
+    "experiments/2026-08-20_cadence_ceiling/stage2_model/meta.json",
+    # Derived/aggregate artifact built entirely from each candidate's facts.json
+    # (which DOES carry the stamp, per the parametrized test above) plus the
+    # batch's noise_floor.json (ditto) — propagating the stamp into the
+    # leaderboard/summary itself is fps-aam, filed and deliberately out of
+    # fps-15c's scope.
+    "experiments/batches/batch0/retrospective_facts.json",
+})
+
+
+def test_every_committed_experiment_json_artifact_carries_its_cadence_stamp():
+    """The generic "catches the next mechanism" backstop fps-15c calls for only
+    works if it actually scans every artifact, not a hand-picked handful — a
+    future writer that's never added to a parametrize list is caught by
+    nothing. Scans every committed experiments/**/*.json (git-tracked, so a
+    developer's local uncommitted/in-progress batch artifacts can't fail this
+    on someone else's machine) against artifact_has_unstamped_cpl, with an
+    explicit, commented allowlist for the two known, deliberate exceptions."""
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    tracked = subprocess.run(
+        ["git", "ls-files", "experiments"], cwd=repo_root, capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    json_paths = [p for p in tracked if p.endswith(".json")]
+    assert len(json_paths) >= 4, "sanity check: git ls-files must actually find the batch0 artifacts"
+
+    failures = []
+    for rel_path in json_paths:
+        if rel_path in _UNSTAMPED_CPL_ALLOWLIST:
+            continue
+        obj = json.loads((repo_root / rel_path).read_text())
+        if artifact_has_unstamped_cpl(obj):
+            failures.append(rel_path)
+    assert failures == [], f"CPL-shaped key(s) with no cadence stamp anywhere in the file: {failures}"

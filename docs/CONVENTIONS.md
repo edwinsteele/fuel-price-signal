@@ -159,16 +159,22 @@ experiment scripts already call) also accepts an optional `tank=` and stamps it 
 same way, so a *new* mechanism inherits the discipline by using the existing shared
 helper instead of reinventing it.
 
-Two tests enforce this generically rather than one assertion per site
+Tests enforce this generically rather than one assertion per site
 (`tests/test_exp_lib_io.py`): `experiments.lib.io.artifact_has_unstamped_cpl(obj)`
 walks a JSON-shaped dict/list looking for any key containing `cpl` (case-
 insensitive — `cpl_own`, `delta_cpl_held`, `band_mean_delta_cpl_held`, ...) with no
-`tank_params`/`tank` key anywhere in the same document, and every one of today's
-six sites is regression-tested against it — including the real on-disk `batch0`
-artifacts, so the backfill below is checked, not just asserted in prose. A future
-artifact-writing mechanism that builds its own dict from scratch and skips the
-shared helper is still caught by this scan, which is the generic "mechanism number
-five" backstop `fps-15c` exists to provide.
+`tank_params`/`tank` key anywhere in the same document.
+`test_every_committed_experiment_json_artifact_carries_its_cadence_stamp` runs it
+over **every git-tracked `experiments/**/*.json`**, not a hand-picked list — a
+future artifact-writing mechanism that builds its own dict from scratch and skips
+the shared helper is caught here without needing its own dedicated test, which is
+the generic "catches the next mechanism" backstop `fps-15c` exists to provide. Two
+deliberate, commented exceptions are allowlisted rather than silently exempted: a
+cadence-*sweep* experiment (`2026-08-20_cadence_ceiling/stage2_model/meta.json`)
+that self-documents cadence per row as `cadence_days` — it IS the independent
+variable there, just under a different key name than this scan looks for — and
+`retrospective_facts.json`, a derived artifact built entirely from already-stamped
+`facts.json`/`noise_floor.json` whose own propagation is `fps-aam`.
 
 `batch0`'s `freeze.json`, `noise_floor.json`, and `tgp_delta_7d`'s `results.json` /
 `facts.json` were backfilled with `tank_params: "50/3.571/7d/10%"` — the batch was
