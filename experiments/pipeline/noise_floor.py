@@ -23,7 +23,7 @@ column each time — `experiments/pipeline/placebo.py` builds it as a circular t
 real baseline column along whichever axis that column actually varies on, so it resembles a
 real feature in distribution/autocorrelation while its alignment to the target is destroyed,
 and — unlike a naive within-date shuffle — never degenerates to a no-op against a market-wide
-column (see placebo.py's module docstring for why that matters: 39 of the 54 locked columns
+column (see placebo.py's module docstring for why that matters: 45 of the 54 locked columns
 are market-wide).
 
 Cost: every draw shares the exact same baseline arm (same frame, columns, seed, tank, folds)
@@ -82,9 +82,10 @@ from experiments.pipeline.batch_freeze import (
     FROZEN_DB_FILENAME,
     check_baseline_contract,
 )
-from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
+from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME, NULL_METHOD_PLACEBO_COLUMN
 from experiments.pipeline.placebo import (
     PLACEBO_COLUMN_NAME,
+    eligible_source_columns,
     make_placebo_series,
     select_draws,
 )
@@ -192,7 +193,14 @@ def compute_noise_floor(
     tank = tank or TankParams()
 
     frame, baseline_columns, db_path = _load_batch(batch_dir)
-    draws = select_draws(baseline_columns, n_draws)
+    # A real batch can have a locked column that's entirely NaN for its snapshot (found in
+    # review against real batch0 data — an LGA council with no qualifying trough events in
+    # range). Excluded from the draw pool up front: mechanically detectable, no judgement
+    # call, and avoids crashing partway through a run on a foreseeable condition (the
+    # shift_autocorrelation self-check below would otherwise raise on it anyway, just later
+    # and after paying for the fit).
+    eligible_columns = eligible_source_columns(frame, baseline_columns)
+    draws = select_draws(eligible_columns, n_draws)
 
     t0 = time.perf_counter()
     deltas: list[float] = []
@@ -305,6 +313,11 @@ def compute_noise_floor(
     wall_seconds = time.perf_counter() - t0
     payload = {
         "deltas_cpl_held": deltas,
+        # dossier_tables._noise_band() refuses (available: False) any noise_floor.json
+        # whose null_method isn't this — a pre-fps-awz batch's already-committed
+        # seed-swap floor (e.g. batch0's) has no such key and is refused, not silently
+        # graded, until it's recomputed under this construction.
+        "null_method": NULL_METHOD_PLACEBO_COLUMN,
         "n_draws": len(draws),
         "seed": seed,
         "placebo_draws": placebo_draws,
@@ -468,6 +481,10 @@ def compute_fit_stability_diagnostic(
     wall_seconds = time.perf_counter() - t0
     payload = {
         "deltas_cpl_held": deltas,
+        # Informational only — nothing reads fit_stability.json programmatically the way
+        # dossier_tables._noise_band() reads noise_floor.json's null_method — but self-
+        # describing the construction is cheap and matches this module's other artifacts.
+        "null_method": "seed_swap",
         "seeds_a": list(seeds_a),
         "seeds_b": list(seeds_b),
         "fold_subset": list(fold_subset) if fold_subset is not None else None,

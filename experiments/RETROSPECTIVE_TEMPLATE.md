@@ -15,18 +15,22 @@ on top of it, same Facts/Judgement split as a candidate dossier.
 
 ## Leaderboard
 
-Ranked by noise-band percentile (higher = better) where the batch has a noise floor,
-else by raw `delta_cpl_held` (a COST — more negative is better).
+Ranked by noise-band z (`noise_band_z` — lower/more-negative is better, `delta_cpl_held`
+is a COST) where the batch has a noise floor with a usable z, else by raw `delta_cpl_held`
+ascending.
 
-| candidate | status | delta_cpl_held | noise-band percentile | clears batch threshold? |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
+| candidate | status | delta_cpl_held | noise-band z | noise-band percentile (colour) | clears batch threshold? |
+|---|---|---|---|---|---|
+| ... | ... | ... | ... | ... | ... |
 
 **Multiple-comparisons note:** with N candidates graded against the same noise band,
 picking the best of N is a different question from grading one candidate alone — the
-`family_wise_percentile_threshold` (Bonferroni-corrected) is the bar a candidate needs
-to clear to be read as surprising at the BATCH level, not the raw 95th percentile.
-State the threshold used and which candidates (if any) clear it.
+`family_wise_z_threshold` (Bonferroni-corrected, t-distributed, in band-standard-deviation
+space, `fps-awz`) is the bar a candidate's `noise_band_z` needs to clear to be read as
+surprising at the BATCH level. `noise_band_percentile`/`family_wise_percentile_threshold`
+are still reported per candidate as descriptive colour — read well, but not the gate; with
+~20 draws the percentile only has ~21 distinct values, too coarse to drive a decision.
+State the z-threshold used and which candidates (if any) clear it.
 
 ## Outcome tally
 

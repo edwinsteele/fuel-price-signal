@@ -10,6 +10,7 @@ from experiments.pipeline.placebo import (
     PLACEBO_SHIFT_DAYS_POOL,
     _effective_shift,
     axis_is_market_wide,
+    eligible_source_columns,
     make_placebo_series,
     select_draws,
 )
@@ -135,6 +136,29 @@ def test_select_draws_uses_distinct_shift_days():
     shifts = [s for _, s in draws]
     assert len(set(shifts)) == len(shifts)
     assert all(s in PLACEBO_SHIFT_DAYS_POOL for s in shifts)
+
+
+def test_eligible_source_columns_excludes_an_all_nan_column():
+    """Found in review against real batch0 data: an LGA council with no qualifying trough
+    events in the frame's date range is entirely NaN. Shifting an all-NaN column produces an
+    all-NaN placebo — the enforced shift_autocorrelation self-check (noise_floor.py) can't
+    verify anything against it (corrcoef of two NaN series is NaN) and would raise. Filtering
+    here, mechanically, avoids a foreseeable crash partway through a real run."""
+    df = _fixture_df()
+    df["all_nan_col"] = float("nan")
+    baseline_columns = ["mw_col", "station_col", "all_nan_col"]
+
+    eligible = eligible_source_columns(df, baseline_columns)
+
+    assert eligible == ["mw_col", "station_col"]
+
+
+def test_eligible_source_columns_keeps_order():
+    df = _fixture_df()
+    df["all_nan_col"] = float("nan")
+    baseline_columns = ["all_nan_col", "mw_col", "station_col"]
+
+    assert eligible_source_columns(df, baseline_columns) == ["mw_col", "station_col"]
 
 
 def test_select_draws_raises_when_n_draws_exceeds_column_count():

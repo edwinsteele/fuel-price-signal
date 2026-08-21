@@ -19,7 +19,7 @@ from click.testing import CliRunner
 
 import experiments.pipeline.noise_floor as noise_floor_module
 from experiments.pipeline.batch_freeze import BaselineContractMismatch, resolve_baseline_columns
-from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
+from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME, NULL_METHOD_PLACEBO_COLUMN
 from experiments.pipeline.noise_floor import (
     FIT_STABILITY_FILENAME,
     compute_fit_stability_diagnostic,
@@ -113,6 +113,7 @@ def test_compute_noise_floor_writes_expected_deltas(tmp_path, monkeypatch):
     assert payload["deltas_cpl_held"] == [9.0, -3.0, 5.0]
     assert payload["n_draws"] == 3
     assert payload["seed"] == noise_floor_module.PLACEBO_SEED_DEFAULT
+    assert payload["null_method"] == NULL_METHOD_PLACEBO_COLUMN
     assert payload["fold_subset"] is None
     assert payload["partial"] is False
     on_disk = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
@@ -174,6 +175,23 @@ def test_compute_noise_floor_draws_distinct_columns_and_shifts(tmp_path, monkeyp
     shifts = [d["shift_days"] for d in payload["placebo_draws"]]
     assert len(set(columns)) == 4
     assert len(set(shifts)) == 4
+
+
+def test_compute_noise_floor_excludes_an_all_nan_locked_column_from_the_draw_pool(tmp_path, monkeypatch):
+    """A locked column that's entirely NaN in the frame (found in review against real batch0
+    data) must never be drawn — it would produce an all-NaN placebo and raise the enforced
+    shift_autocorrelation self-check partway through a real run. compute_noise_floor filters
+    it out up front instead."""
+    df = _baseline_features_df()
+    nan_column = resolve_baseline_columns(df)[0]  # select_draws always picks index 0 for draw 1
+    df[nan_column] = float("nan")
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [0.0] * 5)
+
+    payload = compute_noise_floor(batch_dir, n_draws=5, verbose=False)
+
+    drawn_columns = {d["source_column"] for d in payload["placebo_draws"]}
+    assert nan_column not in drawn_columns
 
 
 def test_compute_noise_floor_raises_if_placebo_provider_never_hits(tmp_path, monkeypatch):
@@ -618,6 +636,7 @@ def test_fit_stability_pairs_seeds_and_writes_expected_deltas(tmp_path, monkeypa
     )
 
     assert payload["deltas_cpl_held"] == [9.0, 18.0]
+    assert payload["null_method"] == "seed_swap"
     assert payload["seeds_a"] == [1, 2]
     assert payload["seeds_b"] == [10, 20]
     on_disk = json.loads((batch_dir / FIT_STABILITY_FILENAME).read_text())

@@ -131,7 +131,7 @@ the judgement session can crash and resume without losing the facts.
   rejection of a per-NIGHT placebo still stands**: a fresh draw compared against a fresh
   candidate every night is a different, noisier design than a fixed bank of ~20 draws
   computed once at batch setup, the shape this replacement actually takes. A naive
-  within-date shuffle is also still unsafe for a market-wide series (39 of the 54 locked
+  within-date shuffle is also still unsafe for a market-wide series (45 of the 54 locked
   columns are per-date, shared by every station on that date) — the construction shifts along
   the axis a column actually varies on rather than shuffling across stations for exactly this
   reason (see `placebo.py`'s module docstring).

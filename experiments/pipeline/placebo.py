@@ -7,16 +7,19 @@ and autocorrelation while having its alignment to the target destroyed, without 
 degrading to a within-date permutation.
 
 Why a within-date permutation is unsafe here: of the 54 locked baseline columns
-(`fuel_signal.features.LOCKED_FEATURE_COLUMNS`), the 35 `days_since_trough_entry_<lga>`
-columns and the 4 `NETWORK_FEATURE_COLUMNS` are market-wide — every station shares the exact
-same value on a given date (`fuel_signal/features.py`'s row-construction loop keys them by
-date alone, never by station). Shuffling a market-wide column's values ACROSS STATIONS on
-the same date is a no-op: every station already has the same value, so the "shuffled" frame
-is identical to the original. fps-3jj's own earlier rejection of a placebo null was of
-exactly this failure mode. The fix here is not a smarter shuffle but a different axis
-entirely: a CIRCULAR TIME-SHIFT, applied along whichever axis the column actually varies on
-(`axis_is_market_wide` decides which, per column, from the data itself rather than a
-hand-maintained group list that could drift out of sync with `features.py`).
+(`fuel_signal.features.LOCKED_FEATURE_COLUMNS`), 45 are market-wide — every station shares
+the exact same value on a given date. That's all 35 `days_since_trough_entry_<lga>` columns,
+all 4 `NETWORK_FEATURE_COLUMNS`, AND 6 of `FEATURE_COLUMNS` (`cycle_pct_through`,
+`cycle_days_since_peak`, `cycle_mean_length`, `cycle_last_min_cents`, `cycle_last_max_cents`,
+`cycle_peak_count` — all read straight off the market-wide cycle-detector state,
+`fuel_signal/features.py`'s `_build_feature_dict`, keyed by date alone, never by station).
+Shuffling a market-wide column's values ACROSS STATIONS on the same date is a no-op: every
+station already has the same value, so the "shuffled" frame is identical to the original.
+fps-3jj's own earlier rejection of a placebo null was of exactly this failure mode. The fix
+here is not a smarter shuffle but a different axis entirely: a CIRCULAR TIME-SHIFT, applied
+along whichever axis the column actually varies on (`axis_is_market_wide` decides which, per
+column, from the data itself rather than a hand-maintained group list that could drift out
+of sync with `features.py`).
 
 A circular shift (`np.roll`) preserves the exact value multiset by construction — same
 values, same per-station or market-wide distribution, same autocorrelation structure up to
@@ -25,6 +28,16 @@ alignment with that date's true label. `shift_days` is drawn from a fixed pool o
 primes: taking `shift_days % n_unique_dates` for the actual roll means a prime can never
 silently degenerate to shift 0 against a small date range the way a round number
 (e.g. a multiple of 7, which could re-align a weekly pattern) could.
+
+"Large" is necessary but not sufficient (review finding): a genuinely large shift still
+lands on a similar value for a SLOWLY-varying column — one that changes only a handful of
+times across the whole date range (`cycle_peak_count`, `cycle_last_min_cents`, and the
+sticky-station-derived `stickiness_score` are the observed cases) — no shift offset destroys
+that column's alignment with ITS OWN unshifted values, whatever the offset's size. This
+module does not try to detect "how slow is too slow" analytically; `noise_floor.py`'s
+`shift_autocorrelation` self-check (correlation between the shifted series and the column's
+own unshifted values, enforced against `MAX_SHIFT_AUTOCORRELATION`) is the actual safeguard
+against a residually-correlated placebo, not the size of the shift by itself.
 """
 from __future__ import annotations
 
@@ -106,6 +119,25 @@ def make_placebo_series(df: pd.DataFrame, source_column: str, shift_days: int) -
         rolled = np.roll(ordered[source_column].to_numpy(), shift)
         out.loc[ordered.index] = rolled
     return out
+
+
+def eligible_source_columns(df: pd.DataFrame, baseline_columns: list[str]) -> list[str]:
+    """`baseline_columns`, minus any that are entirely NaN in `df`.
+
+    A real batch can have a locked column that's all-NaN for its snapshot (e.g. an LGA
+    council with no qualifying trough events in the frame's date range — found in review
+    against real batch0 data). Shifting an all-NaN column produces an all-NaN placebo:
+    `make_placebo_series`'s own correlation self-check (noise_floor.py) can't verify
+    anything against it (corrcoef of two constant/NaN series is NaN) and — now that self-
+    check is enforced, not just recorded — that draw would raise. Filtering here means a
+    foreseeable, mechanically-detectable condition (all-NaN-ness needs no judgement call,
+    unlike "how much residual autocorrelation is too much") degrades the eligible pool
+    gracefully instead of crashing a `compute_noise_floor` run partway through.
+
+    Order-preserving subset of `baseline_columns` — `select_draws`'s own column-selection
+    order depends on it.
+    """
+    return [c for c in baseline_columns if not df[c].isna().all()]
 
 
 def select_draws(baseline_columns: list[str], n_draws: int) -> list[tuple[str, int]]:

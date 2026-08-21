@@ -247,7 +247,8 @@ def freeze_batch(
     (docs/CONVENTIONS.md § The decision cadence is a lock parameter), not a
     per-batch knob.
 
-    The noise floor (~10 single-arm fits, experiments/pipeline/noise_floor.py) is the
+    The noise floor (~1 baseline fit + ~20 placebo-arm fits, `baseline_cache`-shared across
+    draws — fps-awz; experiments/pipeline/noise_floor.py) is the
     final step so batch setup is one command instead of two that must be run in the
     right order by hand with nothing checking they agree (fps-cf8). `skip_noise_floor`
     is an escape hatch for local iteration — e.g. a fake/undersized DB in a test, or a
@@ -282,7 +283,8 @@ def freeze_batch(
         noise_floor_hint = ""
         if not (batch_dir / NOISE_FLOOR_FILENAME).exists():
             # fps-cf8: the noise floor is now the last freeze step, so a crash/interrupt
-            # partway through (it's a ~10-fit, 10-25min step) leaves everything else
+            # partway through (it's a ~1 baseline + ~20 placebo-fit step, fps-awz — wall
+            # time TBD pending a real run under the new construction) leaves everything else
             # already pinned — re-running batch_freeze on this dir would otherwise look
             # like the same "batch frozen twice by mistake" case this guard exists to
             # catch. Point at the actual, safe recovery instead of just refusing.
@@ -380,7 +382,7 @@ def check_baseline_contract(batch_dir: pathlib.Path, df: pd.DataFrame) -> None:
 )
 @click.option(
     "--skip-noise-floor", is_flag=True, default=False,
-    help="Skip computing the noise floor (~10 fits) as the final freeze step. The batch "
+    help="Skip computing the noise floor (~1 baseline + ~20 placebo fits) as the final freeze step. The batch "
     "stays correctly ungraded (dossier_tables._noise_band() refuses without one) until "
     "you run `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch>` — "
     "for local iteration only, not normal batch setup.",

@@ -53,6 +53,7 @@ docs/routines/retrospective.md for when to invoke this):
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 from datetime import datetime, timezone
 
@@ -161,6 +162,18 @@ def family_wise_z_threshold(n_candidates: int, n_draws: int, alpha: float = FAMI
     `candidate_z_vs_band` is <= the NEGATIVE of this threshold (more negative = better/cheaper
     than the band's typical draw), not when its magnitude exceeds it.
 
+    PREDICTION interval, not a one-sample t-test on the band's own mean (caught in review): a
+    candidate's `delta` is a NEW observation being compared against a band whose mean AND std
+    are both estimated from the same `n_draws` placebo draws — not a fixed, known population
+    mean. The standard error of (new observation − estimated mean) is `band_std *
+    sqrt(1 + 1/n_draws)`, not `band_std` alone (the `1` covers the new observation's own
+    within-population variance, the `1/n_draws` covers uncertainty in the estimated mean
+    itself). Omitting the `sqrt(1 + 1/n_draws)` factor makes the returned threshold too small
+    — a real but small effect: ~2.5% lax at n_draws=20, ~10% at n_draws=5. `candidate_z_vs_band`
+    itself (`dossier_tables._noise_band`) is deliberately left as the raw, unscaled z — useful
+    on its own as descriptive colour — so the correction is applied here, at the gate, not
+    baked into that shared quantity.
+
     Raises ValueError if `n_draws < 2` (a t-critical value needs at least 1 degree of freedom;
     `dossier_tables._noise_band` already returns `candidate_z_vs_band: None` at n_draws<2,
     so callers should check for that before reaching here — see `build_leaderboard`).
@@ -170,7 +183,8 @@ def family_wise_z_threshold(n_candidates: int, n_draws: int, alpha: float = FAMI
     if n_draws < 2:
         raise ValueError(f"n_draws must be >= 2 to estimate a band std, got {n_draws}")
     alpha_corrected = alpha / n_candidates
-    return float(_t_dist.ppf(1.0 - alpha_corrected, df=n_draws - 1))
+    t_critical = _t_dist.ppf(1.0 - alpha_corrected, df=n_draws - 1)
+    return float(t_critical * math.sqrt(1.0 + 1.0 / n_draws))
 
 
 def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:

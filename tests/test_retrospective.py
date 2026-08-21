@@ -199,11 +199,26 @@ def test_family_wise_threshold_rejects_non_positive_n():
 
 # ── family_wise_z_threshold ─────────────────────────────────────────────────
 
-def test_family_wise_z_threshold_n1_reduces_to_plain_one_tailed_critical_value():
-    """n_candidates=1 -> alpha unmodified, matching scipy's own t.ppf at that alpha/df."""
+def test_family_wise_z_threshold_n1_matches_the_prediction_interval_formula():
+    """n_candidates=1 -> alpha unmodified; the returned threshold is the raw one-tailed
+    t-critical value inflated by sqrt(1 + 1/n_draws) — the prediction-interval correction
+    for comparing a NEW observation against a mean/std estimated from n_draws samples."""
+    import math
+
     from scipy.stats import t as t_dist
 
-    assert family_wise_z_threshold(1, 20) == pytest.approx(t_dist.ppf(0.95, df=19))
+    expected = t_dist.ppf(0.95, df=19) * math.sqrt(1 + 1 / 20)
+    assert family_wise_z_threshold(1, 20) == pytest.approx(expected)
+
+
+def test_family_wise_z_threshold_exceeds_the_uncorrected_t_critical_value():
+    """The sqrt(1 + 1/n_draws) factor must make the threshold STRICTER (larger), not just
+    different — omitting it would make the gate too lax (review finding: ~2.5% lax at
+    n_draws=20, ~10% at n_draws=5)."""
+    from scipy.stats import t as t_dist
+
+    assert family_wise_z_threshold(1, 20) > t_dist.ppf(0.95, df=19)
+    assert family_wise_z_threshold(1, 5) > t_dist.ppf(0.95, df=4)
 
 
 def test_family_wise_z_threshold_rises_with_n_candidates():
@@ -485,7 +500,10 @@ def test_compute_retrospective_returned_payload_matches_written_file_with_nan_st
     batch_dir = batches_dir / "batch1"
     batch_dir.mkdir(parents=True)
     (batch_dir / "noise_floor.json").write_text(
-        json.dumps({"deltas_cpl_held": [0.01], "partial": False})
+        json.dumps({
+            "deltas_cpl_held": [0.01], "partial": False,
+            "null_method": "placebo_column",
+        })
     )
 
     payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
@@ -512,7 +530,10 @@ def test_compute_retrospective_z_gate_end_to_end(tmp_path):
     batch_dir = batches_dir / "batch1"
     batch_dir.mkdir(parents=True)
     (batch_dir / "noise_floor.json").write_text(
-        json.dumps({"deltas_cpl_held": [0.0, 0.01, -0.01, 0.02, -0.02], "partial": False})
+        json.dumps({
+            "deltas_cpl_held": [0.0, 0.01, -0.01, 0.02, -0.02], "partial": False,
+            "null_method": "placebo_column",
+        })
     )
 
     payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)

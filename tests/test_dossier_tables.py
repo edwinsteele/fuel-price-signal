@@ -329,6 +329,7 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     def add_noise_floor(batch_dir):
         (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
             "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
         }))
 
     run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
@@ -345,6 +346,29 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     expected_percentile = sum(d > -0.05 for d in noise_deltas) / len(noise_deltas) * 100
     assert band["candidate_percentile_better_than_noise"] == pytest.approx(expected_percentile)
     assert band["candidate_percentile_better_than_noise"] > 90
+
+
+def test_build_facts_noise_band_refuses_a_stale_pre_awz_seed_swap_floor(tmp_path):
+    """fps-awz: this PR changed what noise_floor.json's deltas MEASURE (placebo-column null,
+    not seed-swap) without changing baseline_fingerprint — batch0's already-committed
+    noise_floor.json (fingerprint-valid, no null_method key at all, predates this field
+    entirely) must be refused, not silently graded against the OLD, differently-shaped band
+    this rework exists to replace."""
+    noise_deltas = list(np.random.default_rng(2).normal(0, 0.02, size=5))
+
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:deadbeef1234",
+            # No "null_method" key — the exact shape of a pre-fps-awz noise_floor.json.
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
+
+    facts = dt.build_facts(run_dir)
+
+    band = facts["noise_band"]
+    assert band["available"] is False
+    assert "null_method" in band["reason"]
 
 
 def test_build_facts_noise_band_refuses_a_mismatched_baseline_fingerprint(tmp_path):
@@ -525,6 +549,7 @@ def test_process_run_facts_json_is_strictly_valid_even_with_a_single_draw_noise_
     def add_noise_floor(batch_dir):
         (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
             "deltas_cpl_held": [0.01], "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
         }))
 
     run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
