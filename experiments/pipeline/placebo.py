@@ -50,6 +50,23 @@ ANY element is NaN). Also verified against real batch0 data: `lga_mean_cents` an
 unverifiable NaN — masking a real ~0.73 violation as "can't tell" rather than "fails" — and
 a column with an incidental NaN entry elsewhere would get the same false pass/refuse
 ambiguity for a reason that has nothing to do with its actual, checkable correlation.
+
+NAMED LIMITATION (review, verified against a full real-batch0 screen): because
+`shift_autocorrelation` fails at every offset for a slowly-varying column, the bank this
+construction produces systematically EXCLUDES an entire category of feature, not just a few
+unlucky draws. On batch0 at `MAX_SHIFT_AUTOCORRELATION=0.6`, ALL FOUR cycle-magnitude columns
+(`cycle_last_min_cents`, `cycle_peak_count`, `cycle_mean_length`, `cycle_last_max_cents`) and
+every price-LEVEL column (`station_price_cents`, `lga_mean_cents`, `brand_mean_cents`,
+`stickiness_score`) failed screening — none of them can ever appear in the bank. The 20
+draws that DID survive were dominated by counters/phase/differences (12 of 20 were
+`days_since_trough_entry_<lga>` columns). A real candidate feature can be level-like
+(`experiments/results.csv` has examples), so the resulting band characterizes "adding a
+fast-varying column", not "adding an arbitrary column" — a real, named gap in this
+construction's coverage, not a bug in it. Fixing it needs a DIFFERENT construction, not a
+looser threshold on this one: a block-permutation over date ranges (reorder whole
+contiguous chunks of dates rather than circularly shifting every date) would preserve a
+level-like column's own levels within each block while still randomizing block order,
+letting it survive screening — not implemented here (see `bd fps-d7m`).
 """
 from __future__ import annotations
 

@@ -135,6 +135,14 @@ the judgement session can crash and resume without losing the facts.
   columns are per-date, shared by every station on that date) — the construction shifts along
   the axis a column actually varies on rather than shuffling across stations for exactly this
   reason (see `placebo.py`'s module docstring).
+- **Named limitation: the bank systematically excludes level-like columns (`fps-d7m`,
+  filed against real batch0 data).** A circular shift cannot decorrelate a slowly-varying
+  column from itself at ANY offset, so the screen (below) doesn't reject a random subset —
+  on batch0 it excluded ALL FOUR cycle-magnitude columns and every price-level column,
+  every time, leaving a bank dominated by counters/phase/differences. A real candidate
+  feature can be level-like, so the band characterizes "adding a fast-varying column", not
+  "adding an arbitrary column" — a real gap in coverage, not a bug in the construction. See
+  `placebo.py`'s own docstring for the block-permutation alternative that would close it.
 - **The gate reads distance from the band, not empirical rank (`fps-awz`).**
   `retrospective.py`'s `family_wise_z_threshold` is a Bonferroni-corrected, t-distributed
   critical value in band-standard-deviation space; `clears_family_wise_threshold` compares
