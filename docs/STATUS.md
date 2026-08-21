@@ -66,7 +66,7 @@ On-disk artifact: **54-feat LightGBM, isotonic-calibrated, τ=0.25.** Last featu
 `50/3.571/1d/10%`) — re-locked from 7 days on 2026-08-22, bd `fps-oqz`. Cadence is a
 declared lock parameter, not a knob: see
 [CONVENTIONS.md § The decision cadence is a lock parameter](CONVENTIONS.md#the-decision-cadence-is-a-lock-parameter-declared--not-a-default)
-for the rationale and the full before/after. Two consequences for reading this file:
+for the rationale and the full before/after. Three consequences for reading this file:
 
 - **The re-lock is not a retrain and not a τ change.** The on-disk artifact and τ=0.25
   are unchanged — the fit takes no `TankParams`. Nor is it a production code change:
@@ -77,6 +77,29 @@ for the rationale and the full before/after. Two consequences for reading this f
   comparable to a number produced after 2026-08-22 without re-running at 1d. On the
   cadence-ceiling folds the same model reads 189.67 at 7d and 187.82 at 1d, and
   headroom vs the perfect-foresight oracle goes 1.54 → 2.97 c/L.
+- **At 1d the same on-disk artifact scores 182.18 c/L (4.90% vs always-buy 191.56) on
+  this file's test window**, re-scored 2026-08-22 by `score_phase2` after the re-lock
+  (`experiments/results.csv`, stamped `50/3.571/1d/10%`). This is a re-score, **not a
+  new lock** — `baseline_fingerprint` is unchanged at `54:1a6ec2d84a69`. The lock
+  records below stay as they are, at 7d. Note always-buy moves with cadence too
+  (191.78 → 191.56): it fills daily in small amounts rather than weekly in large ones,
+  so the volume weighting across dates changes. Do not compare this 182.18 against the
+  cadence-ceiling oracle floor of 184.85 — different window and station set, so the
+  model has not "beaten perfect foresight".
+
+**Why `score_phase2` still chooses τ=0.25 after the re-lock.** Its τ selector is
+structurally **cadence-blind**: `threshold_sweep` maximises
+`(tp·6.37 − fp·5.80 − fn·11.14) / n` over OOF *prediction rows*, takes no `TankParams`,
+and runs at step 3 — before the tank is constructed for the backtest at all. It will
+print 0.25 at any cadence. That is a known, *measured* gap rather than an oversight:
+`fps-929` swept τ against realised CPL under the tank and found best-in-hindsight is
+0.35 at 1d, worth **0.062 c/L** — about 2% of daily headroom, off **422 changed
+decisions whose effects cancel**, which is a real measurement of no effect rather than
+an underpowered one. τ therefore stays 0.25 by decision, not by inertia. The two
+objectives diverge more at 1d than at 7d for the obvious reason: at 7d the tank forces
+67.6% of fills, so the model's opinion is overridden two-thirds of the time and τ
+barely matters; at 1d only 21.4% are forced, so the operating point gets acted on far
+more often (the same comparison moves 8 decisions at 7d and 422 at 1d).
 
 - **#216** (2026-06-09) — graduated the RAC_full network group (4 cols: `network_px_std`, `network_px_std_delta_3d`, `lga_phase_std`, `lga_phase_std_delta_3d`), retraining the 50-feat Phase 4 baseline to 54. Δh25 −0.045 over LGA-only. See [AGENTS.md § Canonical feature set](../AGENTS.md#canonical-feature-set-54-feat-baseline-locked-issue-216).
 - **#236** (2026-06-13, commit 740b601) — calibration + threshold selection moved to OOF CV over train with an 80/20 eval split; isotonic chosen over raw; τ=0.25. Realised backtest 3.04% (185.94 c/L) vs always-buy 191.78 at the time (prior raw/τ=0.55 was 1.98%).
