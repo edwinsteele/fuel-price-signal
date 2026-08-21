@@ -280,9 +280,10 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     """`check_fingerprint=False` is for retrospective.py's `_batch_noise_summary`,
     which reuses this function's math to summarise a batch's floor on its own
     (mean/std/n_draws) rather than to grade any one candidate run against it — it
-    calls with a dummy `results` that has no real `meta.baseline_fingerprint` to
-    compare, so the per-run identity check below would always (mis)fire as a
-    mismatch. `build_facts()`, which DOES grade a real run, always uses the default.
+    calls with a dummy `results` that has no real `meta.baseline_fingerprint` or
+    `meta.tank_params` to compare, so the per-run identity checks below (fingerprint
+    AND tank_params/cadence, fps-v8o) would always (mis)fire as a mismatch.
+    `build_facts()`, which DOES grade a real run, always uses the default.
     """
     if batch_dir is None:
         return {"available": False, "reason": "no batch_dir recorded in results.json meta"}

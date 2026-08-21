@@ -412,6 +412,28 @@ def test_build_facts_noise_band_refuses_a_mismatched_tank_params(tmp_path):
     assert "tank_params" in band["reason"]
 
 
+def test_build_facts_noise_band_refuses_a_floor_with_no_tank_params(tmp_path):
+    """fps-v8o: a pre-fps-v8o floor (no tank_params at all) cannot be shown to match
+    the run's cadence, so it must not be treated as a pass by default — same rule
+    the fingerprint check already applies to a pre-fps-cf8 floor."""
+    noise_deltas = list(np.random.default_rng(2).normal(0, 0.02, size=20))
+
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
+            # No "tank_params" key — the exact shape of a pre-fps-v8o noise_floor.json.
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor, tank_params="50/3.571/7d/10%")
+
+    facts = dt.build_facts(run_dir)
+
+    band = facts["noise_band"]
+    assert band["available"] is False
+    assert "tank_params" in band["reason"]
+
+
 # ── plots ─────────────────────────────────────────────────────────────────────
 
 def test_make_plots_writes_four_always_plots(tmp_path, capsys):
