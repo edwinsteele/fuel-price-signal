@@ -117,8 +117,9 @@ subsequent row stamped so pre- and post-change rows are mechanically
 distinguishable. `fps-929` may well argue for daily — that is a re-lock decision,
 not an experiment output.
 
-**Update 2026-08-21: the move to 1d is DECIDED and filed as `fps-oqz`** (blocked on
-`fps-15c`). Note what did and did not argue for it: `fps-929` closed as
+**Update 2026-08-21: the move to 1d is DECIDED and filed as `fps-oqz`** (its
+precondition `fps-15c` — the cadence-stamp contract below — closed 2026-08-21, PR
+#320; `fps-oqz` is now unblocked). Note what did and did not argue for it: `fps-929` closed as
 *signal-content limit* — re-picking τ at daily cadence is worth 0.062 c/L, so the
 economics did **not** make the case. The decision rests on the owner's rationale
 (uniformity with the daily price cadence, maximum decision resolution, a choice every
