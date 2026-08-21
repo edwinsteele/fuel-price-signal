@@ -31,13 +31,25 @@ silently degenerate to shift 0 against a small date range the way a round number
 
 "Large" is necessary but not sufficient (review finding): a genuinely large shift still
 lands on a similar value for a SLOWLY-varying column — one that changes only a handful of
-times across the whole date range (`cycle_peak_count`, `cycle_last_min_cents`, and the
-sticky-station-derived `stickiness_score` are the observed cases) — no shift offset destroys
-that column's alignment with ITS OWN unshifted values, whatever the offset's size. This
-module does not try to detect "how slow is too slow" analytically; `noise_floor.py`'s
-`shift_autocorrelation` self-check (correlation between the shifted series and the column's
-own unshifted values, enforced against `MAX_SHIFT_AUTOCORRELATION`) is the actual safeguard
-against a residually-correlated placebo, not the size of the shift by itself.
+times across the whole date range. Verified against real batch0 data: `cycle_mean_length`,
+`cycle_peak_count`, `lga_mean_cents`, and `brand_mean_cents` all sit above 0.6 correlation
+with their own unshifted values at every offset tried — no shift destroys that column's
+self-alignment, whatever the offset's size, because the column simply doesn't change often
+enough for a reshuffle-in-time to look like a different value. This is not a rare edge case
+on real data — it recurs deterministically on every run against the same batch, unlike a
+config-drift condition. `screen_draws` (below) is the actual safeguard: it checks
+`shift_autocorrelation` for every candidate BEFORE any backtest runs and substitutes the
+next candidate on a violation, rather than committing to a fixed draw list up front and
+aborting the whole computation when one entry turns out to be unusable.
+
+The self-check itself uses `pandas.Series.corr` (pairwise-complete: rows where either side
+is NaN are dropped before correlating), not `numpy.corrcoef` (whole-result NaN the moment
+ANY element is NaN). Also verified against real batch0 data: `lga_mean_cents` and
+`brand_mean_cents` carry PARTIAL NaN (too few classified stations on some dates —
+`fuel_signal/features.py`'s own documented behaviour), which `corrcoef` would report as an
+unverifiable NaN — masking a real ~0.73 violation as "can't tell" rather than "fails" — and
+a column with an incidental NaN entry elsewhere would get the same false pass/refuse
+ambiguity for a reason that has nothing to do with its actual, checkable correlation.
 """
 from __future__ import annotations
 
@@ -121,25 +133,6 @@ def make_placebo_series(df: pd.DataFrame, source_column: str, shift_days: int) -
     return out
 
 
-def eligible_source_columns(df: pd.DataFrame, baseline_columns: list[str]) -> list[str]:
-    """`baseline_columns`, minus any that are entirely NaN in `df`.
-
-    A real batch can have a locked column that's all-NaN for its snapshot (e.g. an LGA
-    council with no qualifying trough events in the frame's date range — found in review
-    against real batch0 data). Shifting an all-NaN column produces an all-NaN placebo:
-    `make_placebo_series`'s own correlation self-check (noise_floor.py) can't verify
-    anything against it (corrcoef of two constant/NaN series is NaN) and — now that self-
-    check is enforced, not just recorded — that draw would raise. Filtering here means a
-    foreseeable, mechanically-detectable condition (all-NaN-ness needs no judgement call,
-    unlike "how much residual autocorrelation is too much") degrades the eligible pool
-    gracefully instead of crashing a `compute_noise_floor` run partway through.
-
-    Order-preserving subset of `baseline_columns` — `select_draws`'s own column-selection
-    order depends on it.
-    """
-    return [c for c in baseline_columns if not df[c].isna().all()]
-
-
 def select_draws(baseline_columns: list[str], n_draws: int) -> list[tuple[str, int]]:
     """`n_draws` deterministic (source_column, shift_days) pairs, spread evenly across
     `baseline_columns` so the bank samples both market-wide and station-varying axes rather
@@ -172,3 +165,70 @@ def select_draws(baseline_columns: list[str], n_draws: int) -> list[tuple[str, i
         (baseline_columns[idx], PLACEBO_SHIFT_DAYS_POOL[i])
         for i, idx in enumerate(deduped)
     ]
+
+
+def candidate_pool(baseline_columns: list[str], n_draws: int) -> list[tuple[str, int]]:
+    """An ordered candidate sequence for `screen_draws`: `select_draws`'s own `n_draws`
+    (evenly spread, distinct shifts) FIRST, then every remaining baseline column as a
+    fallback tail (natural order, shifts cycling through `PLACEBO_SHIFT_DAYS_POOL`) — used
+    when a primary candidate fails the `shift_autocorrelation` screen and a substitute is
+    needed. Deliberately longer than `n_draws`; `screen_draws` stops consuming it once it
+    has `n_draws` PASSING candidates, so the fallback tail is only touched on a real
+    failure — the common case (nothing fails) sees exactly `select_draws`'s own output and
+    behaves identically to before this existed.
+    """
+    primary = select_draws(baseline_columns, n_draws)
+    primary_columns = {c for c, _ in primary}
+    remaining = [c for c in baseline_columns if c not in primary_columns]
+    fallback = [
+        (c, PLACEBO_SHIFT_DAYS_POOL[i % len(PLACEBO_SHIFT_DAYS_POOL)])
+        for i, c in enumerate(remaining)
+    ]
+    return primary + fallback
+
+
+def screen_draws(
+    df: pd.DataFrame, baseline_columns: list[str], n_draws: int, *, max_shift_autocorrelation: float,
+) -> list[tuple[str, int, float]]:
+    """`n_draws` (source_column, shift_days, shift_autocorrelation) triples, each verified —
+    BEFORE any backtest fit — to pass `shift_autocorrelation <= max_shift_autocorrelation`.
+
+    Review finding, verified against real batch0 data: a column that changes only a handful
+    of times across the whole date range (`cycle_mean_length`, `cycle_peak_count`,
+    `lga_mean_cents`, `brand_mean_cents` on batch0) fails this check at EVERY shift offset —
+    not a rare, fixable input, but a property of that specific column that recurs
+    deterministically on every run against the same batch. Aborting the whole computation
+    the first time `select_draws`'s fixed, un-substitutable list happens to include one such
+    column (as an earlier version of this module did) means `compute_noise_floor` could not
+    produce a floor on batch0 at all. This screens the WHOLE candidate list (`candidate_pool`)
+    up front and substitutes the next candidate on a violation, so the failure is cheap (a
+    correlation check, not a wasted fit) and does not need every one of the first `n_draws`
+    candidates to individually pass.
+
+    Uses `pd.Series.corr` (pairwise-complete — see the module docstring for why this isn't
+    `np.corrcoef`), so a column with partial NaN is graded on its real, non-NaN correlation,
+    not masked as an unverifiable NaN.
+
+    Raises ValueError if the full candidate pool is exhausted before finding `n_draws` valid
+    candidates — a genuine "this batch cannot support this many draws at this threshold"
+    case, rare but real, and worth surfacing clearly rather than silently returning fewer
+    draws than asked for.
+    """
+    candidates = candidate_pool(baseline_columns, n_draws)
+    screened: list[tuple[str, int, float]] = []
+    for source_column, shift_days in candidates:
+        if len(screened) >= n_draws:
+            break
+        placebo_series = make_placebo_series(df, source_column, shift_days)
+        corr = placebo_series.corr(df[source_column])
+        if pd.isna(corr) or corr > max_shift_autocorrelation:
+            continue
+        screened.append((source_column, shift_days, float(corr)))
+    if len(screened) < n_draws:
+        raise ValueError(
+            f"only found {len(screened)}/{n_draws} placebo draws passing "
+            f"shift_autocorrelation <= {max_shift_autocorrelation} after trying all "
+            f"{len(candidates)} candidates — this batch's data may not support this many "
+            "draws at this threshold."
+        )
+    return screened

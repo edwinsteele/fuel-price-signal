@@ -179,9 +179,9 @@ def test_compute_noise_floor_draws_distinct_columns_and_shifts(tmp_path, monkeyp
 
 def test_compute_noise_floor_excludes_an_all_nan_locked_column_from_the_draw_pool(tmp_path, monkeypatch):
     """A locked column that's entirely NaN in the frame (found in review against real batch0
-    data) must never be drawn — it would produce an all-NaN placebo and raise the enforced
-    shift_autocorrelation self-check partway through a real run. compute_noise_floor filters
-    it out up front instead."""
+    data) must never be drawn — its placebo would be all-NaN, correlation with itself
+    unverifiable, and placebo.screen_draws (called by compute_noise_floor before any
+    backtest fit) skips and substitutes it rather than including it."""
     df = _baseline_features_df()
     nan_column = resolve_baseline_columns(df)[0]  # select_draws always picks index 0 for draw 1
     df[nan_column] = float("nan")
@@ -328,20 +328,21 @@ def test_compute_noise_floor_stamps_provenance(tmp_path, monkeypatch):
         assert isinstance(draw["shift_autocorrelation"], float)
 
 
-def test_compute_noise_floor_raises_on_near_no_op_shift(tmp_path, monkeypatch):
-    """The shift_autocorrelation self-check is ENFORCED, not just recorded: a degenerate
-    near-no-op shift (placebo ~= its own source column) must raise rather than silently
-    narrow the floor with a draw that still carries the source column's own signal."""
+def test_compute_noise_floor_propagates_a_screen_draws_failure(tmp_path, monkeypatch):
+    """The shift_autocorrelation screen is placebo.screen_draws's job (see test_placebo.py
+    for its own substitute-don't-abort behaviour and its NaN/failure-exhaustion coverage);
+    compute_noise_floor must propagate a screen_draws failure rather than swallow it —
+    verified here at the wiring level, not by re-deriving screen_draws's own logic."""
     df = _baseline_features_df()
     batch_dir = _write_batch_dir(tmp_path, df)
     _stub_realised_by_draw(monkeypatch, [1.0])
-    # The source column's own unshifted values, verbatim — correlation with itself is 1.0.
-    monkeypatch.setattr(
-        noise_floor_module, "make_placebo_series",
-        lambda frame, source_column, shift_days: frame[source_column].rename(PLACEBO_COLUMN_NAME),
-    )
 
-    with pytest.raises(ValueError, match="shift_autocorrelation"):
+    def _always_fails(df, baseline_columns, n_draws, *, max_shift_autocorrelation):
+        raise ValueError("only found 0/1 placebo draws passing shift_autocorrelation")
+
+    monkeypatch.setattr(noise_floor_module, "screen_draws", _always_fails)
+
+    with pytest.raises(ValueError, match="only found 0/1"):
         compute_noise_floor(batch_dir, n_draws=1, verbose=False)
 
 

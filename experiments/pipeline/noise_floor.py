@@ -26,6 +26,16 @@ and — unlike a naive within-date shuffle — never degenerates to a no-op agai
 column (see placebo.py's module docstring for why that matters: 45 of the 54 locked columns
 are market-wide).
 
+Verified against real batch0 data (review): a slowly-varying column (changes only a handful
+of times across the whole date range — `cycle_mean_length`, `cycle_peak_count`,
+`lga_mean_cents`, `brand_mean_cents` on batch0) fails the `shift_autocorrelation` self-check
+at EVERY shift offset, deterministically, on every run — not a rare or fixable input, a
+property of that specific column. `placebo.screen_draws` checks every candidate against
+`MAX_SHIFT_AUTOCORRELATION` BEFORE any backtest fit and substitutes the next one on a
+violation, rather than committing to a fixed draw list up front (an earlier version of this
+module did exactly that, via `select_draws` alone, and could not produce a floor on batch0 at
+all as a result — the very first slowly-varying column drawn aborted the whole computation).
+
 Cost: every draw shares the exact same baseline arm (same frame, columns, seed, tank, folds)
 — only the placebo arm changes — so `run_paired_realised_backtest`'s existing
 `baseline_cache` mechanism (fps-e2l) lets draws 2..N skip refitting the baseline entirely.
@@ -71,7 +81,6 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 
 import click
-import numpy as np
 
 from experiments.lib.constants import SEEDS
 from experiments.lib.io import current_git_sha, to_jsonable
@@ -85,9 +94,8 @@ from experiments.pipeline.batch_freeze import (
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME, NULL_METHOD_PLACEBO_COLUMN
 from experiments.pipeline.placebo import (
     PLACEBO_COLUMN_NAME,
-    eligible_source_columns,
     make_placebo_series,
-    select_draws,
+    screen_draws,
 )
 from experiments.pipeline.runner import (
     DEFAULT_INNER_FOLD_PARAMS,
@@ -176,8 +184,13 @@ def compute_noise_floor(
         graded against; overwriting it silently (e.g. from a re-run) would move that ruler
         under them after the fact.
       - BaselineContractMismatch (via check_baseline_contract) on column drift.
-      - ValueError (via placebo.select_draws) if n_draws exceeds the baseline column count
-        or the shift-day pool size.
+      - ValueError (via placebo.select_draws, inside screen_draws) if n_draws exceeds the
+        baseline column count or the shift-day pool size.
+      - ValueError (via placebo.screen_draws) if this batch's data can't support n_draws
+        placebo columns passing MAX_SHIFT_AUTOCORRELATION even after trying every
+        baseline column as a candidate — rare, but a real outcome on a real batch (unlike
+        the config-drift errors above, this is about the DATA, not a caller/environment
+        mistake).
     """
     batch_dir = pathlib.Path(batch_dir)
     out_path = batch_dir / NOISE_FLOOR_FILENAME
@@ -193,14 +206,14 @@ def compute_noise_floor(
     tank = tank or TankParams()
 
     frame, baseline_columns, db_path = _load_batch(batch_dir)
-    # A real batch can have a locked column that's entirely NaN for its snapshot (found in
-    # review against real batch0 data — an LGA council with no qualifying trough events in
-    # range). Excluded from the draw pool up front: mechanically detectable, no judgement
-    # call, and avoids crashing partway through a run on a foreseeable condition (the
-    # shift_autocorrelation self-check below would otherwise raise on it anyway, just later
-    # and after paying for the fit).
-    eligible_columns = eligible_source_columns(frame, baseline_columns)
-    draws = select_draws(eligible_columns, n_draws)
+    # Screened BEFORE any backtest fit, not per-draw after one (review, verified against real
+    # batch0 data): a column that changes only a handful of times across the whole date range
+    # (e.g. cycle_mean_length, cycle_peak_count, lga_mean_cents, brand_mean_cents on batch0)
+    # fails shift_autocorrelation at EVERY offset — a property of that specific column, not a
+    # fixable/rare input, so it recurs on every run against the same batch. select_draws alone
+    # has no substitute to fall back to; screen_draws checks the whole candidate pool up front
+    # and only returns draws that already pass, so the loop below never has to raise on this.
+    draws = screen_draws(frame, baseline_columns, n_draws, max_shift_autocorrelation=MAX_SHIFT_AUTOCORRELATION)
 
     t0 = time.perf_counter()
     deltas: list[float] = []
@@ -208,7 +221,7 @@ def compute_noise_floor(
     n_windows: int | None = None
     tank_params: str | None = None
     baseline_cache: BaselineCache | None = None
-    for i, (source_column, shift_days) in enumerate(draws, start=1):
+    for i, (source_column, shift_days, shift_autocorrelation) in enumerate(draws, start=1):
         placebo_series = make_placebo_series(frame, source_column, shift_days)
         placebo_frame = frame.assign(**{PLACEBO_COLUMN_NAME: placebo_series})
         # ModelStrategy.decide() (the LIVE realised-replay path) never reads an arm's df
@@ -277,24 +290,10 @@ def compute_noise_floor(
                 f"draw 1 ran at {tank_params!r} — cadence must match across every draw."
             )
 
-        # Cheap, label-free self-check: correlation between the shifted series and the
-        # column's own unshifted values. Should sit near 0 — a value close to 1 would mean
-        # the "shift" accidentally no-opped (e.g. a degenerate _effective_shift), silently
-        # narrowing the floor with a column that still carries its original signal.
-        # ENFORCED, not just recorded: a NaN (e.g. a zero-variance source column, which
-        # can't be verified either way) or a correlation past MAX_SHIFT_AUTOCORRELATION
-        # raises rather than silently accepting a placebo that might still carry its
-        # source column's signal.
-        shift_autocorrelation = float(
-            np.corrcoef(placebo_series.to_numpy(dtype=float), frame[source_column].to_numpy(dtype=float))[0, 1]
-        )
-        if not np.isfinite(shift_autocorrelation) or shift_autocorrelation > MAX_SHIFT_AUTOCORRELATION:
-            raise ValueError(
-                f"draw {i} ({source_column!r}, shift={shift_days}): shift_autocorrelation "
-                f"{shift_autocorrelation!r} is not finite and < {MAX_SHIFT_AUTOCORRELATION} — "
-                "the placebo may still carry the source column's own signal (a zero-variance "
-                "source column, or a degenerate near-zero effective shift). Not a valid draw."
-            )
+        # shift_autocorrelation (correlation between the shifted series and the column's own
+        # unshifted values) was already checked against MAX_SHIFT_AUTOCORRELATION by
+        # screen_draws, BEFORE this draw's fit ran — reused here for provenance, not
+        # recomputed.
         deltas.append(delta)
         placebo_draws.append(
             {
