@@ -40,7 +40,8 @@ def _fold_run_deltas() -> list[dict]:
 
 
 def _make_results(batch_dir: pathlib.Path, *, status: str = "rejected", target=None,
-                   inputs=None, columns=None, error=None, bead_id="fps-test.1") -> dict:
+                   inputs=None, columns=None, error=None, bead_id="fps-test.1",
+                   tank_params: str | None = "50/3.571/7d/10%") -> dict:
     return {
         "status": status,
         "candidate": {
@@ -77,6 +78,7 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "rejected", target=N
             "extra_feature_provider_hits": 100, "extra_feature_provider_misses": 0,
             "git_sha": "abc1234", "bead_id": bead_id,
             "n_baseline_columns": 54, "baseline_fingerprint": "54:deadbeef1234",
+            "tank_params": tank_params,
         },
     }
 
@@ -141,6 +143,7 @@ def _make_rowpreds(*, with_axis: bool = False, with_cycle: bool = False,
 def _write_run(
     tmp_path, *, status="rejected", target=None, inputs=None, columns=None,
     with_axis=False, with_cycle=False, low_n_fold=None, batch_extras=None,
+    tank_params: str | None = "50/3.571/7d/10%",
 ) -> tuple[pathlib.Path, pathlib.Path]:
     batch_dir = tmp_path / "batch1"
     batch_dir.mkdir(exist_ok=True)
@@ -153,7 +156,10 @@ def _write_run(
 
     run_dir = tmp_path / "run1"
     run_dir.mkdir(exist_ok=True)
-    results = _make_results(batch_dir, status=status, target=target, inputs=inputs, columns=columns)
+    results = _make_results(
+        batch_dir, status=status, target=target, inputs=inputs, columns=columns,
+        tank_params=tank_params,
+    )
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
     if status == "rejected":
         rowpreds = _make_rowpreds(
@@ -237,6 +243,7 @@ def test_build_facts_rejected_run_has_all_blocks_and_suppresses_thin_cells(tmp_p
     assert facts["provenance"]["git_sha_is_run_time"] is True
     assert facts["provenance"]["n_baseline_columns"] == 54
     assert facts["provenance"]["baseline_fingerprint"] == "54:deadbeef1234"
+    assert facts["provenance"]["tank_params"] == "50/3.571/7d/10%"
 
     assert facts["headline"]["realised"]["delta_cpl_held"] == -0.05
     assert "NOT the arbiter" in facts["headline"]["wfcv_log_loss"]["label"]
@@ -269,6 +276,17 @@ def test_build_facts_rejected_run_has_all_blocks_and_suppresses_thin_cells(tmp_p
 
     assert facts["noise_band"]["available"] is False
     assert "fps-3jj.9" in facts["noise_band"]["reason"]
+
+
+def test_build_facts_raises_when_rejected_run_has_no_tank_params(tmp_path):
+    """fps-15c: status=='rejected' means headline/breakdowns are about to carry a
+    realised CPL — refuse rather than write a facts.json with no cadence stamp.
+    Covers an old results.json that predates the field AND a hand-written
+    mechanism that built its own results.json and skipped the shared path."""
+    run_dir, _ = _write_run(tmp_path, tank_params=None)
+
+    with pytest.raises(ValueError, match="no tank_params"):
+        dt.build_facts(run_dir)
 
 
 def test_build_facts_per_axis_present_when_add_axis_declared(tmp_path):

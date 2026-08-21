@@ -43,26 +43,37 @@ def _write_batch_dir(tmp_path: pathlib.Path, df: pd.DataFrame, name: str = "batc
     return batch_dir
 
 
-def _fake_result(cpl_held: float, n_windows: int = 5):
+_DEFAULT_TANK_PARAMS = "50/3.571/7d/10%"
+
+
+def _fake_result(cpl_held: float, n_windows: int = 5, tank_params: str = _DEFAULT_TANK_PARAMS):
     class _Fake:
         aggregate = pd.DataFrame([{"arm": "baseline", "cpl_own": cpl_held, "cpl_held": cpl_held}])
-        meta = {"n_windows": n_windows}
+        meta = {"n_windows": n_windows, "tank_params": tank_params}
 
     return _Fake()
 
 
 def _stub_realised_by_seed(
-    monkeypatch, cpl_by_seed: dict[int, float], n_windows_by_seed: dict[int, int] | None = None
+    monkeypatch,
+    cpl_by_seed: dict[int, float],
+    n_windows_by_seed: dict[int, int] | None = None,
+    tank_params_by_seed: dict[int, str] | None = None,
 ) -> list[dict]:
-    """Route each call to its seed's canned cpl_held (+ optional n_windows); record
-    every call's args/kwargs."""
+    """Route each call to its seed's canned cpl_held (+ optional n_windows/
+    tank_params); record every call's args/kwargs."""
     calls: list[dict] = []
     n_windows_by_seed = n_windows_by_seed or {}
+    tank_params_by_seed = tank_params_by_seed or {}
 
     def _fake(arms, feature_columns, **kwargs):
         calls.append({"arms": arms, "feature_columns": feature_columns, **kwargs})
         seed = kwargs["seed"]
-        return _fake_result(cpl_by_seed[seed], n_windows_by_seed.get(seed, 5))
+        return _fake_result(
+            cpl_by_seed[seed],
+            n_windows_by_seed.get(seed, 5),
+            tank_params_by_seed.get(seed, _DEFAULT_TANK_PARAMS),
+        )
 
     monkeypatch.setattr(noise_floor_module, "run_paired_realised_backtest", _fake)
     return calls
@@ -86,6 +97,41 @@ def test_compute_noise_floor_pairs_seeds_and_writes_expected_deltas(tmp_path, mo
     assert payload["partial"] is False
     on_disk = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
     assert on_disk == payload
+
+
+def test_compute_noise_floor_stamps_the_default_tank_params(tmp_path, monkeypatch):
+    """fps-15c: the floor's deltas_cpl_held must carry the cadence they were
+    produced at, read back off RealisedResult.meta (not reformatted here)."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    cpl_by_seed = {1: 100.0, 2: 200.0, 10: 109.0, 20: 218.0}
+    calls = _stub_realised_by_seed(monkeypatch, cpl_by_seed)
+
+    payload = compute_noise_floor(batch_dir, seeds_a=(1, 2), seeds_b=(10, 20), verbose=False)
+
+    assert payload["tank_params"] == "50/3.571/7d/10%"
+    from fuel_signal.backtest import TankParams
+
+    assert all(call["tank"] == TankParams() for call in calls)
+
+
+def test_compute_noise_floor_stamps_a_non_default_tank(tmp_path, monkeypatch):
+    from fuel_signal.backtest import TankParams
+
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    cpl_by_seed = {1: 100.0, 2: 200.0, 10: 109.0, 20: 218.0}
+    tank = TankParams(evaluation_interval_days=1)
+    calls = _stub_realised_by_seed(
+        monkeypatch, cpl_by_seed, tank_params_by_seed=dict.fromkeys(cpl_by_seed, "50/3.571/1d/10%")
+    )
+
+    payload = compute_noise_floor(
+        batch_dir, seeds_a=(1, 2), seeds_b=(10, 20), tank=tank, verbose=False,
+    )
+
+    assert payload["tank_params"] == "50/3.571/1d/10%"
+    assert all(call["tank"] == tank for call in calls)
 
 
 def test_compute_noise_floor_mismatched_seed_lengths_raises(tmp_path):
@@ -235,6 +281,21 @@ def test_compute_noise_floor_raises_on_n_windows_mismatch_across_pairs(tmp_path,
 
     with pytest.raises(ValueError, match="fold geometry must be identical"):
         compute_noise_floor(batch_dir, seeds_a=(1, 3), seeds_b=(2, 4), verbose=False)
+
+
+def test_compute_noise_floor_raises_on_tank_params_mismatch_within_pair(tmp_path, monkeypatch):
+    """fps-15c: both halves of a pair share one `tank`, so disagreeing tank_params
+    means run_paired_realised_backtest didn't actually run at the tank it was
+    passed — the resulting delta isn't a same-cadence comparison."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(
+        monkeypatch, {1: 1.0, 2: 2.0},
+        tank_params_by_seed={1: "50/3.571/7d/10%", 2: "50/3.571/1d/10%"},
+    )
+
+    with pytest.raises(ValueError, match="cadence must match"):
+        compute_noise_floor(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
 
 
 def test_compute_noise_floor_default_seeds_pair_five_and_five(tmp_path, monkeypatch):

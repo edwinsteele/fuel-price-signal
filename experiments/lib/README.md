@@ -46,9 +46,13 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 `aggregate_with_deltas(df_rows, cohort_ll_map, baseline_run="R0")` — groups by `(fold, regime, run)`, computes mean/median/`{col}_seedstd` per cohort column, and appends `delta_*_mean` / `delta_*_median` columns vs the baseline run. Ready to write directly to `fold_run.csv`.
 
 ## io.py
-`to_jsonable(o)` — recursively converts non-finite floats to `None`. `write_meta(out_dir, meta, *, baseline_columns=None)` — serialises `meta` with `to_jsonable`, writes `meta.json`, and prints the path.
+`to_jsonable(o)` — recursively converts non-finite floats to `None`. `write_meta(out_dir, meta, *, baseline_columns=None, tank=None)` — serialises `meta` with `to_jsonable`, writes `meta.json`, and prints the path.
 
 `write_meta` also stamps a `baseline` block (`n_columns`, `fingerprint`, `columns`, `declared_by_caller`) into every `meta.json`, so a result always says which R0 it was measured against. It defaults to `BASELINE_COLUMNS`; pass `baseline_columns=` — **in the order the model was fit in** — when the script's R0 is anything else.
+
+If the script's own results carry a realised CPL, pass `tank=` (the `TankParams` it actually ran at) — `write_meta` stamps `tank_params` the same way `log_experiment`/`run_paired_realised_backtest` do (`fuel_signal.backtest.require_tank_stamp`, fps-15c), so a hand-written script inherits the cadence-stamping contract instead of reimplementing (or skipping) it. Omit it entirely for a script with no realised CPL at all (e.g. a WFCV log-loss-only screen) — the field is left out, not written empty.
+
+`artifact_has_unstamped_cpl(obj)` — the generic fps-15c backstop: True if a JSON-shaped `dict`/`list` carries any `cpl`-shaped key (case-insensitive substring match) with no `tank_params`/`tank` key anywhere in it. `tests/test_exp_lib_io.py` runs it over every committed `experiments/**/*.json`, with an explicit allowlist for the known, deliberate exceptions (a cadence-sweep script that self-documents cadence under a different key name; `retrospective_facts.json`, pending `fps-aam`). Route a new artifact-writing script's own JSON output through the same check if it will ever carry a realised CPL.
 
 ## timing.py
 `time_block(label)` — context manager that prints `  [label] N.Ns` on exit.

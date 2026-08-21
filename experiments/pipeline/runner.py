@@ -598,6 +598,12 @@ def run_candidate(
             "seeds": list(seeds),
             "realised_seed": realised_seed,
             "n_windows": realised.meta["n_windows"],
+            # The cadence realised.aggregate's cpl_own/cpl_held values were produced
+            # at (fps-15c) — bare access, same style as n_windows above: a
+            # run_paired_realised_backtest that doesn't supply it (e.g. a test
+            # double that predates this field) fails loudly here rather than
+            # silently writing a CPL with no cadence stamp.
+            "tank_params": realised.meta["tank_params"],
             "realised_wall_seconds": realised.meta["total_wall_seconds"],
             "baseline_cache_used": realised.meta["baseline_cache_used"],
             "baseline_cache_hit_folds": realised.meta["baseline_cache_hit_folds"],

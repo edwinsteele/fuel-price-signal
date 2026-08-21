@@ -1213,3 +1213,25 @@ def test_decide_without_provider_is_unchanged():
     strategy = ModelStrategy(pipeline=pipeline, feature_columns=list(FEATURE_COLUMNS), threshold=0.40)
     assert strategy.extra_feature_provider is None
     assert isinstance(strategy.decide("2018-09-01", station_code, history), bool)
+
+
+# ---------------------------------------------------------------------------
+# require_tank_stamp (fps-15c) — the shared cadence-stamping guard every
+# CPL-writing artifact routes through, generalising log_experiment's original
+# realised_spend_cpl-without-tank check (fps-xx1).
+# ---------------------------------------------------------------------------
+
+def test_require_tank_stamp_raises_when_tank_is_none():
+    import pytest
+
+    from fuel_signal.backtest import require_tank_stamp
+
+    with pytest.raises(ValueError, match="realised_spend_cpl was passed without tank"):
+        require_tank_stamp(None, what="realised_spend_cpl")
+
+
+def test_require_tank_stamp_returns_format_tank_params_when_tank_given():
+    from fuel_signal.backtest import format_tank_params, require_tank_stamp
+
+    tank = TankParams(evaluation_interval_days=1)
+    assert require_tank_stamp(tank, what="anything") == format_tank_params(tank) == "50/3.571/1d/10%"

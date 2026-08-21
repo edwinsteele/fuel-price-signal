@@ -367,6 +367,29 @@ def format_tank_params(tank: TankParams) -> str:
     return f"{size}/{daily}/{interval}/{floor}"
 
 
+def require_tank_stamp(tank: TankParams | None, *, what: str) -> str:
+    """The cadence stamp every artifact that records a realised CPL must obtain
+    through this function, never through a caller-supplied string (fps-15c).
+
+    Generalises log_experiment's original guard (fps-xx1, fps-fii) to every writer:
+    the caller passes the TankParams object the CPL was actually produced with, so
+    the stamp can never disagree with what produced the number it labels — same
+    rule as baseline_fingerprint, one contract down.
+
+    Raises if tank is None: an artifact carrying a realised CPL with no tank to
+    stamp its cadence is exactly the ambiguity fps-xx1 exists to prevent (fps-fii
+    measured realised CPL moving 189.67/187.85/187.82 c/L across 7/2/1-day cadence
+    on an otherwise identical run). Refuse rather than default or silently omit it.
+    """
+    if tank is None:
+        raise ValueError(
+            f"{what} was passed without tank — a value with a realised CPL and no "
+            "tank_params stamp is exactly the ambiguity fps-xx1 exists to prevent. "
+            "Pass the TankParams the backtest ran with."
+        )
+    return format_tank_params(tank)
+
+
 @dataclass
 class NeverDryViolation:
     """A reachable pre-depletion tank level that cannot survive one more interval."""

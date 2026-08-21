@@ -45,7 +45,7 @@ from collections.abc import Iterator
 import numpy as np
 import pandas as pd
 
-from fuel_signal.backtest import TankParams, format_tank_params
+from fuel_signal.backtest import TankParams, format_tank_params, require_tank_stamp
 from fuel_signal.features import baseline_fingerprint
 
 # ---------------------------------------------------------------------------
@@ -294,12 +294,12 @@ def log_experiment(
     fps-fii measured realised CPL moving 189.67/187.85/187.82 c/L across 7/2/1-day
     cadence on an otherwise identical run).
     """
-    if realised_spend_cpl is not None and tank is None:
-        raise ValueError(
-            "realised_spend_cpl was passed without tank — a row with a realised CPL "
-            "and no tank_params stamp is exactly the ambiguity fps-xx1 exists to "
-            "prevent. Pass the TankParams the backtest ran with."
-        )
+    if realised_spend_cpl is not None:
+        # Shared guard (fps-15c) — raises if tank is None. The formatted stamp
+        # itself is still derived below via format_tank_params(tank) so a tank
+        # passed WITHOUT a realised_spend_cpl (a valid call shape) still gets
+        # recorded.
+        require_tank_stamp(tank, what="realised_spend_cpl")
     _RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
     write_header = not _RESULTS_CSV.exists() or _RESULTS_CSV.stat().st_size == 0
     if not write_header:

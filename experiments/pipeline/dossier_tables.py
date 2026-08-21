@@ -184,6 +184,21 @@ def build_facts(run_dir: pathlib.Path) -> dict:
         )
         return facts
 
+    if not facts["provenance"]["tank_params"]:
+        # fps-15c: status=="rejected" means headline/breakdowns are about to carry
+        # realised cpl_own/cpl_held values, and results.json's meta has no
+        # tank_params to stamp them with — refuse rather than write a facts.json a
+        # reader can't tell apart from a 7d one. Most likely an old results.json
+        # that predates this field (backfill it) or a new run-producing mechanism
+        # that built its own results.json by hand and skipped the shared stamping
+        # path (experiments/lib/realised.py's meta, propagated by runner.py).
+        raise ValueError(
+            f"{run_dir}: results.json has status=='rejected' (a realised CPL is about to "
+            "be written into facts.json) but its meta carries no tank_params — refusing "
+            "(fps-15c). Backfill the run's results.json with the tank it actually ran at, "
+            "or re-run it against current code."
+        )
+
     facts["headline"] = _headline(results)
     facts["breakdowns"] = _breakdowns(results, rowpreds, fills)
     return facts
@@ -219,6 +234,11 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         # absence is itself the signal, not a formatting inconvenience.
         "n_baseline_columns": meta.get("n_baseline_columns"),
         "baseline_fingerprint": meta.get("baseline_fingerprint"),
+        # The cadence every realised CPL in this dossier (headline, breakdowns) was
+        # produced at (fps-15c). build_facts() below refuses to proceed past this
+        # point without it whenever status=="rejected" — a rejected run is exactly
+        # the case where headline/breakdowns are about to carry a CPL.
+        "tank_params": meta.get("tank_params"),
     }
 
 

@@ -137,6 +137,50 @@ realised-CPL row, since none of them predate the 7-day default. This was the
 precondition for `fps-929`: without it, a daily-cadence re-lock's own row would be
 indistinguishable from the 7-day rows it must be compared against.
 
+**A recorded CPL without its cadence is a refusal, not a convention (`fps-15c`).**
+The rule above is a stated CONTRACT, not just a habit `log_experiment` happens to
+follow: every artifact that records a realised CPL must carry the `TankParams` it
+was produced at, and the writer must **raise** rather than silently omit it.
+`fuel_signal.backtest.require_tank_stamp(tank, what=...)` is the one shared path —
+raises if `tank` is `None`, otherwise returns `format_tank_params(tank)`. Every
+writer routes through it rather than reimplementing the check:
+
+| Site | What it stamps |
+|---|---|
+| `experiments/results.csv` (`log_experiment`) | `tank_params` column, empty when no backtest ran |
+| `RealisedResult.meta` (`run_paired_realised_backtest`) | `meta["tank_params"]`, always present — `tank` is resolved (never `None`) before the stamp |
+| `runner.py`'s `results.json` | `meta["tank_params"]`, read straight off `RealisedResult.meta` |
+| `dossier_tables.build_facts`'s `facts.json` | `provenance["tank_params"]`; **raises** if `status=="rejected"` (a CPL is about to be written) and the source `results.json` has none |
+| `batch_freeze.freeze_batch`'s `freeze.json` | `tank_params`, the batch's declared cadence contract — the same role `baseline_fingerprint` plays for column identity |
+| `noise_floor.compute_noise_floor`'s `noise_floor.json` | `tank_params`, cross-checked between both halves of every seed pair the same way `n_windows` already is |
+
+`experiments/lib/io.write_meta` (the shared `meta.json` writer ~14 hand-written
+experiment scripts already call) also accepts an optional `tank=` and stamps it the
+same way, so a *new* mechanism inherits the discipline by using the existing shared
+helper instead of reinventing it.
+
+Tests enforce this generically rather than one assertion per site
+(`tests/test_exp_lib_io.py`): `experiments.lib.io.artifact_has_unstamped_cpl(obj)`
+walks a JSON-shaped dict/list looking for any key containing `cpl` (case-
+insensitive — `cpl_own`, `delta_cpl_held`, `band_mean_delta_cpl_held`, ...) with no
+`tank_params`/`tank` key anywhere in the same document.
+`test_every_committed_experiment_json_artifact_carries_its_cadence_stamp` runs it
+over **every git-tracked `experiments/**/*.json`**, not a hand-picked list — a
+future artifact-writing mechanism that builds its own dict from scratch and skips
+the shared helper is caught here without needing its own dedicated test, which is
+the generic "catches the next mechanism" backstop `fps-15c` exists to provide. Two
+deliberate, commented exceptions are allowlisted rather than silently exempted: a
+cadence-*sweep* experiment (`2026-08-20_cadence_ceiling/stage2_model/meta.json`)
+that self-documents cadence per row as `cadence_days` — it IS the independent
+variable there, just under a different key name than this scan looks for — and
+`retrospective_facts.json`, a derived artifact built entirely from already-stamped
+`facts.json`/`noise_floor.json` whose own propagation is `fps-aam`.
+
+`batch0`'s `freeze.json`, `noise_floor.json`, and `tgp_delta_7d`'s `results.json` /
+`facts.json` were backfilled with `tank_params: "50/3.571/7d/10%"` — the batch was
+frozen and every candidate in it ran before this field existed, entirely at the
+canonical 7-day cadence, so the backfilled value is a historical fact, not a guess.
+
 **And cadence is not free to sweep.** `run_backtest`'s emergency rule forces a
 half-fill whenever a wait would leave `tank_level < depletion` (bd `fps-5mn`,
 fixed 2026-08-20 — it previously tested only `tank_level / size < floor_fraction`,

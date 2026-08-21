@@ -223,6 +223,37 @@ def test_baseline_cache_captured_when_held_tau_is_none(monkeypatch):
     assert len(fit_calls) == n_folds * 2
 
 
+def test_meta_carries_the_default_tank_params_stamp(monkeypatch):
+    """RealisedResult.meta must always carry the cadence its cpl_own/cpl_held
+    values were produced at (fps-15c) — the shared stamping path every
+    downstream artifact (results.json, facts.json, noise_floor.json) reads
+    from, rather than reformatting a TankParams itself."""
+    fit_calls, load_history_calls, agg_calls = [], [], []
+    _install_fakes(monkeypatch, fit_calls=fit_calls, load_history_calls=load_history_calls, agg_calls=agg_calls)
+    arms, baseline_cols, outer, inner = _cache_test_setup()
+
+    result = run_paired_realised_backtest(
+        arms, baseline_cols, station_codes=[1], seed=42,
+        outer_fold_params=outer, inner_fold_params=inner, verbose=False,
+    )
+
+    assert result.meta["tank_params"] == "50/3.571/7d/10%"
+
+
+def test_meta_tank_params_reflects_a_non_default_tank(monkeypatch):
+    fit_calls, load_history_calls, agg_calls = [], [], []
+    _install_fakes(monkeypatch, fit_calls=fit_calls, load_history_calls=load_history_calls, agg_calls=agg_calls)
+    arms, baseline_cols, outer, inner = _cache_test_setup()
+
+    result = run_paired_realised_backtest(
+        arms, baseline_cols, station_codes=[1], seed=42,
+        outer_fold_params=outer, inner_fold_params=inner, verbose=False,
+        tank=TankParams(evaluation_interval_days=1),
+    )
+
+    assert result.meta["tank_params"] == "50/3.571/1d/10%"
+
+
 def test_baseline_cache_reuse_skips_baseline_refit_and_history_load(monkeypatch):
     """Second call, passing the first call's cache back in, must reuse arms[0]'s
     fit and economics — not refit it or reload its PriceHistory — while still
