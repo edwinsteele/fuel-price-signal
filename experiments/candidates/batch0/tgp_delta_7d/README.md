@@ -13,9 +13,11 @@
   67.6% of fills and only 244 are chosen, so each flip carries a large share of the
   total; at 1d there are 1832 chosen fills and the per-flip value is correspondingly
   smaller. Do not carry that 0.05 across the boundary as a resolution bar. Comparing
-  anything here against a 1-day run requires re-freezing batch0 at 1d, which is why
-  `dossier_tables._noise_band()` now refuses the cross-cadence comparison outright
-  (`fps-v8o`) rather than letting it look valid.
+  anything here against a 1-day run requires a NEW batch frozen at 1d (`fps-aay`) —
+  batch0 cannot be re-frozen (`batch_freeze` allows one freeze per batch) and its floor
+  must not be recomputed at 1d in place, which `compute_noise_floor` now refuses
+  (`fps-oqz`). `dossier_tables._noise_band()` separately refuses the cross-cadence
+  run-vs-floor comparison (`fps-v8o`) rather than letting it look valid.
 
 ## What this run is for
 

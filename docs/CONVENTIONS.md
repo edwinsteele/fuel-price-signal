@@ -216,8 +216,17 @@ guess. Since the 2026-08-22 re-lock those stamps no longer match the default, so
 *new* candidate run against batch0's floor refuses with `available: false` on the
 `tank_params` axis. That is the guard working, not a regression: batch0 is a 7-day
 batch, and grading a 1-day candidate against a 7-day floor is exactly the silent
-comparison `fps-v8o` exists to block. Re-freezing batch0 at 1d (which recomputes
-the floor) is the way to compare across the boundary; editing the stamps is not.
+comparison `fps-v8o` exists to block.
+
+**To compare across the boundary, freeze a NEW batch at 1d** — that is what `fps-aay`
+already plans. Do *not* reach for `noise_floor.py batch0 --force`: `freeze_batch`
+refuses to re-freeze an existing batch (`FileExistsError`, "batches are frozen once"),
+so `--force` is the only in-place mechanism, and it would recompute the floor at the
+current default while `freeze.json` kept declaring 7d — leaving the batch split-brained
+with no reader to notice, since nothing consumes `freeze.json`'s stamp and `_noise_band`
+compares only run-vs-floor. `compute_noise_floor` now refuses that outright
+(`check_freeze_cadence`, `fps-oqz`): a batch's floor and its freeze manifest must agree
+on cadence. Editing the stamps is not a fix either.
 
 **And cadence is not free to sweep.** `run_backtest`'s emergency rule forces a
 half-fill whenever a wait would leave `tank_level < depletion` (bd `fps-5mn`,

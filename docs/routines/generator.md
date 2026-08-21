@@ -45,7 +45,10 @@ Read all of the following before proposing anything:
      `FEATURE_COLUMNS`, and no longer on a path to it.** Its June 2026 realised-arbiter
      graduation was **retracted 2026-08-19 as inert**: −0.039 c/L does not reproduce
      (+0.0059 c/L on identical columns, folds and seed), and it was never resolvable
-     either way, being smaller than the ~0.05 c/L value of one buy/wait decision flip.
+     either way, being smaller than the value of one buy/wait decision flip — **~0.05 c/L
+     at the 7-day cadence that measurement ran on, and smaller at today's 1-day cadence**
+     (1832 chosen fills instead of 244, so each flip carries less of the total). Do not
+     reuse 0.05 as a general resolution bar; it is a 7-day quantity, not a constant.
      Against the batch0 noise floor it sits at the 40th percentile of pure fit noise.
      The column is registered in `features.NON_MODEL_COLUMNS` under
      `NON_MODEL_REASON_INCONCLUSIVE` — measured below the arbiter's resolution, so
