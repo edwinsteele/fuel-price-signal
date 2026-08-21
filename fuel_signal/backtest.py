@@ -350,12 +350,12 @@ class TankParams:
 
     tank_size_litres: float = 50.0
     daily_consumption_litres: float = 50.0 / 14   # empties in 14 days
-    evaluation_interval_days: int = 7              # how often signal is checked
+    evaluation_interval_days: int = 1              # how often signal is checked
     floor_fraction: float = 0.10                   # emergency half-fill threshold
 
 
 def format_tank_params(tank: TankParams) -> str:
-    """Render as size/daily/interval/floor, e.g. ``50/3.571/7d/10%``.
+    """Render as size/daily/interval/floor, e.g. ``50/3.571/1d/10%``.
 
     A readable literal, not a hash: four numbers are already glanceable, so unlike
     ``baseline_fingerprint`` the values themselves are the stamp.
@@ -1068,7 +1068,12 @@ def _print_results_table(results: list[BacktestResult]) -> None:
     help="Daily fuel consumption in litres.",
 )
 @click.option(
-    "--eval-interval", "eval_interval", type=int, default=7, show_default=True,
+    # Sourced from TankParams rather than repeated as a literal: the cadence is a
+    # declared lock parameter (docs/CONVENTIONS.md), and a second copy of it here
+    # would silently disagree with the dataclass the next time it is re-locked —
+    # which is exactly what happened to the 7 this replaced (fps-oqz).
+    "--eval-interval", "eval_interval", type=int,
+    default=TankParams().evaluation_interval_days, show_default=True,
     help="Days between signal evaluations.",
 )
 @click.option(

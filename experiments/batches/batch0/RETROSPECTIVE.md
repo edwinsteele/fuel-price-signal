@@ -3,6 +3,12 @@
 - **Date:** 2026-08-19
 - **Batch:** experiments/batches/batch0
 - **SHA:** 25a86ee6a4f489bc0e8c920f84927357dbbb5aac
+- **Cadence:** `50/3.571/7d/10%` — batch0 is a **7-day batch**, frozen and graded
+  entirely before the 2026-08-22 re-lock to daily (`fps-oqz`). Every CPL and
+  noise-band figure below is conditioned on it; none has been restated. Its
+  `freeze.json` / `noise_floor.json` stamps still read 7d, so a new candidate run
+  (which now defaults to 1d) is refused against this floor rather than silently
+  graded across the boundary.
 - **Candidates filed:** 1
 
 ## What this is

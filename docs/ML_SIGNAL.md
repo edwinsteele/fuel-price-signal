@@ -60,7 +60,7 @@ Note: the original plan numbered "upstream features" as Phase 4 and the macro mo
 
 ## Phase 2 results (locked baseline)
 
-τ=0.40 on test: logloss 0.4029 (vs baseline 0.5821), brier 0.1346 (vs 0.1966). Realised CPL 190.35 c/L vs always-buy 191.78. Phase 3 must beat 190.35 c/L. See [docs/STATUS.md](STATUS.md) for full table.
+τ=0.40 on test: logloss 0.4029 (vs baseline 0.5821), brier 0.1346 (vs 0.1966). Realised CPL 190.35 c/L vs always-buy 191.78, at **7-day decision cadence** (canonical until the 2026-08-22 re-lock to 1 day — quote realised CPL with its cadence attached). Phase 3 must beat 190.35 c/L. See [docs/STATUS.md](STATUS.md) for full table.
 
 ## Non-goals
 

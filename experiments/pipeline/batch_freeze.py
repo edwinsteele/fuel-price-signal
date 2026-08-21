@@ -241,9 +241,11 @@ def freeze_batch(
     tank (fps-15c): the cadence this batch declares for every candidate run against
     it, stamped into freeze.json's `tank_params` and passed straight through to
     compute_noise_floor so the floor can never silently disagree with it. None
-    (default) resolves to `TankParams()` — the canonical 7-day cadence
-    (docs/CONVENTIONS.md) every other call in this pipeline resolves to when not
-    overridden. Not yet exposed as a CLI flag: moving it is a deliberate re-lock
+    (default) resolves to `TankParams()` — the canonical 1-day cadence
+    (docs/CONVENTIONS.md, re-locked from 7d 2026-08-22, fps-oqz) every other call in
+    this pipeline resolves to when not overridden. A batch frozen before that re-lock
+    (batch0) still declares 7d, and grading a 1d candidate against its floor is
+    refused rather than silently allowed — see dossier_tables._noise_band (fps-v8o). Not yet exposed as a CLI flag: moving it is a deliberate re-lock
     (docs/CONVENTIONS.md § The decision cadence is a lock parameter), not a
     per-batch knob.
 

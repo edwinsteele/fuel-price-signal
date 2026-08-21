@@ -89,9 +89,9 @@ def test_write_meta_omits_tank_params_when_no_tank_passed(tmp_path):
 
 
 def test_write_meta_stamps_the_tank_it_ran_with(tmp_path):
-    write_meta(tmp_path, {}, tank=TankParams(evaluation_interval_days=1))
+    write_meta(tmp_path, {}, tank=TankParams(evaluation_interval_days=7))
     meta = json.loads((tmp_path / "meta.json").read_text())
-    assert meta["tank_params"] == "50/3.571/1d/10%"
+    assert meta["tank_params"] == "50/3.571/7d/10%"
 
 
 # ── artifact_has_unstamped_cpl (fps-15c) — the generic structural backstop ────

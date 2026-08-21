@@ -679,7 +679,7 @@ uv run python -m fuel_signal.backtest_phase2 \
     --model-path data/models/logreg_calibrated.joblib
 ```
 
-**Phase 2 realised-spend result** (2026-05-10, preferred stations, test window 2025-07-01 → 2025-12-31):
+**Phase 2 realised-spend result** (2026-05-10, preferred stations, test window 2025-07-01 → 2025-12-31, **7-day decision cadence** — the canonical cadence was re-locked to 1 day on 2026-08-22, so this table is not comparable to a figure produced after that date; see [CONVENTIONS.md](docs/CONVENTIONS.md#the-decision-cadence-is-a-lock-parameter-declared--not-a-default)):
 
 | Strategy | CPL (c/L) | vs always-buy |
 |---|---|---|
@@ -714,7 +714,7 @@ Calibration: LGBM is heavily over-confident out of the box (max |gap| = 0.38). I
 
 LGBM val logloss beats raw-logreg val logloss (0.3926 < 0.4112) ✓
 
-Realised-spend backtest (τ sweep, preferred stations, test window 2025-07-01 → 2025-12-31):
+Realised-spend backtest (τ sweep, preferred stations, test window 2025-07-01 → 2025-12-31, **7-day decision cadence** — see the note on the Phase 2 table above):
 
 | τ | CPL (c/L) | vs always-buy |
 |---|---|---|
@@ -750,7 +750,7 @@ uv run python -m fuel_signal.backtest --preferred --strategy all \
     --model-path data/models/logreg.joblib \
     --start 2023-01-01 --end 2024-12-31
 
-# Custom tank size and consumption (default: 50L tank, 50L/14d)
+# Custom tank size and consumption (default: 50L tank, 50L/14d, decide daily)
 uv run python -m fuel_signal.backtest --preferred --strategy rule_based \
     --start 2023-01-01 --end 2024-12-31 \
     --tank-size 60 --daily-use 4.0 --eval-interval 7

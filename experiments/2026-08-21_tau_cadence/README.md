@@ -99,19 +99,26 @@ upper side answers this experiment. See `tau_sweep.png`.
   what `fps-3jj`'s batch1 is for.
 - **Does:** leave the production lock alone. τ=0.25 is within 0.01 c/L of optimal at 7d
   and within 0.06 at 1d. **No re-lock, no `docs/STATUS.md` change.**
-- **Does not:** say anything about whether to move *cadence*. That question is untouched
-  and is much larger than τ — the model is 1.85 c/L cheaper at 1d than at 7d
+- **Does not:** say anything about whether to move *cadence*. That question was untouched
+  by this experiment and is much larger than τ — the model is 1.85 c/L cheaper at 1d than at 7d
   (187.82 vs 189.67) regardless of τ. But it also fills 2332 times instead of 752 over
   the same window, at a 9.9 L mean fill instead of 28.8 L: roughly three times as many
   servo visits for smaller amounts. That is an operational trade the CPL column does not
   price, and moving cadence is a deliberate re-lock (`docs/CONVENTIONS.md`).
+  **Addendum 2026-08-22:** that re-lock has since happened — `fps-oqz` moved the
+  canonical cadence 7d → 1d, on the owner's rationale (uniformity, resolution, a choice
+  every day) rather than on this experiment's economics. The 2d option recommended here
+  on the hassle trade-off was considered and overridden. τ stays 0.25, as concluded.
 - **Does not:** slice by zone. Window level only — per-zone economics is not identified
   (`fps-grp`). Per-fold is safe (each fold/station is an independent tank).
 
 ## Scale check, for calibration
 
-At the production 7-day cadence the whole remaining headroom is 1.54 c/L on ~1300 L of
-annual consumption per vehicle: **about $20/year**. The τ gain measured here is under
+At the then-production 7-day cadence the whole remaining headroom is 1.54 c/L on ~1300 L
+of annual consumption per vehicle: **about $20/year**. (Since the 2026-08-22 re-lock the
+production cadence is 1 day, where the headroom is 2.97 c/L — roughly $39/year on the
+same consumption. The order of magnitude, which is the point of this section, is
+unchanged.) The τ gain measured here is under
 $1/year. This does not make the work pointless — `fps-3jj`'s stated primary aim is
 experience with an AI-sourced pipeline, not the pump savings — but any argument that
 reaches for economic urgency should be checked against this number first.

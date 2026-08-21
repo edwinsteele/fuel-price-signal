@@ -64,8 +64,12 @@ setup's wall-clock for a number the gate doesn't consume.
 fps-cf8: `batch_freeze.py`'s `freeze_batch()` calls `compute_noise_floor()` as its own final
 step, so batch setup is one command and the floor cannot be forgotten or run against a
 different snapshot than the one it grades. This module's CLI remains for recomputing a floor
-on its own (e.g. after `--skip-noise-floor`, or with `--force` after a re-lock invalidates
-the existing one — see docs/CONVENTIONS.md).
+on its own (e.g. after `--skip-noise-floor`, or with `--force` to replace a floor computed
+at the batch's OWN declared cadence). Note `--force` is NOT the way to follow a cadence
+re-lock: it resolves `tank` from the current `TankParams()` default, so on a batch frozen
+at the old cadence it is refused by `check_freeze_cadence` below (fps-oqz) rather than
+leaving freeze.json and noise_floor.json declaring different cadences. Freeze a new batch
+at the new cadence instead — see docs/CONVENTIONS.md.
 
 Usage (recompute a floor for an already-frozen batch):
   PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch-name> --force
@@ -88,6 +92,7 @@ from experiments.lib.realised import ArmSpec, BaselineCache, run_paired_realised
 from experiments.pipeline.batch_freeze import (
     BASELINE_COLUMNS_FILENAME,
     DEFAULT_BATCHES_DIR,
+    FREEZE_MANIFEST_FILENAME,
     FROZEN_DB_FILENAME,
     check_baseline_contract,
 )
@@ -102,7 +107,7 @@ from experiments.pipeline.runner import (
     _check_provider_health,
     _make_lookup_provider,
 )
-from fuel_signal.backtest import TankParams
+from fuel_signal.backtest import TankParams, format_tank_params
 from fuel_signal.features import baseline_fingerprint, load_features
 
 BASELINE_ARM_NAME = "baseline"
@@ -131,6 +136,43 @@ MAX_SHIFT_AUTOCORRELATION = 0.6
 # Retained diagnostic only (see module docstring) — the original fps-3jj.9 seed pairing.
 SEEDS_A: tuple[int, ...] = SEEDS
 SEEDS_B: tuple[int, ...] = (47, 48, 49, 50, 51)
+
+
+def check_freeze_cadence(batch_dir: pathlib.Path, tank: TankParams) -> None:
+    """Refuse to write a floor at a cadence the batch does not declare (fps-oqz).
+
+    `freeze.json`'s `tank_params` is the batch's declared cadence contract — the
+    same role `baseline_fingerprint` plays for column identity. `freeze_batch`
+    guarantees the two agree when it computes the floor itself, but this module's
+    CLI can recompute a floor in place (`--force`), and it resolves `tank` from the
+    CURRENT `TankParams()` default. After a re-lock those differ, so `--force` would
+    quietly leave the batch split-brained: `freeze.json` still declaring 7d beside a
+    `noise_floor.json` stamped 1d, with no reader to notice — nothing consumes
+    `freeze.json`'s stamp, and `dossier_tables._noise_band()` (fps-v8o) compares only
+    run-vs-floor, so a 1d candidate would then grade cleanly against what every doc
+    calls a 7-day batch.
+
+    This closes that triangle: fps-15c stamps the writers, fps-v8o guards run-vs-floor,
+    and this guards floor-vs-freeze. Silent on a batch with no stamp (pre-fps-15c
+    freeze manifests) — an absent declaration is not a disagreement.
+    """
+    freeze_path = batch_dir / FREEZE_MANIFEST_FILENAME
+    if not freeze_path.exists():
+        return
+    declared = json.loads(freeze_path.read_text()).get("tank_params")
+    actual = format_tank_params(tank)
+    if declared and declared != actual:
+        raise ValueError(
+            f"{batch_dir.name} declares tank_params {declared!r} in "
+            f"{FREEZE_MANIFEST_FILENAME}, but this floor would be computed at "
+            f"{actual!r} — refusing (fps-oqz). A batch's floor and its freeze manifest "
+            "must agree on cadence, or every candidate graded against that floor is "
+            "compared to a ruler the batch does not declare. This batch was frozen "
+            "before the cadence re-lock; freeze a NEW batch at the current cadence "
+            "rather than recomputing this one's floor at it (docs/CONVENTIONS.md "
+            "§ The decision cadence is a lock parameter). To recompute deliberately "
+            "at the batch's own declared cadence, pass that tank explicitly."
+        )
 
 
 def _load_batch(batch_dir: pathlib.Path):
@@ -167,8 +209,8 @@ def compute_noise_floor(
 
     tank (fps-15c): the TankParams every draw runs at, and the cadence stamped into the
     payload's `tank_params`. None (default) resolves to `TankParams()` — the canonical
-    7-day cadence (docs/CONVENTIONS.md) — same default every other call in this pipeline
-    resolves to when not overridden.
+    1-day cadence (docs/CONVENTIONS.md, re-locked from 7d 2026-08-22, fps-oqz) — same
+    default every other call in this pipeline resolves to when not overridden.
 
     Reads the frozen batch's own features + baseline column contract (declared, never
     discovered — same `baseline_columns.json` every candidate run reads, fps-sa1) and its
@@ -204,6 +246,7 @@ def compute_noise_floor(
     outer_fold_params = dict(outer_fold_params or {})
     inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
     tank = tank or TankParams()
+    check_freeze_cadence(batch_dir, tank)
 
     frame, baseline_columns, db_path = _load_batch(batch_dir)
     # Screened BEFORE any backtest fit, not per-draw after one (review, verified against real
@@ -431,6 +474,7 @@ def compute_fit_stability_diagnostic(
     outer_fold_params = dict(outer_fold_params or {})
     inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
     tank = tank or TankParams()
+    check_freeze_cadence(batch_dir, tank)
 
     frame, baseline_columns, db_path = _load_batch(batch_dir)
 

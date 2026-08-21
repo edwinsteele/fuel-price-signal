@@ -5,6 +5,19 @@
 - **SHA:** 0a69c971eb4d0bf6fc0318d9565d1039cb847e00
 - **Status:** done — **calibration PASSED**
 - **Beads:** fps-32p (candidate), fps-nor (investigation), fps-sa1 + fps-zci (the two defects it found)
+- **Cadence:** `50/3.571/7d/10%` — **every CPL, delta and noise-band figure below is a
+  7-day-cadence number.** This run predates the 2026-08-22 re-lock to daily
+  (`fps-oqz`), and the numbers have not been restated: this is a lab-book record of
+  what was measured, not a live claim. In particular the **~0.05 c/L single-flip
+  quantum quoted below is a 7-day quantity, not a constant** — at 7d the tank forces
+  67.6% of fills and only 244 are chosen, so each flip carries a large share of the
+  total; at 1d there are 1832 chosen fills and the per-flip value is correspondingly
+  smaller. Do not carry that 0.05 across the boundary as a resolution bar. Comparing
+  anything here against a 1-day run requires a NEW batch frozen at 1d (`fps-aay`) —
+  batch0 cannot be re-frozen (`batch_freeze` allows one freeze per batch) and its floor
+  must not be recomputed at 1d in place, which `compute_noise_floor` now refuses
+  (`fps-oqz`). `dossier_tables._noise_band()` separately refuses the cross-cadence
+  run-vs-floor comparison (`fps-v8o`) rather than letting it look valid.
 
 ## What this run is for
 

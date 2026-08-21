@@ -108,27 +108,48 @@ measured the same model, folds, seed and columns at 7 / 2 / 1 day and got
 **headroom 1.54 / 2.69 / 2.97 c/L and realised CPL 189.67 / 187.85 / 187.82**.
 Cadence moves realised economics by more than most feature decisions do.
 
-**The canonical cadence is 7 days.** Every row in `experiments/results.csv`
-carrying a realised CPL was produced at it (`score_phase2.py` constructs a bare
-`TankParams()` with no CLI override), and every published headroom figure assumes
-it. Do not change it because a finer grid scores better — that is discovering the
-lock rather than declaring it, the same failure as resolving R0 from a frame
-header.
+**The canonical cadence is 1 day** (re-locked 2026-08-22, `fps-oqz` — see the
+before/after below). `TankParams.evaluation_interval_days` defaults to it, and
+`score_phase2.py` constructs a bare `TankParams()` with no CLI override, so every
+row written from here on inherits it. Do not change it because a finer grid scores
+better — that is discovering the lock rather than declaring it, the same failure as
+resolving R0 from a frame header.
 
 **Moving it is a deliberate re-lock**, with the same ceremony as changing
 `LOCKED_FEATURE_COLUMNS`: a recorded rationale, a stated before/after, and every
 subsequent row stamped so pre- and post-change rows are mechanically
-distinguishable. `fps-929` may well argue for daily — that is a re-lock decision,
-not an experiment output.
+distinguishable.
 
-**Update 2026-08-21: the move to 1d is DECIDED and filed as `fps-oqz`** (its
-precondition `fps-15c` — the cadence-stamp contract below — closed 2026-08-21, PR
-#320; `fps-oqz` is now unblocked). Note what did and did not argue for it: `fps-929` closed as
-*signal-content limit* — re-picking τ at daily cadence is worth 0.062 c/L, so the
-economics did **not** make the case. The decision rests on the owner's rationale
-(uniformity with the daily price cadence, maximum decision resolution, a choice every
-day), with the 1.85 c/L cadence gain as a consequence rather than the argument. `fps-oqz`
-records the 2d alternative that was considered and rejected, at its numbers.
+#### The 2026-08-22 re-lock: 7d → 1d (`fps-oqz`)
+
+| | before | after |
+|---|---|---|
+| `evaluation_interval_days` | 7 | 1 |
+| stamp | `50/3.571/7d/10%` | `50/3.571/1d/10%` |
+| realised CPL (τ=0.25, same folds/stations/seed) | 189.67 | 187.82 |
+| headroom vs oracle | 1.54 c/L | 2.97 c/L |
+| chosen fills | 244 | 1832 |
+| fills/station/yr | 44 | 135 |
+| emergency (forced) fills | 67.6% | 21.4% |
+
+Note what did and did not argue for it. `fps-929` closed as a *signal-content
+limit* — re-picking τ at daily cadence is worth only 0.062 c/L, so the economics
+did **not** make the case, and τ stays 0.25. The decision rests on the owner's
+rationale: uniformity with the daily price cadence (one clock, not two), maximum
+decision resolution, and a choice every day as the intended product experience.
+The 1.85 c/L is a consequence, not the argument. 2d was recommended by `fps-929`
+on the hassle trade-off (188.00 c/L, 83 fills/yr, 37.5% forced) and explicitly
+overridden by the owner on that rationale; anyone revisiting this should argue
+against the rationale, not re-derive the table. Source:
+`experiments/2026-08-21_tau_cadence/tau_sweep.csv`.
+
+**The 1.85 c/L is conditional on the driver actually behaving this way.** Cadence
+is an *evaluation* parameter — an assumption about how often the owner checks and
+acts — not a property of the model. It is **not a retrain** (the fit takes no
+`TankParams`; `fps-929` replayed 36 cells off one fit) and **not a production code
+change** (`evaluation_interval_days` is consumed only by the backtest engines; the
+live daily signal in `fuel_signal/signal.py` is rule-based, never loads the model,
+and already emits daily).
 
 **Quote realised CPL and headroom with the cadence attached.** "1.66 c/L of
 headroom" is not a fact about the model; "1.54 c/L at 7-day cadence" is.
@@ -137,10 +158,11 @@ headroom" is not a fact about the model; "1.54 c/L at 7-day cadence" is.
 now lives in `results.csv`, alongside `baseline_fingerprint`, derived inside
 `log_experiment` from the `TankParams` the backtest actually ran with — same rule
 as the fingerprint, the stamp cannot disagree with what produced the row. It is
-empty when no backtest ran (`tank=None`) and `50/3.571/7d/10%` on every existing
-realised-CPL row, since none of them predate the 7-day default. This was the
-precondition for `fps-929`: without it, a daily-cadence re-lock's own row would be
-indistinguishable from the 7-day rows it must be compared against.
+empty when no backtest ran (`tank=None`). Every row predating the 2026-08-22
+re-lock reads `50/3.571/7d/10%`; every row after it reads `50/3.571/1d/10%`. That
+column is what makes the two eras comparable at all — without it a daily-cadence
+row would be indistinguishable from the 7-day rows it must be compared against,
+which is why `fps-15c` was a hard precondition for `fps-oqz` rather than a tidy-up.
 
 **A recorded CPL without its cadence is a refusal, not a convention (`fps-15c`).**
 The rule above is a stated CONTRACT, not just a habit `log_experiment` happens to
@@ -189,7 +211,22 @@ The consuming side of this contract lives in `dossier_tables._noise_band()`
 `batch0`'s `freeze.json`, `noise_floor.json`, and `tgp_delta_7d`'s `results.json` /
 `facts.json` were backfilled with `tank_params: "50/3.571/7d/10%"` — the batch was
 frozen and every candidate in it ran before this field existed, entirely at the
-canonical 7-day cadence, so the backfilled value is a historical fact, not a guess.
+then-canonical 7-day cadence, so the backfilled value is a historical fact, not a
+guess. Since the 2026-08-22 re-lock those stamps no longer match the default, so a
+*new* candidate run against batch0's floor refuses with `available: false` on the
+`tank_params` axis. That is the guard working, not a regression: batch0 is a 7-day
+batch, and grading a 1-day candidate against a 7-day floor is exactly the silent
+comparison `fps-v8o` exists to block.
+
+**To compare across the boundary, freeze a NEW batch at 1d** — that is what `fps-aay`
+already plans. Do *not* reach for `noise_floor.py batch0 --force`: `freeze_batch`
+refuses to re-freeze an existing batch (`FileExistsError`, "batches are frozen once"),
+so `--force` is the only in-place mechanism, and it would recompute the floor at the
+current default while `freeze.json` kept declaring 7d — leaving the batch split-brained
+with no reader to notice, since nothing consumes `freeze.json`'s stamp and `_noise_band`
+compares only run-vs-floor. `compute_noise_floor` now refuses that outright
+(`check_freeze_cadence`, `fps-oqz`): a batch's floor and its freeze manifest must agree
+on cadence. Editing the stamps is not a fix either.
 
 **And cadence is not free to sweep.** `run_backtest`'s emergency rule forces a
 half-fill whenever a wait would leave `tank_level < depletion` (bd `fps-5mn`,
@@ -203,8 +240,8 @@ config can still be unsafe if the emergency half-fill target itself
 be broken at the very first decision) and flags any config where that happens;
 the CLI runs it automatically and rejects an unsafe `--tank-size`/`--daily-use`/
 `--eval-interval` combination. Default tank: 1-7 days are safe; 8-14 are not
-(`D > 0.5 * tank_size`). Every row in `experiments/results.csv` runs at the
-canonical 7d, which is safe.
+(`D > 0.5 * tank_size`). Both the old canonical 7d and the current canonical 1d
+are safe, so the re-lock did not cross that boundary.
 
 ### New constants must not silently diverge from a canonical equivalent
 

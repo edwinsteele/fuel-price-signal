@@ -338,14 +338,14 @@ def test_log_experiment_stamps_the_tank_it_ran_with(tmp_path, monkeypatch):
     monkeypatch.setattr(ev, "_RESULTS_CSV", results_path)
     log_experiment("default_tank", [], holdout_logloss=0.5, holdout_brier=0.2, tank=TankParams())
     log_experiment(
-        "daily_tank", [], holdout_logloss=0.5, holdout_brier=0.2,
-        tank=TankParams(evaluation_interval_days=1),
+        "weekly_tank", [], holdout_logloss=0.5, holdout_brier=0.2,
+        tank=TankParams(evaluation_interval_days=7),
     )
 
     rows = list(_csv.reader(results_path.open(newline="")))
     idx = rows[0].index("tank_params")
-    assert rows[1][idx] == "50/3.571/7d/10%"
-    assert rows[2][idx] == "50/3.571/1d/10%"
+    assert rows[1][idx] == "50/3.571/1d/10%"
+    assert rows[2][idx] == "50/3.571/7d/10%"
     assert rows[1][idx] != rows[2][idx]
 
 

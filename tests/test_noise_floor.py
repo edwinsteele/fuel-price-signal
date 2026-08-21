@@ -61,7 +61,7 @@ def _write_batch_dir(tmp_path: pathlib.Path, df: pd.DataFrame, name: str = "batc
     return batch_dir
 
 
-_DEFAULT_TANK_PARAMS = "50/3.571/7d/10%"
+_DEFAULT_TANK_PARAMS = "50/3.571/1d/10%"
 _CACHE_SENTINEL = "fake-baseline-cache"
 
 
@@ -226,7 +226,7 @@ def test_compute_noise_floor_stamps_the_default_tank_params(tmp_path, monkeypatc
 
     payload = compute_noise_floor(batch_dir, n_draws=2, verbose=False)
 
-    assert payload["tank_params"] == "50/3.571/7d/10%"
+    assert payload["tank_params"] == "50/3.571/1d/10%"
     from fuel_signal.backtest import TankParams
 
     assert all(call["tank"] == TankParams() for call in calls)
@@ -237,13 +237,79 @@ def test_compute_noise_floor_stamps_a_non_default_tank(tmp_path, monkeypatch):
 
     df = _baseline_features_df()
     batch_dir = _write_batch_dir(tmp_path, df)
-    tank = TankParams(evaluation_interval_days=1)
-    calls = _stub_realised_by_draw(monkeypatch, [1.0, 2.0], tank_params="50/3.571/1d/10%")
+    tank = TankParams(evaluation_interval_days=7)
+    calls = _stub_realised_by_draw(monkeypatch, [1.0, 2.0], tank_params="50/3.571/7d/10%")
 
     payload = compute_noise_floor(batch_dir, n_draws=2, tank=tank, verbose=False)
 
-    assert payload["tank_params"] == "50/3.571/1d/10%"
+    assert payload["tank_params"] == "50/3.571/7d/10%"
     assert all(call["tank"] == tank for call in calls)
+
+
+# ── check_freeze_cadence: floor-vs-freeze, the third side of the stamp triangle (fps-oqz) ──
+
+def _write_freeze(batch_dir: pathlib.Path, tank_params: str | None) -> None:
+    payload = {"snapshot_date": "2026-08-01"}
+    if tank_params is not None:
+        payload["tank_params"] = tank_params
+    (batch_dir / "freeze.json").write_text(json.dumps(payload))
+
+
+def test_compute_noise_floor_refuses_a_cadence_the_batch_does_not_declare(tmp_path, monkeypatch):
+    """fps-oqz: `--force` resolves tank from the CURRENT TankParams() default, so after
+    a re-lock it would overwrite an old batch's floor at the new cadence while
+    freeze.json keeps declaring the old one. Nothing consumes freeze.json's stamp and
+    _noise_band (fps-v8o) compares only run-vs-floor, so the batch would go
+    split-brained with no reader to notice."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _write_freeze(batch_dir, "50/3.571/7d/10%")
+    _stub_realised_by_draw(monkeypatch, [1.0, 2.0])
+
+    with pytest.raises(ValueError, match="refusing"):
+        compute_noise_floor(batch_dir, n_draws=2, verbose=False)
+
+
+def test_compute_noise_floor_allows_the_batchs_own_declared_cadence(tmp_path, monkeypatch):
+    """The refusal is about DISAGREEMENT, not about being non-default: recomputing a
+    7-day batch's floor at 7 days is exactly the legitimate case."""
+    from fuel_signal.backtest import TankParams
+
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _write_freeze(batch_dir, "50/3.571/7d/10%")
+    _stub_realised_by_draw(monkeypatch, [1.0, 2.0], tank_params="50/3.571/7d/10%")
+
+    payload = compute_noise_floor(
+        batch_dir, n_draws=2, tank=TankParams(evaluation_interval_days=7), verbose=False
+    )
+
+    assert payload["tank_params"] == "50/3.571/7d/10%"
+
+
+def test_compute_noise_floor_is_silent_when_the_freeze_predates_the_stamp(tmp_path, monkeypatch):
+    """A pre-fps-15c freeze.json carries no tank_params. An absent declaration is not
+    a disagreement — refusing there would block every legacy batch."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _write_freeze(batch_dir, None)
+    _stub_realised_by_draw(monkeypatch, [1.0, 2.0])
+
+    payload = compute_noise_floor(batch_dir, n_draws=2, verbose=False)
+
+    assert payload["tank_params"] == _DEFAULT_TANK_PARAMS
+
+
+def test_batch0s_real_freeze_manifest_refuses_the_current_default_cadence():
+    """Regression on the actual scenario, against the committed artifact rather than a
+    fixture: batch0 is a 7-day batch, the canonical cadence is now 1d, so
+    `noise_floor.py batch0 --force` must refuse. Its own module docstring recommends
+    --force 'after a re-lock', which is precisely the dangerous path here."""
+    from experiments.pipeline.noise_floor import check_freeze_cadence
+    from fuel_signal.backtest import TankParams
+
+    with pytest.raises(ValueError, match="refusing"):
+        check_freeze_cadence(pathlib.Path("experiments/batches/batch0"), TankParams())
 
 
 def test_compute_noise_floor_refuses_to_overwrite_without_force(tmp_path, monkeypatch):
@@ -485,7 +551,7 @@ def test_dossier_tables_refuses_a_mismatched_tank_params(tmp_path, monkeypatch):
     fp = _matching_fingerprint(batch_dir)
 
     band = dt._noise_band(
-        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp, "tank_params": "50/3.571/1d/10%"}},
+        {"effect_delta_cpl_held": 5.0, "meta": {"baseline_fingerprint": fp, "tank_params": "50/3.571/7d/10%"}},
         batch_dir,
     )
 
