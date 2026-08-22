@@ -338,8 +338,11 @@ def main(module_paths, features_path, sample_rows, rho_threshold) -> None:
             click.echo(f"  {row['abs_rho']:.3f}  {row['column_a']} <-> {row['column_b']}")
 
     cross = result["pairwise_rho"][result["pairwise_rho"]["cross_candidate"]]
+    # Finite only: an uncomputable pair gets its own section below, with the explanation
+    # attached. A bare `nan` in the GATE listing reads as a display bug to anyone who
+    # hasn't scrolled far enough to find out it isn't one.
     click.echo(f"\nCross-candidate |rho| (HARD GATE at {rho_threshold}):")
-    for row in cross.head(10).to_dict("records"):
+    for row in cross[np.isfinite(cross["abs_rho"])].head(10).to_dict("records"):
         flag = "  <-- GATE" if row["abs_rho"] >= rho_threshold else ""
         click.echo(f"  {row['abs_rho']:.3f}  {row['candidate_a']}.{row['column_a']} "
                    f"<-> {row['candidate_b']}.{row['column_b']}{flag}")
