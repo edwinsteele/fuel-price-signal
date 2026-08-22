@@ -4,7 +4,7 @@
 Like test_runner.py, the real DB-backed realised backtest isn't reproduced here —
 run_paired_realised_backtest is monkeypatched so these tests exercise the draw
 construction and persistence logic in isolation. Placebo CONSTRUCTION itself
-(axis detection, the circular shift) is tested in test_placebo.py against a
+(axis detection, the block permutation) is tested in test_placebo.py against a
 realistic multi-station fixture; here the frame is a minimal one-row-per-date
 fixture whose job is only to exercise noise_floor.py's own wiring.
 """
@@ -26,7 +26,11 @@ from experiments.pipeline.noise_floor import (
     compute_noise_floor,
     main,
 )
-from experiments.pipeline.placebo import PLACEBO_COLUMN_NAME
+from experiments.pipeline.placebo import (
+    MIN_BLOCKS,
+    PLACEBO_BLOCK_DAYS,
+    PLACEBO_COLUMN_NAME,
+)
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
 from fuel_signal.features import (
     FEATURE_COLUMNS,
@@ -36,19 +40,33 @@ from fuel_signal.features import (
 )
 
 
-def _baseline_features_df(n: int = 8) -> pd.DataFrame:
+def _baseline_features_df(n: int = MIN_BLOCKS * PLACEBO_BLOCK_DAYS) -> pd.DataFrame:
     """One row per date, single station (placebo axis-detection logic itself is covered by
     test_placebo.py's multi-station fixture; every column here is trivially market-wide
     since there's only one row per (date, station) group). A `station_code` column is still
     required — `_make_lookup_provider` (reused from runner.py for the placebo arm's
     extra_feature_provider) keys its lookup on (station_code, date) unconditionally, even
-    for a single-station fixture. Non-constant column values so a circular shift is
-    well-defined (a constant column has zero variance, which would make the
-    shift-autocorrelation self-check NaN and fail the enforced bound)."""
+    for a single-station fixture.
+
+    Two constraints on the column values, both from placebo.py's block-permutation
+    construction (fps-d7m). They must be non-constant: a constant column has zero variance,
+    which makes the self_correlation check NaN and fails the enforced bound. And they must
+    not be a pure monotone ramp: a drift-dominated column is the ADVERSARIAL case for any
+    time-axis reordering (see MIN_BLOCKS's own measurement table), so a ramp fixture would
+    put every draw in the screen's tail and make these tests flaky for a reason that has
+    nothing to do with what they assert. Each column here is a distinct short-period sawtooth
+    instead, which block permutation decorrelates reliably at every seed.
+
+    `n` is likewise sized for the construction rather than for the assertions:
+    MIN_BLOCKS * PLACEBO_BLOCK_DAYS is the SMALLEST length at which `_effective_block_days`
+    returns the full block, so the fixture exercises the same code path a real batch does
+    instead of the short-series fallback. Derived rather than hardcoded — a bare literal
+    silently becomes wrong the moment either constant moves (an earlier 720 here claimed to
+    do this and actually got a 30-position block)."""
     dates = [20260801 + i for i in range(n)]
     cols = {"price_date": dates, "station_code": [12345] * n}
-    for c in FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS:
-        cols[c] = [float(i) for i in range(n)]
+    for k, c in enumerate(FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS):
+        cols[c] = [float((i * (k + 3) + k) % 23) for i in range(n)]
     return pd.DataFrame(cols)
 
 
@@ -164,7 +182,7 @@ def test_compute_noise_floor_reuses_baseline_cache_across_draws(tmp_path, monkey
     assert calls[2]["baseline_cache"] == _CACHE_SENTINEL
 
 
-def test_compute_noise_floor_draws_distinct_columns_and_shifts(tmp_path, monkeypatch):
+def test_compute_noise_floor_draws_distinct_columns_and_seeds(tmp_path, monkeypatch):
     df = _baseline_features_df()
     batch_dir = _write_batch_dir(tmp_path, df)
     _stub_realised_by_draw(monkeypatch, [1.0, 2.0, 3.0, 4.0])
@@ -172,9 +190,9 @@ def test_compute_noise_floor_draws_distinct_columns_and_shifts(tmp_path, monkeyp
     payload = compute_noise_floor(batch_dir, n_draws=4, verbose=False)
 
     columns = [d["source_column"] for d in payload["placebo_draws"]]
-    shifts = [d["shift_days"] for d in payload["placebo_draws"]]
+    seeds = [d["block_seed"] for d in payload["placebo_draws"]]
     assert len(set(columns)) == 4
-    assert len(set(shifts)) == 4
+    assert len(set(seeds)) == 4
 
 
 def test_compute_noise_floor_excludes_an_all_nan_locked_column_from_the_draw_pool(tmp_path, monkeypatch):
@@ -390,12 +408,12 @@ def test_compute_noise_floor_stamps_provenance(tmp_path, monkeypatch):
     assert payload["wall_seconds"] >= 0.0
     assert len(payload["placebo_draws"]) == 2
     for draw in payload["placebo_draws"]:
-        assert set(draw) == {"source_column", "shift_days", "shift_autocorrelation"}
-        assert isinstance(draw["shift_autocorrelation"], float)
+        assert set(draw) == {"source_column", "block_seed", "self_correlation"}
+        assert isinstance(draw["self_correlation"], float)
 
 
 def test_compute_noise_floor_propagates_a_screen_draws_failure(tmp_path, monkeypatch):
-    """The shift_autocorrelation screen is placebo.screen_draws's job (see test_placebo.py
+    """The self_correlation screen is placebo.screen_draws's job (see test_placebo.py
     for its own substitute-don't-abort behaviour and its NaN/failure-exhaustion coverage);
     compute_noise_floor must propagate a screen_draws failure rather than swallow it —
     verified here at the wiring level, not by re-deriving screen_draws's own logic."""
@@ -403,8 +421,8 @@ def test_compute_noise_floor_propagates_a_screen_draws_failure(tmp_path, monkeyp
     batch_dir = _write_batch_dir(tmp_path, df)
     _stub_realised_by_draw(monkeypatch, [1.0])
 
-    def _always_fails(df, baseline_columns, n_draws, *, max_shift_autocorrelation):
-        raise ValueError("only found 0/1 placebo draws passing shift_autocorrelation")
+    def _always_fails(df, baseline_columns, n_draws, *, max_self_correlation):
+        raise ValueError("only found 0/1 placebo draws passing abs(self_correlation)")
 
     monkeypatch.setattr(noise_floor_module, "screen_draws", _always_fails)
 

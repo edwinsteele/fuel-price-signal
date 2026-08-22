@@ -118,10 +118,10 @@ the judgement session can crash and resume without losing the facts.
 - **Noise floor is now a placebo-column null (`fps-awz`, reopening the decision this bullet
   used to record).** `noise_floor.py` fits the SAME frozen baseline at a SINGLE fixed seed
   (matching the realised arbiter's own `realised_seed` default) ~20 times, adding one PLACEBO
-  column each draw — `experiments/pipeline/placebo.py` builds it as a circular time-shift of
-  a real baseline column along whichever axis that column actually varies on (market-wide/
-  per-date, or per-station), so it resembles a real feature in distribution and
-  autocorrelation while its date-alignment to the target is destroyed. This measures the SAME
+  column each draw — `experiments/pipeline/placebo.py` builds it as a block permutation of a
+  real baseline column (contiguous date-blocks reordered) along whichever axis that column
+  actually varies on (market-wide/per-date, or per-station), so it resembles a real feature
+  in distribution and autocorrelation while its date-alignment to the target is destroyed. This measures the SAME
   operation a real candidate's `effect_delta_cpl_held` measures (hold seed/data/folds fixed,
   add one column) — the earlier seed-swap null held columns fixed and varied the seed
   instead, a different, unpaired perturbation with no fixed ratio to what candidates are
@@ -132,17 +132,28 @@ the judgement session can crash and resume without losing the facts.
   candidate every night is a different, noisier design than a fixed bank of ~20 draws
   computed once at batch setup, the shape this replacement actually takes. A naive
   within-date shuffle is also still unsafe for a market-wide series (45 of the 54 locked
-  columns are per-date, shared by every station on that date) — the construction shifts along
-  the axis a column actually varies on rather than shuffling across stations for exactly this
-  reason (see `placebo.py`'s module docstring).
-- **Named limitation: the bank systematically excludes level-like columns (`fps-d7m`,
-  filed against real batch0 data).** A circular shift cannot decorrelate a slowly-varying
-  column from itself at ANY offset, so the screen (below) doesn't reject a random subset —
-  on batch0 it excluded ALL FOUR cycle-magnitude columns and every price-level column,
-  every time, leaving a bank dominated by counters/phase/differences. A real candidate
-  feature can be level-like, so the band characterizes "adding a fast-varying column", not
-  "adding an arbitrary column" — a real gap in coverage, not a bug in the construction. See
-  `placebo.py`'s own docstring for the block-permutation alternative that would close it.
+  columns are per-date, shared by every station on that date) — the construction reorders
+  along the axis a column actually varies on rather than shuffling across stations for
+  exactly this reason (see `placebo.py`'s module docstring).
+- **CLOSED (`fps-d7m`): the construction is a block permutation, not a circular time-shift.**
+  The shift could not decorrelate a slowly-varying column from itself — on batch0 it excluded
+  ALL FOUR cycle-magnitude columns and every price-level column, leaving a bank dominated by
+  counters/phase/differences (12 of 20 draws were `days_since_trough_entry_<lga>`), so the
+  band characterized "adding a fast-varying column" rather than "adding an arbitrary column"
+  while a real candidate feature can be level-like. Reordering contiguous date-blocks breaks
+  the "adjacent in time implies similar value" property that caused it, and it covers the
+  fast-varying columns too, so it REPLACED the shift outright rather than being added
+  alongside it — no "is this column level-like?" gating heuristic to maintain. Verified the
+  same way the original was: a full screen of all 54 batch0 columns, where 49 of 49 usable
+  ones (5 are all-NaN) now pass at every seed — 245 checks, zero failures, median
+  self-correlation 0.046 — so no *correlation*-driven substitution fires. Two substitutions
+  still happen on every batch0 run for the unrelated all-NaN skip: two of the 20 primaries
+  land on all-NaN LGA columns and are replaced from the fallback tail. **A narrower limitation remains and is
+  named in `placebo.py`'s docstring**: a column whose information is mostly cross-sectional
+  rather than temporal (`stickiness_score` at 0.47, `station_minus_sydney_avg_cents` at 0.33)
+  cannot be decorrelated by ANY time-axis reorder, so those enter the bank as its weakest
+  draws. `noise_floor.json` stamps every draw's `self_correlation` so this is visible per
+  floor rather than only in prose.
 - **The gate reads distance from the band, not empirical rank (`fps-awz`).**
   `retrospective.py`'s `family_wise_z_threshold` is a Bonferroni-corrected, t-distributed
   critical value in band-standard-deviation space; `clears_family_wise_threshold` compares
