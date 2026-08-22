@@ -4,7 +4,7 @@
 Like test_runner.py, the real DB-backed realised backtest isn't reproduced here —
 run_paired_realised_backtest is monkeypatched so these tests exercise the draw
 construction and persistence logic in isolation. Placebo CONSTRUCTION itself
-(axis detection, the circular shift) is tested in test_placebo.py against a
+(axis detection, the block permutation) is tested in test_placebo.py against a
 realistic multi-station fixture; here the frame is a minimal one-row-per-date
 fixture whose job is only to exercise noise_floor.py's own wiring.
 """
@@ -26,7 +26,11 @@ from experiments.pipeline.noise_floor import (
     compute_noise_floor,
     main,
 )
-from experiments.pipeline.placebo import PLACEBO_COLUMN_NAME
+from experiments.pipeline.placebo import (
+    MIN_BLOCKS,
+    PLACEBO_BLOCK_DAYS,
+    PLACEBO_COLUMN_NAME,
+)
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
 from fuel_signal.features import (
     FEATURE_COLUMNS,
@@ -36,7 +40,7 @@ from fuel_signal.features import (
 )
 
 
-def _baseline_features_df(n: int = 720) -> pd.DataFrame:
+def _baseline_features_df(n: int = MIN_BLOCKS * PLACEBO_BLOCK_DAYS) -> pd.DataFrame:
     """One row per date, single station (placebo axis-detection logic itself is covered by
     test_placebo.py's multi-station fixture; every column here is trivially market-wide
     since there's only one row per (date, station) group). A `station_code` column is still
@@ -53,9 +57,12 @@ def _baseline_features_df(n: int = 720) -> pd.DataFrame:
     nothing to do with what they assert. Each column here is a distinct short-period sawtooth
     instead, which block permutation decorrelates reliably at every seed.
 
-    `n` is likewise sized for the construction rather than for the assertions: 720 dates
-    leaves MIN_BLOCKS blocks at the full PLACEBO_BLOCK_DAYS length, so the fixture exercises
-    the same code path a real batch does instead of the short-series fallback."""
+    `n` is likewise sized for the construction rather than for the assertions:
+    MIN_BLOCKS * PLACEBO_BLOCK_DAYS is the SMALLEST length at which `_effective_block_days`
+    returns the full block, so the fixture exercises the same code path a real batch does
+    instead of the short-series fallback. Derived rather than hardcoded — a bare literal
+    silently becomes wrong the moment either constant moves (an earlier 720 here claimed to
+    do this and actually got a 30-position block)."""
     dates = [20260801 + i for i in range(n)]
     cols = {"price_date": dates, "station_code": [12345] * n}
     for k, c in enumerate(FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS):

@@ -63,10 +63,17 @@ screen, this module's shipped construction, median |self-correlation| over 5 see
     cycle_last_max_cents  0.054      stickiness_score     0.465
 
 — all eight comfortably inside `MAX_SELF_CORRELATION`. Across the whole batch, 49 of 49
-usable columns (54 locked, less 5 all-NaN) pass at EVERY seed tried, median 0.046 and worst
-case 0.470, and `screen_draws` needs no substitution at all at the production default of 20
-draws. The bank that results is no longer dominated by one feature kind: 11 trough-counters,
-3 cycle-magnitude, 1 price-level, 5 other, against 12-of-20 trough-counters before. Because
+usable columns (54 locked, less 5 all-NaN) pass at EVERY seed tried — 245 checks, zero
+failures, median 0.046 and worst case 0.470 — so `screen_draws` never substitutes for a
+CORRELATION failure on this batch. It does still substitute twice, for a different and
+expected reason: `select_draws` spreads its 20 primaries across the column list by position,
+which lands on two of the five all-NaN `days_since_trough_entry_<lga>` columns
+(`lane_cove` seed 157, `waverley` seed 181). Those correlate to NaN, are skipped as
+unverifiable, and are replaced from the fallback tail by `cycle_days_since_peak` and
+`cycle_mean_length`. That happens deterministically on every batch0 run. The bank that
+results is no longer dominated by one feature kind — 11 trough-counters, 3 cycle-magnitude,
+1 price-level, 5 other, against 12-of-20 trough-counters before — though note the two
+substitutes are part of how it gets there. Because
 block permutation covers BOTH cases, there is one construction here, not two gated by a "is
 this column level-like?" heuristic that would need maintaining as `features.py` grows.
 
@@ -360,11 +367,13 @@ def screen_draws(
     (a correlation check, not a wasted fit) and means the computation does not abort just
     because one of the first `n_draws` candidates happens to be unusable. Under the previous
     circular-shift construction this substitution was load-bearing on every batch0 run —
-    eight columns failed deterministically (see the module docstring). Block permutation
-    passes all 54 on batch0, so the fallback tail is now genuinely a rare path; it is kept
-    because a column that a permutation cannot decorrelate still exists in principle (the
-    between-station floor named in the module docstring), and a batch whose panel or date
-    range differs from batch0's has not been screened.
+    eight columns failed deterministically for CORRELATION (see the module docstring). Block
+    permutation passes all 49 usable batch0 columns, so no correlation-driven substitution
+    fires any more. The tail is still exercised on every batch0 run by the OTHER skip
+    condition: two of the 20 primaries land on all-NaN columns, correlate to NaN, and are
+    substituted. It is also kept because a column that a permutation cannot decorrelate still
+    exists in principle (the between-station floor named in the module docstring), and a batch
+    whose panel or date range differs from batch0's has not been screened.
 
     Uses `pd.Series.corr` (pairwise-complete — see the module docstring for why this isn't
     `np.corrcoef`), so a column with partial NaN is graded on its real, non-NaN correlation,

@@ -34,8 +34,9 @@ module did exactly that, via `select_draws` alone, and could not produce a floor
 all as a result — the first unusable column drawn aborted the whole computation). Under the
 original circular-shift construction that substitution fired on every batch0 run and silently
 emptied the bank of an entire feature CATEGORY; fps-d7m replaced the construction with a block
-permutation, under which all 54 batch0 columns pass. See placebo.py's module docstring for
-the measurements behind both.
+permutation, under which all 49 usable batch0 columns pass and no correlation-driven
+substitution fires. (Substitution still fires twice per batch0 run for the unrelated all-NaN
+skip — see placebo.py.) See placebo.py's module docstring for the measurements behind both.
 
 Cost: every draw shares the exact same baseline arm (same frame, columns, seed, tank, folds)
 — only the placebo arm changes — so `run_paired_realised_backtest`'s existing
@@ -235,7 +236,7 @@ def compute_noise_floor(
         under them after the fact.
       - BaselineContractMismatch (via check_baseline_contract) on column drift.
       - ValueError (via placebo.select_draws, inside screen_draws) if n_draws exceeds the
-        baseline column count or the shift-day pool size.
+        baseline column count or the block-seed pool size.
       - ValueError (via placebo.screen_draws) if this batch's data can't support n_draws
         placebo columns passing MAX_SELF_CORRELATION even after trying every baseline column
         as a candidate — rare, but a real outcome on a real batch (unlike the config-drift
@@ -260,9 +261,10 @@ def compute_noise_floor(
     # decorrelated from its own source column is rejected by a correlation check rather than
     # by a wasted fit, and screen_draws substitutes the next candidate in its pool so one
     # unusable column cannot abort the whole computation. Under the previous circular-shift
-    # construction this path fired on every batch0 run (eight columns failed at every offset);
-    # under block permutation all 54 batch0 columns pass, so it is now a rare path kept for
-    # batches that have not been screened — see placebo.py's module docstring.
+    # construction this fired on every batch0 run for CORRELATION (eight columns failed at
+    # every offset); under block permutation all 49 usable batch0 columns pass, so that reason
+    # never fires here. The tail is still used twice per batch0 run for the unrelated all-NaN
+    # skip (two primaries land on all-NaN LGA columns) — see placebo.py's module docstring.
     draws = screen_draws(frame, baseline_columns, n_draws, max_self_correlation=MAX_SELF_CORRELATION)
 
     t0 = time.perf_counter()

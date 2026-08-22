@@ -95,7 +95,7 @@ def test_make_placebo_series_on_market_wide_column_stays_constant_per_date():
     df = _fixture_df()
     placebo = make_placebo_series(df, "mw_col", block_seed=97)
     check = df.assign(**{PLACEBO_COLUMN_NAME: placebo})
-    # The market-wide invariant must survive the shift — this is the whole point of routing
+    # The market-wide invariant must survive the reorder — this is the whole point of routing
     # a market-wide column through the date-only branch rather than a within-date shuffle.
     assert axis_is_market_wide(check, PLACEBO_COLUMN_NAME) is True
 
@@ -104,14 +104,14 @@ def test_make_placebo_series_on_market_wide_column_preserves_the_value_multiset(
     df = _fixture_df()
     placebo = make_placebo_series(df, "mw_col", block_seed=97)
     original_per_date = sorted(df.drop_duplicates("price_date")["mw_col"])
-    shifted_per_date = sorted(placebo.loc[df.drop_duplicates("price_date").index])
-    assert original_per_date == shifted_per_date
+    permuted_per_date = sorted(placebo.loc[df.drop_duplicates("price_date").index])
+    assert original_per_date == permuted_per_date
 
 
 def test_make_placebo_series_on_market_wide_column_actually_moves_values():
     df = _fixture_df()
     placebo = make_placebo_series(df, "mw_col", block_seed=97)
-    # Not identical to the source column — the shift must have actually reassigned dates.
+    # Not identical to the source column — the permutation must have actually moved dates.
     assert not placebo.equals(df["mw_col"].rename(PLACEBO_COLUMN_NAME))
 
 
@@ -121,8 +121,8 @@ def test_make_placebo_series_on_station_varying_column_preserves_each_stations_o
     check = df.assign(**{PLACEBO_COLUMN_NAME: placebo})
     for station, group in check.groupby("station_code"):
         original = sorted(group["station_col"])
-        shifted = sorted(group[PLACEBO_COLUMN_NAME])
-        assert original == shifted, f"station {station} lost/gained a value under the shift"
+        permuted = sorted(group[PLACEBO_COLUMN_NAME])
+        assert original == permuted, f"station {station} lost/gained a value under the permutation"
 
 
 def test_make_placebo_series_on_station_varying_column_actually_moves_values():
@@ -190,10 +190,10 @@ def test_candidate_pool_fallback_covers_every_remaining_column_exactly_once():
     assert len(pool) == len(baseline_columns)
 
 
-def test_candidate_pool_fallback_cycles_the_shift_pool_when_it_runs_short():
+def test_candidate_pool_fallback_cycles_the_seed_pool_when_it_runs_short():
     """More remaining columns than PLACEBO_BLOCK_SEED_POOL entries — the fallback tail
-    must still produce one candidate per remaining column (shift reuse is fine; only the
-    PRIMARY set needs distinct shifts for diversity)."""
+    must still produce one candidate per remaining column (seed reuse is fine; only the
+    PRIMARY set needs distinct seeds for diversity)."""
     baseline_columns = [f"col{i}" for i in range(len(PLACEBO_BLOCK_SEED_POOL) + 10)]
     pool = candidate_pool(baseline_columns, 5)
     assert len(pool) == len(baseline_columns)
@@ -204,7 +204,7 @@ def test_candidate_pool_fallback_cycles_the_shift_pool_when_it_runs_short():
 
 def _diverse_fixture_df(n_dates: int, n_cols: int) -> pd.DataFrame:
     """A longer, market-wide-only fixture whose columns are deliberately diverse (not the
-    slow/short-series case) so a reasonable shift decorrelates all of them — used where a
+    slow/short-series case) so a block permutation decorrelates all of them — used where a
     test needs several REAL candidates that pass screening, not a forced failure."""
     dates = list(range(20260101, 20260101 + n_dates))
     df = pd.DataFrame({"price_date": dates, "station_code": [111] * n_dates})
@@ -220,16 +220,16 @@ def test_screen_draws_happy_path_returns_exactly_n_draws_with_correlations():
     screened = screen_draws(df, baseline_columns, n_draws=5, max_self_correlation=0.9)
 
     assert len(screened) == 5
-    for source_column, shift_days, corr in screened:
+    for source_column, block_seed, corr in screened:
         assert source_column in baseline_columns
-        assert shift_days in PLACEBO_BLOCK_SEED_POOL
+        assert block_seed in PLACEBO_BLOCK_SEED_POOL
         assert pd.notna(corr) and corr <= 0.9
 
 
 def test_screen_draws_substitutes_a_failing_primary_candidate(monkeypatch):
     """A candidate that fails the correlation screen must be replaced by the next
     candidate in candidate_pool, not abort the whole computation — the fps-awz review
-    finding: a slowly-varying column fails at EVERY shift, deterministically, so an
+    finding: a slowly-varying column failed at EVERY circular-shift offset, deterministically, so an
     earlier abort-on-first-failure design could not produce a floor on real batch0 data
     at all."""
     import experiments.pipeline.placebo as placebo_module
@@ -240,7 +240,7 @@ def test_screen_draws_substitutes_a_failing_primary_candidate(monkeypatch):
 
     def _fake(frame, source_column, block_seed):
         if source_column == "col2":
-            # A no-op "shift" — guaranteed correlation 1.0, guaranteed to fail any
+            # A no-op reorder — guaranteed correlation 1.0, guaranteed to fail any
             # reasonable threshold.
             return frame[source_column].rename(placebo_module.PLACEBO_COLUMN_NAME)
         return real_make_placebo_series(frame, source_column, block_seed)
@@ -311,7 +311,7 @@ def test_select_draws_raises_when_n_draws_exceeds_column_count():
         select_draws(baseline_columns, 10)
 
 
-def test_select_draws_raises_when_n_draws_exceeds_shift_pool():
+def test_select_draws_raises_when_n_draws_exceeds_seed_pool():
     baseline_columns = [f"col{i}" for i in range(100)]
     with pytest.raises(ValueError, match="exceeds the block-seed pool size"):
         select_draws(baseline_columns, len(PLACEBO_BLOCK_SEED_POOL) + 1)
@@ -431,4 +431,35 @@ def test_trailing_partial_block_is_not_left_pinned_in_place():
     tail = slice(n - (n % block), n)
     assert not np.array_equal(
         placebo.to_numpy()[tail], df["level_col"].to_numpy()[tail]
+    )
+
+
+def test_each_station_gets_its_own_permutation():
+    """`make_placebo_series`'s docstring states per-station independence as a design property,
+    and nothing else in this file would notice if it were lost: every station-varying
+    assertion here is per-station (multiset preserved, values moved), so hoisting the
+    derangement out of the groupby loop to share ONE block order across all stations would
+    keep them all green.
+
+    That refactor would matter. Sharing one order makes every station's placebo move in
+    lockstep, which preserves the cross-sectional structure of each date — exactly the axis
+    the module's own NAMED LIMITATION already flags as the one a time-axis reorder cannot
+    scramble. The null would quietly weaken along its known weak axis."""
+    df = _fixture_df()
+    placebo = make_placebo_series(df, "station_col", block_seed=97)
+    check = df.assign(**{PLACEBO_COLUMN_NAME: placebo})
+
+    # station_col == station_code + date_idx * 10, so (value - station) / 10 recovers which
+    # date_idx each slot now holds — i.e. the permutation itself, comparably across stations.
+    orders = {}
+    for station, group in check.groupby("station_code"):
+        ordered = group.sort_values("price_date")
+        orders[station] = tuple((ordered[PLACEBO_COLUMN_NAME] - station) // 10)
+
+    assert len(orders) > 1, "fixture must have several stations for this to mean anything"
+    for order in orders.values():
+        assert sorted(order) == sorted(next(iter(orders.values()))), "not a permutation"
+    assert len(set(orders.values())) > 1, (
+        "every station received the SAME block order — the permutation is shared across "
+        "stations rather than drawn per station"
     )

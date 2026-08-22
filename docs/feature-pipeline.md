@@ -145,8 +145,10 @@ the judgement session can crash and resume without losing the facts.
   fast-varying columns too, so it REPLACED the shift outright rather than being added
   alongside it — no "is this column level-like?" gating heuristic to maintain. Verified the
   same way the original was: a full screen of all 54 batch0 columns, where 49 of 49 usable
-  ones (5 are all-NaN) now pass at every seed, median self-correlation 0.046, with no
-  substitution needed at the production default. **A narrower limitation remains and is
+  ones (5 are all-NaN) now pass at every seed — 245 checks, zero failures, median
+  self-correlation 0.046 — so no *correlation*-driven substitution fires. Two substitutions
+  still happen on every batch0 run for the unrelated all-NaN skip: two of the 20 primaries
+  land on all-NaN LGA columns and are replaced from the fallback tail. **A narrower limitation remains and is
   named in `placebo.py`'s docstring**: a column whose information is mostly cross-sectional
   rather than temporal (`stickiness_score` at 0.47, `station_minus_sydney_avg_cents` at 0.33)
   cannot be decorrelated by ANY time-axis reorder, so those enter the bank as its weakest
