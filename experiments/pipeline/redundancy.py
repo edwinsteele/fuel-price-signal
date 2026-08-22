@@ -29,12 +29,14 @@ one-candidate-per-night launch structurally cannot compute.
 from __future__ import annotations
 
 import dataclasses
+import json
 import pathlib
 
 import click
 import numpy as np
 import pandas as pd
 
+from experiments.lib.io import to_jsonable
 from experiments.pipeline.validate import load_candidate_module, validate_candidate
 from fuel_signal.features import (
     DEFAULT_FEATURES_CSV,
@@ -298,13 +300,144 @@ def screen_batch(
     }
 
 
+BATCH_RECORD_MD = "batch.md"
+BATCH_RECORD_JSON = "batch.json"
+
+
+def batch_dir_for(module_paths) -> pathlib.Path | None:
+    """The single directory a batch record belongs to, or None if the modules span more.
+
+    A record spanning two batch directories has no batch to belong to, and picking one
+    silently would file this batch's numbers under another batch's name.
+    """
+    dirs = {pathlib.Path(m).parent for m in module_paths}
+    return dirs.pop() if len(dirs) == 1 else None
+
+
+def write_batch_record(result: dict, batch_candidates_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    """Persist the screen's output as the batch record generator.md § Batch record asks for.
+
+    Two files, deliberately:
+
+    * `batch.json` — what the retrospective reads. Prose is not a data format, and the
+      one question this record exists to answer later ("did the generator produce five
+      variants of one idea?") is a `groupby` over mechanism families, not a close reading.
+    * `batch.md` — what a human reads at 7am. Same numbers, rendered.
+
+    Written at SCREEN time rather than at filing time because these are the numbers that
+    justified filing: a record reconstructed afterwards would be a fresh measurement of
+    whatever the modules say *now*, which is exactly the residual risk generator.md
+    accepts when it notes that a module hand-edited after filing is unchecked.
+    """
+    batch_candidates_dir = pathlib.Path(batch_candidates_dir)
+    batch_candidates_dir.mkdir(parents=True, exist_ok=True)
+
+    rho = result["pairwise_rho"]
+    r2 = result["block_r2"]
+    families = result["mechanism_families"]
+
+    payload = {
+        "n_candidates": result["n_candidates"],
+        "n_rows_sampled": result["n_rows_sampled"],
+        "rho_threshold": result["rho_threshold"],
+        "passed": result["passed"],
+        "mechanism_families": families,
+        "n_distinct_families": len({f for f in families.values() if f}),
+        "undeclared_families": sorted(n for n, f in families.items() if not f),
+        "block_r2": r2.to_dict("records"),
+        "pairwise_rho": rho.to_dict("records"),
+        "gate_violations": result["gate_violations"].to_dict("records"),
+        "uncomputable_pairs": result["uncomputable_pairs"].to_dict("records"),
+    }
+    # to_jsonable, not bare json.dumps: this screen treats NaN as a FIRST-CLASS outcome
+    # (an uncomputable |rho| from a constant column, an unmeasurable block R^2), and
+    # json.dumps emits those as the bare token `NaN`, which is not valid JSON. Python's
+    # own loads() tolerates it, so it looks fine from inside the repo and breaks for
+    # every strict consumer -- jq included -- in exactly the cases this module goes out
+    # of its way to surface. Shared helper for the same reason results.json and
+    # retrospective_facts.json use it (docs/CONVENTIONS.md).
+    json_path = batch_candidates_dir / BATCH_RECORD_JSON
+    json_path.write_text(json.dumps(to_jsonable(payload), indent=2, default=str) + "\n")
+
+    cross = rho[rho["cross_candidate"]]
+    within = rho[~rho["cross_candidate"]]
+
+    lines = [
+        f"# Batch record — {batch_candidates_dir.name}",
+        "",
+        "Written by `experiments.pipeline.redundancy` at screen time, before any bead was",
+        "filed. These are the numbers that justified filing; see that module for why the",
+        "gate sits where it does.",
+        "",
+        f"- Candidates: **{result['n_candidates']}**",
+        f"- Rows sampled: {result['n_rows_sampled']:,}",
+        f"- Cross-candidate |rho| gate: **{result['rho_threshold']}**",
+        f"- Verdict: **{'PASS' if result['passed'] else 'FAIL'}**",
+        "",
+        "## Mechanism families (disclosure, never gated)",
+        "",
+        f"{payload['n_distinct_families']} distinct family label(s) across "
+        f"{result['n_candidates']} candidate(s).",
+        "",
+        "| candidate | mechanism family |",
+        "|---|---|",
+    ]
+    lines += [f"| `{name}` | {family or '**NOT DECLARED**'} |" for name, family in families.items()]
+    # `n_distinct_families` counts truthy labels only, so {a: "f1", b: None} would
+    # otherwise assert "every candidate shares one family" two lines under a table row
+    # marking b as NOT DECLARED. This callout is the record's headline finding; a
+    # self-contradicting edge case costs more than the case is worth.
+    if (payload["n_distinct_families"] == 1 and result["n_candidates"] > 1
+            and not payload["undeclared_families"]):
+        lines += ["", "> **Every candidate in this batch shares one family label.** Not a failure "
+                  "and not gated — but it is the finding about the generator that this "
+                  "disclosure exists to make visible. Read the retrospective with it in mind."]
+
+    lines += ["", "## Block R^2 against the existing column set", "",
+              f"Flagged at {BLOCK_R2_FLAG}; reported, never auto-rejected. Block figure is the "
+              "mean of the candidate's member columns.", "",
+              "| candidate | n cols | block R^2 | max column R^2 |", "|---|---|---|---|"]
+    for row in r2.to_dict("records"):
+        flag = " **<- redesign**" if np.isfinite(row["block_r2"]) and row["block_r2"] >= BLOCK_R2_FLAG else ""
+        block = f"{row['block_r2']:.3f}" if np.isfinite(row["block_r2"]) else "NaN — NOT MEASURED"
+        mx = f"{row['max_column_r2']:.3f}" if np.isfinite(row["max_column_r2"]) else "NaN"
+        lines.append(f"| `{row['candidate']}` | {row['n_columns']} | {block}{flag} | {mx} |")
+
+    lines += ["", "## Pairwise |rho|", "",
+              "**Cross-candidate pairs are the hard gate. Within-candidate pairs are disclosure "
+              "only** — a group whose members are related is usually what makes them one "
+              "mechanism rather than three.", ""]
+    if cross.empty:
+        lines.append("_No cross-candidate pairs (single-candidate batch)._")
+    else:
+        lines += ["### Cross-candidate (gated)", "", "| |rho| | a | b |", "|---|---|---|"]
+        for row in cross.to_dict("records"):
+            val = f"{row['abs_rho']:.3f}" if np.isfinite(row["abs_rho"]) else "NaN"
+            mark = " **<- GATE**" if np.isfinite(row["abs_rho"]) and row["abs_rho"] >= result["rho_threshold"] else ""
+            lines.append(f"| {val}{mark} | `{row['candidate_a']}.{row['column_a']}` "
+                         f"| `{row['candidate_b']}.{row['column_b']}` |")
+    if not within.empty:
+        lines += ["", "### Within-candidate (disclosure only)", "", "| |rho| | candidate | a | b |",
+                  "|---|---|---|---|"]
+        for row in within.to_dict("records"):
+            val = f"{row['abs_rho']:.3f}" if np.isfinite(row["abs_rho"]) else "NaN"
+            lines.append(f"| {val} | `{row['candidate_a']}` | `{row['column_a']}` | `{row['column_b']}` |")
+
+    md_path = batch_candidates_dir / BATCH_RECORD_MD
+    md_path.write_text("\n".join(lines) + "\n")
+    return md_path, json_path
+
+
 @click.command("redundancy")
 @click.argument("module_paths", nargs=-1, required=True,
                 type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path))
 @click.option("--features-path", default=str(DEFAULT_FEATURES_CSV), show_default=True)
 @click.option("--sample-rows", default=DEFAULT_SAMPLE_ROWS, show_default=True)
 @click.option("--rho-threshold", default=PAIRWISE_RHO_THRESHOLD, show_default=True)
-def main(module_paths, features_path, sample_rows, rho_threshold) -> None:
+@click.option("--write-record/--no-write-record", default=True, show_default=True,
+              help="Write batch.md + batch.json beside the candidate modules "
+                   "(generator.md § Batch record). Requires all modules in one directory.")
+def main(module_paths, features_path, sample_rows, rho_threshold, write_record) -> None:
     """Screen a batch of candidate modules before filing any bead."""
     result = screen_batch(list(module_paths), features_path=features_path,
                           sample_rows=sample_rows, rho_threshold=rho_threshold)
@@ -352,6 +485,16 @@ def main(module_paths, features_path, sample_rows, rho_threshold) -> None:
         for row in result["uncomputable_pairs"].to_dict("records"):
             click.echo(f"  {row['candidate_a']}.{row['column_a']} <-> "
                        f"{row['candidate_b']}.{row['column_b']}")
+
+    if write_record:
+        batch_dir = batch_dir_for(module_paths)
+        if batch_dir is None:
+            dirs = sorted({str(pathlib.Path(m).parent) for m in module_paths})
+            click.echo(f"\n[redundancy] batch record SKIPPED — modules span {len(dirs)} "
+                       f"directories ({dirs}); a batch record belongs to exactly one batch.")
+        else:
+            md_path, json_path = write_batch_record(result, batch_dir)
+            click.echo(f"\n[redundancy] batch record: {md_path}, {json_path}")
 
     if result["passed"]:
         click.echo("\n[redundancy] PASS — no cross-candidate pair at or above the gate.")

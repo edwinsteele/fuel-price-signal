@@ -1,23 +1,28 @@
 """Tests for experiments/pipeline/redundancy.py — the pre-filing batch screen."""
 from __future__ import annotations
 
+import json
 import pathlib
 import textwrap
 
 import numpy as np
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
 from experiments.pipeline.redundancy import (
     BLOCK_R2_FLAG,
     PAIRWISE_RHO_THRESHOLD,
     DuplicateCandidateColumn,
+    batch_dir_for,
     block_r2,
     compute_candidate_columns,
     existing_column_set,
+    main,
     pairwise_rho,
     screen_batch,
     usable_predictors,
+    write_batch_record,
 )
 from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, NETWORK_FEATURE_COLUMNS
 
@@ -316,3 +321,201 @@ def test_a_constant_candidate_column_is_not_a_silent_pass(tmp_path, monkeypatch)
     assert not result["passed"], "an uncomputable gate check must not report PASS"
     assert result["gate_violations"].empty          # not a threshold breach...
     assert len(result["uncomputable_pairs"]) == 1   # ...but flagged for a human
+
+
+# --- Batch record (generator.md § Batch record) -----------------------------------
+
+
+def _screen_two(tmp_path, monkeypatch, family_a="f1", family_b="f2"):
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    a = _write_module(tmp_path, "a", _SIMPLE.format(
+        name="a", family=family_a, col="a_col", src="tgp_delta_7d", mult=1.0))
+    b = _write_module(tmp_path, "b", _SIMPLE.format(
+        name="b", family=family_b, col="b_col", src="stickiness_score", mult=1.0))
+    return screen_batch([a, b], sample_rows=0)
+
+
+def test_batch_record_writes_both_formats(tmp_path, monkeypatch):
+    result = _screen_two(tmp_path, monkeypatch)
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+
+    payload = json.loads(json_path.read_text())
+    assert payload["mechanism_families"] == {"a": "f1", "b": "f2"}
+    assert payload["n_distinct_families"] == 2
+    assert payload["rho_threshold"] == PAIRWISE_RHO_THRESHOLD
+    assert len(payload["block_r2"]) == 2
+    assert md_path.read_text().startswith("# Batch record — batch9")
+
+
+def test_batch_record_calls_out_a_single_family_batch(tmp_path, monkeypatch):
+    """The disclosure's entire purpose: five uncorrelated candidates telling one story
+    reads as diversity and isn't. It is not gated, so it has to be VISIBLE."""
+    result = _screen_two(tmp_path, monkeypatch, family_a="same", family_b="same")
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+
+    assert json.loads(json_path.read_text())["n_distinct_families"] == 1
+    assert "Every candidate in this batch shares one family label" in md_path.read_text()
+
+
+def test_batch_record_flags_an_undeclared_family(tmp_path, monkeypatch):
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    a = _write_module(tmp_path, "a", '''
+        import pandas as pd
+        NAME = "a"
+        COLUMNS = ["a_col"]
+        INPUTS = ["tgp_delta_7d"]
+        def add_columns(df):
+            out = df.copy()
+            out["a_col"] = out["tgp_delta_7d"]
+            return out
+    ''')
+    result = screen_batch([a], sample_rows=0)
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+
+    assert json.loads(json_path.read_text())["undeclared_families"] == ["a"]
+    assert "**NOT DECLARED**" in md_path.read_text()
+
+
+def test_batch_record_separates_gated_from_disclosed_pairs(tmp_path, monkeypatch):
+    """The record has to preserve the distinction the gate makes, or it misrepresents
+    why the batch passed."""
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    grp = _write_module(tmp_path, "grp", '''
+        import pandas as pd
+        NAME = "grp"
+        MECHANISM_FAMILY = "f1"
+        COLUMNS = ["g1", "g2"]
+        INPUTS = ["tgp_delta_7d"]
+        def add_columns(df):
+            out = df.copy()
+            out["g1"] = out["tgp_delta_7d"]
+            out["g2"] = out["tgp_delta_7d"] * 2.0
+            return out
+    ''')
+    other = _write_module(tmp_path, "oth", _SIMPLE.format(
+        name="oth", family="f2", col="o_col", src="stickiness_score", mult=1.0))
+    result = screen_batch([grp, other], sample_rows=0)
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+    text = md_path.read_text()
+    payload = json.loads(json_path.read_text())
+
+    assert result["passed"], "a within-candidate 1.0 pair must not fail the batch"
+    assert "### Within-candidate (disclosure only)" in text
+    assert "### Cross-candidate (gated)" in text
+    within = [r for r in payload["pairwise_rho"] if not r["cross_candidate"]]
+    assert len(within) == 1 and within[0]["candidate_a"] == "grp"
+
+
+def test_batch_json_is_strictly_valid_when_a_value_is_nan(tmp_path, monkeypatch):
+    """NaN is a FIRST-CLASS outcome here (uncomputable |rho|, unmeasurable block R^2),
+    and json.dumps writes those as the bare token `NaN`, which is not valid JSON.
+    Python's own loads() accepts it, so the breakage is invisible from inside the repo
+    and hits every strict consumer — jq included — in exactly the cases this module goes
+    out of its way to surface.
+    """
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    const = _write_module(tmp_path, "const", '''
+        import pandas as pd
+        NAME = "const"
+        MECHANISM_FAMILY = "broken"
+        COLUMNS = ["const_col"]
+        INPUTS = ["tgp_delta_7d"]
+        def add_columns(df):
+            out = df.copy()
+            out["const_col"] = 1.0
+            return out
+    ''')
+    other = _write_module(tmp_path, "oth", _SIMPLE.format(
+        name="oth", family="f2", col="o_col", src="stickiness_score", mult=1.0))
+    result = screen_batch([const, other], sample_rows=0)
+    assert not result["uncomputable_pairs"].empty, "fixture must actually produce a NaN"
+
+    _, json_path = write_batch_record(result, tmp_path / "batch9")
+
+    def _reject(token):
+        raise ValueError(f"non-strict JSON token: {token}")
+
+    payload = json.loads(json_path.read_text(), parse_constant=_reject)
+    assert payload["uncomputable_pairs"][0]["abs_rho"] is None
+
+
+def test_single_family_callout_is_suppressed_when_a_family_is_undeclared(tmp_path, monkeypatch):
+    """n_distinct_families counts truthy labels only, so {a: "f1", b: None} would assert
+    "every candidate shares one family" two lines under a row marking b NOT DECLARED."""
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    a = _write_module(tmp_path, "a", _SIMPLE.format(
+        name="a", family="f1", col="a_col", src="tgp_delta_7d", mult=1.0))
+    b = _write_module(tmp_path, "b", '''
+        import pandas as pd
+        NAME = "b"
+        COLUMNS = ["b_col"]
+        INPUTS = ["stickiness_score"]
+        def add_columns(df):
+            out = df.copy()
+            out["b_col"] = out["stickiness_score"]
+            return out
+    ''')
+    result = screen_batch([a, b], sample_rows=0)
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+    text = md_path.read_text()
+
+    assert json.loads(json_path.read_text())["n_distinct_families"] == 1
+    assert "**NOT DECLARED**" in text
+    assert "shares one family label" not in text
+
+
+def test_batch_dir_for_refuses_modules_spanning_two_directories(tmp_path):
+    one, two = tmp_path / "b1", tmp_path / "b2"
+    one.mkdir()
+    two.mkdir()
+
+    assert batch_dir_for([one / "a.py", one / "b.py"]) == one
+    assert batch_dir_for([one / "a.py", two / "b.py"]) is None
+
+
+def test_cli_skips_the_record_loudly_when_modules_span_two_batches(tmp_path, monkeypatch):
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    one, two = tmp_path / "b1", tmp_path / "b2"
+    one.mkdir()
+    two.mkdir()
+    a = _write_module(one, "a", _SIMPLE.format(
+        name="a", family="f1", col="a_col", src="tgp_delta_7d", mult=1.0))
+    b = _write_module(two, "b", _SIMPLE.format(
+        name="b", family="f2", col="b_col", src="stickiness_score", mult=1.0))
+
+    res = CliRunner().invoke(main, [str(a), str(b), "--sample-rows", "0"])
+
+    assert res.exit_code == 0
+    assert "batch record SKIPPED" in res.output
+    assert not (one / "batch.md").exists() and not (two / "batch.md").exists()
+
+
+def test_cli_writes_the_record_by_default_and_honours_no_write_record(tmp_path, monkeypatch):
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    a = _write_module(tmp_path, "a", _SIMPLE.format(
+        name="a", family="f1", col="a_col", src="tgp_delta_7d", mult=1.0))
+    b = _write_module(tmp_path, "b", _SIMPLE.format(
+        name="b", family="f2", col="b_col", src="stickiness_score", mult=1.0))
+
+    res = CliRunner().invoke(main, [str(a), str(b), "--sample-rows", "0"])
+    assert res.exit_code == 0
+    assert (tmp_path / "batch.md").exists() and (tmp_path / "batch.json").exists()
+
+    (tmp_path / "batch.md").unlink()
+    (tmp_path / "batch.json").unlink()
+
+    res = CliRunner().invoke(main, [str(a), str(b), "--sample-rows", "0", "--no-write-record"])
+    assert res.exit_code == 0
+    assert not (tmp_path / "batch.md").exists()

@@ -50,7 +50,7 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "rejected", target=N
             "confidence_effect": 0.6, "confidence_zone": 0.3,
             "columns": columns if columns is not None else ["cand_col"],
             "inputs": inputs if inputs is not None else ["price_date"],
-            "prior_art": None, "target": target,
+            "prior_art": None, "mechanism_family": "test-family", "target": target,
         },
         "effect_resolved": True if status == "rejected" else None,
         "effect_delta_cpl_held": -0.05 if status == "rejected" else None,
@@ -654,3 +654,16 @@ def test_breakdowns_per_axis_reports_coverage_note_and_unmatched_count(tmp_path)
     note = facts["breakdowns"]["per_axis_coverage_note"]
     assert note is not None
     assert "WFCV validation-window" in note
+
+
+def test_mechanism_family_survives_into_facts(tmp_path):
+    """generator.md makes MECHANISM_FAMILY a required DISCLOSURE, whose purpose is that a
+    same-family batch becomes visible downstream rather than a gate the generator learns
+    to game. Until fps-3jj.11 nothing read it off the module at all, so it lived only in
+    a source file and the disclosure was inert. This asserts the wire is connected.
+    """
+    run_dir, _ = _write_run(tmp_path)
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["candidate"]["mechanism_family"] == "test-family"
