@@ -83,6 +83,20 @@ def existing_column_set() -> list[str]:
     return list(FEATURE_COLUMNS) + list(LGA_FEATURE_COLUMNS) + list(NETWORK_FEATURE_COLUMNS) + list(TGP_FEATURE_COLUMNS)
 
 
+class DuplicateCandidateColumn(RuntimeError):
+    """Two candidates in one batch declared the same output column name.
+
+    Unscreenable rather than merely untidy: `pairwise_rho` attributes each column to a
+    candidate by NAME, so a collision makes the second candidate overwrite the first in
+    that mapping. The colliding pair then resolves to the same owner on both sides, is
+    classified within-candidate, and skips the hard gate entirely -- even at |rho| = 1.0
+    from two genuinely different candidates. `pd.concat(axis=1)` and `.corr()` both accept
+    duplicate labels silently, and nothing downstream catches it either: the runner's
+    collision check is per-candidate against the baseline, and candidates run on separate
+    nights, so it never sees two at once. This screen is the only place it can be caught.
+    """
+
+
 @dataclasses.dataclass(frozen=True)
 class CandidateColumns:
     name: str
@@ -116,6 +130,25 @@ def compute_candidate_columns(
                 columns=list(candidate.COLUMNS),
                 values=produced[list(candidate.COLUMNS)],
             )
+        )
+
+    seen: dict[str, str] = {}
+    collisions: dict[str, list[str]] = {}
+    for cand in out:
+        for col in cand.columns:
+            if col in seen:
+                collisions.setdefault(col, [seen[col]]).append(cand.name)
+            else:
+                seen[col] = cand.name
+    if collisions:
+        detail = "; ".join(
+            f"{col!r} declared by {owners}" for col, owners in collisions.items()
+        )
+        raise DuplicateCandidateColumn(
+            "Candidates in this batch declare overlapping output column names: "
+            f"{detail}. Rename one of each pair before screening -- a shared name cannot "
+            "be attributed to a candidate, so the gate would silently classify the pair "
+            "as within-candidate and never apply the threshold."
         )
     return out
 
@@ -245,6 +278,13 @@ def screen_batch(
 
     cross = rho[rho["cross_candidate"]]
     violations = cross[cross["abs_rho"] >= rho_threshold]
+    # A constant column correlates to NaN with everything, and `NaN >= threshold` is
+    # False -- so without this an uncomputable pair reads as a clean pass. Same silent-NaN
+    # failure mode `usable_predictors` exists to stop on the R^2 side; the gate deserves
+    # the same treatment rather than the opposite one. Reported rather than raised: a
+    # column can be constant on the SAMPLE without being constant on the full frame, so
+    # this asks a human to look instead of hard-failing on a possible sampling artifact.
+    uncomputable = cross[~np.isfinite(cross["abs_rho"])]
     return {
         "n_candidates": len(candidates),
         "n_rows_sampled": len(frame),
@@ -252,7 +292,8 @@ def screen_batch(
         "pairwise_rho": rho,
         "block_r2": r2,
         "gate_violations": violations,
-        "passed": violations.empty,
+        "uncomputable_pairs": uncomputable,
+        "passed": bool(violations.empty and uncomputable.empty),
         "mechanism_families": {c.name: c.mechanism_family for c in candidates},
     }
 
@@ -303,11 +344,18 @@ def main(module_paths, features_path, sample_rows, rho_threshold) -> None:
         click.echo(f"  {row['abs_rho']:.3f}  {row['candidate_a']}.{row['column_a']} "
                    f"<-> {row['candidate_b']}.{row['column_b']}{flag}")
 
+    if not result["uncomputable_pairs"].empty:
+        click.echo("\nUNCOMPUTABLE cross-candidate |rho| (constant column?) -- investigate:")
+        for row in result["uncomputable_pairs"].to_dict("records"):
+            click.echo(f"  {row['candidate_a']}.{row['column_a']} <-> "
+                       f"{row['candidate_b']}.{row['column_b']}")
+
     if result["passed"]:
         click.echo("\n[redundancy] PASS — no cross-candidate pair at or above the gate.")
     else:
         click.echo(f"\n[redundancy] FAIL — {len(result['gate_violations'])} pair(s) at or "
-                   "above the gate. Redesign one of each pair before filing.")
+                   f"above the gate, {len(result['uncomputable_pairs'])} uncomputable. "
+                   "Redesign before filing.")
         raise SystemExit(1)
 
 

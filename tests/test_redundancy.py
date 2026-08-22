@@ -11,6 +11,7 @@ import pytest
 from experiments.pipeline.redundancy import (
     BLOCK_R2_FLAG,
     PAIRWISE_RHO_THRESHOLD,
+    DuplicateCandidateColumn,
     block_r2,
     compute_candidate_columns,
     existing_column_set,
@@ -265,3 +266,53 @@ def test_usable_predictors_drops_constant_columns_too():
     assert "cycle_peak_count" not in kept.columns
     assert LGA_FEATURE_COLUMNS[0] not in kept.columns
     assert "cycle_pct_through" in kept.columns
+
+
+def test_two_candidates_declaring_the_same_column_name_is_refused(tmp_path):
+    """A name collision makes the gate unenforceable, silently.
+
+    `pairwise_rho` attributes columns to candidates by name, so the second candidate
+    overwrites the first; the colliding pair then resolves to one owner on both sides and
+    is classified within-candidate, skipping the gate even at |rho| = 1.0. pandas accepts
+    duplicate labels through both concat and corr without complaint, and nothing
+    downstream catches it (the runner checks one candidate at a time, on separate
+    nights). Refusing here is the only option that works.
+    """
+    frame = _frame()
+    a = _write_module(tmp_path, "a", _SIMPLE.format(
+        name="a", family="f1", col="shared_name", src="tgp_delta_7d", mult=1.0))
+    b = _write_module(tmp_path, "b", _SIMPLE.format(
+        name="b", family="f2", col="shared_name", src="stickiness_score", mult=1.0))
+
+    with pytest.raises(DuplicateCandidateColumn, match="shared_name"):
+        compute_candidate_columns([a, b], frame, validate=False)
+
+
+def test_a_constant_candidate_column_is_not_a_silent_pass(tmp_path, monkeypatch):
+    """corr() is NaN against a zero-variance column, and `NaN >= threshold` is False.
+
+    Without surfacing it, a broken add_columns producing a constant column would sail
+    through the gate as though it had been checked. Mirrors the silent-NaN treatment
+    usable_predictors gives the R^2 side.
+    """
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    a = _write_module(tmp_path, "a", '''
+        import pandas as pd
+        NAME = "a"
+        MECHANISM_FAMILY = "f1"
+        COLUMNS = ["const_col"]
+        INPUTS = ["tgp_delta_7d"]
+        def add_columns(df):
+            out = df.copy()
+            out["const_col"] = 1.0
+            return out
+    ''')
+    b = _write_module(tmp_path, "b", _SIMPLE.format(
+        name="b", family="f2", col="b_col", src="stickiness_score", mult=1.0))
+
+    result = screen_batch([a, b], sample_rows=0)
+
+    assert not result["passed"], "an uncomputable gate check must not report PASS"
+    assert result["gate_violations"].empty          # not a threshold breach...
+    assert len(result["uncomputable_pairs"]) == 1   # ...but flagged for a human
