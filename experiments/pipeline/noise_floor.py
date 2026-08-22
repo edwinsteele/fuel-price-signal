@@ -19,22 +19,23 @@ measures (batch0: baseline and candidate arms agreed on 741/752 fills, a near-to
 cancellation the seed-swap null can't reproduce). The replacement here fits the SAME frozen
 baseline at a SINGLE fixed seed (`PLACEBO_SEED_DEFAULT`, matching `runner.py`'s own
 `realised_seed` default for the realised arbiter) across every draw, adding one PLACEBO
-column each time — `experiments/pipeline/placebo.py` builds it as a circular time-shift of a
-real baseline column along whichever axis that column actually varies on, so it resembles a
-real feature in distribution/autocorrelation while its alignment to the target is destroyed,
-and — unlike a naive within-date shuffle — never degenerates to a no-op against a market-wide
+column each time — `experiments/pipeline/placebo.py` builds it as a block permutation of a
+real baseline column (contiguous date-blocks reordered) along whichever axis that column
+actually varies on, so it resembles a real feature in distribution/autocorrelation while its
+alignment to the target is destroyed, and — unlike a naive within-date shuffle — never
+degenerates to a no-op against a market-wide
 column (see placebo.py's module docstring for why that matters: 45 of the 54 locked columns
 are market-wide).
 
-Verified against real batch0 data (review): a slowly-varying column (changes only a handful
-of times across the whole date range — `cycle_mean_length`, `cycle_peak_count`,
-`lga_mean_cents`, `brand_mean_cents` on batch0) fails the `shift_autocorrelation` self-check
-at EVERY shift offset, deterministically, on every run — not a rare or fixable input, a
-property of that specific column. `placebo.screen_draws` checks every candidate against
-`MAX_SHIFT_AUTOCORRELATION` BEFORE any backtest fit and substitutes the next one on a
+`placebo.screen_draws` checks every candidate's `self_correlation` against
+`MAX_SELF_CORRELATION` BEFORE any backtest fit and substitutes the next candidate on a
 violation, rather than committing to a fixed draw list up front (an earlier version of this
 module did exactly that, via `select_draws` alone, and could not produce a floor on batch0 at
-all as a result — the very first slowly-varying column drawn aborted the whole computation).
+all as a result — the first unusable column drawn aborted the whole computation). Under the
+original circular-shift construction that substitution fired on every batch0 run and silently
+emptied the bank of an entire feature CATEGORY; fps-d7m replaced the construction with a block
+permutation, under which all 54 batch0 columns pass. See placebo.py's module docstring for
+the measurements behind both.
 
 Cost: every draw shares the exact same baseline arm (same frame, columns, seed, tank, folds)
 — only the placebo arm changes — so `run_paired_realised_backtest`'s existing
@@ -126,12 +127,19 @@ PLACEBO_SEED_DEFAULT: int = SEEDS[0]
 
 FIT_STABILITY_FILENAME = "fit_stability.json"
 
-# Enforced bound on each draw's shift_autocorrelation self-check (see the draw loop below).
-# Deliberately generous rather than measured against real data (no real batch run has
-# happened yet at review time) — chosen to catch a genuinely degenerate near-no-op shift
-# (typically correlation well above this) without false-positiving on ordinary smooth
-# real-feature autocorrelation. Revisit once a real batch run shows the typical distribution.
-MAX_SHIFT_AUTOCORRELATION = 0.6
+# Enforced bound on each draw's self_correlation self-check (see the draw loop below): the
+# largest |correlation| a placebo may retain with the column it was built from.
+#
+# Now measured, not guessed (fps-d7m, full screen of batch0's 54 locked columns under the
+# block-permutation construction). Batch0's draws separate cleanly into two groups: 46 of the
+# 48 non-all-NaN columns sit at |corr| <= 0.12, and the two whose information is mostly
+# cross-sectional rather than temporal (`stickiness_score` ~0.47,
+# `station_minus_sydney_avg_cents` ~0.33) sit well above the rest — no time-axis reorder can
+# move those, see placebo.py's NAMED LIMITATION. 0.6 admits both of those as (weak) draws
+# while leaving clear air above them; it is deliberately NOT tightened to exclude them,
+# because doing so would re-introduce exactly the systematic category exclusion fps-d7m
+# exists to remove, just along the station axis instead of the level axis.
+MAX_SELF_CORRELATION = 0.6
 
 # Retained diagnostic only (see module docstring) — the original fps-3jj.9 seed pairing.
 SEEDS_A: tuple[int, ...] = SEEDS
@@ -229,10 +237,9 @@ def compute_noise_floor(
       - ValueError (via placebo.select_draws, inside screen_draws) if n_draws exceeds the
         baseline column count or the shift-day pool size.
       - ValueError (via placebo.screen_draws) if this batch's data can't support n_draws
-        placebo columns passing MAX_SHIFT_AUTOCORRELATION even after trying every
-        baseline column as a candidate — rare, but a real outcome on a real batch (unlike
-        the config-drift errors above, this is about the DATA, not a caller/environment
-        mistake).
+        placebo columns passing MAX_SELF_CORRELATION even after trying every baseline column
+        as a candidate — rare, but a real outcome on a real batch (unlike the config-drift
+        errors above, this is about the DATA, not a caller/environment mistake).
     """
     batch_dir = pathlib.Path(batch_dir)
     out_path = batch_dir / NOISE_FLOOR_FILENAME
@@ -249,14 +256,14 @@ def compute_noise_floor(
     check_freeze_cadence(batch_dir, tank)
 
     frame, baseline_columns, db_path = _load_batch(batch_dir)
-    # Screened BEFORE any backtest fit, not per-draw after one (review, verified against real
-    # batch0 data): a column that changes only a handful of times across the whole date range
-    # (e.g. cycle_mean_length, cycle_peak_count, lga_mean_cents, brand_mean_cents on batch0)
-    # fails shift_autocorrelation at EVERY offset — a property of that specific column, not a
-    # fixable/rare input, so it recurs on every run against the same batch. select_draws alone
-    # has no substitute to fall back to; screen_draws checks the whole candidate pool up front
-    # and only returns draws that already pass, so the loop below never has to raise on this.
-    draws = screen_draws(frame, baseline_columns, n_draws, max_shift_autocorrelation=MAX_SHIFT_AUTOCORRELATION)
+    # Screened BEFORE any backtest fit, not per-draw after one: a candidate that cannot be
+    # decorrelated from its own source column is rejected by a correlation check rather than
+    # by a wasted fit, and screen_draws substitutes the next candidate in its pool so one
+    # unusable column cannot abort the whole computation. Under the previous circular-shift
+    # construction this path fired on every batch0 run (eight columns failed at every offset);
+    # under block permutation all 54 batch0 columns pass, so it is now a rare path kept for
+    # batches that have not been screened — see placebo.py's module docstring.
+    draws = screen_draws(frame, baseline_columns, n_draws, max_self_correlation=MAX_SELF_CORRELATION)
 
     t0 = time.perf_counter()
     deltas: list[float] = []
@@ -264,8 +271,8 @@ def compute_noise_floor(
     n_windows: int | None = None
     tank_params: str | None = None
     baseline_cache: BaselineCache | None = None
-    for i, (source_column, shift_days, shift_autocorrelation) in enumerate(draws, start=1):
-        placebo_series = make_placebo_series(frame, source_column, shift_days)
+    for i, (source_column, block_seed, self_correlation) in enumerate(draws, start=1):
+        placebo_series = make_placebo_series(frame, source_column, block_seed)
         placebo_frame = frame.assign(**{PLACEBO_COLUMN_NAME: placebo_series})
         # ModelStrategy.decide() (the LIVE realised-replay path) never reads an arm's df
         # directly — it rebuilds every canonical feature fresh from the DB-backed
@@ -333,22 +340,24 @@ def compute_noise_floor(
                 f"draw 1 ran at {tank_params!r} — cadence must match across every draw."
             )
 
-        # shift_autocorrelation (correlation between the shifted series and the column's own
-        # unshifted values) was already checked against MAX_SHIFT_AUTOCORRELATION by
+        # self_correlation (correlation between the block-permuted series and the column's
+        # own un-permuted values) was already checked against MAX_SELF_CORRELATION by
         # screen_draws, BEFORE this draw's fit ran — reused here for provenance, not
-        # recomputed.
+        # recomputed. Persisted per draw so a human reading a floor can see which draws were
+        # weak ones (placebo.py's NAMED LIMITATION: a mostly-cross-sectional column keeps an
+        # irreducible correlation no time-axis reorder can remove).
         deltas.append(delta)
         placebo_draws.append(
             {
                 "source_column": source_column,
-                "shift_days": shift_days,
-                "shift_autocorrelation": shift_autocorrelation,
+                "block_seed": block_seed,
+                "self_correlation": self_correlation,
             }
         )
         if verbose:
             print(
-                f"[noise_floor] draw {i}/{len(draws)} ({source_column}, shift={shift_days}): "
-                f"delta_cpl_held={delta:+.4f} shift_autocorr={shift_autocorrelation:+.3f}",
+                f"[noise_floor] draw {i}/{len(draws)} ({source_column}, seed={block_seed}): "
+                f"delta_cpl_held={delta:+.4f} self_corr={self_correlation:+.3f}",
                 flush=True,
             )
 
