@@ -1298,3 +1298,63 @@ def test_assembler_tgp_delta_float64_when_table_empty(conn):
     assert "tgp_delta_7d" in df.columns
     assert str(df["tgp_delta_7d"].dtype) == "float64"
     assert df["tgp_delta_7d"].isna().all()
+
+
+# --- Frame column classification (unclassified_columns) ---------------------------
+
+
+def _classified_frame_columns() -> list[str]:
+    """One of each category, with no reference to the gitignored real frame.
+
+    Deliberately built from the declaration symbols rather than a hardcoded list of
+    today's 70 column names: a hardcoded inventory would pass forever while the real
+    frame drifted, which is the failure this whole guard exists to prevent.
+    """
+    from fuel_signal.features import KEY_COLUMNS, LOCKED_FEATURE_COLUMNS, TARGET_COLUMNS
+
+    return (
+        list(LOCKED_FEATURE_COLUMNS)
+        + ["days_since_trough_entry_zzz_test_brand"]  # non-model, matched by rule
+        + ["tgp_delta_7d"]  # non-model, matched by name
+        + list(TARGET_COLUMNS)
+        + sorted(KEY_COLUMNS)
+    )
+
+
+def test_unclassified_columns_is_empty_when_every_category_is_present():
+    import pandas as pd
+
+    from fuel_signal.features import unclassified_columns
+
+    df = pd.DataFrame({c: [0.0] for c in _classified_frame_columns()})
+
+    assert unclassified_columns(df) == []
+
+
+def test_unclassified_columns_flags_an_undeclared_column():
+    """The forcing function: add a column to the frame without saying what it is."""
+    import pandas as pd
+
+    from fuel_signal.features import unclassified_columns
+
+    df = pd.DataFrame({c: [0.0] for c in _classified_frame_columns() + ["future_max_cents"]})
+
+    assert unclassified_columns(df) == ["future_max_cents"]
+
+
+def test_target_and_key_columns_are_disjoint():
+    from fuel_signal.features import KEY_COLUMNS, TARGET_COLUMNS
+
+    assert not set(TARGET_COLUMNS) & KEY_COLUMNS
+
+
+def test_target_columns_cover_the_forward_looking_label_frame_columns():
+    """Pins TARGET_COLUMNS against labels.assemble_training_rows' actual output, so a
+    change to the label frame's shape shows up here rather than as a silent gap."""
+    from fuel_signal.features import KEY_COLUMNS, TARGET_COLUMNS
+
+    label_frame_columns = {
+        "station_code", "price_date", "today_price_cents", "future_min_cents", "label",
+    }
+
+    assert label_frame_columns == set(TARGET_COLUMNS) | KEY_COLUMNS

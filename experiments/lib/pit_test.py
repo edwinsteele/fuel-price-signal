@@ -1,13 +1,20 @@
 """Differential PIT (point-in-time) leak test — shared by hand-written experiments and
 the AI-sourced candidate pipeline (fps-3jj.2).
 
-The sole leak abort in the candidate validation harness. Computes a candidate function
+The leak abort for COMPUTED leaks in the candidate validation harness. Computes a candidate function
 on the full frame and again on the frame truncated at several checkpoint dates; values
 at dates <= the checkpoint must be identical either way. Catches the likeliest
 LLM-authored leak — a whole-series aggregate such as
 ``df.groupby('station_code')['price'].transform('mean')`` (no shift, every row sees the
 station's entire future) — on the first truncation, since only a leaky computation
 changes when future rows are removed.
+
+**What this cannot catch, by construction:** a forward-looking value already STAMPED on
+the row, such as `fuel_signal.features.TARGET_COLUMNS`' `future_min_cents`. Truncating
+the frame at date T removes later rows but does not alter what is written in row T's own
+cell, so the recomputed value matches and the test passes. That hazard is a closed,
+named set and is blocked by declaration instead, in `experiments/pipeline/validate.py`
+step 0.
 
 Applies equally to a candidate's ``add_columns`` and optional ``add_axis``: an axis
 computed with future information doesn't leak into the model (the model never sees it)

@@ -12,6 +12,7 @@ from experiments.pipeline.batch_freeze import (
     BaselineContractMismatch,
     DbRefreshError,
     NonModelColumnLeak,
+    UnclassifiedFrameColumns,
     check_baseline_contract,
     freeze_batch,
     refresh_db,
@@ -459,3 +460,39 @@ def test_refresh_db_succeeds_on_clean_update_and_features_regen(tmp_path):
     repo_root = tmp_path / "repo"
     _write_fake_make(repo_root, exit_code=0)
     refresh_db(repo_root=repo_root)  # must not raise
+
+
+def test_freeze_batch_refuses_an_unclassified_frame_column(tmp_path):
+    """The forcing function that keeps TARGET_COLUMNS' blocklist honest.
+
+    A blocklist of label columns only stays complete while adding a NEW column to the
+    frame makes someone declare what it is. Freezing is where that gets enforced, since
+    it is the one step that reads the real frame before any candidate runs.
+    """
+    df = _features_df()
+    df["future_max_cents"] = [0.0] * len(df)
+    features_path, db_path = _write_source(tmp_path, df)
+
+    with pytest.raises(UnclassifiedFrameColumns) as excinfo:
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
+        )
+
+    assert "future_max_cents" in str(excinfo.value)
+
+
+def test_freeze_batch_accepts_a_frame_carrying_the_label_columns(tmp_path):
+    """The real frame always carries future_min_cents/label/today_price_cents — the
+    freeze gate must classify them, not trip over them."""
+    df = _features_df()
+    for col in ("station_code", "today_price_cents", "future_min_cents", "label"):
+        df[col] = [0.0] * len(df)
+    features_path, db_path = _write_source(tmp_path, df)
+
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
+    )
+
+    assert (batch_dir / "freeze.json").exists()

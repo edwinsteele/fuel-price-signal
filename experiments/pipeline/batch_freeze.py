@@ -52,6 +52,7 @@ from fuel_signal.features import (
     baseline_fingerprint,
     load_features,
     non_model_columns,
+    unclassified_columns,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -82,6 +83,17 @@ class BaselineContractMismatch(RuntimeError):
         super().__init__(
             f"Baseline feature-column contract changed since freeze: +{added} -{removed}"
         )
+
+
+class UnclassifiedFrameColumns(RuntimeError):
+    """The features frame carries a column no declaration accounts for.
+
+    Raised at freeze time rather than tolerated, because "not categorised" is the state
+    in which a new forward-looking column silently becomes readable by a candidate:
+    `validate.py` blocks the label columns by NAME (`features.TARGET_COLUMNS`), and a
+    name-based blocklist only stays complete while adding a column forces someone to say
+    what it is. This is that forcing function — see `features.unclassified_columns`.
+    """
 
 
 class NonModelColumnLeak(RuntimeError):
@@ -306,6 +318,14 @@ def freeze_batch(
 
     df = load_features(batch_dir / "features.csv")
     baseline_columns = resolve_baseline_columns(df)
+    unclassified = unclassified_columns(df)
+    if unclassified:
+        raise UnclassifiedFrameColumns(
+            f"Features frame carries {len(unclassified)} column(s) that are neither locked, "
+            f"non-model, target, nor keys: {unclassified}. Declare each one in "
+            "fuel_signal/features.py (LOCKED_FEATURE_COLUMNS / NON_MODEL_COLUMNS / "
+            "TARGET_COLUMNS / KEY_COLUMNS) before freezing a batch around it."
+        )
     (batch_dir / BASELINE_COLUMNS_FILENAME).write_text(
         json.dumps(baseline_columns, indent=2) + "\n"
     )

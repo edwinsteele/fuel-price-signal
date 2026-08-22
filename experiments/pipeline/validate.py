@@ -3,12 +3,19 @@ modules, since nobody reviews the code (fps-3jj.2).
 
 Run before any fitting, in this order:
 
+0. **Target-column check** — `INPUTS` may not name a `features.TARGET_COLUMNS` column
+   (`future_min_cents`, `label`). These are computed from prices *after* `price_date`
+   and are stamped on the row, so step 2 cannot see them: truncating the frame by date
+   doesn't change a value that was already written into the cell. Declaration-time and
+   exact; the one hazard that has to be caught by name rather than by behaviour.
 1. **Restricted-frame INPUTS check** — call the candidate's `add_columns` /
    `add_axis` against `frame[declared_inputs]` instead of the full frame. Any
    undeclared read raises `KeyError` on its own; exact, unevadable, free. This is a
    *provenance* check (INPUTS feeds the correlation/redundancy checks and the
    ledger's `inputs` field), not a leak check.
-2. **Differential PIT test** (`experiments/lib/pit_test.py`) — the sole leak abort.
+2. **Differential PIT test** (`experiments/lib/pit_test.py`) — the leak abort for
+   *computed* leaks (a forward-reaching aggregate). Step 0 covers the stamped kind it
+   cannot see; the two are complementary, neither subsumes the other.
 3. **NaN-rate assert** — a declared output column that is entirely NaN means
    `add_columns` computed nothing; abort. Partial NaN (warm-up rows) is normal and
    just reported for the dossier.
@@ -29,7 +36,7 @@ import click
 import pandas as pd
 
 from experiments.lib.pit_test import differential_pit_test
-from fuel_signal.features import DEFAULT_FEATURES_CSV, load_features
+from fuel_signal.features import DEFAULT_FEATURES_CSV, TARGET_COLUMNS, load_features
 
 
 class RestrictedFrameViolation(RuntimeError):
@@ -41,6 +48,16 @@ class MissingInputColumnsError(RuntimeError):
 
     Distinct from RestrictedFrameViolation: this is a bad declaration, not an
     undeclared read.
+    """
+
+
+class TargetColumnInInputs(RuntimeError):
+    """A candidate declared one of the label columns (`features.TARGET_COLUMNS`) in INPUTS.
+
+    The one leak the differential PIT test structurally cannot catch, so it is caught
+    here instead, by declaration, before anything runs. See TARGET_COLUMNS' own comment:
+    a forward-looking value stamped ON the row survives date-truncation unchanged, so
+    recompute-and-compare finds nothing wrong with `future_min_cents - station_price_cents`.
     """
 
 
@@ -83,6 +100,18 @@ def validate_candidate(candidate, frame: pd.DataFrame, *, date_column: str = "pr
     Raises on the first failure. Never fits a model.
     """
     inputs = list(candidate.INPUTS)
+
+    # Before the restricted frame is even built: the restricted-frame check enforces that
+    # a candidate reads only what it DECLARED, and the PIT test catches reaching forward
+    # across rows. Neither says a declared read is allowed to be the target.
+    declared_targets = [col for col in inputs if col in TARGET_COLUMNS]
+    if declared_targets:
+        why = "; ".join(f"{col}: {TARGET_COLUMNS[col]}" for col in declared_targets)
+        raise TargetColumnInInputs(
+            f"{candidate.NAME}: INPUTS declares label column(s) {declared_targets}, which are "
+            f"computed from prices after price_date and are never a valid feature input. {why}"
+        )
+
     try:
         restricted = frame[inputs].copy()
     except KeyError as exc:
