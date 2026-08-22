@@ -1348,13 +1348,40 @@ def test_target_and_key_columns_are_disjoint():
     assert not set(TARGET_COLUMNS) & KEY_COLUMNS
 
 
-def test_target_columns_cover_the_forward_looking_label_frame_columns():
-    """Pins TARGET_COLUMNS against labels.assemble_training_rows' actual output, so a
-    change to the label frame's shape shows up here rather than as a silent gap."""
+def test_target_columns_cover_the_forward_looking_label_frame_columns(conn):
+    """Pins TARGET_COLUMNS | KEY_COLUMNS against assemble_training_rows' REAL output.
+
+    An earlier version of this test compared a hand-copied set of five names against the
+    declarations, which only tripwires edits to the declarations themselves — the thing
+    it claimed to catch (the label frame growing a sixth column) would have sailed
+    straight through it. Calling the builder is what makes the claim true.
+    """
     from fuel_signal.features import KEY_COLUMNS, TARGET_COLUMNS
+    from fuel_signal.labels import assemble_training_rows
 
-    label_frame_columns = {
-        "station_code", "price_date", "today_price_cents", "future_min_cents", "label",
-    }
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
 
-    assert label_frame_columns == set(TARGET_COLUMNS) | KEY_COLUMNS
+    label_frame = assemble_training_rows(conn, station_codes=[STATION_A])
+
+    assert len(label_frame) > 0
+    assert set(label_frame.columns) == set(TARGET_COLUMNS) | KEY_COLUMNS
+
+
+def test_the_real_features_frame_classifies_completely(conn):
+    """End-to-end: every column assemble_feature_rows actually produces is classified.
+
+    The freeze gate enforces this on the live frame, but the live frame is gitignored and
+    CI runs a bare `pytest -q` — so without an in-process build over a synthetic DB, the
+    only enforcement would be on the owner's Mac at freeze time. This is the CI-visible
+    half.
+    """
+    from fuel_signal.features import unclassified_columns
+
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+
+    assert len(df) > 0
+    assert unclassified_columns(df) == []

@@ -311,12 +311,16 @@ def freeze_batch(
         raise FileExistsError(
             f"Batch dir already exists: {batch_dir}. Batches are frozen once.{noise_floor_hint}"
         )
-    batch_dir.mkdir(parents=True)
-
-    shutil.copy2(parquet_src, batch_dir / FROZEN_FEATURES_FILENAME)
-    _clone_db(db_path, batch_dir / FROZEN_DB_FILENAME)
-
-    df = load_features(batch_dir / "features.csv")
+    # Every column check runs on the SOURCE frame, before mkdir and before the two
+    # expensive copies below. These raises are not exceptional: UnclassifiedFrameColumns
+    # is the routine outcome of "somebody added a frame column", i.e. it fires on a
+    # normal workflow, not just on a mistake. Raising after the copies would leave a
+    # batch dir holding features.parquet + fuel_signal.db and no freeze.json, which the
+    # FileExistsError branch above then diagnoses as an interrupted noise-floor run and
+    # sends the operator to `noise_floor <batch>` — a command that reads the freeze.json
+    # and baseline_columns.json this path never wrote. Failing before any side effect
+    # means a rejected freeze is simply retryable once the column is declared.
+    df = load_features(features_path)
     baseline_columns = resolve_baseline_columns(df)
     unclassified = unclassified_columns(df)
     if unclassified:
@@ -326,6 +330,11 @@ def freeze_batch(
             "fuel_signal/features.py (LOCKED_FEATURE_COLUMNS / NON_MODEL_COLUMNS / "
             "TARGET_COLUMNS / KEY_COLUMNS) before freezing a batch around it."
         )
+
+    batch_dir.mkdir(parents=True)
+
+    shutil.copy2(parquet_src, batch_dir / FROZEN_FEATURES_FILENAME)
+    _clone_db(db_path, batch_dir / FROZEN_DB_FILENAME)
     (batch_dir / BASELINE_COLUMNS_FILENAME).write_text(
         json.dumps(baseline_columns, indent=2) + "\n"
     )

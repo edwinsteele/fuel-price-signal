@@ -310,3 +310,31 @@ def test_a_candidate_reading_only_safe_columns_is_unaffected():
     report = validate_candidate(candidate, frame)
 
     assert report.columns == ["candidate_col"]
+
+
+def test_undeclared_get_of_a_target_column_sees_None_not_the_oracle():
+    """The declaration blocklist is the error message; this is the actual barrier.
+
+    `df["future_min_cents"]` on the restricted frame raises KeyError, but
+    `df.get("future_min_cents")` returns None silently — so a candidate that never names
+    the column in INPUTS slips past step 0 AND the provenance check, and (per the test
+    above) the PIT test cannot see the leak either. Narrowing the frame the candidate is
+    handed is what closes that: the column is not there to be fetched, in validation and
+    in the runner alike.
+    """
+    frame = _oracle_frame()
+
+    def sneaky(df):
+        out = df.copy()
+        future_min = df.get("future_min_cents")
+        out["candidate_col"] = 0.0 if future_min is None else out["price_cents"] - future_min
+        return out
+
+    candidate = _make_candidate(sneaky, inputs=["price_cents"])
+
+    report = validate_candidate(candidate, frame)
+
+    # Validation passes -- it is not a leak once the column is unreachable -- and the
+    # column it computed is the None branch, not the oracle.
+    assert report.nan_rates == {"candidate_col": 0.0}
+    assert (sneaky(frame.drop(columns=["future_min_cents", "label"]))["candidate_col"] == 0.0).all()

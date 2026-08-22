@@ -480,6 +480,29 @@ def test_freeze_batch_refuses_an_unclassified_frame_column(tmp_path):
         )
 
     assert "future_max_cents" in str(excinfo.value)
+    # No side effects: this gate fires on a NORMAL workflow (someone added a frame
+    # column), so a partial batch dir would be the common case, not the rare one — and
+    # a dir holding features.parquet + fuel_signal.db but no freeze.json trips the
+    # FileExistsError branch on retry, whose hint sends the operator to `noise_floor`,
+    # which reads the freeze.json this path never wrote. Declare the column, re-run,
+    # done — nothing to clean up in between.
+    assert not (tmp_path / "batches" / "batch1").exists()
+
+
+def test_freeze_batch_leaves_no_partial_dir_when_a_locked_column_is_missing(tmp_path):
+    """Same no-side-effects property for the pre-existing baseline contract raise —
+    it moved above mkdir with the classification check and is covered here so a later
+    edit can't quietly drop one of the two back below it."""
+    df = _features_df().drop(columns=[LOCKED_FEATURE_COLUMNS[0]])
+    features_path, db_path = _write_source(tmp_path, df)
+
+    with pytest.raises(ValueError):
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
+        )
+
+    assert not (tmp_path / "batches" / "batch1").exists()
 
 
 def test_freeze_batch_accepts_a_frame_carrying_the_label_columns(tmp_path):

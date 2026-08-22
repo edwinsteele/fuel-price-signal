@@ -122,6 +122,16 @@ Read all of the following before proposing anything:
    raises `KeyError` — see `fps-3jj` parent design, "Validation"), but the generator
    should not spend a slot proposing something that can't pass it. `add_axis`
    (optional per-row grouping function) is under the same restriction.
+
+   **"Present in the frame" is necessary, not sufficient — the label columns are in
+   there too.** `fuel_signal.features.TARGET_COLUMNS` (`future_min_cents`, `label`) sit
+   in `features.csv` and satisfy the rule above by its letter, but they are computed
+   from prices *after* `price_date`: they are what the model predicts, never an input.
+   Naming either in `INPUTS` aborts the candidate at validation
+   (`validate.py`'s `TargetColumnInInputs`), so a slot spent on one is a slot wasted.
+   Note this is the one hazard the differential PIT test cannot catch for you — a
+   forward-looking value stamped *on* the row survives date-truncation unchanged — so
+   don't treat "the leak test would have caught it" as a reason to be casual here.
 6. **The fold/regime taxonomy.** Two distinct axes, don't conflate them:
    - **Fold-level**: 14-fold paired walk-forward CV; `SHOCK_FOLDS = {1, 4, 9, 13}`
      (`experiments/lib/constants.py`), everything else `normal`.

@@ -189,8 +189,10 @@ _BRAND_TROUGH_REASON = (
 #: future rows and re-running a candidate's add_columns, which catches a function that
 #: reaches FORWARD ACROSS ROWS but not a forward-looking value already stamped ON the
 #: row: truncating the frame leaves an existing future_min_cents cell untouched, the
-#: recomputed value matches, and the leak test passes. Naming them here is what turns
-#: that hole into a machine-checkable condition (experiments/pipeline/validate.py).
+#: recomputed value matches, and the leak test passes. Naming them here is what lets the
+#: candidate pipeline close that hole structurally: experiments/pipeline/validate.py and
+#: runner.py both DROP these columns from the frame a candidate is handed, and refuse
+#: outright any candidate that names one in INPUTS or produces one in COLUMNS.
 TARGET_COLUMNS: dict[str, str] = {
     "future_min_cents": (
         "Minimum price over the forward horizon (labels.assemble_training_rows). Pure "

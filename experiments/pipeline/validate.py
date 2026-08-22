@@ -3,11 +3,16 @@ modules, since nobody reviews the code (fps-3jj.2).
 
 Run before any fitting, in this order:
 
-0. **Target-column check** — `INPUTS` may not name a `features.TARGET_COLUMNS` column
-   (`future_min_cents`, `label`). These are computed from prices *after* `price_date`
-   and are stamped on the row, so step 2 cannot see them: truncating the frame by date
-   doesn't change a value that was already written into the cell. Declaration-time and
-   exact; the one hazard that has to be caught by name rather than by behaviour.
+0. **Target columns are removed from the frame, and named in `INPUTS` is an abort.**
+   `features.TARGET_COLUMNS` (`future_min_cents`, `label`) are computed from prices
+   *after* `price_date`, so step 2 structurally cannot see a candidate reading one:
+   truncating the frame by date doesn't change a value already written into the cell.
+   Two halves, and the order matters — the **barrier** is that the candidate is handed
+   a frame with those columns dropped (matching what `runner.py` hands it), so an
+   undeclared `frame.get("future_min_cents")` returns None rather than the answer; the
+   **`INPUTS` check** on top of that turns a declared read into a named, immediate abort
+   instead of a silent None. Neither alone is enough: the check only sees declarations,
+   and the drop alone would fail confusingly.
 1. **Restricted-frame INPUTS check** — call the candidate's `add_columns` /
    `add_axis` against `frame[declared_inputs]` instead of the full frame. Any
    undeclared read raises `KeyError` on its own; exact, unevadable, free. This is a
@@ -119,6 +124,12 @@ def validate_candidate(candidate, frame: pd.DataFrame, *, date_column: str = "pr
         raise MissingInputColumnsError(
             f"{candidate.NAME}: INPUTS declares columns not present in the features frame: {missing}"
         ) from exc
+
+    # The full-frame calls below use the same target-stripped view the runner gives a
+    # candidate (runner.py), so validation exercises exactly what will run — and so a
+    # candidate that reaches for a label column WITHOUT declaring it (frame.get(...),
+    # which returns None rather than raising) sees None here too, instead of the oracle.
+    frame = frame.drop(columns=list(TARGET_COLUMNS), errors="ignore")
 
     _check_restricted_frame(candidate.add_columns, restricted, candidate_name=candidate.NAME, fn_label="add_columns")
     columns_result = differential_pit_test(candidate.add_columns, frame, date_column=date_column)
