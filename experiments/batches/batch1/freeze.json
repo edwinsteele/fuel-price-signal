@@ -1,0 +1,10 @@
+{
+  "batch": "batch1",
+  "snapshot_date": "2026-08-15",
+  "frozen_at": "2026-08-22T02:08:06.772984+00:00",
+  "source_features": "data/features.parquet",
+  "source_db": "fuel_signal.db",
+  "n_baseline_columns": 54,
+  "baseline_fingerprint": "54:1a6ec2d84a69",
+  "tank_params": "50/3.571/1d/10%"
+}
