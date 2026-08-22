@@ -167,6 +167,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
             "columns": candidate.get("columns"),
             "inputs": candidate.get("inputs"),
             "prior_art": candidate.get("prior_art"),
+            "mechanism_family": candidate.get("mechanism_family"),
             "target": candidate.get("target"),
         },
         "provenance": _provenance(results, batch_dir),

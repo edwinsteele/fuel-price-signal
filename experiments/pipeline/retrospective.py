@@ -243,6 +243,11 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
         rows.append(
             {
                 "candidate": entry["candidate"],
+                # Carried per-row so a batch retrospective can see family CONCENTRATION
+                # without reopening five candidate modules -- five uncorrelated
+                # candidates that all tell one story is the finding about the generator
+                # that generator.md's diversity rule exists to surface.
+                "mechanism_family": (facts.get("candidate") or {}).get("mechanism_family"),
                 "status": facts.get("provenance", {}).get("status"),
                 "delta_cpl_held": realised.get("delta_cpl_held"),
                 "effect_resolved": realised.get("effect_resolved"),

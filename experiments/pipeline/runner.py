@@ -594,6 +594,13 @@ def run_candidate(
             "columns": list(candidate.COLUMNS),
             "inputs": list(candidate.INPUTS),
             "prior_art": getattr(candidate, "PRIOR_ART", None),
+            # generator.md makes MECHANISM_FAMILY a REQUIRED DISCLOSURE whose whole
+            # purpose is that "the generator produced five variants of one idea" becomes
+            # visible in the dossier and the retrospective rather than a gate it learns
+            # to game. That only works if it survives the run: until fps-3jj.11 it was
+            # read from the module by nothing at all, so the disclosure existed solely
+            # in a source file nothing downstream opened.
+            "mechanism_family": getattr(candidate, "MECHANISM_FAMILY", None),
             "target": target,
         },
         "effect_resolved": effect_resolved,

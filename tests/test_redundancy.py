@@ -1,6 +1,7 @@
 """Tests for experiments/pipeline/redundancy.py — the pre-filing batch screen."""
 from __future__ import annotations
 
+import json
 import pathlib
 import textwrap
 
@@ -18,6 +19,7 @@ from experiments.pipeline.redundancy import (
     pairwise_rho,
     screen_batch,
     usable_predictors,
+    write_batch_record,
 )
 from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, NETWORK_FEATURE_COLUMNS
 
@@ -316,3 +318,93 @@ def test_a_constant_candidate_column_is_not_a_silent_pass(tmp_path, monkeypatch)
     assert not result["passed"], "an uncomputable gate check must not report PASS"
     assert result["gate_violations"].empty          # not a threshold breach...
     assert len(result["uncomputable_pairs"]) == 1   # ...but flagged for a human
+
+
+# --- Batch record (generator.md § Batch record) -----------------------------------
+
+
+def _screen_two(tmp_path, monkeypatch, family_a="f1", family_b="f2"):
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    a = _write_module(tmp_path, "a", _SIMPLE.format(
+        name="a", family=family_a, col="a_col", src="tgp_delta_7d", mult=1.0))
+    b = _write_module(tmp_path, "b", _SIMPLE.format(
+        name="b", family=family_b, col="b_col", src="stickiness_score", mult=1.0))
+    return screen_batch([a, b], sample_rows=0)
+
+
+def test_batch_record_writes_both_formats(tmp_path, monkeypatch):
+    result = _screen_two(tmp_path, monkeypatch)
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+
+    payload = json.loads(json_path.read_text())
+    assert payload["mechanism_families"] == {"a": "f1", "b": "f2"}
+    assert payload["n_distinct_families"] == 2
+    assert payload["rho_threshold"] == PAIRWISE_RHO_THRESHOLD
+    assert len(payload["block_r2"]) == 2
+    assert md_path.read_text().startswith("# Batch record — batch9")
+
+
+def test_batch_record_calls_out_a_single_family_batch(tmp_path, monkeypatch):
+    """The disclosure's entire purpose: five uncorrelated candidates telling one story
+    reads as diversity and isn't. It is not gated, so it has to be VISIBLE."""
+    result = _screen_two(tmp_path, monkeypatch, family_a="same", family_b="same")
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+
+    assert json.loads(json_path.read_text())["n_distinct_families"] == 1
+    assert "Every candidate in this batch shares one family label" in md_path.read_text()
+
+
+def test_batch_record_flags_an_undeclared_family(tmp_path, monkeypatch):
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    a = _write_module(tmp_path, "a", '''
+        import pandas as pd
+        NAME = "a"
+        COLUMNS = ["a_col"]
+        INPUTS = ["tgp_delta_7d"]
+        def add_columns(df):
+            out = df.copy()
+            out["a_col"] = out["tgp_delta_7d"]
+            return out
+    ''')
+    result = screen_batch([a], sample_rows=0)
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+
+    assert json.loads(json_path.read_text())["undeclared_families"] == ["a"]
+    assert "**NOT DECLARED**" in md_path.read_text()
+
+
+def test_batch_record_separates_gated_from_disclosed_pairs(tmp_path, monkeypatch):
+    """The record has to preserve the distinction the gate makes, or it misrepresents
+    why the batch passed."""
+    frame = _frame()
+    monkeypatch.setattr("experiments.pipeline.redundancy.load_features", lambda p: frame)
+    grp = _write_module(tmp_path, "grp", '''
+        import pandas as pd
+        NAME = "grp"
+        MECHANISM_FAMILY = "f1"
+        COLUMNS = ["g1", "g2"]
+        INPUTS = ["tgp_delta_7d"]
+        def add_columns(df):
+            out = df.copy()
+            out["g1"] = out["tgp_delta_7d"]
+            out["g2"] = out["tgp_delta_7d"] * 2.0
+            return out
+    ''')
+    other = _write_module(tmp_path, "oth", _SIMPLE.format(
+        name="oth", family="f2", col="o_col", src="stickiness_score", mult=1.0))
+    result = screen_batch([grp, other], sample_rows=0)
+
+    md_path, json_path = write_batch_record(result, tmp_path / "batch9")
+    text = md_path.read_text()
+    payload = json.loads(json_path.read_text())
+
+    assert result["passed"], "a within-candidate 1.0 pair must not fail the batch"
+    assert "### Within-candidate (disclosure only)" in text
+    assert "### Cross-candidate (gated)" in text
+    within = [r for r in payload["pairwise_rho"] if not r["cross_candidate"]]
+    assert len(within) == 1 and within[0]["candidate_a"] == "grp"

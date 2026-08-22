@@ -479,10 +479,22 @@ For each candidate that clears the diversity gate and the redundancy checks:
 
 ## Batch record
 
-Store, alongside the batch (e.g. `experiments/candidates/<batch>/batch.md` or the
-batch dir's own note): every candidate's `MECHANISM_FAMILY` (so a same-family batch is
-visible per the Diversity decision above), the computed pairwise |rho| matrix (marking
-which pairs are cross-candidate — the gated ones — and which are within a single
-multi-column candidate, which are disclosure only), and the R² of each candidate against
-the existing column set (as a block, for a multi-column candidate). This is what makes "the
+**Written for you** by the redundancy screen — `batch.md` and `batch.json` land beside the
+candidate modules in `experiments/candidates/<batch>/` on every run (pass
+`--no-write-record` to suppress). Don't hand-write one; commit what the screen produced.
+
+It holds every candidate's `MECHANISM_FAMILY` (so a same-family batch is visible per the
+Diversity decision above — the record calls it out explicitly when every candidate shares
+one label, and marks `NOT DECLARED` when a module omits the field), the pairwise |rho|
+matrix split into cross-candidate (the gated ones) and within-candidate (disclosure only),
+and each candidate's block R² against the existing column set. This is what makes "the
 generator produced five variants of one idea" legible later, rather than lost.
+
+**Two formats on purpose.** `batch.json` is what the retrospective reads — prose is not a
+data format, and the question this record exists to answer later is a group-by over
+mechanism families, not a close reading. `batch.md` is the same numbers for a human.
+
+**Written at SCREEN time, not at filing time**, because these are the numbers that
+justified filing. A record regenerated afterwards would measure whatever the modules say
+*then* — which is exactly the residual risk this file already accepts when it notes that a
+module hand-edited after filing goes unchecked.

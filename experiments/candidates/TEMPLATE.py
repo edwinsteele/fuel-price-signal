@@ -53,6 +53,13 @@ CONFIDENCE_ZONE = 0.10
 # omitted axis means "not claiming a zone" (only CONFIDENCE_EFFECT is graded).
 TARGET = {"axis": "day_of_week", "expect_concentration_in": ["Monday", "Tuesday"], "folds": []}
 
+# A short label for the underlying story: "wholesale-lead", "competition-density",
+# "cycle-shape", ... REQUIRED. This is a disclosure, never a gate -- nothing rejects a
+# batch for sharing a family. It is recorded so that "five uncorrelated candidates that
+# all encode one idea" is visible in the retrospective instead of invisible. Give the
+# honest label; relabelling to look diverse defeats the only purpose it has.
+MECHANISM_FAMILY = "module-format-example"
+
 # Adjacent to something rejected? Say what differs. "None" only for a genuine
 # first-of-its-kind candidate.
 PRIOR_ART = "None — this is the fps-3jj module-format worked example, not a proposed feature."

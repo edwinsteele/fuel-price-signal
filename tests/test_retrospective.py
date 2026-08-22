@@ -31,9 +31,11 @@ def _facts(
     confidence_effect: float = 0.5,
     confidence_zone: float = 0.5,
     noise_band: dict | None = None,
+    mechanism_family: str | None = "test-family",
 ) -> dict:
     return {
-        "candidate": {"name": name, "confidence_effect": confidence_effect, "confidence_zone": confidence_zone},
+        "candidate": {"name": name, "confidence_effect": confidence_effect,
+                      "confidence_zone": confidence_zone, "mechanism_family": mechanism_family},
         "provenance": {"batch": batch, "status": status},
         "headline": {
             "realised": {"delta_cpl_held": delta, "effect_resolved": effect_resolved},
@@ -581,3 +583,21 @@ def test_cli_refuses_to_overwrite_without_force(tmp_path):
     )
 
     assert result.exit_code != 0
+
+
+def test_leaderboard_rows_carry_mechanism_family():
+    """A batch retrospective must be able to see family CONCENTRATION without reopening
+    five candidate modules — that is the whole point of the disclosure being required
+    (generator.md § Diversity: five uncorrelated candidates all telling one story reads
+    as diversity and isn't). Nothing carried it past results.json until fps-3jj.11.
+    """
+    entries = [
+        {"candidate": "a", "state": "dossiered",
+         "facts": _facts("a", delta=-0.05, mechanism_family="wholesale-lead")},
+        {"candidate": "b", "state": "dossiered",
+         "facts": _facts("b", delta=0.02, mechanism_family="wholesale-lead")},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert {r["mechanism_family"] for r in rows} == {"wholesale-lead"}
