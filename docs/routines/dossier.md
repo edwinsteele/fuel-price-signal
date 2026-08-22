@@ -183,12 +183,29 @@ This is the exact text that should be the Routine's stored prompt (three lines, 
 
 ```
 You are the fuel-price-signal dossier routine.
-Your working directory already has a fresh checkout of `edwinsteele/fuel-price-signal`.
+Your working directory is /Users/esteele/Code/fuel-price-signal (the
+fuel-price-signal repo, primary worktree — this is a persistent local checkout, not
+a fresh clone).
 Follow docs/routines/dossier.md exactly.
 ```
 
-**Registering the actual scheduled task is an owner action**, same as every other routine in this
-project — not done as part of `fps-3jj.6`. Register it as a separate Claude Code Routine from both
-the chore/polish worker and the launch routine (three independent schedules against the same repo),
-timed to run after the launch routine's candidate for the night has had time to finish (hours, not
-minutes — see the parent design's "Run (hours, detached)" timing).
+**This is a LOCAL routine.** An earlier revision of this shim said "your working directory already
+has a fresh checkout", copied from the cloud worker. That is wrong here and not merely untidy: a
+fresh clone has neither the run artifacts (`results.json`, `rowpreds.parquet`, `fills.parquet` are
+produced on this machine) nor the batch snapshot (`features.parquet` and the cloned DB are
+gitignored), so a fresh-checkout dossier routine would find an empty work queue every night and
+exit quietly, forever. It must name the primary worktree, exactly as `docs/routines/launch.md`'s
+shim does.
+
+**Registered** (2026-08-22, `fps-3jj.11` prep) as the local scheduled task
+`fuel-price-signal-dossier`, cron `0 5 * * *` local — 5:00 AM AEST daily. Separate from both the
+chore/polish worker and the launch routine: three independent schedules against the same repo.
+
+**Why 5 AM and not "later the same night".** Two constraints pull against each other. The run must
+have finished (launch fires at 9 PM, a candidate takes tens of minutes at 1-day cadence, so ~10 PM
+is already enough), but this routine uses Claude *actively* to write the dossier, and
+`docs/routines/launch.md` puts the 10 PM–4 AM AEST window off limits for exactly that reason —
+it is why launch itself sits at 9 PM. Same-night dossiering lands squarely inside it. 5 AM clears
+the window, leaves hours of headroom over even a badly overrunning candidate, and has the dossier
+waiting when the owner wakes up. If the run is still going, this routine exits quietly and picks
+the candidate up the next morning, so a late finish costs a day rather than a write-up.
