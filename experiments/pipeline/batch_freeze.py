@@ -320,7 +320,16 @@ def freeze_batch(
     # sends the operator to `noise_floor <batch>` — a command that reads the freeze.json
     # and baseline_columns.json this path never wrote. Failing before any side effect
     # means a rejected freeze is simply retryable once the column is declared.
-    df = load_features(features_path)
+    # parquet_src, NOT features_path: `shutil.copy2(parquet_src, ...)` below is what
+    # actually gets frozen, and load_features(csv_path) resolves CSV-vs-parquet by mtime —
+    # so with a CSV newer than its parquet sibling this would validate one frame and
+    # freeze a different one. (The pre-hoist version read the batch dir, which contains
+    # only the copied parquet, so it got this right by accident of location; hoisting the
+    # load above the copy is what made the source path matter.) Passing the .parquet path
+    # makes load_features' own resolution a no-op — with_suffix(".parquet") is idempotent,
+    # so both sides of its mtime comparison are the same file — while keeping its trough
+    # dtype normalisation. Don't "tidy" this back to features_path.
+    df = load_features(parquet_src)
     baseline_columns = resolve_baseline_columns(df)
     unclassified = unclassified_columns(df)
     if unclassified:

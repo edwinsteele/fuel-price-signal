@@ -489,6 +489,34 @@ def test_freeze_batch_refuses_an_unclassified_frame_column(tmp_path):
     assert not (tmp_path / "batches" / "batch1").exists()
 
 
+def test_freeze_batch_validates_the_parquet_it_freezes_not_a_newer_csv(tmp_path):
+    """The frame that is CHECKED must be the frame that is COPIED.
+
+    load_features(csv_path) picks CSV-or-parquet by mtime, but the freeze always copies
+    the parquet. A clean CSV that is newer than a dirty parquet would otherwise pass
+    validation while the dirty parquet became the batch every candidate then reads.
+    """
+    import os
+
+    clean = _features_df()
+    dirty = _features_df()
+    dirty["future_max_cents"] = [0.0] * len(dirty)
+
+    features_path, db_path = _write_source(tmp_path, dirty)  # parquet: unclassified column
+    clean.to_csv(features_path, index=False)                 # csv: clean, and newer
+    os.utime(features_path.with_suffix(".parquet"), (1, 1))
+    assert features_path.stat().st_mtime > features_path.with_suffix(".parquet").stat().st_mtime
+
+    with pytest.raises(UnclassifiedFrameColumns) as excinfo:
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
+        )
+
+    assert "future_max_cents" in str(excinfo.value)
+    assert not (tmp_path / "batches" / "batch1").exists()
+
+
 def test_freeze_batch_leaves_no_partial_dir_when_a_locked_column_is_missing(tmp_path):
     """Same no-side-effects property for the pre-existing baseline contract raise —
     it moved above mkdir with the classification check and is covered here so a later
