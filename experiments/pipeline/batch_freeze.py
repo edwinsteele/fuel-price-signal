@@ -52,6 +52,7 @@ from fuel_signal.features import (
     baseline_fingerprint,
     load_features,
     non_model_columns,
+    unclassified_columns,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -82,6 +83,17 @@ class BaselineContractMismatch(RuntimeError):
         super().__init__(
             f"Baseline feature-column contract changed since freeze: +{added} -{removed}"
         )
+
+
+class UnclassifiedFrameColumns(RuntimeError):
+    """The features frame carries a column no declaration accounts for.
+
+    Raised at freeze time rather than tolerated, because "not categorised" is the state
+    in which a new forward-looking column silently becomes readable by a candidate:
+    `validate.py` blocks the label columns by NAME (`features.TARGET_COLUMNS`), and a
+    name-based blocklist only stays complete while adding a column forces someone to say
+    what it is. This is that forcing function — see `features.unclassified_columns`.
+    """
 
 
 class NonModelColumnLeak(RuntimeError):
@@ -299,13 +311,39 @@ def freeze_batch(
         raise FileExistsError(
             f"Batch dir already exists: {batch_dir}. Batches are frozen once.{noise_floor_hint}"
         )
+    # Every column check runs on the SOURCE frame, before mkdir and before the two
+    # expensive copies below. These raises are not exceptional: UnclassifiedFrameColumns
+    # is the routine outcome of "somebody added a frame column", i.e. it fires on a
+    # normal workflow, not just on a mistake. Raising after the copies would leave a
+    # batch dir holding features.parquet + fuel_signal.db and no freeze.json, which the
+    # FileExistsError branch above then diagnoses as an interrupted noise-floor run and
+    # sends the operator to `noise_floor <batch>` — a command that reads the freeze.json
+    # and baseline_columns.json this path never wrote. Failing before any side effect
+    # means a rejected freeze is simply retryable once the column is declared.
+    # parquet_src, NOT features_path: `shutil.copy2(parquet_src, ...)` below is what
+    # actually gets frozen, and load_features(csv_path) resolves CSV-vs-parquet by mtime —
+    # so with a CSV newer than its parquet sibling this would validate one frame and
+    # freeze a different one. (The pre-hoist version read the batch dir, which contains
+    # only the copied parquet, so it got this right by accident of location; hoisting the
+    # load above the copy is what made the source path matter.) Passing the .parquet path
+    # makes load_features' own resolution a no-op — with_suffix(".parquet") is idempotent,
+    # so both sides of its mtime comparison are the same file — while keeping its trough
+    # dtype normalisation. Don't "tidy" this back to features_path.
+    df = load_features(parquet_src)
+    baseline_columns = resolve_baseline_columns(df)
+    unclassified = unclassified_columns(df)
+    if unclassified:
+        raise UnclassifiedFrameColumns(
+            f"Features frame carries {len(unclassified)} column(s) that are neither locked, "
+            f"non-model, target, nor keys: {unclassified}. Declare each one in "
+            "fuel_signal/features.py (LOCKED_FEATURE_COLUMNS / NON_MODEL_COLUMNS / "
+            "TARGET_COLUMNS / KEY_COLUMNS) before freezing a batch around it."
+        )
+
     batch_dir.mkdir(parents=True)
 
     shutil.copy2(parquet_src, batch_dir / FROZEN_FEATURES_FILENAME)
     _clone_db(db_path, batch_dir / FROZEN_DB_FILENAME)
-
-    df = load_features(batch_dir / "features.csv")
-    baseline_columns = resolve_baseline_columns(df)
     (batch_dir / BASELINE_COLUMNS_FILENAME).write_text(
         json.dumps(baseline_columns, indent=2) + "\n"
     )

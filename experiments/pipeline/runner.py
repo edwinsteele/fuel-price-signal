@@ -127,7 +127,7 @@ from experiments.pipeline.validate import (
     validate_candidate,
 )
 from fuel_signal import evaluate as _ev
-from fuel_signal.features import baseline_fingerprint, load_features
+from fuel_signal.features import TARGET_COLUMNS, baseline_fingerprint, load_features
 
 STATUS_REJECTED = "rejected"
 STATUS_DISQUALIFIED = "disqualified"
@@ -401,16 +401,29 @@ def run_candidate(
             error=f"validation raised: {exc!r}", bead_id=bead_id,
         )
 
-    overlap = set(candidate.COLUMNS) & set(baseline_columns)
+    # TARGET_COLUMNS joins the baseline in this check: a candidate declaring
+    # COLUMNS=["label"] would otherwise overwrite the target in candidate_frame below,
+    # and the WFCV screen reads val_df["label"] downstream. Self-defeating rather than
+    # an oracle (it loses the realised arbiter), but it fails confusingly instead of
+    # loudly, and the output side deserves the same named refusal as the input side.
+    overlap = set(candidate.COLUMNS) & (set(baseline_columns) | set(TARGET_COLUMNS))
     if overlap:
         return _finish(
             STATUS_ABORTED_CANDIDATE, name, t0, out_dir,
-            error=f"{name}: COLUMNS overlaps the baseline contract: {sorted(overlap)}",
+            error=f"{name}: COLUMNS overlaps the baseline contract or the label columns: "
+                  f"{sorted(overlap)}",
             bead_id=bead_id,
         )
 
+    # The candidate never SEES the label columns, so the INPUTS blocklist in validate.py
+    # is a good error message rather than the only thing standing between a candidate and
+    # the oracle: `frame.get("future_min_cents")` returns None here, not the answer.
+    # Declaration-based blocking alone would miss a read that never names the column in
+    # INPUTS. candidate_frame below is still built from the FULL frame, so `label`
+    # remains available to the WFCV screen — only the candidate's view is narrowed.
+    candidate_input = frame.drop(columns=list(TARGET_COLUMNS), errors="ignore")
     try:
-        candidate_output = candidate.add_columns(frame)
+        candidate_output = candidate.add_columns(candidate_input)
         candidate_frame = frame.copy()
         for col in candidate.COLUMNS:
             candidate_frame[col] = candidate_output[col]
@@ -426,7 +439,7 @@ def run_candidate(
     axis_lookup = None
     if add_axis is not None:
         try:
-            axis_series = add_axis(frame).rename("axis")
+            axis_series = add_axis(candidate_input).rename("axis")
         except Exception as exc:  # noqa: BLE001 — candidate-caused, see outcome taxonomy
             return _finish(
                 STATUS_ABORTED_CANDIDATE, name, t0, out_dir,

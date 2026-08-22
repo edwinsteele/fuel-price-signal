@@ -63,6 +63,10 @@ COLUMNS = ["example_network_avg_minus_rolling7"]
 # Every column add_columns (and add_axis, if present) reads. The runner and
 # validation harness call add_columns(frame[INPUTS].copy()) as a provenance
 # check — an undeclared read raises KeyError and the candidate is aborted.
+#
+# The label columns (fuel_signal.features.TARGET_COLUMNS: future_min_cents, label)
+# are present in the frame but are NEVER valid inputs — they are computed from
+# prices after price_date. Declaring one aborts the candidate before anything runs.
 INPUTS = ["price_date", "station_price_cents"]
 
 

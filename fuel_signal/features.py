@@ -179,6 +179,38 @@ _BRAND_TROUGH_REASON = (
 )
 
 
+#: The label frame's own columns (``labels.assemble_training_rows``), which ride along
+#: in features.csv because the frame is built by joining features onto labels. Split by
+#: whether the value is knowable at decision time.
+#:
+#: TARGET_COLUMNS are computed from prices AFTER price_date. They are what the model
+#: predicts, never an input to it — and the candidate pipeline cannot discover that on
+#: its own. Its differential PIT test (experiments/lib/pit_test.py) works by deleting
+#: future rows and re-running a candidate's add_columns, which catches a function that
+#: reaches FORWARD ACROSS ROWS but not a forward-looking value already stamped ON the
+#: row: truncating the frame leaves an existing future_min_cents cell untouched, the
+#: recomputed value matches, and the leak test passes. Naming them here is what lets the
+#: candidate pipeline close that hole structurally: experiments/pipeline/validate.py and
+#: runner.py both DROP these columns from the frame a candidate is handed, and refuse
+#: outright any candidate that names one in INPUTS or produces one in COLUMNS.
+TARGET_COLUMNS: dict[str, str] = {
+    "future_min_cents": (
+        "Minimum price over the forward horizon (labels.assemble_training_rows). Pure "
+        "oracle — it is the quantity the model exists to predict."
+    ),
+    "label": (
+        "The training target itself: future_min_cents thresholded against today's price "
+        "and a trailing percentile (labels.assemble_training_rows)."
+    ),
+}
+
+#: Label-frame columns that ARE knowable at decision time: the two join keys, plus
+#: today_price_cents (byte-identical to the locked station_price_cents on every row of
+#: the real frame). Not model inputs and not hazards — but they have to classify as
+#: SOMETHING for unclassified_columns() below to mean anything.
+KEY_COLUMNS: frozenset[str] = frozenset({"station_code", "price_date", "today_price_cents"})
+
+
 def non_model_columns(df: pd.DataFrame) -> dict[str, tuple[str, str]]:
     """Columns present in `df` that are deliberately outside the lock, with why.
 
@@ -207,6 +239,36 @@ def non_model_columns(df: pd.DataFrame) -> dict[str, tuple[str, str]]:
         elif col.startswith(_TROUGH_PREFIX) and col not in lga:
             out[col] = _BRAND_TROUGH_REASON
     return out
+
+
+def unclassified_columns(df: pd.DataFrame) -> list[str]:
+    """Columns in `df` that no declaration accounts for, in frame order.
+
+    Every column in the features frame should be exactly one of: in the lock; computed
+    but excluded (`non_model_columns`); the target (`TARGET_COLUMNS`); or a decision-time
+    key (`KEY_COLUMNS`). Anything else is a column somebody added without saying what it
+    is — and "unsaid" is the state in which a forward-looking column becomes readable by
+    a candidate, because the pipeline's other guards are all keyed on declarations.
+
+    This is the forcing function for `TARGET_COLUMNS` being a BLOCKLIST rather than an
+    allowlist. A blocklist is the right shape here (the hazard is the target, a closed
+    set, not an open category) but only while adding a new column to the frame forces
+    someone to decide which bucket it belongs in. `freeze_batch` calls this on the real
+    frame so that a batch cannot be frozen around an unclassified column.
+
+    Deliberately DOES consult LOCKED_FEATURE_COLUMNS, unlike `non_model_columns`. The
+    two guard different invariants and the difference is not an oversight: that one
+    answers "is this column wrongly IN the lock?" and so must not take the lock's word
+    for anything, while this one answers "has this column been categorised at all?", for
+    which being in the lock is a perfectly good answer.
+    """
+    known = (
+        set(LOCKED_FEATURE_COLUMNS)
+        | set(non_model_columns(df))
+        | set(TARGET_COLUMNS)
+        | KEY_COLUMNS
+    )
+    return [col for col in df.columns if col not in known]
 
 
 def baseline_fingerprint(columns: Sequence[str]) -> str:

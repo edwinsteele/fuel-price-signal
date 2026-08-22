@@ -1298,3 +1298,90 @@ def test_assembler_tgp_delta_float64_when_table_empty(conn):
     assert "tgp_delta_7d" in df.columns
     assert str(df["tgp_delta_7d"].dtype) == "float64"
     assert df["tgp_delta_7d"].isna().all()
+
+
+# --- Frame column classification (unclassified_columns) ---------------------------
+
+
+def _classified_frame_columns() -> list[str]:
+    """One of each category, with no reference to the gitignored real frame.
+
+    Deliberately built from the declaration symbols rather than a hardcoded list of
+    today's 70 column names: a hardcoded inventory would pass forever while the real
+    frame drifted, which is the failure this whole guard exists to prevent.
+    """
+    from fuel_signal.features import KEY_COLUMNS, LOCKED_FEATURE_COLUMNS, TARGET_COLUMNS
+
+    return (
+        list(LOCKED_FEATURE_COLUMNS)
+        + ["days_since_trough_entry_zzz_test_brand"]  # non-model, matched by rule
+        + ["tgp_delta_7d"]  # non-model, matched by name
+        + list(TARGET_COLUMNS)
+        + sorted(KEY_COLUMNS)
+    )
+
+
+def test_unclassified_columns_is_empty_when_every_category_is_present():
+    import pandas as pd
+
+    from fuel_signal.features import unclassified_columns
+
+    df = pd.DataFrame({c: [0.0] for c in _classified_frame_columns()})
+
+    assert unclassified_columns(df) == []
+
+
+def test_unclassified_columns_flags_an_undeclared_column():
+    """The forcing function: add a column to the frame without saying what it is."""
+    import pandas as pd
+
+    from fuel_signal.features import unclassified_columns
+
+    df = pd.DataFrame({c: [0.0] for c in _classified_frame_columns() + ["future_max_cents"]})
+
+    assert unclassified_columns(df) == ["future_max_cents"]
+
+
+def test_target_and_key_columns_are_disjoint():
+    from fuel_signal.features import KEY_COLUMNS, TARGET_COLUMNS
+
+    assert not set(TARGET_COLUMNS) & KEY_COLUMNS
+
+
+def test_target_columns_cover_the_forward_looking_label_frame_columns(conn):
+    """Pins TARGET_COLUMNS | KEY_COLUMNS against assemble_training_rows' REAL output.
+
+    An earlier version of this test compared a hand-copied set of five names against the
+    declarations, which only tripwires edits to the declarations themselves — the thing
+    it claimed to catch (the label frame growing a sixth column) would have sailed
+    straight through it. Calling the builder is what makes the claim true.
+    """
+    from fuel_signal.features import KEY_COLUMNS, TARGET_COLUMNS
+    from fuel_signal.labels import assemble_training_rows
+
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+
+    label_frame = assemble_training_rows(conn, station_codes=[STATION_A])
+
+    assert len(label_frame) > 0
+    assert set(label_frame.columns) == set(TARGET_COLUMNS) | KEY_COLUMNS
+
+
+def test_the_real_features_frame_classifies_completely(conn):
+    """End-to-end: every column assemble_feature_rows actually produces is classified.
+
+    The freeze gate enforces this on the live frame, but the live frame is gitignored and
+    CI runs a bare `pytest -q` — so without an in-process build over a synthetic DB, the
+    only enforcement would be on the owner's Mac at freeze time. This is the CI-visible
+    half.
+    """
+    from fuel_signal.features import unclassified_columns
+
+    _add_station(conn, STATION_A)
+    _add_prices(conn, STATION_A, _3_CYCLES)
+
+    df = assemble_feature_rows(conn, station_codes=[STATION_A], min_rows_per_station=0)
+
+    assert len(df) > 0
+    assert unclassified_columns(df) == []

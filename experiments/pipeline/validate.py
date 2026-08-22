@@ -3,12 +3,24 @@ modules, since nobody reviews the code (fps-3jj.2).
 
 Run before any fitting, in this order:
 
+0. **Target columns are removed from the frame, and named in `INPUTS` is an abort.**
+   `features.TARGET_COLUMNS` (`future_min_cents`, `label`) are computed from prices
+   *after* `price_date`, so step 2 structurally cannot see a candidate reading one:
+   truncating the frame by date doesn't change a value already written into the cell.
+   Two halves, and the order matters — the **barrier** is that the candidate is handed
+   a frame with those columns dropped (matching what `runner.py` hands it), so an
+   undeclared `frame.get("future_min_cents")` returns None rather than the answer; the
+   **`INPUTS` check** on top of that turns a declared read into a named, immediate abort
+   instead of a silent None. Neither alone is enough: the check only sees declarations,
+   and the drop alone would fail confusingly.
 1. **Restricted-frame INPUTS check** — call the candidate's `add_columns` /
    `add_axis` against `frame[declared_inputs]` instead of the full frame. Any
    undeclared read raises `KeyError` on its own; exact, unevadable, free. This is a
    *provenance* check (INPUTS feeds the correlation/redundancy checks and the
    ledger's `inputs` field), not a leak check.
-2. **Differential PIT test** (`experiments/lib/pit_test.py`) — the sole leak abort.
+2. **Differential PIT test** (`experiments/lib/pit_test.py`) — the leak abort for
+   *computed* leaks (a forward-reaching aggregate). Step 0 covers the stamped kind it
+   cannot see; the two are complementary, neither subsumes the other.
 3. **NaN-rate assert** — a declared output column that is entirely NaN means
    `add_columns` computed nothing; abort. Partial NaN (warm-up rows) is normal and
    just reported for the dossier.
@@ -29,7 +41,7 @@ import click
 import pandas as pd
 
 from experiments.lib.pit_test import differential_pit_test
-from fuel_signal.features import DEFAULT_FEATURES_CSV, load_features
+from fuel_signal.features import DEFAULT_FEATURES_CSV, TARGET_COLUMNS, load_features
 
 
 class RestrictedFrameViolation(RuntimeError):
@@ -41,6 +53,16 @@ class MissingInputColumnsError(RuntimeError):
 
     Distinct from RestrictedFrameViolation: this is a bad declaration, not an
     undeclared read.
+    """
+
+
+class TargetColumnInInputs(RuntimeError):
+    """A candidate declared one of the label columns (`features.TARGET_COLUMNS`) in INPUTS.
+
+    The one leak the differential PIT test structurally cannot catch, so it is caught
+    here instead, by declaration, before anything runs. See TARGET_COLUMNS' own comment:
+    a forward-looking value stamped ON the row survives date-truncation unchanged, so
+    recompute-and-compare finds nothing wrong with `future_min_cents - station_price_cents`.
     """
 
 
@@ -83,6 +105,38 @@ def validate_candidate(candidate, frame: pd.DataFrame, *, date_column: str = "pr
     Raises on the first failure. Never fits a model.
     """
     inputs = list(candidate.INPUTS)
+
+    # Before the restricted frame is even built: the restricted-frame check enforces that
+    # a candidate reads only what it DECLARED, and the PIT test catches reaching forward
+    # across rows. Neither says a declared read is allowed to be the target.
+    declared_targets = [col for col in inputs if col in TARGET_COLUMNS]
+    if declared_targets:
+        why = "; ".join(f"{col}: {TARGET_COLUMNS[col]}" for col in declared_targets)
+        raise TargetColumnInInputs(
+            f"{candidate.NAME}: INPUTS declares label column(s) {declared_targets}, which are "
+            f"computed from prices after price_date and are never a valid feature input. {why}"
+        )
+
+    # Output side. Without this a candidate declaring COLUMNS=["future_min_cents"] and an
+    # identity add_columns is still stopped -- the target columns are dropped below, so it
+    # fails to produce what it declared -- but it fails as MissingOutputColumnError, which
+    # reads as "your function is broken" rather than "you tried to make the label a
+    # feature". Same refusal, named.
+    #
+    # Scoped to TARGET_COLUMNS deliberately, NOT to "any column already in the frame":
+    # re-declaring an existing frame column is the LEGITIMATE shape for a candidate that
+    # promotes a computed-but-excluded column into the model. batch0's own known-graduate
+    # candidate is exactly that (COLUMNS = INPUTS = ["tgp_delta_7d"], a column present in
+    # the frame and deliberately outside the lock), so a blanket frame-collision rule
+    # would have rejected the run that calibrated this pipeline. The baseline contract is
+    # the other half and is checked in runner.py, which is where baseline_columns lives.
+    produced_targets = [col for col in candidate.COLUMNS if col in TARGET_COLUMNS]
+    if produced_targets:
+        raise TargetColumnInInputs(
+            f"{candidate.NAME}: COLUMNS declares label column(s) {produced_targets} as candidate "
+            "output, which would overwrite the model's target with a candidate-computed value."
+        )
+
     try:
         restricted = frame[inputs].copy()
     except KeyError as exc:
@@ -90,6 +144,12 @@ def validate_candidate(candidate, frame: pd.DataFrame, *, date_column: str = "pr
         raise MissingInputColumnsError(
             f"{candidate.NAME}: INPUTS declares columns not present in the features frame: {missing}"
         ) from exc
+
+    # The full-frame calls below use the same target-stripped view the runner gives a
+    # candidate (runner.py), so validation exercises exactly what will run — and so a
+    # candidate that reaches for a label column WITHOUT declaring it (frame.get(...),
+    # which returns None rather than raising) sees None here too, instead of the oracle.
+    frame = frame.drop(columns=list(TARGET_COLUMNS), errors="ignore")
 
     _check_restricted_frame(candidate.add_columns, restricted, candidate_name=candidate.NAME, fn_label="add_columns")
     columns_result = differential_pit_test(candidate.add_columns, frame, date_column=date_column)

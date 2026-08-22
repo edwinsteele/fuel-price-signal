@@ -7,15 +7,18 @@ import types
 import pandas as pd
 import pytest
 
+from experiments.lib.pit_test import differential_pit_test
 from experiments.pipeline.validate import (
     AllNaNColumnError,
     CandidateImportError,
     MissingInputColumnsError,
     MissingOutputColumnError,
     RestrictedFrameViolation,
+    TargetColumnInInputs,
     load_candidate_module,
     validate_candidate,
 )
+from fuel_signal.features import TARGET_COLUMNS
 
 
 def _panel_frame() -> pd.DataFrame:
@@ -214,3 +217,161 @@ def test_declared_output_column_not_produced_raises_clear_error():
 
     with pytest.raises(MissingOutputColumnError):
         validate_candidate(candidate, frame)
+
+
+# --- Target columns (features.TARGET_COLUMNS) ------------------------------------
+
+
+def _oracle_frame() -> pd.DataFrame:
+    """A panel frame carrying the label columns, as the real features frame does."""
+    frame = _panel_frame()
+    # future_min_cents as the real frame has it: the forward-looking minimum, already
+    # computed and STAMPED on each row rather than derived at read time.
+    frame = frame.sort_values(["station_code", "price_date"]).copy()
+    frame["future_min_cents"] = (
+        frame.groupby("station_code")["price_cents"]
+        .transform(lambda s: s[::-1].cummin()[::-1])
+    )
+    frame["label"] = (frame["future_min_cents"] >= frame["price_cents"] - 3.0).astype(int)
+    return frame
+
+
+def _oracle_add_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """The leak: today's price minus the known future minimum."""
+    out = df.copy()
+    out["candidate_col"] = out["price_cents"] - out["future_min_cents"]
+    return out
+
+
+def test_differential_pit_test_does_NOT_catch_a_stamped_target_column():
+    """The reason TargetColumnInInputs has to exist — documents the hole, not a wish.
+
+    The PIT test truncates the frame by date and re-runs. `future_min_cents` was computed
+    upstream and written into the row, so truncation leaves it untouched, the recomputed
+    values match, and a blatant oracle feature sails through. If this test ever starts
+    raising, the PIT test got stronger and this guard's rationale needs revisiting.
+    """
+    frame = _oracle_frame()
+
+    differential_pit_test(_oracle_add_columns, frame)  # no PitLeakError — that is the point
+
+
+def test_validate_candidate_rejects_target_column_in_inputs():
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        _oracle_add_columns, inputs=["price_cents", "future_min_cents"]
+    )
+
+    with pytest.raises(TargetColumnInInputs) as excinfo:
+        validate_candidate(candidate, frame)
+
+    assert "future_min_cents" in str(excinfo.value)
+
+
+def test_validate_candidate_rejects_label_in_inputs():
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        lambda df: df.assign(candidate_col=df["label"].astype(float)),
+        inputs=["label"],
+    )
+
+    with pytest.raises(TargetColumnInInputs):
+        validate_candidate(candidate, frame)
+
+
+def test_target_check_runs_before_the_restricted_frame_check():
+    """Ordering matters: a candidate reading a target column AND an undeclared one should
+    report the target, which is the disqualifying fault, not the provenance slip."""
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        lambda df: df.assign(candidate_col=df["future_min_cents"] - df["tgp_delta_7d"]),
+        inputs=["future_min_cents"],  # tgp_delta_7d read but undeclared
+    )
+
+    with pytest.raises(TargetColumnInInputs):
+        validate_candidate(candidate, frame)
+
+
+def test_target_columns_are_absent_from_the_locked_baseline():
+    """A target column in the lock would mean the model trains on its own answer."""
+    from fuel_signal.features import LOCKED_FEATURE_COLUMNS
+
+    assert not set(TARGET_COLUMNS) & set(LOCKED_FEATURE_COLUMNS)
+
+
+def test_a_candidate_reading_only_safe_columns_is_unaffected():
+    """The guard is keyed on the target columns alone — it must not fire on a frame that
+    merely CONTAINS them, which every real features frame does."""
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        _pit_safe_add_columns, inputs=["station_code", "price_date", "tgp_delta_7d"]
+    )
+
+    report = validate_candidate(candidate, frame)
+
+    assert report.columns == ["candidate_col"]
+
+
+def test_undeclared_get_of_a_target_column_sees_None_not_the_oracle():
+    """The declaration blocklist is the error message; this is the actual barrier.
+
+    `df["future_min_cents"]` on the restricted frame raises KeyError, but
+    `df.get("future_min_cents")` returns None silently — so a candidate that never names
+    the column in INPUTS slips past step 0 AND the provenance check, and (per the test
+    above) the PIT test cannot see the leak either. Narrowing the frame the candidate is
+    handed is what closes that: the column is not there to be fetched, in validation and
+    in the runner alike.
+    """
+    frame = _oracle_frame()
+
+    def sneaky(df):
+        out = df.copy()
+        future_min = df.get("future_min_cents")
+        out["candidate_col"] = 0.0 if future_min is None else out["price_cents"] - future_min
+        return out
+
+    candidate = _make_candidate(sneaky, inputs=["price_cents"])
+
+    report = validate_candidate(candidate, frame)
+
+    # Validation passes -- it is not a leak once the column is unreachable -- and the
+    # column it computed is the None branch, not the oracle.
+    assert report.nan_rates == {"candidate_col": 0.0}
+    assert (sneaky(frame.drop(columns=["future_min_cents", "label"]))["candidate_col"] == 0.0).all()
+
+
+def test_validate_candidate_rejects_a_target_column_as_candidate_output():
+    """COLUMNS=["future_min_cents"] with an identity add_columns.
+
+    The drop already stops this (identity on a target-stripped frame fails to produce the
+    declared column), but as MissingOutputColumnError — "your function is broken" rather
+    than "you tried to make the label a feature". The named refusal is the point.
+    """
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        lambda df: df.copy(), inputs=["price_cents"], columns=["future_min_cents"]
+    )
+
+    with pytest.raises(TargetColumnInInputs) as excinfo:
+        validate_candidate(candidate, frame)
+
+    assert "future_min_cents" in str(excinfo.value)
+
+
+def test_redeclaring_a_non_model_frame_column_as_output_is_ALLOWED():
+    """Guards the scope of the check above against being widened to "any frame column".
+
+    Promoting a computed-but-excluded column into the model is the legitimate shape for a
+    candidate, and it is what batch0's known-graduate run actually did: tgp_delta_7d is
+    present in the frame, deliberately outside the lock, and declared as both INPUTS and
+    COLUMNS. A blanket frame-collision rule would have rejected the run that calibrated
+    this pipeline, so this asserts the narrow scope on purpose.
+    """
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        lambda df: df.copy(), inputs=["tgp_delta_7d"], columns=["tgp_delta_7d"]
+    )
+
+    report = validate_candidate(candidate, frame)
+
+    assert report.columns == ["tgp_delta_7d"]
