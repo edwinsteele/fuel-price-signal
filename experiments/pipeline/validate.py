@@ -117,6 +117,26 @@ def validate_candidate(candidate, frame: pd.DataFrame, *, date_column: str = "pr
             f"computed from prices after price_date and are never a valid feature input. {why}"
         )
 
+    # Output side. Without this a candidate declaring COLUMNS=["future_min_cents"] and an
+    # identity add_columns is still stopped -- the target columns are dropped below, so it
+    # fails to produce what it declared -- but it fails as MissingOutputColumnError, which
+    # reads as "your function is broken" rather than "you tried to make the label a
+    # feature". Same refusal, named.
+    #
+    # Scoped to TARGET_COLUMNS deliberately, NOT to "any column already in the frame":
+    # re-declaring an existing frame column is the LEGITIMATE shape for a candidate that
+    # promotes a computed-but-excluded column into the model. batch0's own known-graduate
+    # candidate is exactly that (COLUMNS = INPUTS = ["tgp_delta_7d"], a column present in
+    # the frame and deliberately outside the lock), so a blanket frame-collision rule
+    # would have rejected the run that calibrated this pipeline. The baseline contract is
+    # the other half and is checked in runner.py, which is where baseline_columns lives.
+    produced_targets = [col for col in candidate.COLUMNS if col in TARGET_COLUMNS]
+    if produced_targets:
+        raise TargetColumnInInputs(
+            f"{candidate.NAME}: COLUMNS declares label column(s) {produced_targets} as candidate "
+            "output, which would overwrite the model's target with a candidate-computed value."
+        )
+
     try:
         restricted = frame[inputs].copy()
     except KeyError as exc:

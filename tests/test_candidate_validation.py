@@ -338,3 +338,40 @@ def test_undeclared_get_of_a_target_column_sees_None_not_the_oracle():
     # column it computed is the None branch, not the oracle.
     assert report.nan_rates == {"candidate_col": 0.0}
     assert (sneaky(frame.drop(columns=["future_min_cents", "label"]))["candidate_col"] == 0.0).all()
+
+
+def test_validate_candidate_rejects_a_target_column_as_candidate_output():
+    """COLUMNS=["future_min_cents"] with an identity add_columns.
+
+    The drop already stops this (identity on a target-stripped frame fails to produce the
+    declared column), but as MissingOutputColumnError — "your function is broken" rather
+    than "you tried to make the label a feature". The named refusal is the point.
+    """
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        lambda df: df.copy(), inputs=["price_cents"], columns=["future_min_cents"]
+    )
+
+    with pytest.raises(TargetColumnInInputs) as excinfo:
+        validate_candidate(candidate, frame)
+
+    assert "future_min_cents" in str(excinfo.value)
+
+
+def test_redeclaring_a_non_model_frame_column_as_output_is_ALLOWED():
+    """Guards the scope of the check above against being widened to "any frame column".
+
+    Promoting a computed-but-excluded column into the model is the legitimate shape for a
+    candidate, and it is what batch0's known-graduate run actually did: tgp_delta_7d is
+    present in the frame, deliberately outside the lock, and declared as both INPUTS and
+    COLUMNS. A blanket frame-collision rule would have rejected the run that calibrated
+    this pipeline, so this asserts the narrow scope on purpose.
+    """
+    frame = _oracle_frame()
+    candidate = _make_candidate(
+        lambda df: df.copy(), inputs=["tgp_delta_7d"], columns=["tgp_delta_7d"]
+    )
+
+    report = validate_candidate(candidate, frame)
+
+    assert report.columns == ["tgp_delta_7d"]
