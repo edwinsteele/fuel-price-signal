@@ -490,9 +490,16 @@ matrix split into cross-candidate (the gated ones) and within-candidate (disclos
 and each candidate's block R² against the existing column set. This is what makes "the
 generator produced five variants of one idea" legible later, rather than lost.
 
-**Two formats on purpose.** `batch.json` is what the retrospective reads — prose is not a
+**Two formats on purpose.** `batch.json` is the machine-readable half — prose is not a
 data format, and the question this record exists to answer later is a group-by over
 mechanism families, not a close reading. `batch.md` is the same numbers for a human.
+
+Note that **nothing reads `batch.json` automatically yet.** Family concentration reaches
+the batch retrospective by a different route (`MECHANISM_FAMILY` -> `results.json` ->
+`facts.json` -> leaderboard rows, `fps-3jj.16`). `batch.json` is the durable evidence
+artifact for the screen itself — the pairwise matrix and block R² that justified filing,
+which live nowhere else — and the format a cross-batch reader would use. Don't go hunting
+for a consumer; there isn't one.
 
 **Written at SCREEN time, not at filing time**, because these are the numbers that
 justified filing. A record regenerated afterwards would measure whatever the modules say

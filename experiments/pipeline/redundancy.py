@@ -36,6 +36,7 @@ import click
 import numpy as np
 import pandas as pd
 
+from experiments.lib.io import to_jsonable
 from experiments.pipeline.validate import load_candidate_module, validate_candidate
 from fuel_signal.features import (
     DEFAULT_FEATURES_CSV,
@@ -303,6 +304,16 @@ BATCH_RECORD_MD = "batch.md"
 BATCH_RECORD_JSON = "batch.json"
 
 
+def batch_dir_for(module_paths) -> pathlib.Path | None:
+    """The single directory a batch record belongs to, or None if the modules span more.
+
+    A record spanning two batch directories has no batch to belong to, and picking one
+    silently would file this batch's numbers under another batch's name.
+    """
+    dirs = {pathlib.Path(m).parent for m in module_paths}
+    return dirs.pop() if len(dirs) == 1 else None
+
+
 def write_batch_record(result: dict, batch_candidates_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     """Persist the screen's output as the batch record generator.md § Batch record asks for.
 
@@ -338,8 +349,15 @@ def write_batch_record(result: dict, batch_candidates_dir: pathlib.Path) -> tupl
         "gate_violations": result["gate_violations"].to_dict("records"),
         "uncomputable_pairs": result["uncomputable_pairs"].to_dict("records"),
     }
+    # to_jsonable, not bare json.dumps: this screen treats NaN as a FIRST-CLASS outcome
+    # (an uncomputable |rho| from a constant column, an unmeasurable block R^2), and
+    # json.dumps emits those as the bare token `NaN`, which is not valid JSON. Python's
+    # own loads() tolerates it, so it looks fine from inside the repo and breaks for
+    # every strict consumer -- jq included -- in exactly the cases this module goes out
+    # of its way to surface. Shared helper for the same reason results.json and
+    # retrospective_facts.json use it (docs/CONVENTIONS.md).
     json_path = batch_candidates_dir / BATCH_RECORD_JSON
-    json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+    json_path.write_text(json.dumps(to_jsonable(payload), indent=2, default=str) + "\n")
 
     cross = rho[rho["cross_candidate"]]
     within = rho[~rho["cross_candidate"]]
@@ -365,7 +383,12 @@ def write_batch_record(result: dict, batch_candidates_dir: pathlib.Path) -> tupl
         "|---|---|",
     ]
     lines += [f"| `{name}` | {family or '**NOT DECLARED**'} |" for name, family in families.items()]
-    if payload["n_distinct_families"] == 1 and result["n_candidates"] > 1:
+    # `n_distinct_families` counts truthy labels only, so {a: "f1", b: None} would
+    # otherwise assert "every candidate shares one family" two lines under a table row
+    # marking b as NOT DECLARED. This callout is the record's headline finding; a
+    # self-contradicting edge case costs more than the case is worth.
+    if (payload["n_distinct_families"] == 1 and result["n_candidates"] > 1
+            and not payload["undeclared_families"]):
         lines += ["", "> **Every candidate in this batch shares one family label.** Not a failure "
                   "and not gated — but it is the finding about the generator that this "
                   "disclosure exists to make visible. Read the retrospective with it in mind."]
@@ -464,16 +487,13 @@ def main(module_paths, features_path, sample_rows, rho_threshold, write_record) 
                        f"{row['candidate_b']}.{row['column_b']}")
 
     if write_record:
-        dirs = {pathlib.Path(m).parent for m in module_paths}
-        if len(dirs) != 1:
-            # A record spanning two batch directories has no batch to belong to, and
-            # picking one silently would file this batch's numbers under another batch's
-            # name. Skip loudly instead.
+        batch_dir = batch_dir_for(module_paths)
+        if batch_dir is None:
+            dirs = sorted({str(pathlib.Path(m).parent) for m in module_paths})
             click.echo(f"\n[redundancy] batch record SKIPPED — modules span {len(dirs)} "
-                       f"directories ({sorted(str(d) for d in dirs)}); a batch record "
-                       "belongs to exactly one batch.")
+                       f"directories ({dirs}); a batch record belongs to exactly one batch.")
         else:
-            md_path, json_path = write_batch_record(result, dirs.pop())
+            md_path, json_path = write_batch_record(result, batch_dir)
             click.echo(f"\n[redundancy] batch record: {md_path}, {json_path}")
 
     if result["passed"]:
