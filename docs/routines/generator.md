@@ -203,6 +203,31 @@ Every candidate must:
   "competition-density", "cycle-shape"). This is a **disclosure, not a gate** — see
   below.
 
+### The honest detection bar (fps-cds, resolved via fps-aay's batch1 freeze)
+
+This section was blank until 2026-08-22 — the bar wasn't knowable before `fps-awz`'s
+placebo-column ruler was rebuilt and a real batch was frozen against it (`fps-aay`).
+
+`batch1`'s own noise floor puts the family-wise gate (`docs/CONVENTIONS.md` § The gate
+is distance from the band) at `effect_delta_cpl_held ≤ -0.22 c/L` for a batch this size
+(5 candidates) to read as surprising at the BATCH level, not just individually — a
+single candidate judged alone needs only `≤ -0.15 c/L`.
+
+**This is a DETECTION threshold, not a target.** `experiments/results.csv`'s own
+history shows single-column features landing between 0.03 and 0.26 c/L — a bar above
+that range describes what this instrument can currently resolve, not what a good
+feature looks like. Do not propose only candidates you expect to clear -0.22 c/L on
+their own, and do not read a candidate that lands below the bar as a failed proposal —
+group candidates in particular (§ "A candidate is one MECHANISM" below) routinely beat
+their own noise band as a group even when no single column in it would. The bar is
+useful for calibrating confidence language (`CONFIDENCE_EFFECT`), not for pre-filtering
+ideas.
+
+**The number itself is `batch1`-specific**, not a constant — it depends on that batch's
+own draws, columns and cadence (`docs/CONVENTIONS.md` § A re-lock invalidates the
+batch's noise floor). Check the current batch's own `noise_floor.json` before citing a
+number here; don't carry `-0.22` forward into a later batch by habit.
+
 ### A candidate is one MECHANISM — it may be one column or a group of related columns
 
 **Both shapes are explicitly fine. Do not constrain yourself to one column per
