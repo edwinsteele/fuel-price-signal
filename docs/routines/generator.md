@@ -298,9 +298,37 @@ bead is filed, against **live `data/features.parquet`** (NOT the frozen batch
 snapshot — a redundancy screen doesn't depend on which day's data it uses; a column
 0.95-correlated with `tgp_delta_7d` on Monday is 0.95-correlated on Thursday):
 
+**Run them with the module, not by hand** (`fps-3jj.15`) — the threshold is a declared
+constant rather than a per-session judgement call, and the output is the batch record's
+raw material:
+
+```bash
+PYTHONPATH=. uv run python -m experiments.pipeline.redundancy \
+  experiments/candidates/<batch>/*.py
+```
+
+It exits non-zero if the batch fails, and validates each candidate (including the
+`TARGET_COLUMNS` label guard) before correlating anything, so a candidate reaching for
+the target is caught here rather than five nights later.
+
 1. **Pairwise |rho| ACROSS candidates.** Compute each candidate's column(s) via its
    `add_columns` against live data, then the pairwise correlation matrix. Reject/redesign
    any *cross-candidate* pair above threshold before filing either.
+
+   **The threshold is `|rho| >= 0.85`** (`redundancy.PAIRWISE_RHO_THRESHOLD`). Set from
+   the locked features' own correlation structure, not by feel: 25% of the 54 locked
+   columns' pairs already sit at |rho| >= 0.7 and the highest is 0.971
+   (`cycle_pct_through` vs `cycle_days_since_peak` — the same quantity in two units, both
+   locked), so a 0.7 gate would reject candidates for being no more similar than a
+   quarter of production. Only ~1% of locked pairs reach 0.85. A false reject costs one
+   redesign in this session; a false accept costs a night of a five-night batch.
+
+   **Two candidates may not declare the same column NAME.** The screen refuses the batch
+   (`DuplicateCandidateColumn`) rather than gating it, because a shared name cannot be
+   attributed to a candidate: the pair would be silently classified within-candidate and
+   skip the threshold entirely, even at |rho| = 1.0. Remediation is to rename one of
+   them and re-run — nothing downstream catches this, since the runner only ever sees one
+   candidate at a time.
 
    **Correlation WITHIN a multi-column candidate is not gated.** A group whose members
    are related is the normal case — that is usually what makes them one mechanism rather
@@ -315,6 +343,19 @@ snapshot — a redundancy screen doesn't depend on which day's data it uses; a c
    group as a block** (its columns jointly against the existing set) — that matches how it
    will be evaluated. A member that is individually reconstructible is not disqualifying
    if the group as a whole is not.
+
+   **"As a block" means the MEAN of the members' R², and can only mean that.** For OLS,
+   regressing several targets jointly against a shared predictor set gives coefficients
+   identical to regressing them separately — so "jointly" cannot refer to the fit, only to
+   how the members are aggregated afterwards. The mean is the standard redundancy index,
+   and it is what makes the preceding sentence true arithmetically: one member at 0.95
+   alongside two at 0.10 gives a block figure of 0.38, not a rejection. `max` would make
+   that sentence false. This is reported and flagged at 0.9, never auto-rejected — only
+   |rho| is a gate.
+
+   Five locked LGA trough columns (`bayside`, `waverley`, `hunters_hill`, `botany_bay`,
+   `lane_cove`) are entirely NaN on the real frame and are dropped from the predictor set
+   with the drop disclosed. Do not read their absence as the screen going wrong.
 
 Reasons these run here and not in the launch routine: pairwise rho is a **batch-level**
 property — launch validation sees one candidate per night and structurally cannot
