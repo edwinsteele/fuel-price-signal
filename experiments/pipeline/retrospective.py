@@ -240,12 +240,21 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
 
 
 def build_outcome_tally(entries: list[dict]) -> dict:
+    """`dossiered_by_status` keys on `"{status}:{abort_reason}"` when a candidate's facts.json
+    carries an abort_reason (fps-3jj.13), `"{status}"` otherwise — so e.g.
+    `"aborted_candidate:leak_by_declaration"` and plain `"aborted_candidate"` tally separately.
+    This is the leak-vs-bug breakdown aim (b) needs: without it every declared leak (a candidate
+    that named a label column as INPUTS/COLUMNS) was indistinguishable from an ordinary bug in
+    the candidate's arithmetic, both landing on the same "aborted_candidate" count."""
     dossiered_by_status: dict[str, int] = {}
     never_run = retryable_incomplete = pending_dossier = 0
     for entry in entries:
         if entry["state"] == "dossiered":
-            status = entry["facts"].get("provenance", {}).get("status") or "unknown"
-            dossiered_by_status[status] = dossiered_by_status.get(status, 0) + 1
+            provenance = entry["facts"].get("provenance", {})
+            status = provenance.get("status") or "unknown"
+            abort_reason = provenance.get("abort_reason")
+            key = f"{status}:{abort_reason}" if abort_reason else status
+            dossiered_by_status[key] = dossiered_by_status.get(key, 0) + 1
         elif entry["state"] == "never_run":
             never_run += 1
         elif entry["state"] == "retryable_incomplete":

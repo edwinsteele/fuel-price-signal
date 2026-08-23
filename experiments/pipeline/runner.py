@@ -35,7 +35,16 @@ Outcome taxonomy (five codes — see fps-3jj):
                          fit, the WFCV screen itself raised, or a total
                          extra_feature_provider (station_code, date) key-format
                          miss. All deterministic and attributable to THIS
-                         candidate — repeatable; do not retry.
+                         candidate — repeatable; do not retry. results.json's
+                         abort_reason is ABORT_REASON_LEAK_BY_DECLARATION when
+                         the cause is specifically validate.py's target-column
+                         guard (TargetColumnInInputs, or a COLUMNS collision
+                         with TARGET_COLUMNS) — a declared leak, not a bug in
+                         the candidate's arithmetic. Every other
+                         aborted_candidate cause leaves abort_reason null
+                         (fps-3jj.13: aim (b) wants a leak rate, and that rate
+                         needs a countable numerator distinct from ordinary
+                         aborts).
   aborted_pipeline    — the run never got to say anything about the candidate
                          because the pipeline itself was misconfigured: a
                          realised-backtest config error (bad ArmSpec /
@@ -123,6 +132,7 @@ from experiments.pipeline.validate import (
     MissingInputColumnsError,
     MissingOutputColumnError,
     RestrictedFrameViolation,
+    TargetColumnInInputs,
     load_candidate_module,
     validate_candidate,
 )
@@ -146,6 +156,13 @@ TERMINAL_STATUSES = frozenset({STATUS_GRADED, STATUS_DISQUALIFIED, STATUS_ABORTE
 # Statuses where the candidate never got a fair hearing, so its claim must go
 # back on the queue rather than be consumed. Read by launch.find_stale_claims.
 RETRYABLE_STATUSES = frozenset({STATUS_ABORTED_PIPELINE, STATUS_ABORTED_ENVIRONMENT})
+
+# results.json's optional abort_reason (fps-3jj.13): a structured code distinguishing
+# WHY a candidate landed on STATUS_ABORTED_CANDIDATE, so the retrospective (fps-3jj.8)
+# can count declared leaks separately from ordinary bugs without re-cutting the status
+# taxonomy itself. Only one code exists so far — the taxonomy generalises to more
+# (redundancy, PIT aborts) if a later batch needs the same separation for those.
+ABORT_REASON_LEAK_BY_DECLARATION = "leak_by_declaration"
 
 BASELINE_ARM = "R0"
 CANDIDATE_ARM = "candidate"
@@ -382,6 +399,11 @@ def run_candidate(
         validate_candidate(candidate, frame)
     except PitLeakError as exc:
         return _finish(STATUS_DISQUALIFIED, name, t0, out_dir, error=str(exc), bead_id=bead_id)
+    except TargetColumnInInputs as exc:
+        return _finish(
+            STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=str(exc), bead_id=bead_id,
+            abort_reason=ABORT_REASON_LEAK_BY_DECLARATION,
+        )
     except (
         RestrictedFrameViolation,
         MissingInputColumnsError,
@@ -401,11 +423,13 @@ def run_candidate(
             error=f"validation raised: {exc!r}", bead_id=bead_id,
         )
 
-    # TARGET_COLUMNS joins the baseline in this check: a candidate declaring
-    # COLUMNS=["label"] would otherwise overwrite the target in candidate_frame below,
-    # and the WFCV screen reads val_df["label"] downstream. Self-defeating rather than
-    # an oracle (it loses the realised arbiter), but it fails confusingly instead of
-    # loudly, and the output side deserves the same named refusal as the input side.
+    # TARGET_COLUMNS joins the baseline in this check for defence in depth, but can never
+    # actually fire here: validate_candidate above already raises TargetColumnInInputs (and
+    # is tagged ABORT_REASON_LEAK_BY_DECLARATION, fps-3jj.13) for any candidate.COLUMNS entry
+    # in TARGET_COLUMNS, so this function never reaches this line with one. What's real here
+    # is baseline_columns — self-defeating (it loses the realised arbiter) rather than an
+    # oracle, but it fails confusingly instead of loudly, and the output side deserves the
+    # same named refusal as the input side.
     overlap = set(candidate.COLUMNS) & (set(baseline_columns) | set(TARGET_COLUMNS))
     if overlap:
         return _finish(
@@ -977,7 +1001,7 @@ def _resolve_zone(
 
 def _finish(
     status: str, name: str, t0: float, out_dir: pathlib.Path, *, error: str,
-    bead_id: str | None = None,
+    bead_id: str | None = None, abort_reason: str | None = None,
 ) -> RunResult:
     """Write a status-only results.json, self-report to the bead, and return early.
 
@@ -987,9 +1011,17 @@ def _finish(
     indistinguishable on the bead from a run that never started — fps-32p
     aborted at 22:07 and nothing said so until a human read run.log the next
     day. Whatever else changes here, keep something landing on the bead.
+
+    abort_reason (fps-3jj.13): always written, null unless the caller passes a
+    structured code (e.g. ABORT_REASON_LEAK_BY_DECLARATION) — present-but-null
+    rather than an absent key, so a reader doesn't need `.get()` defensiveness
+    to tell "no reason recorded" from "field predates this convention".
     """
     wall_seconds = time.perf_counter() - t0
-    results = {"status": status, "candidate": {"name": name}, "error": error, "meta": {"wall_seconds": wall_seconds}}
+    results = {
+        "status": status, "candidate": {"name": name}, "error": error,
+        "abort_reason": abort_reason, "meta": {"wall_seconds": wall_seconds},
+    }
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     results_path = out_dir / RESULTS_FILENAME
