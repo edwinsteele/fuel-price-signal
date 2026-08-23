@@ -81,6 +81,40 @@ narrows the band and makes the bar easier. That is the bias direction this bead 
 0.036 c/L draw-count penalty at n_candidates=5. That is below the realised arbiter's own
 ~0.05 c/L decision-flip quantum — precision the instrument downstream cannot express.
 
+## The ruler self-destructs above ~4 columns
+
+Found while writing the above, from the owner's observation that a candidate could have
+one feature per LGA. Because the t-critical uses `df = n_draws - 1` and max draws is
+`min(floor(54/k), floor(30/k))`, the bar does not degrade gracefully as arity rises — it
+explodes, and almost none of the explosion is the arity effect. It is the collapsing draw
+count. On batch1's k=3 band (mean +0.0251, std 0.0999), family-wise at 5 candidates:
+
+| arity | max draws | z(5 cand) | bar | |
+|---|---|---|---|---|
+| 1 | 30 | 2.503 | −0.2249 | |
+| 2 | 15 | 2.711 | −0.2457 | |
+| 3 | 10 | 2.959 | −0.2705 | batch1 today |
+| 4 | 7 | 3.360 | −0.3105 | generator.md already invites this |
+| 5 | 6 | 3.635 | −0.3380 | |
+| 6 | 5 | 4.105 | −0.3849 | |
+| 10 | 3 | 8.042 | −0.7783 | 3x the largest win in project history |
+| 13 | 2 | 38.972 | −3.8682 | absurd |
+| 18+ | 1 | — | — | **no band possible** (needs n ≥ 2) |
+| 35 | 0 | — | — | `select_draws` raises: 70 columns needed, 54 exist |
+
+**This project's own motivating precedent for group candidates is ungradeable by this
+ruler.** `docs/routines/generator.md` justifies multi-column candidates on the 35 LGA
+features having gone in together. A 35-column candidate cannot have a noise floor
+computed at all.
+
+**And the gap is already live.** generator.md invites 2–4 columns. A 4-column candidate
+gets a 7-draw floor, so its bar is **0.0400 c/L harder** than a 3-column candidate's —
+purely from band thinness, nothing to do with its arity being higher. Two candidates in
+the same batch, both legitimate under the generator's own rules, would be graded by
+rulers of materially different strictness, and nothing in the dossier says so.
+
+Filed as bd `fps-3jj.21` (P1), blocking batch2.
+
 **It DOES matter for batch2**, because the Bonferroni correction grows with candidate
 count: the same 10→18 draw-count penalty is 0.032 c/L at 5 candidates, 0.043 at 10, and
 0.050 — a full flip — at 15. And at batch2's size the 54-column pool cannot supply both
