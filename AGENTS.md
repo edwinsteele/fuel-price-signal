@@ -381,3 +381,7 @@ If while implementing a `polish` issue you discover it actually requires design 
 - PR body: 3–5 bullet plan (what changed, what didn't, what test was added)
 - Target branch: always `main` (`--base main`)
 - Run `uv run ruff check . && uv run pytest -q` before pushing; fix any failures
+### Reviewing PRs
+
+- PR branches authored in this repo are usually checked out under `.claude/worktrees/<slug>`. Before fetching anything, run `git worktree list`, match the PR's head branch name, and verify `git -C <path> rev-parse HEAD` equals the PR head sha. If it matches, review files directly from the worktree — far cheaper than paging `gh pr diff` or `git show FETCH_HEAD:<path>` per file. Fetch only if no worktree matches or it's stale.
+- When reading PR metadata, skip comments unless they're actually needed (e.g. `gh pr view --json title,body,files` rather than a full view) — review bots (CodeRabbit et al.) attach large noise blobs.
