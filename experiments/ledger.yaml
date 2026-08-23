@@ -36,6 +36,13 @@
 # before deciding. First use: batch0/tgp_delta_7d, 2026-08-19 — pooled realised
 # delta +0.0059 c/L against a ~0.05 c/L per-decision-flip quantum.
 #
+# For a batch1+ pipeline run this split is MECHANICAL, not a per-entry judgement call
+# (fps-3jj.17, decided 2026-08-23): docs/routines/dossier.md § Step 1.4 writes `rejected`
+# when a candidate's noise-band z is clearly the wrong sign (measurably worse than the
+# batch's own noise floor) and `inconclusive` when it sits inside the band (indistinguishable
+# from noise at single-candidate resolution). See that section for the exact rule and the
+# `facts.json` fields it reads.
+#
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
