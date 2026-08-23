@@ -767,3 +767,32 @@ def test_noise_band_matching_arity_is_not_flagged_as_wider(tmp_path):
     assert band["n_placebo_columns"] == 3
     assert band["candidate_n_columns"] == 3
     assert band["floor_arity_exceeds_run"] is False
+
+
+def test_arity_refusal_carries_a_machine_readable_code(tmp_path):
+    """The dossier routine maps `available: false` to `outcome: rejected` — dead ground the
+    next generator won't re-propose. An arity refusal must NOT reach that branch: the run
+    graded fine and becomes a real measurement once a wide-enough ruler exists. The routine
+    branches on this code rather than pattern-matching the prose reason, because fps-3jj.17
+    made the ledger outcome mechanical rather than a 05:06 judgement call."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a", "b", "c"], batch_extras=_floor_with(arity=1)
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+    # The prose must ALSO say it, for the human reading the dossier rather than the branch.
+    assert "NOT rejected" in band["reason"]
+
+
+def test_other_refusals_carry_no_arity_code(tmp_path):
+    """The carve-out is specific. A missing floor really does mean 'no ruler, and none is
+    coming without human action', so it keeps falling through to the rejected rule."""
+    run_dir, _ = _write_run(tmp_path, columns=["a"])  # no noise_floor.json at all
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert "reason_code" not in band

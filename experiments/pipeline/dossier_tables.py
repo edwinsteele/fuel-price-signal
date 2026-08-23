@@ -92,6 +92,19 @@ FREEZE_MANIFEST_FILENAME = "freeze.json"
 # the producer must write and what _noise_band() will accept — noise_floor.py imports this
 # name rather than the two modules each defining their own copy of the string.
 NULL_METHOD_PLACEBO_COLUMN = "placebo_column"
+
+#: `_noise_band` refusal codes, machine-readable so the dossier routine can branch on the
+#: KIND of unavailability instead of pattern-matching the prose `reason` (fps-3jj.17's rule:
+#: the ledger outcome is mechanical, never a 05:06 judgement call).
+#:
+#: Only the arity case carries a code today, and that asymmetry is the point rather than an
+#: oversight. `docs/routines/dossier.md` maps `available: false` to `outcome: rejected`, which
+#: is defensible for the pre-existing refusals (a batch with no floor at all has no ruler and
+#: never will without human action) but is WRONG for this one: the run itself completed and
+#: graded fine, and building the right-arity ruler turns it into a real measurement. Writing
+#: `rejected` there would stamp dead ground onto a candidate nothing has measured — the exact
+#: harm fps-3jj.17 exists to prevent. See dossier.md Step 1.4's arity carve-out.
+NOISE_BAND_REFUSAL_ARITY = "floor_arity_below_run"
 FROZEN_FEATURES_FILENAME = "features.parquet"
 
 SEED_STD_FLAG_RATIO = 5.0
@@ -433,6 +446,7 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         max_draws = len(PLACEBO_BLOCK_SEED_POOL) // run_arity
         return {
             "available": False,
+            "reason_code": NOISE_BAND_REFUSAL_ARITY,
             "reason": f"noise_floor.json is a {floor_arity}-column null but this candidate adds "
             f"{run_arity} columns ({', '.join(map(str, run_columns))}) — a wider arm graded "
             "against a narrower ruler, biased in the candidate's favour by an unmeasured "
@@ -446,7 +460,10 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             f"noise_floor_k{run_arity}.json noise_floor.json`. Do NOT `--force` over "
             "noise_floor.json instead: that destroys the ruler this batch's existing dossiers "
             "were graded against, and the baseline any arity comparison needs. Full procedure: "
-            "docs/CONVENTIONS.md § 'The band's ARITY must be at least the candidate's'.",
+            "docs/CONVENTIONS.md § 'The band's ARITY must be at least the candidate's'. This run is "
+            "NOT rejected and must not be written up as such — it completed and graded fine, and "
+            "becomes a real measurement once a wide-enough ruler exists. Leave it in the dossier "
+            "queue (write no README.md, no ledger entry) until then.",
         }
     if noise_floor.get("partial"):
         # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover

@@ -98,7 +98,11 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      `seed_flags` list (if empty,
      say so — "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating),
      validation (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
-     (`facts["noise_band"]`) — if `available: false`, say plainly "noise-floor band: not
+     (`facts["noise_band"]`) — if `floor_arity_exceeds_run` is `true`, say so: this run was
+     graded against a ruler built from MORE columns than the candidate has, which is allowed
+     (a wider ruler only raises the bar, never lowers it — `docs/CONVENTIONS.md` § The band's
+     ARITY) but means a candidate that failed here has not been shown to fail against its own
+     arity's band. If `available: false`, say plainly "noise-floor band: not
      available" and quote `facts["noise_band"]["reason"]` verbatim rather than omitting the
      line or paraphrasing it (as of `fps-cf8` there is more than one refusal reason — no floor
      yet, a partial `--fold-subset` floor, or a `baseline_fingerprint` mismatch against a
@@ -137,10 +141,23 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      - `status == "graded"` — the pipeline's own name for "ran to completion and reached the
        scoring stages" (`runner.py`'s outcome taxonomy comment; it says nothing yet about the
        claim's merit) — apply the **rejected-vs-inconclusive split**:
-       - `facts["noise_band"]["available"]` is `false` → `outcome: rejected`. No noise floor
-         means no ruler to grade "below the instrument's resolution" against, so there is nothing
-         to call inconclusive — same as before this rule existed. Note the unavailability in the
-         README as usual (Step 1 above); don't invent a floor to unblock this decision.
+       - `facts["noise_band"]["reason_code"] == "floor_arity_below_run"` → **STOP. Do not write
+         a README.md, do not write a ledger entry, do not pick an outcome for this run at all.**
+         Report that this batch needs a wider-arity ruler (quote the `reason`, which carries the
+         exact two commands) and move on to the next pending run. This is the one unavailability
+         that is NOT about the candidate: the run completed and graded fine, and it becomes a real
+         measurement the moment a floor with enough columns exists (`fps-3jj.14`). Falling through
+         to the `rejected` rule below would stamp DEAD GROUND — what the next generator reads as
+         "don't re-propose this" — onto a claim nothing has measured, which is precisely the harm
+         `fps-3jj.17` exists to prevent. Writing no README.md is deliberate and load-bearing:
+         `find_pending_runs` keys the queue on "results.json present, README.md absent", so
+         staying silent leaves the run to be picked up correctly on a later night. Check this
+         BEFORE the `available` test below — the arity case sets `available: false` too, so
+         ordering is what keeps it out of the `rejected` branch.
+       - `facts["noise_band"]["available"]` is `false` (any other reason) → `outcome: rejected`. No
+         noise floor means no ruler to grade "below the instrument's resolution" against, so there
+         is nothing to call inconclusive — same as before this rule existed. Note the unavailability
+         in the README as usual (Step 1 above); don't invent a floor to unblock this decision.
        - `facts["noise_band"]["available"]` is `true` but `candidate_z_vs_band` or
          `single_candidate_z_threshold` is `null` → `outcome: rejected`, same fallback and same
          reasoning as the `available: false` case above. This state is real, not hypothetical: the
