@@ -73,6 +73,15 @@ Four sections, matching the parent bead's acceptance criteria:
    findings — see "When to invoke" above; ideally all three are zero by the time you're
    writing this up.
 
+   `aborted_candidate` itself further splits on `abort_reason` when one was recorded
+   (fps-3jj.13): a key like `"aborted_candidate:leak_by_declaration"` tallies candidates
+   whose `INPUTS`/`COLUMNS` named a label column (`future_min_cents`/`label`) — the
+   generator proposing an oracle feature, aim (b)'s "how often it produces leaky ...
+   candidates" — separately from plain `"aborted_candidate"`, which is an ordinary bug
+   in the candidate's own arithmetic. Report both counts and the leak rate
+   (`leak-tagged / total_candidates_filed`) explicitly rather than quoting one combined
+   `aborted_candidate` number.
+
 4. **`confidence_calibration`** — **scoped to EVERY batch dossiered so far, not just this
    one** (`confidence_calibration.scope` states this; see the module's own docstring for
    why — `docs/routines/generator.md`: "Five candidates cannot calibrate anything on

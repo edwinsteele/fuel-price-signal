@@ -23,6 +23,7 @@ from experiments.lib.realised import BaselineCache, BaselineCacheMismatch
 from experiments.pipeline import batch_freeze
 from experiments.pipeline.batch_freeze import resolve_baseline_columns
 from experiments.pipeline.runner import (
+    ABORT_REASON_LEAK_BY_DECLARATION,
     BASELINE_CACHE_FILENAME,
     DEFAULT_INNER_FOLD_PARAMS,
     RETRYABLE_STATUSES,
@@ -120,6 +121,16 @@ COLUMNS = ["cand_col"]
 def add_columns(df):
     out = df.copy()
     out["cand_col"] = float("nan")
+    return out
+'''
+
+TARGET_LEAK_CANDIDATE = '''
+NAME = "cand"
+INPUTS = ["price_date", "future_min_cents"]
+COLUMNS = ["cand_col"]
+def add_columns(df):
+    out = df.copy()
+    out["cand_col"] = df["future_min_cents"]
     return out
 '''
 
@@ -239,7 +250,24 @@ def test_run_candidate_aborted_candidate_on_all_nan_output(tmp_path):
     assert result.status == STATUS_ABORTED_CANDIDATE
 
 
+def test_run_candidate_tags_declared_leak_with_abort_reason(tmp_path):
+    """fps-3jj.13: a candidate that names a label column in INPUTS is a declared leak,
+    distinct from an ordinary bug — results.json's abort_reason must say so, so the
+    retrospective can count it separately from every other aborted_candidate cause."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, TARGET_LEAK_CANDIDATE)
+
+    result = run_candidate(batch_dir, candidate_path, out_dir=tmp_path / "out")
+
+    assert result.status == STATUS_ABORTED_CANDIDATE
+    written = json.loads(result.results_path.read_text())
+    assert written["abort_reason"] == ABORT_REASON_LEAK_BY_DECLARATION
+
+
 def test_run_candidate_aborted_candidate_on_columns_overlap_baseline(tmp_path):
+    """A baseline-column collision is self-defeating but not a declared leak (fps-3jj.13):
+    abort_reason must stay null, unlike TARGET_LEAK_CANDIDATE above."""
     df = _baseline_features_df()
     batch_dir = _write_batch_dir(tmp_path, df)
     candidate_path = _write_candidate(tmp_path, OVERLAP_CANDIDATE)
@@ -248,6 +276,7 @@ def test_run_candidate_aborted_candidate_on_columns_overlap_baseline(tmp_path):
 
     assert result.status == STATUS_ABORTED_CANDIDATE
     assert "overlaps" in result.error
+    assert json.loads(result.results_path.read_text())["abort_reason"] is None
 
 
 def test_run_candidate_aborted_candidate_on_add_columns_non_pit_exception(tmp_path):

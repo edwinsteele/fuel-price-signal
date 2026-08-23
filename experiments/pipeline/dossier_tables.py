@@ -280,6 +280,11 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         "seeds": meta.get("seeds"),
         "wall_seconds": meta.get("wall_seconds"),
         "status": results.get("status"),
+        # Structured reason a status=="aborted_candidate" run aborted (fps-3jj.13) — null
+        # for every other status and for aborts that predate the convention. Carried here
+        # (not just left in results.json) because retrospective.py reads facts.json, not
+        # results.json, for its outcome tally.
+        "abort_reason": results.get("abort_reason"),
         "bead_id": meta.get("bead_id"),
         # Baseline identity (fps-zci item 5). None for runs that predate the field —
         # which is exactly the population where a wrong R0 could be hiding, so the

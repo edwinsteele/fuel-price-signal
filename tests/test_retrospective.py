@@ -32,11 +32,12 @@ def _facts(
     confidence_zone: float = 0.5,
     noise_band: dict | None = None,
     mechanism_family: str | None = "test-family",
+    abort_reason: str | None = None,
 ) -> dict:
     return {
         "candidate": {"name": name, "confidence_effect": confidence_effect,
                       "confidence_zone": confidence_zone, "mechanism_family": mechanism_family},
-        "provenance": {"batch": batch, "status": status},
+        "provenance": {"batch": batch, "status": status, "abort_reason": abort_reason},
         "headline": {
             "realised": {"delta_cpl_held": delta, "effect_resolved": effect_resolved},
             "zone": {"resolved": zone_resolved},
@@ -379,6 +380,25 @@ def test_build_outcome_tally_counts_every_state():
         "never_run": 1,
         "retryable_incomplete": 1,
         "pending_dossier": 1,
+    }
+
+
+def test_build_outcome_tally_separates_declared_leaks_from_ordinary_aborts():
+    """fps-3jj.13: a candidate that declared a label column as INPUTS/COLUMNS (abort_reason
+    'leak_by_declaration') must tally under its own key, not merge into plain
+    'aborted_candidate' with an ordinary bug in the candidate's arithmetic."""
+    entries = [
+        {"candidate": "leaky", "state": "dossiered",
+         "facts": _facts("leaky", status="aborted_candidate", abort_reason="leak_by_declaration")},
+        {"candidate": "buggy", "state": "dossiered",
+         "facts": _facts("buggy", status="aborted_candidate")},
+    ]
+
+    tally = build_outcome_tally(entries)
+
+    assert tally["dossiered_by_status"] == {
+        "aborted_candidate:leak_by_declaration": 1,
+        "aborted_candidate": 1,
     }
 
 
