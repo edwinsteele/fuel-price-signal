@@ -143,7 +143,7 @@ def _make_rowpreds(*, with_axis: bool = False, with_cycle: bool = False,
 def _write_run(
     tmp_path, *, status="graded", target=None, inputs=None, columns=None,
     with_axis=False, with_cycle=False, low_n_fold=None, batch_extras=None,
-    tank_params: str | None = "50/3.571/7d/10%",
+    tank_params: str | None = "50/3.571/7d/10%", fills_df: pd.DataFrame | None = None,
 ) -> tuple[pathlib.Path, pathlib.Path]:
     batch_dir = tmp_path / "batch1"
     batch_dir.mkdir(exist_ok=True)
@@ -166,7 +166,8 @@ def _write_run(
             with_axis=with_axis, with_cycle=with_cycle, candidate_col=(columns or ["cand_col"])[0]
         )
         rowpreds.to_parquet(run_dir / dt.ROWPREDS_FILENAME)
-        _make_fills(low_n_fold=low_n_fold).to_parquet(run_dir / dt.FILLS_FILENAME)
+        fills = fills_df if fills_df is not None else _make_fills(low_n_fold=low_n_fold)
+        fills.to_parquet(run_dir / dt.FILLS_FILENAME)
     return run_dir, batch_dir
 
 
@@ -439,6 +440,112 @@ def test_build_facts_noise_band_refuses_a_floor_with_no_tank_params(tmp_path):
     band = facts["noise_band"]
     assert band["available"] is False
     assert "tank_params" in band["reason"]
+
+
+# ── decision flips (fps-gez) ───────────────────────────────────────────────────
+
+def _diverging_fills(fold=1) -> pd.DataFrame:
+    """One clean flip: baseline buys expensive, candidate buys the same litres
+    cheaper, on different dates — exactly the case `summarise_flips` should
+    turn into a non-null `flip_cpl_delta`."""
+    return pd.DataFrame([
+        {"fold": fold, "arm": BASELINE_ARM, "own_tau": 0.25, "date": "2026-01-01",
+         "station_code": 100, "price": 200.0, "litres": 10.0, "spend_cents": 2000.0,
+         "emergency": False},
+        {"fold": fold, "arm": CANDIDATE_ARM, "own_tau": 0.25, "date": "2026-01-02",
+         "station_code": 100, "price": 150.0, "litres": 10.0, "spend_cents": 1500.0,
+         "emergency": False},
+    ])
+
+
+def test_decision_flips_not_computed_below_arity_2(tmp_path):
+    run_dir, _ = _write_run(tmp_path, columns=["one_col"], fills_df=_diverging_fills())
+    facts = dt.build_facts(run_dir)
+    flips = facts["decision_flips"]
+    assert flips["computed"] is False
+    assert "1 column" in flips["reason"]
+
+
+def test_decision_flips_not_computed_when_noise_band_unavailable(tmp_path):
+    # No batch_extras -> no noise_floor.json -> noise_band["available"] is False.
+    run_dir, _ = _write_run(tmp_path, columns=["col_a", "col_b"], fills_df=_diverging_fills())
+    facts = dt.build_facts(run_dir)
+    flips = facts["decision_flips"]
+    assert flips["computed"] is False
+    assert "noise band unavailable" in flips["reason"]
+
+
+def test_decision_flips_not_computed_when_band_std_not_estimable(tmp_path):
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [-0.05], "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+            "n_placebo_columns": 2,
+        }))
+
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        fills_df=_diverging_fills(),
+    )
+    facts = dt.build_facts(run_dir)
+    flips = facts["decision_flips"]
+    assert flips["computed"] is False
+    assert "null" in flips["reason"]
+
+
+def test_decision_flips_not_computed_on_a_clean_reject(tmp_path):
+    # Noise band centred far better than the candidate's own -0.05 delta, with a
+    # tiny std -> candidate reads as clearly the WRONG sign vs. this batch's noise.
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [-1.01, -1.0, -0.99, -1.0, -1.0],
+            "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+            "n_placebo_columns": 2,
+        }))
+
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        fills_df=_diverging_fills(),
+    )
+    facts = dt.build_facts(run_dir)
+    band = facts["noise_band"]
+    assert band["candidate_z_vs_band"] >= band["single_candidate_z_threshold"]  # sanity: is a clean reject
+    flips = facts["decision_flips"]
+    assert flips["computed"] is False
+    assert "clean reject" in flips["reason"]
+
+
+def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
+    # Wide noise band (std ~0.79) around the candidate's -0.05 delta -> z is tiny,
+    # well inside (-t, t) regardless of n_draws -> the trigger fires.
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [-1.0, -0.5, 0.0, 0.5, 1.0],
+            "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+            "n_placebo_columns": 2,
+        }))
+
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        fills_df=_diverging_fills(fold=1),
+    )
+    facts = dt.build_facts(run_dir)
+    band = facts["noise_band"]
+    assert -band["single_candidate_z_threshold"] < band["candidate_z_vs_band"] < band["single_candidate_z_threshold"]
+
+    flips = facts["decision_flips"]
+    assert flips["computed"] is True
+    assert flips["n_flips"] == 2
+    row = next(r for r in flips["per_fold"] if r["fold"] == 1)
+    assert row["regime"] == "shock"
+    assert row["n_baseline_only"] == 1
+    assert row["n_candidate_only"] == 1
+    assert row["flip_cpl_baseline"] == pytest.approx(200.0)
+    assert row["flip_cpl_candidate"] == pytest.approx(150.0)
+    assert row["flip_cpl_delta"] == pytest.approx(-50.0)
+    assert len(flips["rows"]) == 2
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────

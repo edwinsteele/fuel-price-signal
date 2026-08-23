@@ -64,6 +64,7 @@ import pandas as pd
 from scipy.stats import t as _t_dist
 
 from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
+from experiments.lib.flips import summarise_flips
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
 from experiments.pipeline.placebo import PLACEBO_BLOCK_SEED_POOL
@@ -232,6 +233,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
         "provenance": _provenance(results, batch_dir),
         "headline": None,
         "breakdowns": None,
+        "decision_flips": None,
         "seed_flags": results.get("seed_variance", {}).get("flags", []),
         "validation": _validation(results, rowpreds),
         "grading": {
@@ -267,7 +269,62 @@ def build_facts(run_dir: pathlib.Path) -> dict:
 
     facts["headline"] = _headline(results)
     facts["breakdowns"] = _breakdowns(results, rowpreds, fills)
+    facts["decision_flips"] = _decision_flips(facts, fills)
     return facts
+
+
+def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
+    """Per-fold buy/wait divergence between R0 and candidate (fps-gez).
+
+    Computed only when it's likely to matter, not "when a session feels like
+    it" (fps-3jj.17's rule: the ledger outcome is mechanical, not a per-run
+    judgement call, and this trigger follows the same discipline so dossiers
+    stay comparable): 2+ candidate columns (arity 1 has nothing to
+    disaggregate) AND the noise-band call isn't a clean reject (z >= t — the
+    candidate is clearly the wrong sign vs. this batch's own noise; a flip
+    breakdown adds little once the aggregate already says no). Both the
+    `inconclusive` case (inside the band) and the z <= -t case (clears noise
+    on the good side) get computed, since both are cases a human is likely to
+    look closer at.
+
+    Always present with an explicit `computed` flag, never just absent —
+    same pattern `noise_band["available"]` already uses — so no downstream
+    reader has to guess whether this was skipped or forgotten.
+
+    Guardrail for how this gets written up (docs/routines/dossier.md): flip
+    detail is colour illustrating a mechanism, and must never be presented
+    as a second arbiter overriding the noise-band call — same rule already
+    in place for per_axis.
+    """
+    columns = facts["candidate"].get("columns") or []
+    noise_band = facts["noise_band"]
+    if len(columns) < 2:
+        return {
+            "computed": False,
+            "reason": f"candidate has {len(columns)} column(s) — nothing to disaggregate below arity 2.",
+        }
+    if not noise_band.get("available"):
+        return {
+            "computed": False,
+            "reason": "noise band unavailable for this run — see facts['noise_band']['reason'].",
+        }
+    z = noise_band.get("candidate_z_vs_band")
+    t = noise_band.get("single_candidate_z_threshold")
+    if z is None or t is None:
+        return {
+            "computed": False,
+            "reason": "noise band has a null z / single_candidate_z_threshold (band_std not "
+            "estimable from this batch's draws) — nothing to gate the trigger on.",
+        }
+    if z >= t:
+        return {
+            "computed": False,
+            "reason": f"clean reject (z={z:.3f} >= threshold={t:.3f}) — candidate is clearly the "
+            "wrong sign vs. this batch's noise band; flip detail is unlikely to change that call.",
+        }
+    summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, SHOCK_FOLDS)
+    summary["computed"] = True
+    return summary
 
 
 def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
