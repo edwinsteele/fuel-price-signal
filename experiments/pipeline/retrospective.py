@@ -53,17 +53,20 @@ docs/routines/retrospective.md for when to invoke this):
 from __future__ import annotations
 
 import json
-import math
 import pathlib
 from datetime import datetime, timezone
 
 import click
 import numpy as np
-from scipy.stats import t as _t_dist
 
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.pipeline.batch_freeze import DEFAULT_BATCHES_DIR
-from experiments.pipeline.dossier_tables import FACTS_FILENAME, _noise_band
+from experiments.pipeline.dossier_tables import (
+    FACTS_FILENAME,
+    FAMILY_WISE_ALPHA,
+    _noise_band,
+    family_wise_z_threshold,
+)
 from experiments.pipeline.runner import RETRYABLE_STATUSES, default_out_dir, read_run_status
 
 DEFAULT_CANDIDATES_DIR = DEFAULT_BATCHES_DIR.parent / "candidates"
@@ -73,8 +76,6 @@ RETROSPECTIVE_FILENAME = "retrospective_facts.json"
 # Set above that so a single batch's confidence pairs never masquerade as a calibration read;
 # the field only turns on once pairs have accumulated across multiple batches.
 MIN_CALIBRATION_N = 10
-
-FAMILY_WISE_ALPHA = 0.05
 
 
 def find_batch_candidates(
@@ -141,50 +142,6 @@ def family_wise_percentile_threshold(n_candidates: int, alpha: float = FAMILY_WI
     if n_candidates < 1:
         raise ValueError(f"n_candidates must be >= 1, got {n_candidates}")
     return 100.0 * (1.0 - alpha / n_candidates)
-
-
-def family_wise_z_threshold(n_candidates: int, n_draws: int, alpha: float = FAMILY_WISE_ALPHA) -> float:
-    """The gate fps-awz actually reads: a Bonferroni-corrected, ONE-TAILED t-critical value,
-    in band-standard-deviation units, that `dossier_tables._noise_band`'s `candidate_z_vs_band`
-    must clear to count as surprising at the BATCH level.
-
-    Same Bonferroni logic as `family_wise_percentile_threshold` (alpha split N ways across N
-    candidates so picking the best of N isn't a free pass), just in distance space instead of
-    percentile space — percentile space is where the old gate broke: with `n_draws` draws the
-    empirical-rank statistic `(deltas > delta).mean()` only has `n_draws + 1` possible values,
-    so at the old default of 5 it collapsed to "beat every single draw" (1-in-6 per candidate,
-    ~60% family-wise at n_candidates=5) no matter where the nominal threshold was set.
-
-    Uses the t distribution, not the normal, because `band_std_delta_cpl_held` is ESTIMATED
-    from `n_draws` placebo draws, not known — `df = n_draws - 1`. One-tailed because the
-    question is directional ("is the candidate SURPRISINGLY BETTER than noise", not "SURPRISING
-    in either direction"): `delta_cpl_held` is a cost, so a candidate clears the gate when its
-    `candidate_z_vs_band` is <= the NEGATIVE of this threshold (more negative = better/cheaper
-    than the band's typical draw), not when its magnitude exceeds it.
-
-    PREDICTION interval, not a one-sample t-test on the band's own mean (caught in review): a
-    candidate's `delta` is a NEW observation being compared against a band whose mean AND std
-    are both estimated from the same `n_draws` placebo draws — not a fixed, known population
-    mean. The standard error of (new observation − estimated mean) is `band_std *
-    sqrt(1 + 1/n_draws)`, not `band_std` alone (the `1` covers the new observation's own
-    within-population variance, the `1/n_draws` covers uncertainty in the estimated mean
-    itself). Omitting the `sqrt(1 + 1/n_draws)` factor makes the returned threshold too small
-    — a real but small effect: ~2.5% lax at n_draws=20, ~10% at n_draws=5. `candidate_z_vs_band`
-    itself (`dossier_tables._noise_band`) is deliberately left as the raw, unscaled z — useful
-    on its own as descriptive colour — so the correction is applied here, at the gate, not
-    baked into that shared quantity.
-
-    Raises ValueError if `n_draws < 2` (a t-critical value needs at least 1 degree of freedom;
-    `dossier_tables._noise_band` already returns `candidate_z_vs_band: None` at n_draws<2,
-    so callers should check for that before reaching here — see `build_leaderboard`).
-    """
-    if n_candidates < 1:
-        raise ValueError(f"n_candidates must be >= 1, got {n_candidates}")
-    if n_draws < 2:
-        raise ValueError(f"n_draws must be >= 2 to estimate a band std, got {n_draws}")
-    alpha_corrected = alpha / n_candidates
-    t_critical = _t_dist.ppf(1.0 - alpha_corrected, df=n_draws - 1)
-    return float(t_critical * math.sqrt(1.0 + 1.0 / n_draws))
 
 
 def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:

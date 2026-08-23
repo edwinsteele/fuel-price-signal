@@ -346,6 +346,13 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     expected_percentile = sum(d > -0.05 for d in noise_deltas) / len(noise_deltas) * 100
     assert band["candidate_percentile_better_than_noise"] == pytest.approx(expected_percentile)
     assert band["candidate_percentile_better_than_noise"] > 90
+    # fps-3jj.17: the mechanical rejected/inconclusive split (docs/routines/dossier.md § Step 1.4)
+    # reads this field directly rather than the dossier session computing a t-critical value
+    # itself — single-sourced from family_wise_z_threshold(n_candidates=1, n_draws=20).
+    assert band["single_candidate_z_threshold"] == pytest.approx(
+        dt.family_wise_z_threshold(n_candidates=1, n_draws=20)
+    )
+    assert band["single_candidate_z_threshold"] > 0
 
 
 def test_build_facts_noise_band_refuses_a_stale_pre_awz_seed_swap_floor(tmp_path):
@@ -603,6 +610,9 @@ def test_process_run_facts_json_is_strictly_valid_even_with_a_single_draw_noise_
     facts = _strict_json_loads(raw_text)  # must not raise
     assert facts["noise_band"]["available"] is True
     assert facts["noise_band"]["band_std_delta_cpl_held"] is None  # to_jsonable maps NaN -> null
+    # single_candidate_z_threshold needs a t-critical value (df = n_draws - 1 >= 1), same guard
+    # as candidate_z_vs_band itself — n_draws=1 can't estimate a std, so both are None (fps-3jj.17).
+    assert facts["noise_band"]["single_candidate_z_threshold"] is None
 
 
 # ── CLI robustness ────────────────────────────────────────────────────────────

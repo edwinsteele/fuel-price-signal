@@ -51,6 +51,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 
 import click
@@ -60,6 +61,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402 — backend must be set before this import
 import numpy as np
 import pandas as pd
+from scipy.stats import t as _t_dist
 
 from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
 from experiments.lib.io import current_git_sha, to_jsonable
@@ -91,6 +93,48 @@ NULL_METHOD_PLACEBO_COLUMN = "placebo_column"
 FROZEN_FEATURES_FILENAME = "features.parquet"
 
 SEED_STD_FLAG_RATIO = 5.0
+
+# Single-sourced here (fps-3jj.17), not in retrospective.py, because _noise_band() below is the
+# only place that can attach a per-run threshold to facts.json at dossier time — retrospective.py
+# already imports _noise_band FROM this module, so the dependency has to run this direction, not
+# the other way, to avoid a cycle. retrospective.py imports this constant and function rather than
+# keeping its own copy (the same single-symbol discipline BASELINE_COLUMNS gets — docs/CONVENTIONS.md
+# § "The baseline feature set is declared, never discovered").
+FAMILY_WISE_ALPHA = 0.05
+
+
+def family_wise_z_threshold(n_candidates: int, n_draws: int, alpha: float = FAMILY_WISE_ALPHA) -> float:
+    """A Bonferroni-corrected, ONE-TAILED t-critical value, in band-standard-deviation units, that
+    `_noise_band`'s `candidate_z_vs_band` must clear (in magnitude) to count as distinguishable
+    from the noise band rather than a draw from it.
+
+    Moved from retrospective.py (fps-3jj.17) so `_noise_band` can attach the n_candidates=1 case —
+    "the honest single-candidate bar" (docs/CONVENTIONS.md) — to every run's facts.json as
+    `single_candidate_z_threshold`, giving the dossier routine a precomputed number to compare
+    `candidate_z_vs_band` against instead of a judgement call. retrospective.py's own
+    `family_wise_z_gate` (n_candidates = the whole batch) is a separate, larger call to this same
+    function, for a different question (did any candidate clear the bar at the BATCH level,
+    correcting for picking the best of N) — see its docstring there.
+
+    Uses the t distribution, not the normal, because `band_std_delta_cpl_held` is ESTIMATED from
+    `n_draws` placebo draws, not known — `df = n_draws - 1`. The `sqrt(1 + 1/n_draws)` factor is a
+    PREDICTION interval, not a one-sample t-test on the band's own mean: a candidate's `delta` is a
+    NEW observation being compared against a band whose mean AND std are both estimated from the
+    same `n_draws` draws, so the standard error of (new observation − estimated mean) needs the
+    `1` (the new observation's own within-population variance) as well as the `1/n_draws`
+    (uncertainty in the estimated mean itself).
+
+    Raises ValueError if `n_draws < 2` (a t-critical value needs at least 1 degree of freedom) —
+    callers should check `n_draws >= 2` first, same as `_noise_band` already does for
+    `candidate_z_vs_band` itself.
+    """
+    if n_candidates < 1:
+        raise ValueError(f"n_candidates must be >= 1, got {n_candidates}")
+    if n_draws < 2:
+        raise ValueError(f"n_draws must be >= 2 to estimate a band std, got {n_draws}")
+    alpha_corrected = alpha / n_candidates
+    t_critical = _t_dist.ppf(1.0 - alpha_corrected, df=n_draws - 1)
+    return float(t_critical * math.sqrt(1.0 + 1.0 / n_draws))
 
 # Row-level cycle-phase columns (experiments/lib/zones.py assign_regime() operates on the first).
 # "candidate touches cycle phase" (Plots spec, fps-3jj.6) triggers off a candidate's declared
@@ -381,6 +425,16 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # against a noise band centred near zero must read as a HIGH percentile here, not near 0.
         "candidate_percentile_better_than_noise": float((deltas > delta).mean() * 100),
         "candidate_z_vs_band": (delta - band_mean) / band_std if np.isfinite(band_std) and band_std > 0 else None,
+        # "The honest single-candidate bar" (docs/CONVENTIONS.md), n_candidates=1 — the magnitude
+        # candidate_z_vs_band must clear, in EITHER direction, to be distinguishable from a draw
+        # off this batch's own noise floor. Drives the ledger rejected/inconclusive split
+        # (docs/routines/dossier.md § Step 1.4, fps-3jj.17); None when band_std isn't estimable
+        # (deltas.size < 2), same guard as candidate_z_vs_band itself.
+        "single_candidate_z_threshold": (
+            family_wise_z_threshold(n_candidates=1, n_draws=int(deltas.size))
+            if np.isfinite(band_std) and band_std > 0
+            else None
+        ),
     }
 
 

@@ -130,13 +130,42 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      showed, in the same style as existing entries (see `tgp_delta_7d` vs
      `station_minus_tgp_cents` in the file for the contrast).
    - `not_tested`: the same judgement you wrote into the README — reuse it verbatim, don't redo it.
-   - `outcome`: the pipeline's own status code — `rejected` / `disqualified` /
-     `aborted_candidate` (`facts["provenance"]["status"]`). The retryable statuses are filtered
-     out at Step 0 and never reach a ledger entry. **Never write `graduated` here.** Per the parent design's decision boundary, this pipeline never touches
-     `fuel_signal/features.py`; graduation is a separate, human-initiated PR, and a human updates
-     this same ledger entry's `outcome` to `graduated` by hand when that PR lands (see how the
-     `tgp_delta_7d` entry already reads `graduated` even though every pipeline run of it would have
-     closed `rejected`).
+   - `outcome`: mechanical, from `facts["provenance"]["status"]` and, for a completed run,
+     `facts["noise_band"]` — **not a judgement call** (`fps-3jj.17`, decided 2026-08-23):
+     - `status == "disqualified"` → `outcome: disqualified`.
+     - `status == "aborted_candidate"` → `outcome: aborted_candidate`.
+     - `status == "rejected"` — the pipeline's own name for "ran to completion and reached the
+       scoring stages" (`runner.py`'s outcome taxonomy comment; it says nothing yet about the
+       claim's merit) — apply the **rejected-vs-inconclusive split**:
+       - `facts["noise_band"]["available"]` is `false` → `outcome: rejected`. No noise floor
+         means no ruler to grade "below the instrument's resolution" against, so there is nothing
+         to call inconclusive — same as before this rule existed. Note the unavailability in the
+         README as usual (Step 1 above); don't invent a floor to unblock this decision.
+       - Otherwise read `z = facts["noise_band"]["candidate_z_vs_band"]` and
+         `t = facts["noise_band"]["single_candidate_z_threshold"]` — both already computed by
+         `dossier_tables._noise_band` (`t` is `family_wise_z_threshold(n_candidates=1, n_draws=...)`,
+         i.e. the *single*-candidate detection bar, docs/CONVENTIONS.md's "-0.15 c/L judged
+         singly" for `batch1`; deliberately **not** the batch-level `clears_family_wise_threshold`
+         gate, which needs the whole batch dossiered and exists to answer a different question —
+         "is any candidate surprising after correcting for picking the best of N", the retrospective
+         routine's job, not this one's):
+         - `z >= t` → `outcome: rejected`. `delta_cpl_held` is clearly the WRONG SIGN by more than
+           this batch's own noise band — measurably worse than a placebo column, not merely
+           unresolved.
+         - `-t < z < t` → `outcome: inconclusive`. The effect sits inside the noise band — this run
+           could not distinguish the candidate from noise. Per the ledger header, this is **not**
+           `rejected`: the ground may still be open (more data, a different arm of the same
+           mechanism, etc. is a legitimate follow-up, not a re-proposal of dead ground).
+         - `z <= -t` → `outcome: rejected`, same as every run before this rule existed. The
+           candidate clears single-candidate noise in the GOOD direction, but this dossier step
+           still never decides graduation (see below) — a human who reads a strongly negative `z`
+           and wants to pursue it upgrades this same entry's `outcome` to `graduated` by hand.
+     The retryable statuses are filtered out at Step 0 and never reach a ledger entry. **Never
+     write `graduated` here.** Per the parent design's decision boundary, this pipeline never
+     touches `fuel_signal/features.py`; graduation is a separate, human-initiated PR, and a human
+     updates this same ledger entry's `outcome` to `graduated` by hand when that PR lands (see how
+     the `tgp_delta_7d` entry already reads `graduated` even though every pipeline run of it would
+     have closed `rejected`).
    - `evidence`: the run directory's path, relative to the repo root.
 
 5. **Prepend one row to `experiments/INDEX.md`'s table** in the same pass (its own convention: the
