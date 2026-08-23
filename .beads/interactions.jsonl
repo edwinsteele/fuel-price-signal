@@ -99,3 +99,4 @@
 {"id":"int-6238621e137fdda48c43567b193a55d6","kind":"field_change","created_at":"2026-08-22T10:41:58.55098Z","actor":"Edwin Steele","issue_id":"fps-3jj.15","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-1c63d40fa32c03a837bfaea22fcecb2e","kind":"field_change","created_at":"2026-08-22T11:17:50.24141Z","actor":"Edwin Steele","issue_id":"fps-3jj.16","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-7524692172a14ebc69bbb912f63d3795","kind":"field_change","created_at":"2026-08-22T11:29:58.932779Z","actor":"Edwin Steele","issue_id":"fps-3jj.11","extra":{"field":"status","new_value":"open","old_value":"in_progress"}}
+{"id":"int-3ae4870416088d305c00699b33f2c97b","kind":"field_change","created_at":"2026-08-23T03:54:44.134946Z","actor":"Edwin Steele","issue_id":"fps-3jj.17","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
