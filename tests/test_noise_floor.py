@@ -407,8 +407,12 @@ def test_compute_noise_floor_stamps_provenance(tmp_path, monkeypatch):
     assert payload["inner_fold_params"] == DEFAULT_INNER_FOLD_PARAMS
     assert payload["wall_seconds"] >= 0.0
     assert len(payload["placebo_draws"]) == 2
-    for draw in payload["placebo_draws"]:
-        assert set(draw) == {"source_column", "block_seed", "self_correlation"}
+    # fps-3jj.14: one record per draw MEMBER, tagged with its 1-indexed draw. At arity 1
+    # that is still one record per draw.
+    assert payload["n_placebo_columns"] == 1
+    for i, draw in enumerate(payload["placebo_draws"], start=1):
+        assert set(draw) == {"draw", "source_column", "block_seed", "self_correlation"}
+        assert draw["draw"] == i
         assert isinstance(draw["self_correlation"], float)
 
 
@@ -421,10 +425,10 @@ def test_compute_noise_floor_propagates_a_screen_draws_failure(tmp_path, monkeyp
     batch_dir = _write_batch_dir(tmp_path, df)
     _stub_realised_by_draw(monkeypatch, [1.0])
 
-    def _always_fails(df, baseline_columns, n_draws, *, max_self_correlation):
+    def _always_fails(df, baseline_columns, n_draws, *, arity, max_self_correlation):
         raise ValueError("only found 0/1 placebo draws passing abs(self_correlation)")
 
-    monkeypatch.setattr(noise_floor_module, "screen_draws", _always_fails)
+    monkeypatch.setattr(noise_floor_module, "screen_draw_groups", _always_fails)
 
     with pytest.raises(ValueError, match="only found 0/1"):
         compute_noise_floor(batch_dir, n_draws=1, verbose=False)
@@ -876,4 +880,119 @@ def test_cli_fit_stability_flag_writes_fit_stability_file(tmp_path, monkeypatch)
 
     assert result.exit_code == 0, result.output
     assert (batch_dir / FIT_STABILITY_FILENAME).exists()
+    assert not (batch_dir / NOISE_FLOOR_FILENAME).exists()
+
+
+# ── arity (fps-3jj.14) ────────────────────────────────────────────────────────
+
+def test_arity_1_is_byte_identical_to_the_pre_arity_behaviour(tmp_path, monkeypatch):
+    """The whole point of `placebo_column_names`' arity-1 branch: adding the parameter must
+    not move an existing floor. Asserts the arm's feature list still ends in the historical
+    single `__placebo__` name and the deltas are unchanged."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    calls = _stub_realised_by_draw(monkeypatch, [0.5, -0.25])
+
+    payload = compute_noise_floor(batch_dir, n_draws=2, verbose=False)
+
+    assert payload["n_placebo_columns"] == 1
+    assert payload["deltas_cpl_held"] == pytest.approx([0.5, -0.25])
+    for call in calls:
+        placebo_arm = call["arms"][1]
+        assert placebo_arm.feature_columns[-1:] == [PLACEBO_COLUMN_NAME]
+
+
+def test_arity_3_adds_three_distinct_placebo_columns_to_the_placebo_arm(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    calls = _stub_realised_by_draw(monkeypatch, [0.1, 0.2])
+
+    payload = compute_noise_floor(batch_dir, n_draws=2, arity=3, verbose=False)
+
+    assert payload["n_placebo_columns"] == 3
+    assert payload["n_draws"] == 2
+    baseline_columns = json.loads((batch_dir / "baseline_columns.json").read_text())
+    for call in calls:
+        baseline_arm, placebo_arm = call["arms"]
+        assert baseline_arm.feature_columns == baseline_columns
+        added = placebo_arm.feature_columns[len(baseline_columns):]
+        assert added == ["__placebo_1__", "__placebo_2__", "__placebo_3__"]
+        # Every added column must actually be present and non-degenerate in the arm's frame,
+        # not merely declared — a declared-but-absent column would KeyError at fit time in
+        # the real path and silently pass a shape-only assertion here.
+        for col in added:
+            assert placebo_arm.df[col].notna().any()
+            assert placebo_arm.df[col].nunique() > 1
+
+
+def test_arity_3_uses_a_distinct_source_column_for_every_member_of_every_draw(tmp_path, monkeypatch):
+    """n_draws * arity distinct columns, not n_draws columns reused three times — the whole
+    bank must be distinct or the band under-samples the column space it claims to cover."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [0.1, 0.2, 0.3])
+
+    payload = compute_noise_floor(batch_dir, n_draws=3, arity=3, verbose=False)
+
+    records = payload["placebo_draws"]
+    assert len(records) == 9
+    assert [r["draw"] for r in records] == [1, 1, 1, 2, 2, 2, 3, 3, 3]
+    sources = [r["source_column"] for r in records]
+    assert len(set(sources)) == 9
+    # Members of one draw get distinct block seeds on this fixture, where no substitution
+    # fires. Not asserted as a universal invariant: `candidate_pool`'s fallback tail cycles
+    # the seed pool from index 0, so a substituted draw CAN reuse a seed — pre-existing
+    # behaviour visible in batch1's own committed arity-1 floor (seeds 97 and 101 twice).
+    for draw_i in (1, 2, 3):
+        seeds = [r["block_seed"] for r in records if r["draw"] == draw_i]
+        assert len(set(seeds)) == 3
+
+
+def test_arity_below_1_is_rejected(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [0.1])
+    with pytest.raises(ValueError, match="arity must be >= 1"):
+        compute_noise_floor(batch_dir, n_draws=1, arity=0, verbose=False)
+
+
+def test_out_name_writes_beside_the_real_floor_without_forcing(tmp_path, monkeypatch):
+    """An arity calibration is a MEASUREMENT of the ruler, not a replacement for it. It must
+    be writable while noise_floor.json already exists, without --force (which would destroy
+    the floor every dossier so far was graded against)."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [0.1, 0.2, 0.3, 0.4])
+
+    compute_noise_floor(batch_dir, n_draws=2, verbose=False)
+    assert (batch_dir / NOISE_FLOOR_FILENAME).exists()
+
+    compute_noise_floor(
+        batch_dir, n_draws=2, arity=3, out_name="noise_floor_k3.json", verbose=False
+    )
+
+    real = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
+    calib = json.loads((batch_dir / "noise_floor_k3.json").read_text())
+    assert real["n_placebo_columns"] == 1
+    assert calib["n_placebo_columns"] == 3
+    assert real["deltas_cpl_held"] == pytest.approx([0.1, 0.2])
+
+
+def test_cli_arity_and_out_name(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    (tmp_path / "batches").mkdir()
+    batch_dir = _write_batch_dir(tmp_path / "batches", df, name="b1")
+    _stub_realised_by_draw(monkeypatch, [0.1, 0.2])
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "b1", "--batches-dir", str(tmp_path / "batches"),
+            "--n-draws", "2", "--arity", "3", "--out-name", "noise_floor_k3.json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((batch_dir / "noise_floor_k3.json").read_text())
+    assert payload["n_placebo_columns"] == 3
     assert not (batch_dir / NOISE_FLOOR_FILENAME).exists()

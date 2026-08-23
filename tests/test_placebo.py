@@ -15,7 +15,10 @@ from experiments.pipeline.placebo import (
     _effective_block_days,
     axis_is_market_wide,
     candidate_pool,
+    make_placebo_frame,
     make_placebo_series,
+    placebo_column_names,
+    screen_draw_groups,
     screen_draws,
     select_draws,
 )
@@ -463,3 +466,98 @@ def test_each_station_gets_its_own_permutation():
         "every station received the SAME block order — the permutation is shared across "
         "stations rather than drawn per station"
     )
+
+
+# ── arity (fps-3jj.14) ────────────────────────────────────────────────────────
+
+def test_placebo_column_names_keeps_the_historical_name_at_arity_1():
+    """Not cosmetic: batch1's committed 20-draw floor is the ruler its verdict rests on,
+    and 'a column rename cannot change a LightGBM fit' is a derivation, not a measurement.
+    Keeping arity 1 byte-identical removes the question."""
+    assert placebo_column_names(1) == [PLACEBO_COLUMN_NAME]
+    assert placebo_column_names(3) == ["__placebo_1__", "__placebo_2__", "__placebo_3__"]
+    with pytest.raises(ValueError, match="arity must be >= 1"):
+        placebo_column_names(0)
+
+
+def test_screen_draw_groups_at_arity_1_is_exactly_screen_draws():
+    """The identity that makes an existing arity-1 floor reproducible after this landed."""
+    df = _diverse_fixture_df(n_dates=200, n_cols=10)
+    baseline_columns = [f"col{i}" for i in range(10)]
+
+    flat = screen_draws(df, baseline_columns, n_draws=5, max_self_correlation=0.9)
+    grouped = screen_draw_groups(
+        df, baseline_columns, n_draws=5, arity=1, max_self_correlation=0.9
+    )
+
+    assert grouped == [[triple] for triple in flat]
+
+
+def test_screen_draw_groups_chunks_n_draws_times_arity_distinct_columns():
+    df = _diverse_fixture_df(n_dates=200, n_cols=20)
+    baseline_columns = [f"col{i}" for i in range(20)]
+
+    groups = screen_draw_groups(
+        df, baseline_columns, n_draws=4, arity=3, max_self_correlation=0.9
+    )
+
+    assert len(groups) == 4
+    assert all(len(g) == 3 for g in groups)
+    # DISTINCT SOURCE COLUMNS is the invariant that actually holds across the whole bank;
+    # distinct seeds is not, and never was. `candidate_pool`'s fallback tail cycles
+    # PLACEBO_BLOCK_SEED_POOL from index 0, so once a primary is substituted away (batch1's
+    # committed arity-1 floor already has seeds 97 and 101 used twice for that reason) a
+    # later draw can reuse an earlier draw's seed on a DIFFERENT column. That is harmless
+    # for the column pair itself but does mean two draws built from correlated sources under
+    # a shared block order are less independent than the draw count suggests — a property of
+    # the pre-existing substitution path, not of arity.
+    sources = [col for g in groups for col, _seed, _corr in g]
+    assert len(set(sources)) == 12
+    seeds = [seed for g in groups for _col, seed, _corr in g]
+    assert len(set(seeds)) == 12  # no substitution fires on this fixture
+
+
+def test_screen_draw_groups_binds_the_pools_on_n_draws_times_arity():
+    """The failure mode a caller will actually hit: 10 draws at arity 3 needs 30 screened
+    columns, so a batch with 20 usable columns fails at arity 3 even though it is fine at
+    arity 1. The message must name the product, not n_draws."""
+    df = _diverse_fixture_df(n_dates=200, n_cols=20)
+    baseline_columns = [f"col{i}" for i in range(20)]
+
+    assert len(screen_draw_groups(
+        df, baseline_columns, n_draws=10, arity=1, max_self_correlation=0.9
+    )) == 10
+    with pytest.raises(ValueError, match=r"30.*exceeds the baseline column count \(20\)"):
+        screen_draw_groups(df, baseline_columns, n_draws=10, arity=3, max_self_correlation=0.9)
+
+
+def test_make_placebo_frame_builds_one_column_per_member_named_by_arity():
+    df = _diverse_fixture_df(n_dates=200, n_cols=10)
+    baseline_columns = [f"col{i}" for i in range(10)]
+    draw = screen_draw_groups(
+        df, baseline_columns, n_draws=1, arity=3, max_self_correlation=0.9
+    )[0]
+
+    frame = make_placebo_frame(df, draw)
+
+    assert list(frame.columns) == ["__placebo_1__", "__placebo_2__", "__placebo_3__"]
+    assert frame.index.equals(df.index)
+    for name, (source_column, block_seed, _corr) in zip(frame.columns, draw, strict=True):
+        expected = make_placebo_series(df, source_column, block_seed)
+        pd.testing.assert_series_equal(
+            frame[name], expected.rename(name), check_names=True
+        )
+
+
+def test_make_placebo_frame_members_do_not_share_a_block_order():
+    """Two members permuted with the SAME seed share a block ORDER, which makes the pair as
+    correlated as their source columns are — for a reason that has nothing to do with how a
+    real candidate's columns relate. Distinct seeds are what stops that."""
+    df = _diverse_fixture_df(n_dates=400, n_cols=10)
+    same_source = [("col0", 97, 0.0), ("col0", 97, 0.0)]
+    shared = make_placebo_frame(df, same_source)
+    assert shared["__placebo_1__"].equals(shared["__placebo_2__"])
+
+    distinct_seeds = [("col0", 97, 0.0), ("col0", 101, 0.0)]
+    varied = make_placebo_frame(df, distinct_seeds)
+    assert not varied["__placebo_1__"].equals(varied["__placebo_2__"])

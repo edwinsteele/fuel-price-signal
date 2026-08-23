@@ -677,3 +677,122 @@ def test_mechanism_family_survives_into_facts(tmp_path):
     facts = dt.build_facts(run_dir)
 
     assert facts["candidate"]["mechanism_family"] == "test-family"
+
+
+# ── noise-band arity guard (fps-3jj.14) ───────────────────────────────────────
+
+def _floor_with(arity=None, n=20):
+    deltas = list(np.random.default_rng(7).normal(0, 0.02, size=n))
+    payload = {
+        "deltas_cpl_held": deltas, "baseline_fingerprint": "54:deadbeef1234",
+        "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+    }
+    if arity is not None:
+        payload["n_placebo_columns"] = arity
+
+    def _write(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps(payload))
+
+    return _write
+
+
+def test_noise_band_refuses_a_multi_column_candidate_against_a_1_column_floor(tmp_path):
+    """The bias this bead exists to close: a 3-column arm has more chances for the fit to
+    find something than the 1-column placebo arm the band was built from, so the band is
+    narrow in the CANDIDATE's favour by an unmeasured amount."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a", "b", "c"], batch_extras=_floor_with(arity=1)
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert "1-column null" in band["reason"]
+    assert "3 columns" in band["reason"]
+    # The message must be actionable — it is read by an unattended 05:06 dossier session.
+    # BOTH halves have to be there. An earlier revision said only "compute a floor at this
+    # arity ... then point this batch's ruler at it", which names no mechanism: _noise_band
+    # reads only NOISE_FLOOR_FILENAME and nothing reads an arity-suffixed side-file, so
+    # following it produces a file that changes nothing. Promotion is a rename; the rename
+    # IS the remediation.
+    assert "--arity 3" in band["reason"]
+    assert "--out-name noise_floor_k3.json" in band["reason"]
+    assert "mv noise_floor.json noise_floor_k1.json" in band["reason"]
+    assert "mv noise_floor_k3.json noise_floor.json" in band["reason"]
+    # And it must steer away from the tempting-but-destructive alternative.
+    assert "--force" in band["reason"]
+    # n_draws is derived from the seed pool, not hardcoded, so it cannot go stale.
+    assert "--n-draws 10" in band["reason"]
+
+
+def test_noise_band_treats_a_floor_with_no_arity_key_as_arity_1(tmp_path):
+    """A floor predating fps-3jj.14 WAS arity 1 — the parameter did not exist. So its
+    absence pins the value rather than leaving it unknown, and it keeps grading 1-column
+    candidates instead of being refused wholesale."""
+    (tmp_path / "single").mkdir()
+    (tmp_path / "multi").mkdir()
+    single = _write_run(tmp_path / "single", columns=["a"], batch_extras=_floor_with(arity=None))[0]
+    assert dt.build_facts(single)["noise_band"]["available"] is True
+
+    multi = _write_run(tmp_path / "multi", columns=["a", "b"], batch_extras=_floor_with(arity=None))[0]
+    multi_band = dt.build_facts(multi)["noise_band"]
+    assert multi_band["available"] is False
+    assert "1-column null" in multi_band["reason"]
+
+
+def test_noise_band_allows_a_wider_floor_and_discloses_it(tmp_path):
+    """One-sided on purpose. A floor at arity >= the run's can only be as wide or wider,
+    i.e. a HARDER bar — refusing it would force one ~2h calibration per distinct arity in a
+    batch (batch1 alone has arities 3,3,3,2,2) to buy a tighter bar nobody needs."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a", "b"], batch_extras=_floor_with(arity=3)
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is True
+    assert band["n_placebo_columns"] == 3
+    assert band["candidate_n_columns"] == 2
+    assert band["floor_arity_exceeds_run"] is True
+
+
+def test_noise_band_matching_arity_is_not_flagged_as_wider(tmp_path):
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a", "b", "c"], batch_extras=_floor_with(arity=3)
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is True
+    assert band["n_placebo_columns"] == 3
+    assert band["candidate_n_columns"] == 3
+    assert band["floor_arity_exceeds_run"] is False
+
+
+def test_arity_refusal_carries_a_machine_readable_code(tmp_path):
+    """The dossier routine maps `available: false` to `outcome: rejected` — dead ground the
+    next generator won't re-propose. An arity refusal must NOT reach that branch: the run
+    graded fine and becomes a real measurement once a wide-enough ruler exists. The routine
+    branches on this code rather than pattern-matching the prose reason, because fps-3jj.17
+    made the ledger outcome mechanical rather than a 05:06 judgement call."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a", "b", "c"], batch_extras=_floor_with(arity=1)
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+    # The prose must ALSO say it, for the human reading the dossier rather than the branch.
+    assert "NOT rejected" in band["reason"]
+
+
+def test_other_refusals_carry_no_arity_code(tmp_path):
+    """The carve-out is specific. A missing floor really does mean 'no ruler, and none is
+    coming without human action', so it keeps falling through to the rejected rule."""
+    run_dir, _ = _write_run(tmp_path, columns=["a"])  # no noise_floor.json at all
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert "reason_code" not in band

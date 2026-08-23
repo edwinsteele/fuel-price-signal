@@ -156,6 +156,11 @@ def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
     return {
         "available": True,
         "n_draws": band["n_draws"],
+        # The arity this band measures (fps-3jj.14). Surfaced at batch level because the
+        # leaderboard ranks candidates of DIFFERENT arities against this one band, and
+        # whether that comparison is like-for-like is a fact about the ruler, not about any
+        # single row.
+        "n_placebo_columns": band["n_placebo_columns"],
         "band_mean_delta_cpl_held": band["band_mean_delta_cpl_held"],
         "band_std_delta_cpl_held": band["band_std_delta_cpl_held"],
     }
