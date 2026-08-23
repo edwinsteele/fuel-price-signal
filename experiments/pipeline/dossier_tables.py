@@ -66,6 +66,7 @@ from scipy.stats import t as _t_dist
 from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
+from experiments.pipeline.placebo import PLACEBO_BLOCK_SEED_POOL
 from experiments.pipeline.runner import (
     BASELINE_ARM,
     CANDIDATE_ARM,
@@ -423,14 +424,29 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     run_columns = results.get("candidate", {}).get("columns") or []
     run_arity = len(run_columns)
     if check_fingerprint and run_arity > floor_arity:
+        # The remediation below is spelled out as TWO steps on purpose. This function reads
+        # only NOISE_FLOOR_FILENAME, and nothing anywhere reads an arity-suffixed side-file,
+        # so "compute a wider floor" alone does not unblock grading — the earlier revision of
+        # this message said "then point this batch's ruler at it", which named no mechanism
+        # because there is no selector to name. Promotion is a rename, and the rename has to
+        # be in the message: it is the whole remediation, not a detail of it.
+        max_draws = len(PLACEBO_BLOCK_SEED_POOL) // run_arity
         return {
             "available": False,
             "reason": f"noise_floor.json is a {floor_arity}-column null but this candidate adds "
             f"{run_arity} columns ({', '.join(map(str, run_columns))}) — a wider arm graded "
             "against a narrower ruler, biased in the candidate's favour by an unmeasured "
-            "amount (fps-3jj.14). Compute a floor at this arity: `PYTHONPATH=. uv run python "
-            f"-m experiments.pipeline.noise_floor <batch> --arity {run_arity} "
-            f"--out-name noise_floor_k{run_arity}.json`, then point this batch's ruler at it.",
+            f"amount (fps-3jj.14). This batch needs a ruler of at least {run_arity} columns, and "
+            "grading reads ONLY noise_floor.json, so producing one is two steps. (1) Compute it "
+            "beside the current ruler: `PYTHONPATH=. uv run python -m "
+            f"experiments.pipeline.noise_floor <batch> --arity {run_arity} --n-draws {max_draws} "
+            f"--out-name noise_floor_k{run_arity}.json` (the draw pools bind on n_draws * arity, "
+            f"so {max_draws} is the maximum at arity {run_arity}). (2) Promote it, keeping the "
+            f"old one: `mv noise_floor.json noise_floor_k{floor_arity}.json && mv "
+            f"noise_floor_k{run_arity}.json noise_floor.json`. Do NOT `--force` over "
+            "noise_floor.json instead: that destroys the ruler this batch's existing dossiers "
+            "were graded against, and the baseline any arity comparison needs. Full procedure: "
+            "docs/CONVENTIONS.md § 'The band's ARITY must be at least the candidate's'.",
         }
     if noise_floor.get("partial"):
         # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover

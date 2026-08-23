@@ -710,7 +710,19 @@ def test_noise_band_refuses_a_multi_column_candidate_against_a_1_column_floor(tm
     assert "1-column null" in band["reason"]
     assert "3 columns" in band["reason"]
     # The message must be actionable — it is read by an unattended 05:06 dossier session.
+    # BOTH halves have to be there. An earlier revision said only "compute a floor at this
+    # arity ... then point this batch's ruler at it", which names no mechanism: _noise_band
+    # reads only NOISE_FLOOR_FILENAME and nothing reads an arity-suffixed side-file, so
+    # following it produces a file that changes nothing. Promotion is a rename; the rename
+    # IS the remediation.
     assert "--arity 3" in band["reason"]
+    assert "--out-name noise_floor_k3.json" in band["reason"]
+    assert "mv noise_floor.json noise_floor_k1.json" in band["reason"]
+    assert "mv noise_floor_k3.json noise_floor.json" in band["reason"]
+    # And it must steer away from the tempting-but-destructive alternative.
+    assert "--force" in band["reason"]
+    # n_draws is derived from the seed pool, not hardcoded, so it cannot go stale.
+    assert "--n-draws 10" in band["reason"]
 
 
 def test_noise_band_treats_a_floor_with_no_arity_key_as_arity_1(tmp_path):
