@@ -401,6 +401,37 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             "(or predates tank_params entirely) and does not grade this run. Recompute with "
             "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> --force`.",
         }
+    # fps-3jj.14: arity. Same failure class as baseline_fingerprint, null_method and
+    # tank_params above — a floor that measures a DIFFERENT operation from the one the run
+    # performed — but with an asymmetry the others do not have, and the guard is one-sided
+    # because of it. A k-column candidate arm has more chances for the fit to find something
+    # than a j-column placebo arm does when k > j, so a floor BELOW the run's arity is
+    # narrow in the favourable direction and is refused. A floor at or ABOVE the run's arity
+    # can only be as wide or wider, i.e. a HARDER bar, so it is allowed and disclosed
+    # (`floor_arity_exceeds_run` below) rather than refused: refusing it would force a
+    # separate calibration run per distinct arity in a batch, which for batch1 alone
+    # (arities 3,3,3,2,2) means two ~2h runs to grade five candidates, buying nothing but a
+    # tighter bar the batch does not need.
+    #
+    # A floor with no n_placebo_columns key at all predates this and WAS arity 1 — read as
+    # 1 rather than refused, so an existing committed floor keeps grading 1-column
+    # candidates and only stops grading multi-column ones. That is the opposite of the
+    # "cannot be shown to match, so cannot be trusted" rule the checks above apply, and
+    # deliberately: those keys' absence left the value genuinely unknown, whereas this one's
+    # absence pins it (the parameter did not exist, so every such floor is arity 1).
+    floor_arity = int(noise_floor.get("n_placebo_columns", 1))
+    run_columns = results.get("candidate", {}).get("columns") or []
+    run_arity = len(run_columns)
+    if check_fingerprint and run_arity > floor_arity:
+        return {
+            "available": False,
+            "reason": f"noise_floor.json is a {floor_arity}-column null but this candidate adds "
+            f"{run_arity} columns ({', '.join(map(str, run_columns))}) — a wider arm graded "
+            "against a narrower ruler, biased in the candidate's favour by an unmeasured "
+            "amount (fps-3jj.14). Compute a floor at this arity: `PYTHONPATH=. uv run python "
+            f"-m experiments.pipeline.noise_floor <batch> --arity {run_arity} "
+            f"--out-name noise_floor_k{run_arity}.json`, then point this batch's ruler at it.",
+        }
     if noise_floor.get("partial"):
         # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover
         # some outer folds, but effect_delta_cpl_held always pools every fold. Grading a
@@ -422,6 +453,12 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     return {
         "available": True,
         "n_draws": int(deltas.size),
+        "n_placebo_columns": floor_arity,
+        "candidate_n_columns": run_arity,
+        # True when the ruler is WIDER-armed than the run it grades — allowed (it can only
+        # make the bar harder) but worth surfacing, because a candidate that fails against
+        # such a floor has not been shown to fail against its own arity's band.
+        "floor_arity_exceeds_run": bool(run_arity and floor_arity > run_arity),
         "band_mean_delta_cpl_held": band_mean,
         "band_std_delta_cpl_held": band_std,
         "candidate_delta_cpl_held": delta,

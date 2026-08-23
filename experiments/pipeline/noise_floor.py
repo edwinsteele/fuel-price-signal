@@ -100,9 +100,10 @@ from experiments.pipeline.batch_freeze import (
 )
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME, NULL_METHOD_PLACEBO_COLUMN
 from experiments.pipeline.placebo import (
-    PLACEBO_COLUMN_NAME,
-    make_placebo_series,
-    screen_draws,
+    DEFAULT_PLACEBO_ARITY,
+    make_placebo_frame,
+    placebo_column_names,
+    screen_draw_groups,
 )
 from experiments.pipeline.runner import (
     DEFAULT_INNER_FOLD_PARAMS,
@@ -193,28 +194,54 @@ def _load_batch(batch_dir: pathlib.Path):
     return frame, baseline_columns, db_path
 
 
+def _draw_label(draw: list[tuple[str, int, float]]) -> str:
+    """A one-line human label for a draw: its source columns and their block seeds.
+
+    Used in progress output and in every error raised from inside the draw loop. A draw is
+    a GROUP at arity > 1, so naming only its first member would point a reader at the wrong
+    column half the time.
+    """
+    return ", ".join(f"{col}@{seed}" for col, seed, _corr in draw)
+
+
 def compute_noise_floor(
     batch_dir: pathlib.Path,
     *,
     n_draws: int = DEFAULT_N_DRAWS,
+    arity: int = DEFAULT_PLACEBO_ARITY,
     seed: int = PLACEBO_SEED_DEFAULT,
     outer_fold_params: dict | None = None,
     inner_fold_params: dict | None = None,
     fold_subset: Iterable[int] | None = None,
     station_codes: list[int] | None = None,
     tank: TankParams | None = None,
+    out_name: str = NOISE_FLOOR_FILENAME,
     force: bool = False,
     verbose: bool = True,
 ) -> dict:
     """Compute `n_draws` placebo-column realised-CPL deltas and persist them to
-    `<batch_dir>/noise_floor.json`.
+    `<batch_dir>/<out_name>` (default `noise_floor.json`).
 
     Every draw is a two-arm `run_paired_realised_backtest` call: the frozen baseline vs the
-    SAME baseline plus one placebo column (`experiments.pipeline.placebo`), at the SAME
+    SAME baseline plus `arity` placebo columns (`experiments.pipeline.placebo`), at the SAME
     fixed `seed` throughout, `held_tau=None` (baseline's own per-fold τ is the held τ — the
     same contract runner.py's real candidate runs use). `delta = placebo.cpl_held -
     baseline.cpl_held` is exactly the operation `effect_delta_cpl_held` measures for a real
     candidate, so the resulting band is commensurable with it.
+
+    arity (fps-3jj.14): how many placebo columns each draw adds. Default 1, the historical
+    shape. A candidate is one MECHANISM and may be 2-4 columns (docs/routines/generator.md),
+    and a k-column arm has more chances for the fit to find something than a 1-column arm
+    does — so a k-column candidate graded against a 1-column band is graded against a ruler
+    that does not know k, in the favourable direction. Stamped into the payload as
+    `n_placebo_columns`; `dossier_tables._noise_band` refuses a floor whose arity is BELOW
+    the run's candidate arity. Note the pools bind on `n_draws * arity`, not `n_draws`.
+
+    out_name: the filename written under `batch_dir`. Defaults to the batch's real ruler,
+    `noise_floor.json`. An arity-calibration run is a MEASUREMENT of the ruler's arity
+    sensitivity, not a replacement ruler, so it is written beside the real one under its own
+    name (e.g. `noise_floor_k3.json`) rather than forcing over it — `--force` on the default
+    name destroys the floor every dossier so far was graded against.
 
     tank (fps-15c): the TankParams every draw runs at, and the cadence stamped into the
     payload's `tank_params`. None (default) resolves to `TankParams()` — the canonical
@@ -243,7 +270,9 @@ def compute_noise_floor(
         errors above, this is about the DATA, not a caller/environment mistake).
     """
     batch_dir = pathlib.Path(batch_dir)
-    out_path = batch_dir / NOISE_FLOOR_FILENAME
+    if arity < 1:
+        raise ValueError(f"arity must be >= 1, got {arity}")
+    out_path = batch_dir / out_name
     if out_path.exists() and not force:
         raise FileExistsError(
             f"{out_path} already exists. Every dossier written so far was graded against it — "
@@ -265,7 +294,10 @@ def compute_noise_floor(
     # every offset); under block permutation all 49 usable batch0 columns pass, so that reason
     # never fires here. The tail is still used twice per batch0 run for the unrelated all-NaN
     # skip (two primaries land on all-NaN LGA columns) — see placebo.py's module docstring.
-    draws = screen_draws(frame, baseline_columns, n_draws, max_self_correlation=MAX_SELF_CORRELATION)
+    draws = screen_draw_groups(
+        frame, baseline_columns, n_draws, arity=arity, max_self_correlation=MAX_SELF_CORRELATION
+    )
+    placebo_columns = placebo_column_names(arity)
 
     t0 = time.perf_counter()
     deltas: list[float] = []
@@ -273,9 +305,9 @@ def compute_noise_floor(
     n_windows: int | None = None
     tank_params: str | None = None
     baseline_cache: BaselineCache | None = None
-    for i, (source_column, block_seed, self_correlation) in enumerate(draws, start=1):
-        placebo_series = make_placebo_series(frame, source_column, block_seed)
-        placebo_frame = frame.assign(**{PLACEBO_COLUMN_NAME: placebo_series})
+    for i, draw in enumerate(draws, start=1):
+        placebo_cols = make_placebo_frame(frame, draw)
+        placebo_frame = frame.assign(**{c: placebo_cols[c] for c in placebo_columns})
         # ModelStrategy.decide() (the LIVE realised-replay path) never reads an arm's df
         # directly — it rebuilds every canonical feature fresh from the DB-backed
         # PriceHistory and only consults extra_feature_provider for anything beyond that
@@ -284,12 +316,12 @@ def compute_noise_floor(
         # PLACEBO_COLUMN_NAME. Same lookup-provider mechanism runner.py already uses for a
         # real candidate's added column (e.g. the tgp_delta_7d precedent) — reused, not
         # reimplemented, so both sites agree on the (station_code, date)-keyed lookup.
-        provider = _make_lookup_provider(placebo_frame, [PLACEBO_COLUMN_NAME])
+        provider = _make_lookup_provider(placebo_frame, placebo_columns)
         arms = [
             ArmSpec(BASELINE_ARM_NAME, frame, feature_columns=baseline_columns),
             ArmSpec(
                 PLACEBO_ARM_NAME, placebo_frame,
-                feature_columns=[*baseline_columns, PLACEBO_COLUMN_NAME],
+                feature_columns=[*baseline_columns, *placebo_columns],
                 extra_feature_provider=provider,
             ),
         ]
@@ -317,7 +349,7 @@ def compute_noise_floor(
         # candidate's provider, reused here rather than re-derived.
         health = _check_provider_health(provider)
         if health is not None:
-            raise RuntimeError(f"draw {i} ({source_column!r}): {health}")
+            raise RuntimeError(f"draw {i} ({_draw_label(draw)}): {health}")
 
         agg = result.aggregate.set_index("arm")
         delta = float(agg.loc[PLACEBO_ARM_NAME, "cpl_held"] - agg.loc[BASELINE_ARM_NAME, "cpl_held"])
@@ -333,12 +365,12 @@ def compute_noise_floor(
             tank_params = draw_tank_params
         elif draw_n_windows != n_windows:
             raise ValueError(
-                f"draw {i} ({source_column!r}): walked {draw_n_windows} windows but draw 1 "
+                f"draw {i} ({_draw_label(draw)}): walked {draw_n_windows} windows but draw 1 "
                 f"walked {n_windows} — fold geometry must be identical across every draw."
             )
         elif draw_tank_params != tank_params:
             raise ValueError(
-                f"draw {i} ({source_column!r}): ran at tank_params {draw_tank_params!r} but "
+                f"draw {i} ({_draw_label(draw)}): ran at tank_params {draw_tank_params!r} but "
                 f"draw 1 ran at {tank_params!r} — cadence must match across every draw."
             )
 
@@ -349,17 +381,24 @@ def compute_noise_floor(
         # weak ones (placebo.py's NAMED LIMITATION: a mostly-cross-sectional column keeps an
         # irreducible correlation no time-axis reorder can remove).
         deltas.append(delta)
-        placebo_draws.append(
-            {
-                "source_column": source_column,
-                "block_seed": block_seed,
-                "self_correlation": self_correlation,
-            }
-        )
+        # One record per MEMBER of the draw, each tagged with its draw index, so an
+        # arity-k floor stays readable as "which columns made up draw 3" rather than
+        # collapsing a group into whichever member happened to be first. At arity 1 this
+        # is one record per draw with one extra key, so an existing reader that only
+        # looks at source_column/block_seed/self_correlation is unaffected.
+        for source_column, block_seed, self_correlation in draw:
+            placebo_draws.append(
+                {
+                    "draw": i,
+                    "source_column": source_column,
+                    "block_seed": block_seed,
+                    "self_correlation": self_correlation,
+                }
+            )
         if verbose:
             print(
-                f"[noise_floor] draw {i}/{len(draws)} ({source_column}, seed={block_seed}): "
-                f"delta_cpl_held={delta:+.4f} self_corr={self_correlation:+.3f}",
+                f"[noise_floor] draw {i}/{len(draws)} ({_draw_label(draw)}): "
+                f"delta_cpl_held={delta:+.4f}",
                 flush=True,
             )
 
@@ -372,6 +411,12 @@ def compute_noise_floor(
         # graded, until it's recomputed under this construction.
         "null_method": NULL_METHOD_PLACEBO_COLUMN,
         "n_draws": len(draws),
+        # fps-3jj.14: the arity this band measures. dossier_tables._noise_band refuses a
+        # floor whose n_placebo_columns is below the run's own candidate column count —
+        # a floor with no such key at all (pre-fps-3jj.14) reads as arity 1, which is what
+        # it in fact was, so an existing committed floor keeps grading 1-column candidates
+        # and only stops grading multi-column ones.
+        "n_placebo_columns": arity,
         "seed": seed,
         "placebo_draws": placebo_draws,
         "fold_subset": list(fold_subset) if fold_subset is not None else None,
@@ -592,6 +637,19 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     "seed-paired at the module's SEEDS_A/SEEDS_B defaults — not a CLI-overridable option).",
 )
 @click.option(
+    "--arity", default=DEFAULT_PLACEBO_ARITY, show_default=True,
+    help="Placebo columns per draw (fps-3jj.14). 1 is the historical shape. Raise it to "
+    "match a batch whose candidates are multi-column GROUPS — a k-column candidate graded "
+    "against a 1-column band is graded favourably by an unmeasured amount. Note the draw "
+    "pools bind on n_draws * arity.",
+)
+@click.option(
+    "--out-name", default=NOISE_FLOOR_FILENAME, show_default=True,
+    help="Output filename under the batch dir. Change it to write an arity-calibration "
+    "run BESIDE the batch's real ruler (e.g. noise_floor_k3.json) instead of --force'ing "
+    "over the floor every dossier so far was graded against.",
+)
+@click.option(
     "--fit-stability", is_flag=True, default=False,
     help="Compute the retained seed-swap diagnostic (fit_stability.json) instead of the "
     "noise-floor gate (noise_floor.json). Not part of the automatic batch-freeze path.",
@@ -609,8 +667,8 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     "ruler.",
 )
 def main(
-    batch_name: str, batches_dir: str, n_draws: int, fit_stability: bool,
-    fold_subset: str | None, force: bool,
+    batch_name: str, batches_dir: str, n_draws: int, arity: int, out_name: str,
+    fit_stability: bool, fold_subset: str | None, force: bool,
 ) -> None:
     """Compute and persist the noise-floor calibration for an already-frozen batch."""
     batch_dir = pathlib.Path(batches_dir) / batch_name
@@ -619,8 +677,11 @@ def main(
         compute_fit_stability_diagnostic(batch_dir, fold_subset=subset, force=force)
         click.echo(f"Wrote fit-stability diagnostic for batch '{batch_name}' -> {batch_dir / FIT_STABILITY_FILENAME}")
         return
-    compute_noise_floor(batch_dir, n_draws=n_draws, fold_subset=subset, force=force)
-    click.echo(f"Wrote noise floor for batch '{batch_name}' -> {batch_dir / NOISE_FLOOR_FILENAME}")
+    compute_noise_floor(
+        batch_dir, n_draws=n_draws, arity=arity, out_name=out_name,
+        fold_subset=subset, force=force,
+    )
+    click.echo(f"Wrote noise floor (arity {arity}) for batch '{batch_name}' -> {batch_dir / out_name}")
 
 
 if __name__ == "__main__":

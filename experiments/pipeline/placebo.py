@@ -1,10 +1,20 @@
 """Placebo-column construction for the noise floor (fps-awz, reworked fps-d7m).
 
 `experiments/pipeline/noise_floor.py` needs a null that measures the SAME operation a real
-candidate's `effect_delta_cpl_held` measures: hold seed, data, and folds fixed; add ONE
-column. This module builds that column — one that resembles a real feature in distribution
-and autocorrelation while having its alignment to the target destroyed, without ever
-degrading to a within-date permutation.
+candidate's `effect_delta_cpl_held` measures: hold seed, data, and folds fixed; add the
+candidate's columns. This module builds those columns — each one resembling a real feature
+in distribution and autocorrelation while having its alignment to the target destroyed,
+without ever degrading to a within-date permutation.
+
+**The null's ARITY is a parameter** (fps-3jj.14). It was fixed at one column until batch1
+made the mismatch load-bearing: `docs/routines/generator.md` explicitly invites 2-4 column
+candidates (every feature win in this project's history arrived as a group), and three of
+batch1's five candidates are 3-column groups, so grading them against a 1-column band
+compares a k-column arm to a ruler that does not know k. `screen_draw_groups` and
+`make_placebo_frame` below build a k-column draw; `noise_floor.compute_noise_floor` takes
+`arity` and stamps `n_placebo_columns` into the payload, and `dossier_tables._noise_band`
+refuses a floor whose arity is below the run's. Arity 1 is unchanged in every particular,
+by construction rather than by inspection — see `placebo_column_names`.
 
 Why a within-date permutation is unsafe here: of the 54 locked baseline columns
 (`fuel_signal.features.LOCKED_FEATURE_COLUMNS`), 45 are market-wide — every station shares
@@ -147,6 +157,11 @@ import numpy as np
 import pandas as pd
 
 PLACEBO_COLUMN_NAME = "__placebo__"
+
+#: Arity of the placebo arm: how many placebo columns one draw adds. 1 is the historical
+#: (and still the default) shape — see `placebo_column_names` and `screen_draw_groups` for
+#: why it became a parameter (fps-3jj.14).
+DEFAULT_PLACEBO_ARITY = 1
 
 # Contiguous date-block length for the permutation, in date POSITIONS (not calendar days —
 # the frame's own sorted unique dates, so a gap in the calendar doesn't shorten a block).
@@ -402,3 +417,90 @@ def screen_draws(
             "draws at this threshold."
         )
     return screened
+
+
+def placebo_column_names(arity: int) -> list[str]:
+    """The `arity` column names one placebo draw adds to the candidate arm.
+
+    Arity 1 returns the historical single name (`PLACEBO_COLUMN_NAME`) rather than
+    `__placebo_1__`. A column's NAME cannot change a LightGBM fit — splits are chosen by
+    feature index, and the placebo is appended last either way — so renaming it would be a
+    no-op BY DERIVATION. That is exactly the kind of claim this repo has been bitten by
+    asserting instead of executing (see the run-dry clamp's "no-op by derivation ... but
+    that has not been EXECUTED" in experiments/ledger.yaml), and batch1's committed
+    20-draw floor is the ruler its whole verdict rests on. Keeping the arity-1 name
+    byte-identical costs one branch and removes the question.
+    """
+    if arity < 1:
+        raise ValueError(f"arity must be >= 1, got {arity}")
+    if arity == 1:
+        return [PLACEBO_COLUMN_NAME]
+    return [f"__placebo_{i}__" for i in range(1, arity + 1)]
+
+
+def screen_draw_groups(
+    df: pd.DataFrame,
+    baseline_columns: list[str],
+    n_draws: int,
+    *,
+    arity: int = DEFAULT_PLACEBO_ARITY,
+    max_self_correlation: float,
+) -> list[list[tuple[str, int, float]]]:
+    """`n_draws` groups of `arity` screened (source_column, block_seed, self_correlation)
+    triples — one group per draw, every column distinct across the whole bank.
+
+    **Arity 1 is exactly `screen_draws`**, one group per triple: same call, same screening
+    order, same substitutions. That identity is deliberate and is what makes an existing
+    arity-1 floor reproducible after this function landed.
+
+    For arity k it screens `n_draws * k` candidates in one pass and chunks them
+    consecutively. Two consequences worth stating rather than discovering:
+
+    - **Each group's members are ADJACENT in `baseline_columns`.** `select_draws` spreads
+      its picks evenly across the column list by position, so a group of 3 tends to be
+      three columns from the same feature GROUP (three `cycle_*` columns, or three
+      `days_since_trough_entry_<lga>` columns). That is a feature, not an accident: a real
+      multi-column candidate is one MECHANISM, and its members are usually related
+      (docs/routines/generator.md, "A candidate is one MECHANISM"). A null built from
+      three unrelated columns would be a weaker analogue of the thing being measured.
+    - **The pools bind `n_draws * arity`, not `n_draws`.** `select_draws` raises above
+      either the baseline column count or `PLACEBO_BLOCK_SEED_POOL`'s size (30), so the
+      maximum draw count at arity k is `floor(30 / k)` — 10 at arity 3, which is exactly
+      what fps-3jj.14 asks for and leaves no headroom above it. Raised as a plain
+      ValueError from `select_draws` with the product in the message.
+
+    What is guaranteed across the bank is DISTINCT SOURCE COLUMNS, not distinct seeds.
+    `candidate_pool`'s fallback tail cycles the seed pool from index 0, so once a primary
+    is substituted away a later draw can reuse an earlier draw's seed on a different
+    column — visible in batch1's own committed arity-1 floor, where seeds 97 and 101 each
+    appear twice after two all-NaN LGA primaries were substituted. Pre-existing, unchanged
+    by arity, and worth knowing when reading a floor: two draws whose sources are strongly
+    correlated AND which share a block order are less independent than the draw count
+    suggests.
+    """
+    if arity < 1:
+        raise ValueError(f"arity must be >= 1, got {arity}")
+    flat = screen_draws(
+        df, baseline_columns, n_draws * arity, max_self_correlation=max_self_correlation
+    )
+    return [flat[i * arity:(i + 1) * arity] for i in range(n_draws)]
+
+
+def make_placebo_frame(
+    df: pd.DataFrame, draw: list[tuple[str, int, float]]
+) -> pd.DataFrame:
+    """One draw's placebo columns as a frame indexed like `df`, named by `placebo_column_names`.
+
+    Each member is built by `make_placebo_series` from its OWN source column and its OWN
+    block seed, so the members are not permuted in lockstep: two columns sharing a seed
+    would share a block ORDER, which would make the pair as correlated as their sources
+    are, for a reason that has nothing to do with how a real candidate's columns relate.
+    """
+    names = placebo_column_names(len(draw))
+    return pd.DataFrame(
+        {
+            name: make_placebo_series(df, source_column, block_seed).rename(name)
+            for name, (source_column, block_seed, _corr) in zip(names, draw, strict=True)
+        },
+        index=df.index,
+    )
