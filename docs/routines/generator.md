@@ -469,11 +469,34 @@ reading a copy of this file that still states that order as a precondition, it i
 
 ## Filing
 
-For each candidate that clears the diversity gate and the redundancy checks:
+**Create the batch's parent bead FIRST** (decided 2026-08-23, batch1). Every batch gets
+one tracking bead — type `epic`, parented to `fps-3jj`, labelled `design` and **never**
+`experiment` (a bead carrying that label enters the launch queue, and the parent has no
+`Batch:`/`Module:` lines to parse, so the routine would claim it and abort it on the
+first night). The candidate beads are its children, and so are the batch-level tasks that
+only become possible once the queue drains. `fps-3jj.18` is the worked example; it holds
+the freeze parameters, the batch's own detection bar, the candidate table in launch order,
+and the expected-yield statement written *before* any result existed.
+
+Two children go in at filing time, not later, because neither has a scheduled task and
+both are easy to forget once the nightly runs start producing dossiers:
+
+- **Run the batch retrospective** (`fps-3jj.18.1` is the template) — blocked by every
+  candidate bead. This is the aim-(b) payoff artifact and the only place the leaderboard,
+  the family-wise gate, the confidence calibration and the mechanism-family concentration
+  get written down.
+- **Act on the outcome** (`fps-3jj.18.2`) — blocked by the retrospective. Graduate,
+  iterate, or record as mapped ground; a graduation is a separate `features.py` PR, never
+  an inline edit.
+
+Per-candidate *dossier* runs get no bead: the dossier routine writes those unsupervised.
+
+Then, for each candidate that clears the diversity gate and the redundancy checks:
 
 1. Write `experiments/candidates/<batch>/<NAME>.py` in the format above; commit
    straight to `main` (`experiments/**` is PR-exempt).
-2. `bd create` one issue per candidate, labelled `experiment` — the launch routine
+2. `bd create` one issue per candidate, labelled `experiment`, `--parent` the batch bead
+   — the launch routine
    (fps-3jj.5, `experiments/pipeline/launch.py`) queries `bd ready --label experiment`
    and is structurally invisible to the chore/polish worker without this label.
    Description must carry `HYPOTHESIS`, `TARGET`, `PREDICTED_SIGNATURE`, both
@@ -487,6 +510,16 @@ For each candidate that clears the diversity gate and the redundancy checks:
    ```
    Both paths must resolve inside `experiments/` (`<batch>` matching the batch dir
    this candidate's module was just written under is what makes that true).
+
+   **Creation order is run order.** `launch.py` claims with
+   `bd ready --label experiment --unassigned --sort oldest -n 1`, so the sequence you
+   `bd create` in is the sequence the nights run in. File highest-conviction first, so a
+   runner bug or a genuine surprise lands on the candidate that matters most rather than
+   on the one you cared least about.
+
+   Also record each candidate's **column count** in its description — `fps-3jj.14`'s
+   arity calibration is sized from the batch's real arities, and reading them back off
+   the modules later is strictly worse than having the generator state them.
 3. `bd dolt push` after filing the batch.
 
 ## Batch record
