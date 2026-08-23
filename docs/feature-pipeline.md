@@ -104,16 +104,16 @@ the judgement session can crash and resume without losing the facts.
 - **Fingerprint everything.** `baseline_fingerprint()` / `LOCKED_FEATURE_FINGERPRINT` stamp a
   run's baseline identity into its meta so two runs' comparability is a mechanical `==` check,
   not an eyeball one (`bd recall baseline-fingerprint-before-comparing-runs`).
-- **Outcome-status taxonomy** (`experiments/pipeline/runner.py`): `rejected` /
+- **Outcome-status taxonomy** (`experiments/pipeline/runner.py`): `graded` /
   `disqualified` / `aborted_candidate` are TERMINAL — the candidate got a fair hearing.
   `aborted_pipeline` / `aborted_environment` are RETRYABLE — it didn't, and the claim goes
   back on the queue (bounded by `fps-rtd`'s retry budget, one retry, then `blocked`). Every
   downstream consumer (dossier, retrospective) treats these differently: folding a retryable
-  abort into `rejected` would misreport a candidate that was never actually tested.
+  abort into `graded` would misreport a candidate that was never actually tested.
 - **`graduated` is a human-only edit.** No pipeline stage ever writes `outcome: graduated`
   into `ledger.yaml` — graduation means landing code in `fuel_signal/features.py`, a separate,
-  deliberate PR. The pipeline's own terminal verdict for a feature that clears the arbiter is
-  still just `rejected`/`disqualified` from ITS run; a human updates the ledger entry by hand
+  deliberate PR. The pipeline's own terminal status for a feature that clears the arbiter is
+  still just `graded`/`disqualified` from ITS run; a human updates the ledger entry by hand
   once the graduation PR lands.
 - **Noise floor is now a placebo-column null (`fps-awz`, reopening the decision this bullet
   used to record).** `noise_floor.py` fits the SAME frozen baseline at a SINGLE fixed seed

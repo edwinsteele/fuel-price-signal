@@ -12,7 +12,7 @@
   "leaderboard": [
     {
       "candidate": "tgp_delta_7d",
-      "status": "rejected",
+      "status": "graded",
       "delta_cpl_held": 0.005851407340855985,
       "effect_resolved": false,
       "zone_resolved": null,
@@ -27,7 +27,7 @@
   "outcome_tally": {
     "total_candidates_filed": 1,
     "dossiered_by_status": {
-      "rejected": 1
+      "graded": 1
     },
     "never_run": 0,
     "retryable_incomplete": 0,

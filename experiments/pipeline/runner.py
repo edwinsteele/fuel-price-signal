@@ -24,9 +24,9 @@ was captured under) falls back to a full refit rather than aborting — see
 `_load_baseline_cache`'s docstring.
 
 Outcome taxonomy (five codes — see fps-3jj):
-  rejected            — ran to completion. The default outcome; results.json's
+  graded              — ran to completion. The default outcome; results.json's
                          effect_resolved / zone carry the actual verdict. A
-                         graduate candidate still closes "rejected" — graduation
+                         graduate candidate still closes "graded" — graduation
                          is a separate, human-initiated PR.
   disqualified        — the differential PIT test caught a leak.
   aborted_candidate   — add_columns/add_axis raised, an INPUTS/COLUMNS
@@ -129,7 +129,7 @@ from experiments.pipeline.validate import (
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import TARGET_COLUMNS, baseline_fingerprint, load_features
 
-STATUS_REJECTED = "rejected"
+STATUS_GRADED = "graded"
 STATUS_DISQUALIFIED = "disqualified"
 STATUS_ABORTED_CANDIDATE = "aborted_candidate"
 STATUS_ABORTED_PIPELINE = "aborted_pipeline"
@@ -141,7 +141,7 @@ STATUS_ABORTED_ENVIRONMENT = "aborted_environment"
 # it reaches one of these, so a LATER, unrelated re-run of the same bead (e.g.
 # manually re-queued against a re-frozen batch) isn't born already at budget
 # (fps-rtd PR #304 review finding #3).
-TERMINAL_STATUSES = frozenset({STATUS_REJECTED, STATUS_DISQUALIFIED, STATUS_ABORTED_CANDIDATE})
+TERMINAL_STATUSES = frozenset({STATUS_GRADED, STATUS_DISQUALIFIED, STATUS_ABORTED_CANDIDATE})
 
 # Statuses where the candidate never got a fair hearing, so its claim must go
 # back on the queue rather than be consumed. Read by launch.find_stale_claims.
@@ -584,7 +584,7 @@ def run_candidate(
 
     wall_seconds = time.perf_counter() - t0
     results = {
-        "status": STATUS_REJECTED,
+        "status": STATUS_GRADED,
         "candidate": {
             "name": name,
             "hypothesis": getattr(candidate, "HYPOTHESIS", None),
@@ -650,7 +650,7 @@ def run_candidate(
         post_bd_comment(bead_id, _summarise_for_comment(results))
 
     return RunResult(
-        status=STATUS_REJECTED, candidate_name=name, wall_seconds=wall_seconds, results=results,
+        status=STATUS_GRADED, candidate_name=name, wall_seconds=wall_seconds, results=results,
         results_path=results_path, rowpreds_path=rowpreds_path, fills_path=fills_path,
     )
 

@@ -30,6 +30,7 @@ from experiments.pipeline.runner import (
     STATUS_ABORTED_ENVIRONMENT,
     STATUS_ABORTED_PIPELINE,
     STATUS_DISQUALIFIED,
+    STATUS_GRADED,
     FoldGeometryError,
     RunResult,
     _build_axis_lookup,
@@ -722,7 +723,7 @@ def test_finish_without_bead_id_posts_nothing(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "written,expected",
     [
-        ('{"status": "rejected"}', "rejected"),
+        ('{"status": "graded"}', "graded"),
         ('{"status": "aborted_pipeline"}', "aborted_pipeline"),
         ('{"error": "no status key"}', None),
         ('{ truncated mid-write', None),          # JSONDecodeError
@@ -1065,7 +1066,7 @@ def test_run_candidate_persists_baseline_cache_after_successful_run(tmp_path, mo
         batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
     )
 
-    assert result.status == "rejected"
+    assert result.status == STATUS_GRADED
     persisted = _load_baseline_cache(batch_dir, verbose=False)
     assert persisted.fingerprint == new_cache.fingerprint
     assert persisted.per_fold == new_cache.per_fold
@@ -1092,7 +1093,7 @@ def test_run_candidate_records_the_baseline_fingerprint_it_was_graded_against(
         batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
     )
 
-    assert result.status == "rejected"
+    assert result.status == STATUS_GRADED
     frozen = json.loads((batch_dir / "baseline_columns.json").read_text())
     meta = result.results["meta"]
     assert meta["n_baseline_columns"] == len(frozen)
@@ -1116,7 +1117,7 @@ def test_run_candidate_records_the_tank_params_it_was_graded_at(tmp_path, monkey
         batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
     )
 
-    assert result.status == "rejected"
+    assert result.status == STATUS_GRADED
     assert result.results["meta"]["tank_params"] == "50/3.571/7d/10%"
 
 
@@ -1139,7 +1140,7 @@ def test_run_candidate_does_not_persist_when_baseline_cache_is_none(tmp_path, mo
 def test_summarise_for_comment_reports_effect_and_zone():
     results = {
         "candidate": {"name": "cand"},
-        "status": "rejected",
+        "status": STATUS_GRADED,
         "effect_resolved": True,
         "effect_delta_cpl_held": -0.5,
         "zone": {"resolved": True, "target_delta_cpl_own": -1.0, "other_delta_cpl_own": 0.1},
@@ -1162,7 +1163,7 @@ def test_summarise_for_comment_handles_grade_run_failure_shape():
     """
     results = {
         "candidate": {"name": "cand"},
-        "status": "rejected",
+        "status": STATUS_GRADED,
         "effect_resolved": None,
         "effect_delta_cpl_held": None,
         "grading_error": "KeyError('cpl_held')",
@@ -1196,7 +1197,7 @@ def test_run_candidate_posts_bd_comment_even_when_grading_failed(monkeypatch):
     )
     results = {
         "candidate": {"name": "cand"},
-        "status": "rejected",
+        "status": STATUS_GRADED,
         "effect_resolved": effect_resolved,
         "effect_delta_cpl_held": effect_delta,
         "grading_error": grading_error,

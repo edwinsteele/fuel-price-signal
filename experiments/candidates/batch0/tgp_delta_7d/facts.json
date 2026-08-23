@@ -33,7 +33,7 @@
       46
     ],
     "wall_seconds": 1543.2986615419995,
-    "status": "rejected",
+    "status": "graded",
     "bead_id": null,
     "n_baseline_columns": 54,
     "baseline_fingerprint": "54:1a6ec2d84a69",

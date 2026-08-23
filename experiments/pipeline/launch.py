@@ -217,7 +217,7 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
        aborts retryably again, action is "block" instead of "release" -- see
        module docstring for why an unbounded release starves the whole queue.
 
-    3. Finished with a TERMINAL_STATUSES verdict (rejected / disqualified /
+    3. Finished with a TERMINAL_STATUSES verdict (graded / disqualified /
        aborted_candidate) AND this claim's retry_count metadata is still
        nonzero from an earlier abort in the SAME cycle: action "reset_retry"
        clears the counter (fps-rtd PR #304 review finding #3) so a LATER,

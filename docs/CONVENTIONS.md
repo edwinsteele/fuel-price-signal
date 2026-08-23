@@ -179,7 +179,7 @@ writer routes through it rather than reimplementing the check:
 | `experiments/results.csv` (`log_experiment`) | `tank_params` column, empty when no backtest ran |
 | `RealisedResult.meta` (`run_paired_realised_backtest`) | `meta["tank_params"]`, always present — `tank` is resolved (never `None`) before the stamp |
 | `runner.py`'s `results.json` | `meta["tank_params"]`, read straight off `RealisedResult.meta` |
-| `dossier_tables.build_facts`'s `facts.json` | `provenance["tank_params"]`; **raises** if `status=="rejected"` (a CPL is about to be written) and the source `results.json` has none |
+| `dossier_tables.build_facts`'s `facts.json` | `provenance["tank_params"]`; **raises** if `status=="graded"` (a CPL is about to be written) and the source `results.json` has none |
 | `batch_freeze.freeze_batch`'s `freeze.json` | `tank_params`, the batch's declared cadence contract — the same role `baseline_fingerprint` plays for column identity |
 | `noise_floor.compute_noise_floor`'s `noise_floor.json` | `tank_params`, cross-checked between both halves of every seed pair the same way `n_windows` already is |
 

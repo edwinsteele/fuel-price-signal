@@ -71,6 +71,7 @@ from experiments.pipeline.runner import (
     CANDIDATE_ARM,
     DEFAULT_MIN_ROW_CELL_N,
     RETRYABLE_STATUSES,
+    STATUS_GRADED,
     read_run_status,
 )
 from fuel_signal.dates import date_from_int
@@ -185,17 +186,17 @@ def build_facts(run_dir: pathlib.Path) -> dict:
     batch_dir = pathlib.Path(meta["batch_dir"]) if meta.get("batch_dir") else None
 
     rowpreds, fills = None, None
-    if status == "rejected":
+    if status == STATUS_GRADED:
         for filename in (ROWPREDS_FILENAME, FILLS_FILENAME):
             if not (run_dir / filename).exists():
-                # status=="rejected" means runner.py's success path ran, which writes both
+                # status=="graded" means runner.py's success path ran, which writes both
                 # parquet artifacts BEFORE results.json (see runner.py's "write artifacts before
                 # grading" comment) — so this means something removed them after the fact (a
                 # manual `git clean`, disk issue, etc.), not a normal in-progress race. Fail with
                 # a message that says so, rather than a bare pyarrow FileNotFoundError the --scan
                 # loop just logs.
                 raise FileNotFoundError(
-                    f"{run_dir}: status=='rejected' but {filename} is missing — "
+                    f"{run_dir}: status=='graded' but {filename} is missing — "
                     "expected artifact was removed after the run completed."
                 )
         rowpreds = pd.read_parquet(run_dir / ROWPREDS_FILENAME)
@@ -228,7 +229,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
         "noise_band": _noise_band(results, batch_dir),
     }
 
-    if status != "rejected":
+    if status != STATUS_GRADED:
         facts["status_note"] = (
             f"status={status!r} — run did not reach the scoring stages; headline/breakdowns are "
             f"unavailable. error: {results.get('error')}"
@@ -236,7 +237,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
         return facts
 
     if not facts["provenance"]["tank_params"]:
-        # fps-15c: status=="rejected" means headline/breakdowns are about to carry
+        # fps-15c: status=="graded" means headline/breakdowns are about to carry
         # realised cpl_own/cpl_held values, and results.json's meta has no
         # tank_params to stamp them with — refuse rather than write a facts.json a
         # reader can't tell apart from a 7d one. Most likely an old results.json
@@ -244,7 +245,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
         # that built its own results.json by hand and skipped the shared stamping
         # path (experiments/lib/realised.py's meta, propagated by runner.py).
         raise ValueError(
-            f"{run_dir}: results.json has status=='rejected' (a realised CPL is about to "
+            f"{run_dir}: results.json has status=='graded' (a realised CPL is about to "
             "be written into facts.json) but its meta carries no tank_params — refusing "
             "(fps-15c). Backfill the run's results.json with the tank it actually ran at, "
             "or re-run it against current code."
@@ -287,7 +288,7 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         "baseline_fingerprint": meta.get("baseline_fingerprint"),
         # The cadence every realised CPL in this dossier (headline, breakdowns) was
         # produced at (fps-15c). build_facts() below refuses to proceed past this
-        # point without it whenever status=="rejected" — a rejected run is exactly
+        # point without it whenever status=="graded" — a graded run is exactly
         # the case where headline/breakdowns are about to carry a CPL.
         "tank_params": meta.get("tank_params"),
     }
@@ -295,7 +296,7 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
 
 def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
     status = results["status"]
-    if status == "rejected":
+    if status == STATUS_GRADED:
         pit_test = "passed — reached the WFCV/realised stages, so the differential PIT truncation test found no leak"
         inputs_check = "passed — INPUTS declaration matched every column add_columns/add_axis actually read"
     elif status == "disqualified":

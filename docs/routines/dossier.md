@@ -134,7 +134,7 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      `facts["noise_band"]` — **not a judgement call** (`fps-3jj.17`, decided 2026-08-23):
      - `status == "disqualified"` → `outcome: disqualified`.
      - `status == "aborted_candidate"` → `outcome: aborted_candidate`.
-     - `status == "rejected"` — the pipeline's own name for "ran to completion and reached the
+     - `status == "graded"` — the pipeline's own name for "ran to completion and reached the
        scoring stages" (`runner.py`'s outcome taxonomy comment; it says nothing yet about the
        claim's merit) — apply the **rejected-vs-inconclusive split**:
        - `facts["noise_band"]["available"]` is `false` → `outcome: rejected`. No noise floor
@@ -175,7 +175,7 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      touches `fuel_signal/features.py`; graduation is a separate, human-initiated PR, and a human
      updates this same ledger entry's `outcome` to `graduated` by hand when that PR lands (see how
      the `tgp_delta_7d` entry already reads `graduated` even though every pipeline run of it would
-     have closed `rejected`).
+     have closed with status `graded`).
    - `evidence`: the run directory's path, relative to the repo root.
 
 5. **Prepend one row to `experiments/INDEX.md`'s table** in the same pass (its own convention: the

@@ -35,7 +35,7 @@ Four things this module produces, per the fps-3jj.8 bead body:
      A module with a results.json in a RETRYABLE status has not had a fair hearing yet either
      (still cycling through launch.py's retry budget, or exhausted and sitting `blocked` in bd —
      this module reads disk only, so it cannot tell those two apart; `docs/routines/retrospective.md`
-     flags that as a known gap rather than guessing). Folding either into `rejected` would bias the
+     flags that as a known gap rather than guessing). Folding either into `graded` would bias the
      calibration read below.
 
   4. Confidence calibration — did CONFIDENCE_EFFECT/CONFIDENCE_ZONE predict what actually
@@ -187,7 +187,7 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
             continue
         facts = entry["facts"]
         # dossier_tables.build_facts writes headline: None (not a missing key) for every
-        # terminal status other than "rejected" (disqualified / aborted_candidate never
+        # terminal status other than "graded" (disqualified / aborted_candidate never
         # reach the scoring stages) — `.get("headline", {})` doesn't catch that, since the
         # key IS present, just null. `or {}` does.
         headline = facts.get("headline") or {}
