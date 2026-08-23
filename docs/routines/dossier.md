@@ -108,7 +108,20 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      yet, a partial `--fold-subset` floor, or a `baseline_fingerprint` mismatch against a
      stale/re-locked floor — and the reason string already says which); if available, report
      `candidate_percentile_better_than_noise` as-is (already oriented so higher = better —
-     don't re-derive or re-sign it).
+     don't re-derive or re-sign it). If `facts["decision_flips"]["computed"]` is `true` (arity 2+
+     and the noise-band call isn't a clean reject — `experiments/pipeline/dossier_tables.py`'s
+     `_decision_flips`, fps-gez), report `n_flips` and the per-fold `n_baseline_only` /
+     `n_candidate_only` / `flip_cpl_baseline` / `flip_cpl_candidate` / `flip_cpl_delta` table
+     verbatim — this is the buy/wait divergence between R0 and candidate, diffed directly off
+     `fills.parquet` (not a rowpreds proba-threshold crossing — see `experiments/lib/flips.py`'s
+     module docstring for why that substrate is the wrong one here: rowpreds' WFCV-screen proba is
+     a different, uncalibrated fit from the one that actually drove the realised decision).
+     **Same rule as `per_axis`: flip detail is colour illustrating a mechanism, and must never
+     reach the Judgement section as a second arbiter overriding the noise-band call** — one vivid
+     flip (a station catching a big cheap fill one day early) is easy to find more convincing than
+     the aggregate test, and it isn't. If `computed` is `false`, state the `reason` verbatim rather
+     than omitting the field — a candidate with only 1 column, or a clean reject, not having this
+     breakdown is expected, not a gap in this run.
    - **Judgement** (your reasoning, visibly separated — a `## Judgement` heading is enough):
      - The `PREDICTED_SIGNATURE` grading verdict + explanation you just wrote.
      - **`not_tested`** — adjacent ground this run does *not* rule out. This is the highest-value
