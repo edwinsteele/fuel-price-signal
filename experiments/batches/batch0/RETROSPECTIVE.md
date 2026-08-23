@@ -32,7 +32,7 @@ Ranked by noise-band percentile (batch0 has a noise floor — `fps-3jj.9`, `n_dr
 
 | candidate | status | delta_cpl_held | noise-band percentile | clears batch threshold? |
 |---|---|---|---|---|
-| tgp_delta_7d | rejected | +0.00585 | 40.0 | no |
+| tgp_delta_7d | graded | +0.00585 | 40.0 | no |
 
 **Multiple-comparisons note:** `family_wise_percentile_threshold` at n=1 dossiered
 candidate is 95.0 — the Bonferroni correction reduces to the plain single-draw bar
@@ -45,7 +45,7 @@ is not a case where the correction changes the verdict.
 
 | status | count |
 |---|---|
-| rejected | 1 |
+| graded | 1 |
 
 `never_run` / `retryable_incomplete` / `pending_dossier` are all 0 — the tally is
 clean, batch0 is genuinely finished.

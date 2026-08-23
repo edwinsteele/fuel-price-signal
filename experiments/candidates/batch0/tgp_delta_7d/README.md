@@ -60,7 +60,7 @@ to it*, not the code.
 Transcribed from `facts.json` — no new arithmetic.
 
 **Provenance:** batch `batch0`, snapshot 2026-08-10, seeds [42, 43, 44, 45, 46]
-(realised stage uses 42 alone), wall 1543.3s, status `rejected`.
+(realised stage uses 42 alone), wall 1543.3s, status `graded`.
 
 **Headline (realised CPL, held τ — the arbiter):**
 
