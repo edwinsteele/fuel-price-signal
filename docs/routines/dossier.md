@@ -141,8 +141,18 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          means no ruler to grade "below the instrument's resolution" against, so there is nothing
          to call inconclusive — same as before this rule existed. Note the unavailability in the
          README as usual (Step 1 above); don't invent a floor to unblock this decision.
+       - `facts["noise_band"]["available"]` is `true` but `candidate_z_vs_band` or
+         `single_candidate_z_threshold` is `null` → `outcome: rejected`, same fallback and same
+         reasoning as the `available: false` case above. This state is real, not hypothetical: the
+         batch has a `noise_floor.json`, but `_noise_band` couldn't estimate a band std from it
+         (fewer than 2 draws, or — even with `n_draws >= 2` — every draw landing on the same
+         value, `band_std == 0.0`), so there is no ruler to compare `delta_cpl_held` against
+         despite `available` reading `true`. Don't treat a present-but-null `z`/`t` as "inside the
+         band" (that's what `-t < z < t` is for, and it doesn't apply when either side is `null`)
+         — this branch must be checked **before** the three regions below, not folded into them.
        - Otherwise read `z = facts["noise_band"]["candidate_z_vs_band"]` and
-         `t = facts["noise_band"]["single_candidate_z_threshold"]` — both already computed by
+         `t = facts["noise_band"]["single_candidate_z_threshold"]` (both non-null at this point) —
+         already computed by
          `dossier_tables._noise_band` (`t` is `family_wise_z_threshold(n_candidates=1, n_draws=...)`,
          i.e. the *single*-candidate detection bar, docs/CONVENTIONS.md's "-0.15 c/L judged
          singly" for `batch1`; deliberately **not** the batch-level `clears_family_wise_threshold`

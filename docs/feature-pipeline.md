@@ -155,7 +155,9 @@ the judgement session can crash and resume without losing the facts.
   draws. `noise_floor.json` stamps every draw's `self_correlation` so this is visible per
   floor rather than only in prose.
 - **The gate reads distance from the band, not empirical rank (`fps-awz`).**
-  `retrospective.py`'s `family_wise_z_threshold` is a Bonferroni-corrected, t-distributed
+  `dossier_tables.py`'s `family_wise_z_threshold` (moved there from `retrospective.py`,
+  `fps-3jj.17`, so `dossier_tables._noise_band()` can attach a per-run threshold to
+  `facts.json`; `retrospective.py` imports it) is a Bonferroni-corrected, t-distributed
   critical value in band-standard-deviation space; `clears_family_wise_threshold` compares
   each candidate's `candidate_z_vs_band` against it. The empirical percentile
   (`candidate_percentile_better_than_noise`) is still reported as descriptive colour but no
@@ -172,8 +174,9 @@ the judgement session can crash and resume without losing the facts.
   (`docs/CONVENTIONS.md`).
 - **Multiple comparisons in the retrospective.** Grading N candidates against the SAME noise
   band and asking "did the best one beat noise?" is a different, easier-to-satisfy-by-chance
-  question than grading one candidate alone. `retrospective.py`'s `family_wise_z_threshold`
-  applies a Bonferroni correction (in band-standard-deviation space, `fps-awz`) so a batch's
+  question than grading one candidate alone. `retrospective.py` calls `family_wise_z_threshold`
+  (imported from `dossier_tables.py`, `fps-3jj.17`) with the whole batch's `n_candidates` here —
+  applying a Bonferroni correction (in band-standard-deviation space, `fps-awz`) so a batch's
   leaderboard doesn't silently promote a noise delta to a finding just because it was the
   best of several; `family_wise_percentile_threshold` is still computed too, purely as the
   descriptive-colour percentile equivalent.
