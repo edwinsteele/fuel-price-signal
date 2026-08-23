@@ -24,7 +24,12 @@ from experiments.pipeline.redundancy import (
     usable_predictors,
     write_batch_record,
 )
-from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS, NETWORK_FEATURE_COLUMNS
+from fuel_signal.features import (
+    FEATURE_COLUMNS,
+    LGA_FEATURE_COLUMNS,
+    LOCKED_FEATURE_COLUMNS,
+    NETWORK_FEATURE_COLUMNS,
+)
 
 
 def _frame(n: int = 400) -> pd.DataFrame:
@@ -178,12 +183,17 @@ def test_gate_is_sign_blind(tmp_path):
     assert rho.iloc[0]["abs_rho"] > 0.99
 
 
-def test_existing_column_set_excludes_rejected_brand_troughs():
-    """Reconstructibility from an evaluated-and-REJECTED group is not evidence a
-    candidate is redundant with the model."""
+def test_existing_column_set_is_exactly_the_lock():
+    """Reconstructibility from a column the MODEL never sees is not evidence a candidate
+    is redundant — so the predictor set is LOCKED_FEATURE_COLUMNS, single-sourced, and
+    carries no computed-but-non-model column."""
     existing = existing_column_set()
 
-    assert "tgp_delta_7d" in existing
+    assert existing == list(LOCKED_FEATURE_COLUMNS)
+    # tgp_delta_7d is computed into features.csv but registered NON_MODEL_COLUMNS
+    # (evaluated-inconclusive, no TGP feature is in the lock) — see bd fps-x0f.
+    assert "tgp_delta_7d" not in existing
+    # ...and the Phase 4b brand troughs, evaluated and rejected, stay out for the same reason.
     assert not [c for c in existing if c.startswith("days_since_trough_entry_")
                 and c not in LGA_FEATURE_COLUMNS]
 
@@ -254,7 +264,7 @@ def test_a_candidate_that_is_an_existing_column_scores_block_r2_one(tmp_path):
     as perfectly reconstructible. This is what the batch0 smoke test asserts by hand."""
     frame = _frame()
     mod = _write_module(tmp_path, "same", _SIMPLE.format(
-        name="same", family="f1", col="tgp_copy", src="tgp_delta_7d", mult=1.0))
+        name="same", family="f1", col="phase_copy", src="cycle_pct_through", mult=1.0))
 
     row = block_r2(compute_candidate_columns([mod], frame, validate=False), frame).iloc[0]
 

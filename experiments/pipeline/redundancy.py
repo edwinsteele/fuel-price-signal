@@ -40,10 +40,7 @@ from experiments.lib.io import to_jsonable
 from experiments.pipeline.validate import load_candidate_module, validate_candidate
 from fuel_signal.features import (
     DEFAULT_FEATURES_CSV,
-    FEATURE_COLUMNS,
-    LGA_FEATURE_COLUMNS,
-    NETWORK_FEATURE_COLUMNS,
-    TGP_FEATURE_COLUMNS,
+    LOCKED_FEATURE_COLUMNS,
     load_features,
 )
 
@@ -76,13 +73,28 @@ SAMPLE_SEED = 42
 
 
 def existing_column_set() -> list[str]:
-    """The columns a candidate must not be reconstructible from.
+    """The columns a candidate must not be reconstructible from: the lock, and only the lock.
 
-    Per generator.md: the locked 54 plus `tgp_delta_7d`. Deliberately excludes the Phase
-    4b brand troughs — they are evaluated-and-rejected, so being able to reconstruct a
-    candidate from them is not evidence the candidate is redundant with the MODEL.
+    Single-sourced from ``fuel_signal.features.LOCKED_FEATURE_COLUMNS`` — the same symbol
+    ``batch_freeze.resolve_baseline_columns`` writes into a batch's ``baseline_columns.json``
+    and the runner's R0 arm trains on (docs/CONVENTIONS.md § "The baseline feature set is
+    declared, never discovered"). Block R^2 asks whether a candidate adds anything the MODEL
+    does not already have, so the predictor set has to be the set the model actually gets
+    rather than a hand-rolled superset of it.
+
+    That excludes every computed-but-non-model column: the Phase 4b brand troughs, and — since
+    this function used to include it — ``tgp_delta_7d``, registered in
+    ``fuel_signal.features.NON_MODEL_COLUMNS`` as ``evaluated-inconclusive`` and explicitly not
+    in the lock. Being reconstructible from a column R0 never sees is not evidence a candidate
+    is redundant with anything. Keeping it in biased the screen against the one lead
+    ``experiments/ledger.yaml`` rates highest among still-open ground (the TGP gap against
+    depth-remaining, which bd ``fps-x0f`` exists to revisit), and scored batch0's own
+    ``tgp_delta_7d`` at block R^2 = 1.000 — a predictor of itself.
+
+    PAIRWISE_RHO_THRESHOLD above was already derived from these 54 columns' own correlation
+    structure, so this is what the rest of the module already assumed.
     """
-    return list(FEATURE_COLUMNS) + list(LGA_FEATURE_COLUMNS) + list(NETWORK_FEATURE_COLUMNS) + list(TGP_FEATURE_COLUMNS)
+    return list(LOCKED_FEATURE_COLUMNS)
 
 
 class DuplicateCandidateColumn(RuntimeError):

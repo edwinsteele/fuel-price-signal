@@ -337,12 +337,24 @@ the target is caught here rather than five nights later.
    pairs are a hard gate. Two *different* candidates that are 0.95 correlated waste a
    slot; two columns inside one candidate do not.
 2. **R² of each candidate regressed on the existing column set.** A candidate that's
-   90% reconstructible from `FEATURE_COLUMNS + LGA_FEATURE_COLUMNS +
-   NETWORK_FEATURE_COLUMNS + TGP_FEATURE_COLUMNS` should be reworked now, not filed,
-   queued, and disqualified five nights later. **For a multi-column candidate, regress the
-   group as a block** (its columns jointly against the existing set) — that matches how it
-   will be evaluated. A member that is individually reconstructible is not disqualifying
-   if the group as a whole is not.
+   90% reconstructible from `LOCKED_FEATURE_COLUMNS` — the 54 columns the R0 arm actually
+   trains on, single-sourced from the same symbol `batch_freeze` writes into a batch's
+   `baseline_columns.json` — should be reworked now, not filed, queued, and disqualified
+   five nights later.
+
+   **The predictor set is the lock and nothing else.** Computed-but-non-model columns are
+   deliberately excluded: the Phase 4b brand troughs, and `tgp_delta_7d` (registered
+   `NON_MODEL_COLUMNS`, `evaluated-inconclusive`). Being reconstructible from a column R0
+   never sees says nothing about whether a candidate is redundant with the model. An earlier
+   revision of this file named `FEATURE_COLUMNS + LGA_FEATURE_COLUMNS +
+   NETWORK_FEATURE_COLUMNS + TGP_FEATURE_COLUMNS` here, and the screen scored `tgp_delta_7d`
+   itself at block R² = 1.000 as a result — biasing the check against the very ground bd
+   `fps-x0f` exists to revisit. They remain fair game as an `INPUTS` read; they are just not
+   evidence of redundancy.
+
+   **For a multi-column candidate, regress the group as a block** (its columns jointly
+   against the existing set) — that matches how it will be evaluated. A member that is
+   individually reconstructible is not disqualifying if the group as a whole is not.
 
    **"As a block" means the MEAN of the members' R², and can only mean that.** For OLS,
    regressing several targets jointly against a shared predictor set gives coefficients
