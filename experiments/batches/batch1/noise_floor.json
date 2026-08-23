@@ -1,135 +1,206 @@
 {
   "deltas_cpl_held": [
-    -0.059449613113116584,
-    -0.036485077993603454,
-    0.09490499663814944,
-    -0.00661863136951979,
-    -0.00432158383111414,
-    -0.06657634151079606,
-    -0.08503292511656468,
-    0.007713214945539448,
-    0.11764588324862757,
-    0.010928564252935757,
-    -0.07095961081233781,
-    0.11435561467573052,
-    0.1264399937897167,
-    0.013399097666649595,
-    -0.06822192982099295,
-    -0.015871999620827637,
-    -0.20068903743143096,
-    -0.03384630865923555,
-    -0.04488742204566165,
-    0.029730873384465895
+    -0.03139700865619943,
+    -0.03276357709876265,
+    -0.004665142997453131,
+    0.1253976263845118,
+    -0.1273463498050944,
+    0.11581952373651916,
+    0.18353713101657831,
+    0.08264948874028732,
+    -0.08675283642023146,
+    0.026541100773016524
   ],
   "null_method": "placebo_column",
-  "n_draws": 20,
+  "n_draws": 10,
+  "n_placebo_columns": 3,
   "seed": 42,
   "placebo_draws": [
     {
+      "draw": 1,
       "source_column": "cycle_pct_through",
       "block_seed": 97,
       "self_correlation": -0.023092669468697237
     },
     {
-      "source_column": "cycle_last_min_cents",
+      "draw": 1,
+      "source_column": "cycle_mean_length",
       "block_seed": 101,
-      "self_correlation": 0.037351942906069815
+      "self_correlation": 0.18307303607863415
     },
     {
-      "source_column": "cycle_peak_count",
+      "draw": 1,
+      "source_column": "cycle_last_max_cents",
       "block_seed": 103,
-      "self_correlation": -0.015938598571156235
+      "self_correlation": -0.04053869340562651
     },
     {
-      "source_column": "station_minus_last_max_cents",
+      "draw": 2,
+      "source_column": "cycle_peak_count",
       "block_seed": 107,
-      "self_correlation": 0.08764322288435673
+      "self_correlation": -0.02926107784084579
     },
     {
-      "source_column": "station_minus_lga_mean_cents",
+      "draw": 2,
+      "source_column": "station_minus_last_min_cents",
       "block_seed": 109,
-      "self_correlation": 0.2749914633608442
+      "self_correlation": 0.11287951196744585
     },
     {
-      "source_column": "stickiness_score",
+      "draw": 2,
+      "source_column": "station_minus_sydney_avg_cents",
       "block_seed": 113,
-      "self_correlation": 0.4633992729569151
+      "self_correlation": 0.32726173578992174
     },
     {
-      "source_column": "days_since_trough_entry_blacktown",
+      "draw": 3,
+      "source_column": "station_minus_lga_mean_cents",
       "block_seed": 127,
-      "self_correlation": -0.07206628893466
+      "self_correlation": 0.27675675430788343
     },
     {
-      "source_column": "days_since_trough_entry_burwood",
+      "draw": 3,
+      "source_column": "station_minus_brand_mean_cents",
       "block_seed": 131,
-      "self_correlation": 0.003530289420349767
+      "self_correlation": 0.1868525880178067
     },
     {
-      "source_column": "days_since_trough_entry_canada_bay",
+      "draw": 3,
+      "source_column": "stickiness_score",
       "block_seed": 137,
-      "self_correlation": -0.01853378772207527
+      "self_correlation": 0.4676789603305944
     },
     {
-      "source_column": "days_since_trough_entry_cumberland",
+      "draw": 4,
+      "source_column": "days_since_trough_entry_blacktown",
       "block_seed": 139,
-      "self_correlation": -0.015829509221573574
+      "self_correlation": -0.06837543536389629
     },
     {
-      "source_column": "days_since_trough_entry_hawkesbury",
-      "block_seed": 149,
-      "self_correlation": -0.016488031106500857
-    },
-    {
-      "source_column": "days_since_trough_entry_inner_west",
+      "draw": 4,
+      "source_column": "days_since_trough_entry_camden",
       "block_seed": 151,
-      "self_correlation": -0.011433835852277242
+      "self_correlation": 0.008700151645966351
     },
     {
-      "source_column": "days_since_trough_entry_north_sydney",
+      "draw": 4,
+      "source_column": "days_since_trough_entry_canada_bay",
+      "block_seed": 157,
+      "self_correlation": -0.0072745843254200466
+    },
+    {
+      "draw": 5,
+      "source_column": "days_since_trough_entry_canterbury_bankstown",
       "block_seed": 163,
-      "self_correlation": 0.020397221880014513
+      "self_correlation": 0.05385201970308471
     },
     {
-      "source_column": "days_since_trough_entry_penrith",
+      "draw": 5,
+      "source_column": "days_since_trough_entry_fairfield",
       "block_seed": 167,
-      "self_correlation": 0.029088804892273838
+      "self_correlation": -0.036584334244039694
     },
     {
-      "source_column": "days_since_trough_entry_rockdale",
+      "draw": 5,
+      "source_column": "days_since_trough_entry_hawkesbury",
       "block_seed": 173,
-      "self_correlation": -0.011775399812214506
+      "self_correlation": 0.02886747234822797
     },
     {
-      "source_column": "days_since_trough_entry_sutherland_shire",
-      "block_seed": 179,
-      "self_correlation": 0.08624561318618561
+      "draw": 6,
+      "source_column": "days_since_trough_entry_ku_ring_gai",
+      "block_seed": 181,
+      "self_correlation": 0.01835919034064208
     },
     {
-      "source_column": "days_since_trough_entry_woollahra",
-      "block_seed": 191,
-      "self_correlation": 0.02394175946525138
-    },
-    {
-      "source_column": "network_px_std_delta_3d",
+      "draw": 6,
+      "source_column": "days_since_trough_entry_mosman",
       "block_seed": 193,
-      "self_correlation": -0.012487535461299484
+      "self_correlation": -0.013379783150488779
     },
     {
+      "draw": 6,
+      "source_column": "days_since_trough_entry_northern_beaches",
+      "block_seed": 197,
+      "self_correlation": -0.007617301318681688
+    },
+    {
+      "draw": 7,
+      "source_column": "days_since_trough_entry_penrith",
+      "block_seed": 199,
+      "self_correlation": -0.050435029757662724
+    },
+    {
+      "draw": 7,
+      "source_column": "days_since_trough_entry_rockdale",
+      "block_seed": 211,
+      "self_correlation": -0.10476059260617596
+    },
+    {
+      "draw": 7,
+      "source_column": "days_since_trough_entry_ryde",
+      "block_seed": 223,
+      "self_correlation": -0.042489613084327055
+    },
+    {
+      "draw": 8,
+      "source_column": "days_since_trough_entry_sutherland_shire",
+      "block_seed": 227,
+      "self_correlation": -0.03853315736052224
+    },
+    {
+      "draw": 8,
+      "source_column": "days_since_trough_entry_the_hills_shire",
+      "block_seed": 229,
+      "self_correlation": -0.008411655911461646
+    },
+    {
+      "draw": 8,
+      "source_column": "days_since_trough_entry_willoughby",
+      "block_seed": 233,
+      "self_correlation": -0.06410742741310868
+    },
+    {
+      "draw": 9,
+      "source_column": "days_since_trough_entry_woollahra",
+      "block_seed": 239,
+      "self_correlation": 0.01929493704291278
+    },
+    {
+      "draw": 9,
+      "source_column": "network_px_std",
+      "block_seed": 241,
+      "self_correlation": -0.0014473780185605867
+    },
+    {
+      "draw": 9,
+      "source_column": "lga_phase_std",
+      "block_seed": 251,
+      "self_correlation": 0.0844317942105358
+    },
+    {
+      "draw": 10,
       "source_column": "cycle_days_since_peak",
       "block_seed": 97,
       "self_correlation": -0.02944243185030894
     },
     {
-      "source_column": "cycle_mean_length",
+      "draw": 10,
+      "source_column": "cycle_last_min_cents",
       "block_seed": 101,
-      "self_correlation": 0.18307303607863415
+      "self_correlation": 0.037351942906069815
+    },
+    {
+      "draw": 10,
+      "source_column": "station_price_cents",
+      "block_seed": 103,
+      "self_correlation": 0.04754450030682505
     }
   ],
   "fold_subset": null,
   "partial": false,
-  "computed_at": "2026-08-22T05:56:48.556752+00:00",
-  "git_sha": "afa0ecb55b663aff2e03660345855a08284242de",
+  "computed_at": "2026-08-23T11:53:24.640808+00:00",
+  "git_sha": "55106bb59c5d5a5d903fc8e5ac950e9820695887",
   "baseline_fingerprint": "54:1a6ec2d84a69",
   "tank_params": "50/3.571/1d/10%",
   "n_windows": 14,
@@ -139,5 +210,5 @@
     "val_days": 90,
     "step_days": 90
   },
-  "wall_seconds": 13717.083883959014
+  "wall_seconds": 8368.11936875002
 }

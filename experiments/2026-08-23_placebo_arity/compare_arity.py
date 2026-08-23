@@ -20,7 +20,13 @@ from scipy.stats import f as f_dist
 from experiments.pipeline.dossier_tables import family_wise_z_threshold
 
 BATCH_DIR = pathlib.Path("experiments/batches/batch1")
-FLOORS = {1: "noise_floor.json", 3: "noise_floor_k3.json"}
+
+#: Filenames AFTER the promotion this analysis decided (fps-3jj.14, 2026-08-24). The k=3
+#: floor was promoted to the grading ruler by rename, so it now holds the unsuffixed name
+#: `_noise_band` reads, and the k=1 floor it replaced is retained as the arity baseline.
+#: Before the promotion these were `noise_floor.json` (k=1) and `noise_floor_k3.json` (k=3)
+#: — the run log and the git history predate the swap, so a filename in either is not a bug.
+FLOORS = {1: "noise_floor_k1.json", 3: "noise_floor.json"}
 
 #: batch1's own size (docs/routines/generator.md § Batch sizing) — the n the family-wise
 #: correction is made over. Not a constant: a later batch is 10-15.
@@ -57,9 +63,11 @@ def main() -> None:
         path = BATCH_DIR / name
         if not path.exists():
             raise SystemExit(
-                f"missing {path} — run:\n  PYTHONPATH=. uv run python -m "
-                f"experiments.pipeline.noise_floor batch1 --arity {arity} --n-draws 10 "
-                f"--out-name {name}"
+                f"missing {path} — this analysis compares batch1's PROMOTED ruler "
+                f"(arity 3) against the arity-1 floor it replaced. To rebuild the arity-"
+                f"{arity} side:\n  PYTHONPATH=. uv run python -m "
+                f"experiments.pipeline.noise_floor batch1 --arity {arity} "
+                f"--n-draws {20 if arity == 1 else 10} --out-name {name}"
             )
         bands[arity] = _load(path)
 

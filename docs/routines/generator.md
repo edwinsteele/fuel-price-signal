@@ -219,14 +219,19 @@ This section was blank until 2026-08-22 — the bar wasn't knowable before `fps-
 placebo-column ruler was rebuilt and a real batch was frozen against it (`fps-aay`).
 
 `batch1`'s own noise floor puts the family-wise gate (`docs/CONVENTIONS.md` § The gate
-is distance from the band) at `effect_delta_cpl_held ≤ -0.22 c/L` for a batch this size
+is distance from the band) at `effect_delta_cpl_held ≤ -0.27 c/L` for a batch this size
 (5 candidates) to read as surprising at the BATCH level, not just individually — a
-single candidate judged alone needs only `≤ -0.15 c/L`.
+single candidate judged alone needs only `≤ -0.17 c/L`.
+
+**Updated 2026-08-24 (`fps-3jj.14`), from `-0.22` / `-0.15`.** batch1's ruler was
+re-cut at arity 3 to match its own candidates' column counts, and the bar hardened. If
+you are reading a batch1 candidate file written before that date, its `CONFIDENCE`
+language was calibrated against the older, easier bar.
 
 **This is a DETECTION threshold, not a target.** `experiments/results.csv`'s own
 history shows single-column features landing between 0.03 and 0.26 c/L — a bar above
 that range describes what this instrument can currently resolve, not what a good
-feature looks like. Do not propose only candidates you expect to clear -0.22 c/L on
+feature looks like. Do not propose only candidates you expect to clear -0.27 c/L on
 their own, and do not read a candidate that lands below the bar as a failed proposal —
 group candidates in particular (§ "A candidate is one MECHANISM" below) routinely beat
 their own noise band as a group even when no single column in it would. The bar is
@@ -236,7 +241,10 @@ ideas.
 **The number itself is `batch1`-specific**, not a constant — it depends on that batch's
 own draws, columns and cadence (`docs/CONVENTIONS.md` § A re-lock invalidates the
 batch's noise floor). Check the current batch's own `noise_floor.json` before citing a
-number here; don't carry `-0.22` forward into a later batch by habit.
+number here; don't carry `-0.27` forward into a later batch by habit. It also depends
+on the batch's **arity** — see `docs/CONVENTIONS.md` § The band's ARITY must be at least
+the candidate's — so a batch whose candidates are shaped differently gets a different
+bar even on the same data.
 
 ### A candidate is one MECHANISM — it may be one column or a group of related columns
 

@@ -1,10 +1,106 @@
 # Does the placebo band widen with arity? (bd fps-3jj.14)
 
-**STATUS: measurement not yet run.** This directory holds the analysis machinery; the
-finding replaces this section once `noise_floor_k3.json` exists. Committed ahead of the
-result, against the usual "commit a lab book entry after results exist" convention,
-because PR #332's merge plan depends on this script existing and a plan that references an
-untracked file is not reviewable.
+**STATUS: measured 2026-08-24. The k=3 floor is now batch1's grading ruler.**
+
+## The finding
+
+| | k=1 | k=3 |
+|---|---|---|
+| draws | 20 | 10 |
+| band mean | −0.0089 c/L | **+0.0251 c/L** |
+| band std | 0.0800 c/L | **0.0999 c/L** |
+
+**std ratio 1.25×, and the design cannot resolve it.** F(9,19) = 1.56, two-sided
+p = 0.395, 95% confidence interval on the std ratio **[0.74, 2.40]**. The smallest ratio
+n=10-vs-n=20 could have called significant is **1.70×**. So the honest statement is
+"could not see it", NOT "it is not there" — the interval comfortably contains both no
+widening and a doubling. Written this way deliberately; see
+`feedback_correction_no_finer_than_estimator`.
+
+**Two effects moved, in opposite directions, and neither is individually resolvable.**
+
+- **Dilution** (mean −0.0089 → +0.0251): three junk columns degrade the fit more than one
+  does, which moves the bar *easier*.
+- **Opportunity** (std 0.0800 → 0.0999): three junk columns give the fit more places to
+  find spurious structure, which moves the bar *harder*. This is the effect `fps-3jj.14`
+  was opened to measure.
+
+They partly cancel, which is why the net bar move is small. Decomposing the batch-of-5
+bar (−0.2170 → −0.2706):
+
+```
+mean shift   +0.0340   (easier)   dilution
+std widening −0.0519   (harder)   opportunity — the arity effect proper
+n 20 → 10    −0.0357   (harder)   NOT arity: the t-penalty for a less certain band
+```
+
+**Two-thirds of the net hardening at batch level is draw count, not arity.** The k=3
+ruler is stricter partly because it is a *less certain* ruler: `family_wise_z_threshold`
+uses `df = n_draws − 1`, so z rises from 2.602 to 2.959 at n_candidates=5 purely because
+there are half as many draws. Worth knowing before attributing the whole move to arity.
+
+## The decision: k=3 is batch1's ruler
+
+Promoted by rename (`fps-3jj.14`, 2026-08-24):
+
+```
+noise_floor.json     -> noise_floor_k1.json    (the arity baseline, retained)
+noise_floor_k3.json  -> noise_floor.json       (the grading ruler)
+```
+
+**The decisive reason is not the statistics.** batch1's candidates are 3, 3, 3, 2, 2
+columns, and `_noise_band` refuses a floor whose arity is *below* the run's. Under the
+k=1 floor all five candidates would have dossiered `available: false` — batch1 would be
+ungradeable. The promotion is a precondition, not a preference.
+
+The statistics support it as the *conservative* choice rather than proving it necessary:
+where the two rulers differ the k=3 one is net harder, and the one-sided guard means the
+two 2-column candidates get a slightly-too-hard bar (disclosed as
+`floor_arity_exceeds_run`) rather than a too-soft one. "Could not see a widening" is not
+licence to keep grading wide arms on a narrow ruler — that is exactly the favourable bias
+the bead exists to remove.
+
+**batch1's bar is therefore −0.167 c/L judged singly, −0.271 c/L at the batch-of-5
+family-wise correction.** Propagated to `docs/CONVENTIONS.md`, `docs/routines/generator.md`
+and `docs/routines/dossier.md`.
+
+## Rejected: re-running k=3 at 20 draws to match k=1's certainty
+
+Considered and ruled out on 2026-08-24. Two reasons.
+
+**It is not available.** The binding pool is the COLUMNS, not the seeds. Each draw needs
+`arity` distinct source columns and the lock has 54, so 20 draws at k=3 would need 60.
+The hard ceiling is `floor(54/3)` = **18 draws** — and 18 consumes every lock column,
+leaving the `self_correlation` screen no substitution headroom. Substitution is not
+hypothetical: it fired twice on the k=1 run (two all-NaN LGA columns). With an empty
+fallback tail the run either hard-fails after hours of compute, or is forced to keep a
+column that FAILED the screen — a placebo still correlated with its original, which
+narrows the band and makes the bar easier. That is the bias direction this bead removes.
+
+**It would not be worth it if it were.** Going 10 → 18 draws recovers 0.032 c/L of the
+0.036 c/L draw-count penalty at n_candidates=5. That is below the realised arbiter's own
+~0.05 c/L decision-flip quantum — precision the instrument downstream cannot express.
+
+**It DOES matter for batch2**, because the Bonferroni correction grows with candidate
+count: the same 10→18 draw-count penalty is 0.032 c/L at 5 candidates, 0.043 at 10, and
+0.050 — a full flip — at 15. And at batch2's size the 54-column pool cannot supply both
+higher arity and more draws, so something structural has to give (reusing source columns
+across draws, at a cost in independence; or drawing placebos from outside the lock).
+Filed as bd `fps-3jj.21`, blocking batch2.
+
+## Provenance
+
+k=3 run: `git_sha 55106bb`, `computed_at 2026-08-23T11:53Z`, `wall_seconds 8368` (2.3h),
+`partial: false`. Both floors share `baseline_fingerprint 54:1a6ec2d84a69`,
+`tank_params 50/3.571/1d/10%`, `seed 42`, `n_windows 14` and identical
+`inner_fold_params` — `compare_arity.py` hard-stops if they ever diverge.
+
+Run log `noise_floor_k3.log` is gitignored (`*.log`). It was 172 lines, every one
+accounted for by 10 × (1 `loaded` + 14 `fold` + 1 `done`) + 10 draw lines + 2 trailer
+lines: no warnings, no substitutions, no retries.
+
+**No `experiments/ledger.yaml` entry.** This is an instrument finding — a measurement of
+the ruler — not a candidate claim, and the ledger takes one entry per falsified claim.
 
 ## The question
 
@@ -25,16 +121,25 @@ gate-quality band, which is why the k=3 run is 10 draws rather than 20.
 
 ## How to reproduce
 
+Both floors are committed, so the comparison alone re-runs in a second:
+
 ```bash
-# 1. the k=3 floor (~1.9h). 10 draws is the ceiling: the draw pools bind on
-#    n_draws * arity against a 30-seed pool, so max draws at arity k is floor(30/k).
+PYTHONPATH=. uv run python experiments/2026-08-23_placebo_arity/compare_arity.py
+```
+
+To rebuild the k=3 floor from scratch (~2.3h as measured; 10 draws was the ceiling at the
+time because the seed pool binds `n_draws * arity` at 30 — note the COLUMN pool binds
+harder still, at `floor(54/3)` = 18):
+
+```bash
 PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor batch1 \
     --arity 3 --n-draws 10 --out-name noise_floor_k3.json \
     2>&1 | tee experiments/batches/batch1/noise_floor_k3.log
-
-# 2. the comparison
-PYTHONPATH=. uv run python experiments/2026-08-23_placebo_arity/compare_arity.py
 ```
+
+That writes the side-file name. It was the grading ruler's name only AFTER the promotion
+rename below — `compare_arity.py` reads the post-promotion names
+(`noise_floor_k1.json` / `noise_floor.json`), so repoint it or redo the rename.
 
 `compare_arity.py` hard-stops if the two floors disagree on `baseline_fingerprint`,
 `tank_params` or `seed` — arity is supposed to be the only thing that differs — and

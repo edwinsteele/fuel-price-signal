@@ -171,8 +171,8 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          `t = facts["noise_band"]["single_candidate_z_threshold"]` (both non-null at this point) —
          already computed by
          `dossier_tables._noise_band` (`t` is `family_wise_z_threshold(n_candidates=1, n_draws=...)`,
-         i.e. the *single*-candidate detection bar, docs/CONVENTIONS.md's "-0.15 c/L judged
-         singly" for `batch1`; deliberately **not** the batch-level `clears_family_wise_threshold`
+         i.e. the *single*-candidate detection bar, docs/CONVENTIONS.md's "-0.17 c/L judged
+         singly" for `batch1` (was -0.15 against the retired arity-1 floor, `fps-3jj.14`); deliberately **not** the batch-level `clears_family_wise_threshold`
          gate, which needs the whole batch dossiered and exists to answer a different question —
          "is any candidate surprising after correcting for picking the best of N", the retrospective
          routine's job, not this one's):
