@@ -66,8 +66,8 @@ Four sections, matching the parent bead's acceptance criteria:
 
 3. **`outcome_tally`** — `total_candidates_filed` is the universe (every `.py` module
    under `experiments/candidates/<batch>/`), not just the ones that finished.
-   `dossiered_by_status` breaks down terminal outcomes (`rejected` / `disqualified` /
-   `aborted_candidate`) SEPARATELY — folding `aborted_*` into `rejected` would bias any
+   `dossiered_by_status` breaks down terminal outcomes (`graded` / `disqualified` /
+   `aborted_candidate`) SEPARATELY — folding `aborted_*` into `graded` would bias any
    calibration read below, since an aborted candidate never got a fair hearing at all.
    `never_run` / `retryable_incomplete` / `pending_dossier` are missing data, not
    findings — see "When to invoke" above; ideally all three are zero by the time you're

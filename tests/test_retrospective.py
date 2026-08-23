@@ -24,7 +24,7 @@ from experiments.pipeline.retrospective import (
 def _facts(
     name: str = "cand",
     batch: str = "batch1",
-    status: str = "rejected",
+    status: str = "graded",
     delta: float = 0.01,
     effect_resolved: bool | None = False,
     zone_resolved: bool | None = None,
@@ -47,7 +47,7 @@ def _facts(
 
 def _disqualified_facts(name: str = "cand", batch: str = "batch1") -> dict:
     """The real on-disk shape dossier_tables.build_facts writes for a terminal status
-    other than 'rejected' (disqualified / aborted_candidate never reach the scoring
+    other than 'graded' (disqualified / aborted_candidate never reach the scoring
     stages): headline and breakdowns are None, not missing keys."""
     return {
         "candidate": {"name": name, "confidence_effect": 0.4, "confidence_zone": None},
@@ -107,7 +107,7 @@ def test_compute_retrospective_never_run_candidate_has_no_leaderboard_row(tmp_pa
     assert payload["outcome_tally"]["total_candidates_filed"] == 1
 
 
-def test_compute_retrospective_retryable_status_not_folded_into_rejected(tmp_path):
+def test_compute_retrospective_retryable_status_not_folded_into_graded(tmp_path):
     candidates_root = tmp_path / "candidates"
     batches_dir = tmp_path / "batches"
     module_path = _write_candidate_module(candidates_root, "batch1", "flaky")
@@ -128,7 +128,7 @@ def test_compute_retrospective_terminal_status_no_facts_yet_is_pending_dossier(t
     module_path = _write_candidate_module(candidates_root, "batch1", "just_finished")
     out_dir = module_path.with_suffix("")
     out_dir.mkdir()
-    (out_dir / "results.json").write_text(json.dumps({"status": "rejected"}))
+    (out_dir / "results.json").write_text(json.dumps({"status": "graded"}))
     (batches_dir / "batch1").mkdir(parents=True)
 
     payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
@@ -341,7 +341,7 @@ def test_build_leaderboard_skips_non_dossiered_entries():
 
 def test_build_leaderboard_handles_disqualified_candidate_with_null_headline():
     """dossier_tables writes headline: None (not a missing key) for any terminal status
-    other than 'rejected'. This must not crash, and the candidate still appears (it IS
+    other than 'graded'. This must not crash, and the candidate still appears (it IS
     dossiered) with null metrics rather than being silently dropped."""
     entries = [
         {"candidate": "dq", "state": "dossiered", "facts": _disqualified_facts("dq")},
@@ -364,7 +364,7 @@ def test_build_leaderboard_handles_disqualified_candidate_with_null_headline():
 
 def test_build_outcome_tally_counts_every_state():
     entries = [
-        {"candidate": "a", "state": "dossiered", "facts": _facts("a", status="rejected")},
+        {"candidate": "a", "state": "dossiered", "facts": _facts("a", status="graded")},
         {"candidate": "b", "state": "dossiered", "facts": _facts("b", status="disqualified")},
         {"candidate": "c", "state": "never_run", "facts": None},
         {"candidate": "d", "state": "retryable_incomplete", "facts": None},
@@ -375,7 +375,7 @@ def test_build_outcome_tally_counts_every_state():
 
     assert tally == {
         "total_candidates_filed": 5,
-        "dossiered_by_status": {"rejected": 1, "disqualified": 1},
+        "dossiered_by_status": {"graded": 1, "disqualified": 1},
         "never_run": 1,
         "retryable_incomplete": 1,
         "pending_dossier": 1,

@@ -1,5 +1,5 @@
 {
-  "status": "rejected",
+  "status": "graded",
   "candidate": {
     "name": "tgp_delta_7d",
     "hypothesis": "7-day AIP Sydney TGP (wholesale floor) momentum predicts near-term retail descent, concentrating in shock regimes where today's wholesale floor position alone misleads (the raw gap station_minus_tgp_cents helps calm but hurts shock; tgp_delta_7d rescues exactly the shock regression). Already graduated the realised arbiter, 2026-06-22, experiments/2026-06-20_leading_indicators/.",

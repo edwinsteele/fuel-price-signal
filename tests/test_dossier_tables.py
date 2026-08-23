@@ -39,7 +39,7 @@ def _fold_run_deltas() -> list[dict]:
     return rows
 
 
-def _make_results(batch_dir: pathlib.Path, *, status: str = "rejected", target=None,
+def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=None,
                    inputs=None, columns=None, error=None, bead_id="fps-test.1",
                    tank_params: str | None = "50/3.571/7d/10%") -> dict:
     return {
@@ -52,24 +52,24 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "rejected", target=N
             "inputs": inputs if inputs is not None else ["price_date"],
             "prior_art": None, "mechanism_family": "test-family", "target": target,
         },
-        "effect_resolved": True if status == "rejected" else None,
-        "effect_delta_cpl_held": -0.05 if status == "rejected" else None,
+        "effect_resolved": True if status == "graded" else None,
+        "effect_delta_cpl_held": -0.05 if status == "graded" else None,
         "zone": (
             {"resolved": True, "target_delta_cpl_own": -0.1, "other_delta_cpl_own": 0.02}
-            if status == "rejected" else {"resolved": None}
+            if status == "graded" else {"resolved": None}
         ),
         "grading_error": None,
         "aggregate": [
             {"arm": BASELINE_ARM, "cpl_own": 4.20, "cpl_held": 4.25, "saving_own_pct": 3.0, "saving_held_pct": 2.8},
             {"arm": CANDIDATE_ARM, "cpl_own": 4.15, "cpl_held": 4.20, "saving_own_pct": 3.2, "saving_held_pct": 3.0},
-        ] if status == "rejected" else None,
-        "fold_run_deltas": _fold_run_deltas() if status == "rejected" else None,
+        ] if status == "graded" else None,
+        "fold_run_deltas": _fold_run_deltas() if status == "graded" else None,
         "seed_variance": {
             "summary": {"all": {"cohort_median_seed_std": 0.01, "n_cells": 8, "n_flagged_gt_5x": 1}},
             "flags": [
                 {"cohort": "all", "fold": 4, "run": "candidate", "seed_std": 0.09, "ratio_vs_cohort_median": 9.0}
             ],
-        } if status == "rejected" else {},
+        } if status == "graded" else {},
         "error": error,
         "meta": {
             "batch_dir": str(batch_dir), "seeds": [42, 43, 44], "realised_seed": 42,
@@ -141,7 +141,7 @@ def _make_rowpreds(*, with_axis: bool = False, with_cycle: bool = False,
 
 
 def _write_run(
-    tmp_path, *, status="rejected", target=None, inputs=None, columns=None,
+    tmp_path, *, status="graded", target=None, inputs=None, columns=None,
     with_axis=False, with_cycle=False, low_n_fold=None, batch_extras=None,
     tank_params: str | None = "50/3.571/7d/10%",
 ) -> tuple[pathlib.Path, pathlib.Path]:
@@ -161,7 +161,7 @@ def _write_run(
         tank_params=tank_params,
     )
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
-    if status == "rejected":
+    if status == "graded":
         rowpreds = _make_rowpreds(
             with_axis=with_axis, with_cycle=with_cycle, candidate_col=(columns or ["cand_col"])[0]
         )
@@ -201,7 +201,7 @@ def test_find_pending_runs_skips_retryable_aborts(tmp_path, status):
     assert dt.find_pending_runs(tmp_path) == []
 
 
-@pytest.mark.parametrize("status", ["rejected", "disqualified", "aborted_candidate"])
+@pytest.mark.parametrize("status", ["graded", "disqualified", "aborted_candidate"])
 def test_find_pending_runs_keeps_terminal_statuses(tmp_path, status):
     """Only retryable runs are held back — real verdicts still get written up."""
     run_dir = tmp_path / "terminal"
@@ -230,7 +230,7 @@ def test_find_pending_runs_keeps_unreadable_results_json(tmp_path):
 
 # ── facts.json ────────────────────────────────────────────────────────────────
 
-def test_build_facts_rejected_run_has_all_blocks_and_suppresses_thin_cells(tmp_path):
+def test_build_facts_graded_run_has_all_blocks_and_suppresses_thin_cells(tmp_path):
     run_dir, batch_dir = _write_run(tmp_path, low_n_fold=1)
 
     facts = dt.build_facts(run_dir)
@@ -278,8 +278,8 @@ def test_build_facts_rejected_run_has_all_blocks_and_suppresses_thin_cells(tmp_p
     assert "fps-3jj.9" in facts["noise_band"]["reason"]
 
 
-def test_build_facts_raises_when_rejected_run_has_no_tank_params(tmp_path):
-    """fps-15c: status=='rejected' means headline/breakdowns are about to carry a
+def test_build_facts_raises_when_graded_run_has_no_tank_params(tmp_path):
+    """fps-15c: status=='graded' means headline/breakdowns are about to carry a
     realised CPL — refuse rather than write a facts.json with no cadence stamp.
     Covers an old results.json that predates the field AND a hand-written
     mechanism that built its own results.json and skipped the shared path."""
@@ -309,7 +309,7 @@ def test_build_facts_per_axis_present_when_add_axis_declared(tmp_path):
     assert "never as a finding" in note
 
 
-def test_build_facts_non_rejected_status_sets_status_note_and_no_breakdowns(tmp_path):
+def test_build_facts_non_graded_status_sets_status_note_and_no_breakdowns(tmp_path):
     run_dir, _ = _write_run(tmp_path, status="disqualified")
     results = json.loads((run_dir / dt.RESULTS_FILENAME).read_text())
     results["error"] = "differential PIT test failed: mismatch at date 2026-01-05"
@@ -626,7 +626,7 @@ def test_main_scan_isolates_one_broken_run_from_the_rest(tmp_path):
     good_dir, _ = _write_run(good_root)
     bad_dir = tmp_path / "bad"
     bad_dir.mkdir()
-    (bad_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "rejected"}))  # missing "candidate" etc
+    (bad_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))  # missing "candidate" etc
 
     result = CliRunner().invoke(dt.main, ["--scan", str(tmp_path)])
 

@@ -310,7 +310,7 @@ def test_find_stale_claims_blocks_once_retry_budget_exhausted(tmp_path, monkeypa
     assert "retry_count" not in stale[0]
 
 
-@pytest.mark.parametrize("status", ["rejected", "disqualified", "aborted_candidate"])
+@pytest.mark.parametrize("status", ["graded", "disqualified", "aborted_candidate"])
 def test_find_stale_claims_leaves_terminal_status_alone(tmp_path, monkeypatch, status):
     """A verdict legitimately consumes the claim -- only retryable aborts come back."""
     repo_root = _fake_repo_root(tmp_path, monkeypatch)
@@ -329,7 +329,7 @@ def test_find_stale_claims_leaves_terminal_status_alone(tmp_path, monkeypatch, s
     assert find_stale_claims() == []
 
 
-@pytest.mark.parametrize("status", ["rejected", "disqualified", "aborted_candidate"])
+@pytest.mark.parametrize("status", ["graded", "disqualified", "aborted_candidate"])
 def test_find_stale_claims_resets_retry_metadata_on_terminal_verdict_with_spent_budget(
     tmp_path, monkeypatch, status,
 ):
@@ -648,7 +648,7 @@ def test_recover_stale_claims_dispatches_reset_retry_action(tmp_path, monkeypatc
     candidate_path = repo_root / "experiments" / "candidates" / "batch1" / "tgp_delta_7d.py"
     out_dir = default_out_dir(candidate_path)
     out_dir.mkdir(parents=True)
-    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "rejected"}))
+    (out_dir / RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
     description = _description_for(
         "experiments/batches/batch1", "experiments/candidates/batch1/tgp_delta_7d.py"
     )
