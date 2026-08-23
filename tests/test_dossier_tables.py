@@ -516,6 +516,34 @@ def test_decision_flips_not_computed_on_a_clean_reject(tmp_path):
     assert "clean reject" in flips["reason"]
 
 
+def test_decision_flips_computed_when_clearing_noise_on_the_good_side(tmp_path):
+    # Mirror of the clean-reject test above, flipped: a tight noise band centred
+    # near 0 with the candidate's -0.05 delta far BELOW it (more negative = better)
+    # -> z <= -t, clearing noise on the good side. dossier.md is explicit this
+    # case still gets the flip breakdown computed (a human may want to look
+    # closer at exactly the candidates that cleared) — it must not be silently
+    # folded into the "clean reject" (z >= t) skip branch by a future sign bug.
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [0.01, 0.0, -0.01, 0.0, 0.0],
+            "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+            "n_placebo_columns": 2,
+        }))
+
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        fills_df=_diverging_fills(),
+    )
+    facts = dt.build_facts(run_dir)
+    band = facts["noise_band"]
+    assert band["candidate_z_vs_band"] <= -band["single_candidate_z_threshold"]  # sanity: clears on the good side
+
+    flips = facts["decision_flips"]
+    assert flips["computed"] is True
+    assert flips["n_flips"] == 2
+
+
 def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
     # Wide noise band (std ~0.79) around the candidate's -0.05 delta -> z is tiny,
     # well inside (-t, t) regardless of n_draws -> the trigger fires.
