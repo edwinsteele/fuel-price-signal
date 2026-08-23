@@ -1,0 +1,337 @@
+{
+  "status": "graded",
+  "candidate": {
+    "name": "network_move_breadth",
+    "hypothesis": "The Sydney cycle ends with a coordinated restoration: a subset of stations jumps 20-30 c/L within a day or two and the rest follow over the next few days. For a buyer the cost of being one day late to that turn dwarfs the gain from one more day of a 1-2 c/L descent, so the single most valuable thing the model could know is that peers have STARTED jumping while this station has not. It cannot currently know it. network_px_std measures the SPREAD of the cross-section and is invariant to direction: a handful of stations 20 c/L above the pack and a handful 20 c/L below produce the same reading. Counting the share of stations moving UP versus DOWN over a fixed window recovers the sign that the dispersion statistic throws away, and does it as a participation count that is robust to the size of any one station's jump.",
+    "predicted_signature": "Decision-timing, in the most direct form in this batch: rows where network_rise_breadth_delta_2d turns sharply positive should flip WAIT -> BUY immediately, one to three days earlier than the lock manages, and the saved cents per flip should be LARGE (a restoration is worth 20-30 c/L, versus ~1-2 c/L for a day of descent). So the expected signature is FEW decision flips carrying an outsized share of the pooled delta -- if the pooled delta instead comes from many small flips spread evenly, the columns are working as generic momentum and the restoration-timing story is not what is paying. Expect concentration on the SHOCK folds, where restorations are most violent and the network clock is least reliable. Note the asymmetry: network_fall_breadth_3d should mostly cause the model to WAIT longer, so the two columns are expected to push in opposite directions rather than reinforce.",
+    "confidence_effect": 0.6,
+    "confidence_zone": 0.35,
+    "columns": [
+      "network_rise_breadth_3d",
+      "network_fall_breadth_3d",
+      "network_rise_breadth_delta_2d"
+    ],
+    "inputs": [
+      "station_code",
+      "price_date",
+      "station_price_cents"
+    ],
+    "prior_art": "Adjacent to family A (network_px_std, network_px_std_delta_3d \u2014 GRADUATED, in the lock) and, through it, to family C: all three are per-date cross-sectional summaries, and the memory note that A and C both decode 'the network is converging on a trough' applies to this candidate's super-family too. Stated plainly rather than relabelled: this batch files TWO cross-sectional-consensus candidates (this one and lga_trough_propagation) and the batch record should be read with that in mind. What differs mechanically from A: A is a scale statistic (a std) computed on price LEVELS within a cohort; these are signed participation COUNTS computed on price CHANGES. A cannot distinguish up from down and is dominated by the few largest deviations; a breadth count is direction-explicit and caps every station's contribution at one vote. A's own ledger not_tested flags its unresolved defect as 'the missing axis is descent shape, not elongation' \u2014 a directional breadth reading is one candidate for that axis, though this module claims restoration timing specifically, not the elongation corner. Also adjacent to family B (discount-cohort gap \u2014 REJECTED, flat), whose not_tested asks 'whether B's signal lives in its VELOCITY rather than its level'; this is a velocity-of-participation statistic over the whole network rather than a level gap between two brand cohorts.",
+    "mechanism_family": "directional-network-breadth",
+    "target": {
+      "axis": "regime",
+      "expect_concentration_in": [
+        "shock"
+      ],
+      "folds": []
+    }
+  },
+  "effect_resolved": true,
+  "effect_delta_cpl_held": -0.15523421583191066,
+  "zone": {
+    "resolved": true,
+    "target_delta_cpl_own": -0.3064786613969943,
+    "other_delta_cpl_own": -0.09247080097171079,
+    "n_target_candidate_fills": 705,
+    "n_other_candidate_fills": 1619
+  },
+  "grading_error": null,
+  "aggregate": [
+    {
+      "arm": "R0",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 192.99364583333386,
+      "cpl_own": 187.8211302592766,
+      "saving_own_pct": 2.68014812183203,
+      "cpl_held": 187.8211302592766,
+      "saving_held_pct": 2.68014812183203
+    },
+    {
+      "arm": "candidate",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 192.99364583333386,
+      "cpl_own": 187.6658960434447,
+      "saving_own_pct": 2.760583006183595,
+      "cpl_held": 187.6658960434447,
+      "saving_held_pct": 2.760583006183595
+    }
+  ],
+  "fold_run_deltas": [
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.0025040598276857007,
+      "delta_ll_hard25_median": -0.03397187780497335
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.0024718232848560395,
+      "delta_ll_hard25_median": -0.03759873449646167
+    },
+    {
+      "fold": 3,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 3,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.05071131802297041,
+      "delta_ll_hard25_median": -0.2079719509066924
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.01273395962162055,
+      "delta_ll_hard25_median": -0.07637123545225832
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.0023459115600074076,
+      "delta_ll_hard25_median": -0.009276493012922882
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.003190135963202223,
+      "delta_ll_hard25_median": -0.023003678527469984
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.0012989616976709084,
+      "delta_ll_hard25_median": -0.020102747801272858
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.015790999429806774,
+      "delta_ll_hard25_median": -0.0587624131650486
+    },
+    {
+      "fold": 9,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 9,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.010294086778218803,
+      "delta_ll_hard25_median": -0.04017749296595863
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.004732123782241721,
+      "delta_ll_hard25_median": 0.008584553941640816
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.019395136572922078,
+      "delta_ll_hard25_median": -0.08587842923489253
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.02624241522451043,
+      "delta_ll_hard25_median": -0.11714772736662438
+    },
+    {
+      "fold": 13,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 13,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.00626021105116864,
+      "delta_ll_hard25_median": -0.0247408518495128
+    },
+    {
+      "fold": 14,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 14,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.013556971131186757,
+      "delta_ll_hard25_median": -0.07091638092027575
+    }
+  ],
+  "seed_variance": {
+    "summary": {
+      "all": {
+        "cohort_median_seed_std": 0.007602416828288305,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 2
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.022471264025511146,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 3
+      }
+    },
+    "flags": [
+      {
+        "cohort": "all",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.04577158957845631,
+        "ratio_vs_cohort_median": 6.020662982874335
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.04510154120949116,
+        "ratio_vs_cohort_median": 5.932526751449623
+      },
+      {
+        "cohort": "hard25",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.13260218587337955,
+        "ratio_vs_cohort_median": 5.900966929267491
+      },
+      {
+        "cohort": "hard25",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.12581970347391533,
+        "ratio_vs_cohort_median": 5.5991377846424175
+      },
+      {
+        "cohort": "hard25",
+        "fold": 5,
+        "run": "R0",
+        "seed_std": 0.12047042226982245,
+        "ratio_vs_cohort_median": 5.36108792692102
+      }
+    ]
+  },
+  "error": null,
+  "meta": {
+    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1",
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "realised_seed": 42,
+    "n_windows": 14,
+    "tank_params": "50/3.571/1d/10%",
+    "realised_wall_seconds": 1337.621958832955,
+    "baseline_cache_used": false,
+    "baseline_cache_hit_folds": [],
+    "wall_seconds": 1782.5709468330024,
+    "pass_criterion": null,
+    "extra_feature_provider_hits": 5693,
+    "extra_feature_provider_misses": 607,
+    "git_sha": "19b65549181cd94bca63fffde682f180faabd606",
+    "bead_id": "fps-2l9",
+    "n_baseline_columns": 54,
+    "baseline_fingerprint": "54:1a6ec2d84a69"
+  }
+}

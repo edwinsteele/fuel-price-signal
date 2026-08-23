@@ -1,0 +1,295 @@
+{
+  "candidate": {
+    "name": "network_move_breadth",
+    "hypothesis": "The Sydney cycle ends with a coordinated restoration: a subset of stations jumps 20-30 c/L within a day or two and the rest follow over the next few days. For a buyer the cost of being one day late to that turn dwarfs the gain from one more day of a 1-2 c/L descent, so the single most valuable thing the model could know is that peers have STARTED jumping while this station has not. It cannot currently know it. network_px_std measures the SPREAD of the cross-section and is invariant to direction: a handful of stations 20 c/L above the pack and a handful 20 c/L below produce the same reading. Counting the share of stations moving UP versus DOWN over a fixed window recovers the sign that the dispersion statistic throws away, and does it as a participation count that is robust to the size of any one station's jump.",
+    "predicted_signature": "Decision-timing, in the most direct form in this batch: rows where network_rise_breadth_delta_2d turns sharply positive should flip WAIT -> BUY immediately, one to three days earlier than the lock manages, and the saved cents per flip should be LARGE (a restoration is worth 20-30 c/L, versus ~1-2 c/L for a day of descent). So the expected signature is FEW decision flips carrying an outsized share of the pooled delta -- if the pooled delta instead comes from many small flips spread evenly, the columns are working as generic momentum and the restoration-timing story is not what is paying. Expect concentration on the SHOCK folds, where restorations are most violent and the network clock is least reliable. Note the asymmetry: network_fall_breadth_3d should mostly cause the model to WAIT longer, so the two columns are expected to push in opposite directions rather than reinforce.",
+    "confidence_effect": 0.6,
+    "confidence_zone": 0.35,
+    "columns": [
+      "network_rise_breadth_3d",
+      "network_fall_breadth_3d",
+      "network_rise_breadth_delta_2d"
+    ],
+    "inputs": [
+      "station_code",
+      "price_date",
+      "station_price_cents"
+    ],
+    "prior_art": "Adjacent to family A (network_px_std, network_px_std_delta_3d \u2014 GRADUATED, in the lock) and, through it, to family C: all three are per-date cross-sectional summaries, and the memory note that A and C both decode 'the network is converging on a trough' applies to this candidate's super-family too. Stated plainly rather than relabelled: this batch files TWO cross-sectional-consensus candidates (this one and lga_trough_propagation) and the batch record should be read with that in mind. What differs mechanically from A: A is a scale statistic (a std) computed on price LEVELS within a cohort; these are signed participation COUNTS computed on price CHANGES. A cannot distinguish up from down and is dominated by the few largest deviations; a breadth count is direction-explicit and caps every station's contribution at one vote. A's own ledger not_tested flags its unresolved defect as 'the missing axis is descent shape, not elongation' \u2014 a directional breadth reading is one candidate for that axis, though this module claims restoration timing specifically, not the elongation corner. Also adjacent to family B (discount-cohort gap \u2014 REJECTED, flat), whose not_tested asks 'whether B's signal lives in its VELOCITY rather than its level'; this is a velocity-of-participation statistic over the whole network rather than a level gap between two brand cohorts.",
+    "mechanism_family": "directional-network-breadth",
+    "target": {
+      "axis": "regime",
+      "expect_concentration_in": [
+        "shock"
+      ],
+      "folds": []
+    }
+  },
+  "provenance": {
+    "candidate": "network_move_breadth",
+    "batch": "batch1",
+    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1",
+    "snapshot_date": "2026-08-15",
+    "git_sha": "19b65549181cd94bca63fffde682f180faabd606",
+    "git_sha_is_run_time": true,
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "wall_seconds": 1782.5709468330024,
+    "status": "graded",
+    "abort_reason": null,
+    "bead_id": "fps-2l9",
+    "n_baseline_columns": 54,
+    "baseline_fingerprint": "54:1a6ec2d84a69",
+    "tank_params": "50/3.571/1d/10%"
+  },
+  "headline": {
+    "realised": {
+      "arbiter": "realised CPL (cost per litre), held tau \u2014 clean attribution, isolated from the operating point",
+      "r0_cpl_held": 187.8211302592766,
+      "candidate_cpl_held": 187.6658960434447,
+      "delta_cpl_held": -0.15523421583191066,
+      "effect_resolved": true,
+      "r0_cpl_own": 187.8211302592766,
+      "candidate_cpl_own": 187.6658960434447
+    },
+    "wfcv_log_loss": {
+      "label": "descriptive colour, NOT the arbiter (docs/CONVENTIONS.md \u2014 #250/#254 both showed flat WFCV log-loss with opposite realised outcomes)",
+      "delta_ll_all_mean_across_folds": -0.011390424499160227,
+      "delta_ll_hard25_mean_across_folds": -0.05695253282590881
+    },
+    "zone": {
+      "resolved": true,
+      "target_delta_cpl_own": -0.3064786613969943,
+      "other_delta_cpl_own": -0.09247080097171079,
+      "n_target_candidate_fills": 705,
+      "n_other_candidate_fills": 1619
+    },
+    "pass_criterion": null
+  },
+  "breakdowns": {
+    "per_fold": [
+      {
+        "fold": 1,
+        "regime": "shock",
+        "n_fills": 188,
+        "suppressed": false,
+        "delta_cpl_own": 0.05730858468672295,
+        "delta_ll_all_median": -0.0025040598276857007,
+        "delta_ll_hard25_median": -0.03397187780497335
+      },
+      {
+        "fold": 2,
+        "regime": "normal",
+        "n_fills": 197,
+        "suppressed": false,
+        "delta_cpl_own": -0.4233200432902322,
+        "delta_ll_all_median": -0.0024718232848560395,
+        "delta_ll_hard25_median": -0.03759873449646167
+      },
+      {
+        "fold": 3,
+        "regime": "normal",
+        "n_fills": 178,
+        "suppressed": false,
+        "delta_cpl_own": -0.6391666666666822,
+        "delta_ll_all_median": -0.05071131802297041,
+        "delta_ll_hard25_median": -0.2079719509066924
+      },
+      {
+        "fold": 4,
+        "regime": "shock",
+        "n_fills": 239,
+        "suppressed": false,
+        "delta_cpl_own": -0.1728930072690673,
+        "delta_ll_all_median": -0.01273395962162055,
+        "delta_ll_hard25_median": -0.07637123545225832
+      },
+      {
+        "fold": 5,
+        "regime": "normal",
+        "n_fills": 185,
+        "suppressed": false,
+        "delta_cpl_own": 0.3300639658848752,
+        "delta_ll_all_median": -0.0023459115600074076,
+        "delta_ll_hard25_median": -0.009276493012922882
+      },
+      {
+        "fold": 6,
+        "regime": "normal",
+        "n_fills": 127,
+        "suppressed": false,
+        "delta_cpl_own": 0.17671777950317846,
+        "delta_ll_all_median": -0.003190135963202223,
+        "delta_ll_hard25_median": -0.023003678527469984
+      },
+      {
+        "fold": 7,
+        "regime": "normal",
+        "n_fills": 232,
+        "suppressed": false,
+        "delta_cpl_own": -0.06221198156686114,
+        "delta_ll_all_median": 0.0012989616976709084,
+        "delta_ll_hard25_median": -0.020102747801272858
+      },
+      {
+        "fold": 8,
+        "regime": "normal",
+        "n_fills": 88,
+        "suppressed": false,
+        "delta_cpl_own": -0.060215662512035806,
+        "delta_ll_all_median": -0.015790999429806774,
+        "delta_ll_hard25_median": -0.0587624131650486
+      },
+      {
+        "fold": 9,
+        "regime": "shock",
+        "n_fills": 112,
+        "suppressed": false,
+        "delta_cpl_own": 0.28935281837163984,
+        "delta_ll_all_median": -0.010294086778218803,
+        "delta_ll_hard25_median": -0.04017749296595863
+      },
+      {
+        "fold": 10,
+        "regime": "normal",
+        "n_fills": 96,
+        "suppressed": false,
+        "delta_cpl_own": 0.8968181818181051,
+        "delta_ll_all_median": 0.004732123782241721,
+        "delta_ll_hard25_median": 0.008584553941640816
+      },
+      {
+        "fold": 11,
+        "regime": "normal",
+        "n_fills": 161,
+        "suppressed": false,
+        "delta_cpl_own": -0.3534883720930395,
+        "delta_ll_all_median": -0.019395136572922078,
+        "delta_ll_hard25_median": -0.08587842923489253
+      },
+      {
+        "fold": 12,
+        "regime": "normal",
+        "n_fills": 177,
+        "suppressed": false,
+        "delta_cpl_own": -0.7462196718010716,
+        "delta_ll_all_median": -0.02624241522451043,
+        "delta_ll_hard25_median": -0.11714772736662438
+      },
+      {
+        "fold": 13,
+        "regime": "shock",
+        "n_fills": 146,
+        "suppressed": false,
+        "delta_cpl_own": -1.325000000000017,
+        "delta_ll_all_median": -0.00626021105116864,
+        "delta_ll_hard25_median": -0.0247408518495128
+      },
+      {
+        "fold": 14,
+        "regime": "normal",
+        "n_fills": 168,
+        "suppressed": false,
+        "delta_cpl_own": -0.02809224318659176,
+        "delta_ll_all_median": -0.013556971131186757,
+        "delta_ll_hard25_median": -0.07091638092027575
+      }
+    ],
+    "per_regime": [
+      {
+        "regime": "shock",
+        "n_fills": 687,
+        "suppressed": false,
+        "delta_cpl_own": -0.3064786613969943
+      },
+      {
+        "regime": "normal",
+        "n_fills": 1619,
+        "suppressed": false,
+        "delta_cpl_own": -0.09247080097171079
+      }
+    ],
+    "per_axis": null,
+    "per_axis_coverage_note": null,
+    "per_axis_identification_note": null,
+    "min_row_cell_n": 30
+  },
+  "seed_flags": [
+    {
+      "cohort": "all",
+      "fold": 2,
+      "run": "R0",
+      "seed_std": 0.04577158957845631,
+      "ratio_vs_cohort_median": 6.020662982874335
+    },
+    {
+      "cohort": "all",
+      "fold": 3,
+      "run": "R0",
+      "seed_std": 0.04510154120949116,
+      "ratio_vs_cohort_median": 5.932526751449623
+    },
+    {
+      "cohort": "hard25",
+      "fold": 2,
+      "run": "R0",
+      "seed_std": 0.13260218587337955,
+      "ratio_vs_cohort_median": 5.900966929267491
+    },
+    {
+      "cohort": "hard25",
+      "fold": 3,
+      "run": "R0",
+      "seed_std": 0.12581970347391533,
+      "ratio_vs_cohort_median": 5.5991377846424175
+    },
+    {
+      "cohort": "hard25",
+      "fold": 5,
+      "run": "R0",
+      "seed_std": 0.12047042226982245,
+      "ratio_vs_cohort_median": 5.36108792692102
+    }
+  ],
+  "validation": {
+    "pit_test": "passed \u2014 reached the WFCV/realised stages, so the differential PIT truncation test found no leak",
+    "inputs_check": "passed \u2014 INPUTS declaration matched every column add_columns/add_axis actually read",
+    "candidate_column_nan_rate": {
+      "network_rise_breadth_3d": 0.0,
+      "network_fall_breadth_3d": 0.0,
+      "network_rise_breadth_delta_2d": 0.0
+    }
+  },
+  "grading": {
+    "predicted_signature": "Decision-timing, in the most direct form in this batch: rows where network_rise_breadth_delta_2d turns sharply positive should flip WAIT -> BUY immediately, one to three days earlier than the lock manages, and the saved cents per flip should be LARGE (a restoration is worth 20-30 c/L, versus ~1-2 c/L for a day of descent). So the expected signature is FEW decision flips carrying an outsized share of the pooled delta -- if the pooled delta instead comes from many small flips spread evenly, the columns are working as generic momentum and the restoration-timing story is not what is paying. Expect concentration on the SHOCK folds, where restorations are most violent and the network clock is least reliable. Note the asymmetry: network_fall_breadth_3d should mostly cause the model to WAIT longer, so the two columns are expected to push in opposite directions rather than reinforce.",
+    "verdict": "inconclusive",
+    "explanation": "The regime breakdown points the right way (shock -0.3065 c/L vs normal -0.0925 c/L, matching the predicted shock concentration), but almost all of the shock effect is one fold (13, -1.325) while the other three shock folds are flat-to-worse (+0.057, -0.173, +0.289) -- consistent with a rare, violent restoration paying big when caught, but also consistent with one outlier carrying the aggregate. The headline realised delta (-0.1552 c/L) sits inside this batch's single-candidate noise band (z=-1.80 vs threshold 1.92), so the effect isn't resolved as real. facts.json has no decision-flip count or per-column (rise vs fall breadth) attribution, so the signature's more granular claims -- few large flips, and the two columns pushing in opposite directions -- can't be checked from what's here.",
+    "pending": false
+  },
+  "noise_band": {
+    "available": true,
+    "n_draws": 10,
+    "n_placebo_columns": 3,
+    "candidate_n_columns": 3,
+    "floor_arity_exceeds_run": false,
+    "band_mean_delta_cpl_held": 0.025101995567317202,
+    "band_std_delta_cpl_held": 0.09993498251895033,
+    "candidate_delta_cpl_held": -0.15523421583191066,
+    "candidate_percentile_better_than_noise": 100.0,
+    "candidate_z_vs_band": -1.8045353774393398,
+    "single_candidate_z_threshold": 1.9225850634649964
+  },
+  "plots": [
+    "per_fold_delta_bars.png",
+    "seed_mean_vs_median.png",
+    "realised_cpl_by_fold.png",
+    "tau_sweep.png",
+    "candidate_over_time.png",
+    "external_series_overlay.png"
+  ]
+}

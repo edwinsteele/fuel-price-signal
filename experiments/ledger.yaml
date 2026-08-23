@@ -46,6 +46,39 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: network_rise_breadth_3d, network_fall_breadth_3d, network_rise_breadth_delta_2d
+    (directional network-breadth participation counts)
+  inputs: [station_code, price_date, station_price_cents]
+  claim: >-
+    A subset of stations jumps 20-30 c/L within a day or two at the end of a cycle
+    (a coordinated restoration) and the rest follow over the next few days.
+    network_px_std measures cross-sectional spread and is invariant to direction;
+    counting the signed share of stations moving up vs down over a fixed window
+    recovers the sign that dispersion throws away, so the model can see "peers
+    have started jumping" and flip WAIT->BUY one to three days earlier, in a few
+    large decision flips concentrated on shock folds.
+  falsified: >-
+    Not resolved either way. The regime split lands where predicted (shock
+    -0.3065 c/L vs normal -0.0925 c/L), but the headline realised delta
+    (-0.1552 c/L held-tau) sits inside batch1's single-candidate noise band
+    (z=-1.80 vs threshold 1.92, arity-3 floor). Almost all of the shock effect
+    is one fold (13, -1.325 c/L); the other three shock folds are flat-to-worse.
+    facts.json carries no decision-flip count or per-column attribution, so the
+    predicted "few large flips" / rise-vs-fall asymmetry mechanism could not be
+    checked directly, only inferred through fold aggregates.
+  not_tested: >-
+    Per-decision-flip attribution (the mechanism predicts a few large flips, not
+    a smooth pooled delta -- current facts can't distinguish that from "one lucky
+    shock fold"). Whether network_fall_breadth_3d actually pushes WAIT longer as
+    predicted, or is inert/reinforcing (needs per-column attribution, e.g. SHAP
+    interaction values). Whether fold 13 is the restoration mechanism or an
+    outlier -- the noise floor's n=10 draws leave this candidate at the 100th
+    empirical percentile even though the parametric z-test calls it inconclusive.
+    Whether combining this with lga_trough_propagation (same batch, same
+    cross-sectional-consensus family) does better than either alone.
+  outcome: inconclusive
+  evidence: experiments/candidates/batch1/network_move_breadth/
+
 - candidate: per-zone economics cut on a ROW LABEL rather than on folds (per_axis
     delta_cpl_own, CONFIDENCE_ZONE graded on a candidate's own add_axis)
   inputs: [realised fill ledgers, any per-row grouping label a candidate declares]
