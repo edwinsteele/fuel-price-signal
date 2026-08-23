@@ -65,8 +65,9 @@ PAIRWISE_RHO_THRESHOLD = 0.85
 #: "90% reconstructible ... should be reworked now, not filed" — a prompt to a human.
 BLOCK_R2_FLAG = 0.9
 
-#: Rows sampled for the screen. Correlation and R^2 over 65 predictors are stable long
-#: before the full ~2.5M rows, and the screen is meant to be re-runnable in seconds
+#: Rows sampled for the screen. Correlation and R^2 over a predictor set this size (the
+#: locked 54 — `existing_column_set()`, minus whatever `usable_predictors` drops) are stable
+#: long before the full ~2.5M rows, and the screen is meant to be re-runnable in seconds
 #: while candidates are still being edited.
 DEFAULT_SAMPLE_ROWS = 300_000
 SAMPLE_SEED = 42
