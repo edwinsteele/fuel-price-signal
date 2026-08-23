@@ -101,6 +101,34 @@ c/L sits at the **100th percentile** of the 10 observed noise draws
 them), but the parametric single-candidate call is `z = -1.80` against a
 threshold of `t = 1.92`: inside the band, not past it.
 
+**Decision flips** (`facts["decision_flips"]`, added 2026-08-24 once `fps-gez`
+merged — diffs R0's and the candidate's `fills.parquet` directly on
+`(fold, station_code, date)`; `flip_cpl_*` is `pooled_cpl` over ONLY the fills
+that differ in that fold, not the same quantity as `delta_cpl_own` above,
+which pools every fill): **336 total flips**. Per fold:
+
+| fold | regime | n_baseline_only | n_candidate_only | flip_cpl_baseline | flip_cpl_candidate | flip_cpl_delta |
+|---|---|---|---|---|---|---|
+| 1 | shock | 4 | 2 | 153.11 | 167.90 | +14.79 |
+| 2 | normal | 31 | 28 | 182.35 | 176.28 | -6.06 |
+| 3 | normal | 25 | 12 | 197.30 | 195.53 | -1.77 |
+| 4 | shock | 26 | 38 | 181.82 | 183.59 | +1.77 |
+| 5 | normal | 22 | 22 | 186.37 | 187.96 | +1.59 |
+| 6 | normal | 15 | 7 | 185.48 | 187.37 | +1.88 |
+| 7 | normal | 8 | 5 | 178.78 | 176.52 | -2.26 |
+| 8 | normal | 6 | 7 | 185.35 | 187.16 | +1.80 |
+| 9 | shock | 0 | 8 | — (no baseline-only fills) | 181.35 | — |
+| 10 | normal | 5 | 12 | 199.99 | 202.64 | +2.64 |
+| 11 | normal | 3 | 5 | 212.45 | 197.97 | **-14.47** |
+| 12 | normal | 11 | 3 | 186.93 | 172.51 | **-14.42** |
+| 13 | shock | 10 | 10 | 199.03 | 186.08 | **-12.95** |
+| 14 | normal | 6 | 5 | 181.62 | 178.52 | -3.11 |
+
+Fold 9's `flip_cpl_delta` is unavailable (`null`): the candidate has 8
+candidate-only fills there and R0 has zero baseline-only fills to compare
+against, so this fold's divergence is "candidate bought more often," not "the
+two arms swapped timing" — a different shape than every other row.
+
 ![](per_fold_delta_bars.png)
 ![](seed_mean_vs_median.png)
 ![](realised_cpl_by_fold.png)
@@ -110,51 +138,72 @@ threshold of `t = 1.92`: inside the band, not past it.
 
 ## Judgement
 
-**Signature grading: inconclusive.** The regime breakdown points the right
-way (shock -0.3065 c/L vs. normal -0.0925 c/L, matching the predicted shock
-concentration), but almost all of the shock effect is one fold (13, -1.325)
-while the other three shock folds are flat-to-worse (+0.057, -0.173, +0.289) —
-consistent with a rare, violent restoration paying big when caught, but also
-consistent with one outlier carrying the aggregate. The headline realised
-delta (-0.1552 c/L) sits inside this batch's single-candidate noise band, so
-the effect isn't resolved as real against the ruler. `facts.json` has no
-decision-flip count or per-column (rise vs. fall breadth) attribution, so the
-signature's more granular claims — few large flips, and the two columns
-pushing in opposite directions — can't be checked from what's recorded here.
+**Signature grading: inconclusive** — revised 2026-08-24 with `decision_flips`
+now available; supersedes the original fold-13-only read below. **The
+favourable effect is real and sustained, not a single-fold artifact**: three
+CONSECUTIVE folds — 11 (-14.47 c/L), 12 (-14.42 c/L), 13 (-12.95 c/L) — each
+show a flip-only CPL delta of similar, large magnitude, on double-digit flip
+counts each. That is a materially stronger finding than "one dominant shock
+fold" — it looks like a genuine multi-week period where these columns paid
+off, not a single lucky catch.
+
+**But it contradicts the specific mechanism predicted.** Only fold 13 of
+those three is a SHOCK fold (`SHOCK_FOLDS = {1, 4, 9, 13}`); folds 11 and 12
+are classified `normal`. The predicted signature was explicit — concentration
+on shock (restoration) folds specifically — and the actual per-flip wins
+straddle the shock/normal boundary rather than sitting inside it. The
+per-regime aggregate (shock -0.3065 vs. normal -0.0925 c/L) still nominally
+points the predicted way, but that now reads more like a coincidence of which
+folds happen to carry the `SHOCK_FOLDS` label than confirmation of a
+restoration-timing mechanism — the three winning folds are calendar-adjacent,
+not regime-adjacent. Elsewhere the flip-level effect is flat-to-unfavourable
+(folds 1, 4–8, 10 all sit between +1.6 and +14.8 c/L, i.e. worse for the
+candidate), and fold 9 is a different shape again — 8 candidate-only fills
+with zero matched baseline-only fills, i.e. more frequent buying rather than
+swapped timing. The headline realised delta (-0.1552 c/L) still sits inside
+this batch's single-candidate noise band, so nothing here overrides that —
+per `docs/routines/dossier.md`'s guardrail, this flip-level detail is colour
+explaining *why* the aggregate looks the way it does, not a second arbiter.
 
 **not_tested:**
 
-- **Per-decision-flip attribution.** The predicted mechanism is specifically
-  about a *few large flips*, not a smooth pooled delta — that's exactly what
-  this run's facts can't distinguish from "one lucky shock fold." A follow-up
-  that counts buy/wait flips attributable to `network_rise_breadth_delta_2d`
-  crossing a threshold, and sizes each flip's saving, would test the
-  mechanism directly rather than through a fold-aggregate proxy.
+- **Why folds 11–13 specifically.** Three calendar-adjacent folds carrying
+  the whole favourable pattern, crossing the shock/normal label boundary, is
+  a concrete new question this run raises rather than answers: is there a
+  real event in that window (visible in `candidate_over_time.png` or the raw
+  snapshot) that these columns caught regardless of the `SHOCK_FOLDS`
+  labelling, or is 3-folds-in-a-row itself within the range pure noise would
+  produce at this batch's fold count? The batch's own noise floor is
+  fold-pooled (10 draws, no per-fold breakdown), so it can't answer the
+  second half directly.
 - **The rise/fall asymmetry.** Nothing here checks whether
   `network_fall_breadth_3d` is actually pushing WAIT longer as predicted, or
   whether it's inert (or even reinforcing) — that needs per-column
-  attribution (e.g. SHAP interaction values) this dossier doesn't have.
-- **Whether fold 13 is the restoration mechanism or an outlier.** The batch's
-  own noise-floor draws are only n=10; a candidate that beats all 10 by this
-  much but still falls inside the ±t parametric band is a case where more
-  draws (or a fold-level bootstrap) might resolve the tension between the
-  100th-percentile empirical read and the "inconclusive" parametric one.
+  attribution (e.g. SHAP interaction values), which needs the candidate's
+  fitted model persisted (it currently isn't — only R0's baseline is
+  cached). Discussed but deliberately not built as part of `fps-gez`.
+- Fold 9's "more frequent buying" shape is untouched — is that itself a
+  restoration-adjacent pattern (buying every small dip because participation
+  breadth stayed elevated) or an unrelated effect of these columns.
 - The three columns here are one arm of a two-candidate cross-sectional-
   consensus filing in this batch (see `lga_trough_propagation`, same batch) —
   whether a combined rise/fall breadth + LGA-trough feature does better than
   either alone is untested.
 
 **Recommendation:** not a graduation candidate on this run — the headline
-sits inside the batch's own noise floor — but not dead ground either. The
-regime split lands where the hypothesis said it would, and the miss is
-plausibly a measurement-resolution problem (fold-level aggregation smearing
-out a few-large-flips effect) rather than a wrong mechanism. Worth a second
-look with per-flip attribution before deciding whether to re-propose this
-series, rather than treating -0.1552 c/L as the final word.
+sits inside the batch's own noise floor — but this is now better-evidenced
+open ground, not a coin-flip. The favourable pattern is real and sustained
+(folds 11–13), which rules out "one lucky fold," but it isn't the predicted
+mechanism (it isn't shock-concentrated) — so if this series gets revisited,
+the next hypothesis should be built around "what happened in this
+calendar window" rather than "restoration timing during shocks."
 
 ## Followups
 
-- None filed yet. A per-decision-flip attribution tool (see not_tested above)
-  would be generically useful for any future "decision-timing" candidate in
-  this family, not just this one — worth a `design` bead if a future session
-  wants to build it rather than re-deriving it per candidate.
+- `fps-gez` (decision-flip attribution tool) is now built and merged —
+  this dossier is its first real application, and the folds-11–13 finding
+  above is the direct payoff. No further tooling work needed to act on this
+  candidate's own not_tested items.
+- The rise/fall per-column attribution gap (SHAP, needs the candidate model
+  persisted) remains open — worth its own bead if a future candidate's
+  grading depends on it, rather than building it speculatively now.

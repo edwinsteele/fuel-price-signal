@@ -58,24 +58,29 @@
     have started jumping" and flip WAIT->BUY one to three days earlier, in a few
     large decision flips concentrated on shock folds.
   falsified: >-
-    Not resolved either way. The regime split lands where predicted (shock
-    -0.3065 c/L vs normal -0.0925 c/L), but the headline realised delta
-    (-0.1552 c/L held-tau) sits inside batch1's single-candidate noise band
-    (z=-1.80 vs threshold 1.92, arity-3 floor). Almost all of the shock effect
-    is one fold (13, -1.325 c/L); the other three shock folds are flat-to-worse.
-    facts.json carries no decision-flip count or per-column attribution, so the
-    predicted "few large flips" / rise-vs-fall asymmetry mechanism could not be
-    checked directly, only inferred through fold aggregates.
+    Not resolved either way. REVISED 2026-08-24 once fps-gez's decision-flip
+    attribution landed: the real per-fold flip-only CPL deltas show the
+    favourable effect is NOT one outlier fold. Three CONSECUTIVE folds carry it
+    -- 11 (-14.47 c/L), 12 (-14.42 c/L), 13 (-12.95 c/L) -- a sustained pattern,
+    not a single lucky catch. But only fold 13 of those three is a SHOCK fold;
+    11-12 are "normal", so the concrete wins are calendar-adjacent, not
+    regime-adjacent, contradicting the predicted shock-restoration mechanism
+    even though the coarser per-regime aggregate (shock -0.3065 vs normal
+    -0.0925 c/L) still nominally points the predicted way. The headline
+    realised delta (-0.1552 c/L held-tau) still sits inside batch1's
+    single-candidate noise band (z=-1.80 vs threshold 1.92, arity-3 floor).
   not_tested: >-
-    Per-decision-flip attribution (the mechanism predicts a few large flips, not
-    a smooth pooled delta -- current facts can't distinguish that from "one lucky
-    shock fold"). Whether network_fall_breadth_3d actually pushes WAIT longer as
-    predicted, or is inert/reinforcing (needs per-column attribution, e.g. SHAP
-    interaction values). Whether fold 13 is the restoration mechanism or an
-    outlier -- the noise floor's n=10 draws leave this candidate at the 100th
-    empirical percentile even though the parametric z-test calls it inconclusive.
-    Whether combining this with lga_trough_propagation (same batch, same
-    cross-sectional-consensus family) does better than either alone.
+    Why folds 11-13 specifically: a real calendar-clustered event these columns
+    caught regardless of SHOCK_FOLDS labelling, or within the range noise would
+    produce at this fold count (the batch's noise floor is pooled, not
+    per-fold, so it can't answer this directly). Whether network_fall_breadth_3d
+    actually pushes WAIT longer as predicted, or is inert/reinforcing (needs
+    per-column attribution, e.g. SHAP interaction values -- needs the candidate
+    model persisted, which the pipeline doesn't currently do; deliberately not
+    built as part of fps-gez). Fold 9's different shape (8 candidate-only fills,
+    zero matched baseline-only -- more frequent buying, not swapped timing) is
+    untouched. Whether combining this with lga_trough_propagation (same batch,
+    same cross-sectional-consensus family) does better than either alone.
   outcome: inconclusive
   evidence: experiments/candidates/batch1/network_move_breadth/
 
