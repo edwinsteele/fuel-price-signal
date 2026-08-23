@@ -1,0 +1,743 @@
+{
+  "n_candidates": 5,
+  "n_rows_sampled": 2084203,
+  "rho_threshold": 0.85,
+  "passed": true,
+  "mechanism_families": {
+    "lga_trough_propagation": "lead-lag-propagation",
+    "network_move_breadth": "directional-network-breadth",
+    "station_descent_dynamics": "station-own-price-dynamics",
+    "stickiness_phase_saddle": "station-heterogeneity-interaction",
+    "tgp_cycle_displacement": "wholesale-lead"
+  },
+  "n_distinct_families": 5,
+  "undeclared_families": [],
+  "block_r2": [
+    {
+      "candidate": "lga_trough_propagation",
+      "mechanism_family": "lead-lag-propagation",
+      "n_columns": 3,
+      "n_predictors_used": 49,
+      "predictors_dropped": [
+        "days_since_trough_entry_bayside",
+        "days_since_trough_entry_botany_bay",
+        "days_since_trough_entry_hunters_hill",
+        "days_since_trough_entry_lane_cove",
+        "days_since_trough_entry_waverley"
+      ],
+      "block_r2": 0.6853475576568192,
+      "max_column_r2": 0.8546410705796263,
+      "per_column_r2": {
+        "lga_trough_breadth_7d": 0.7046956275106663,
+        "lga_trough_breadth_delta_3d": 0.49670597488016544,
+        "lga_leader_lead_days": 0.8546410705796263
+      }
+    },
+    {
+      "candidate": "network_move_breadth",
+      "mechanism_family": "directional-network-breadth",
+      "n_columns": 3,
+      "n_predictors_used": 49,
+      "predictors_dropped": [
+        "days_since_trough_entry_bayside",
+        "days_since_trough_entry_botany_bay",
+        "days_since_trough_entry_hunters_hill",
+        "days_since_trough_entry_lane_cove",
+        "days_since_trough_entry_waverley"
+      ],
+      "block_r2": 0.5215045518095468,
+      "max_column_r2": 0.671451880892834,
+      "per_column_r2": {
+        "network_rise_breadth_3d": 0.6347329638825294,
+        "network_fall_breadth_3d": 0.671451880892834,
+        "network_rise_breadth_delta_2d": 0.25832881065327684
+      }
+    },
+    {
+      "candidate": "station_descent_dynamics",
+      "mechanism_family": "station-own-price-dynamics",
+      "n_columns": 3,
+      "n_predictors_used": 49,
+      "predictors_dropped": [
+        "days_since_trough_entry_bayside",
+        "days_since_trough_entry_botany_bay",
+        "days_since_trough_entry_hunters_hill",
+        "days_since_trough_entry_lane_cove",
+        "days_since_trough_entry_waverley"
+      ],
+      "block_r2": 0.40820989367926747,
+      "max_column_r2": 0.6424073492612143,
+      "per_column_r2": {
+        "station_px_change_3d": 0.3748138291083575,
+        "station_px_change_14d": 0.6424073492612143,
+        "station_descent_decel": 0.20740850266823052
+      }
+    },
+    {
+      "candidate": "stickiness_phase_saddle",
+      "mechanism_family": "station-heterogeneity-interaction",
+      "n_columns": 2,
+      "n_predictors_used": 49,
+      "predictors_dropped": [
+        "days_since_trough_entry_bayside",
+        "days_since_trough_entry_botany_bay",
+        "days_since_trough_entry_hunters_hill",
+        "days_since_trough_entry_lane_cove",
+        "days_since_trough_entry_waverley"
+      ],
+      "block_r2": 0.44995256860181126,
+      "max_column_r2": 0.7222399927427048,
+      "per_column_r2": {
+        "sticky_x_phase": 0.7222399927427048,
+        "abs_sticky_x_phase": 0.17766514446091775
+      }
+    },
+    {
+      "candidate": "tgp_cycle_displacement",
+      "mechanism_family": "wholesale-lead",
+      "n_columns": 2,
+      "n_predictors_used": 49,
+      "predictors_dropped": [
+        "days_since_trough_entry_bayside",
+        "days_since_trough_entry_botany_bay",
+        "days_since_trough_entry_hunters_hill",
+        "days_since_trough_entry_lane_cove",
+        "days_since_trough_entry_waverley"
+      ],
+      "block_r2": 0.5741052304693022,
+      "max_column_r2": 0.5827425253501988,
+      "per_column_r2": {
+        "tgp_cycle_displacement_cents": 0.5827425253501988,
+        "tgp_cycle_displacement_frac_amp": 0.5654679355884056
+      }
+    }
+  ],
+  "pairwise_rho": [
+    {
+      "column_a": "station_px_change_3d",
+      "column_b": "station_descent_decel",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": false,
+      "abs_rho": 0.9027127298080301
+    },
+    {
+      "column_a": "tgp_cycle_displacement_cents",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "tgp_cycle_displacement",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": false,
+      "abs_rho": 0.8533707340617641
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "network_fall_breadth_3d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": false,
+      "abs_rho": 0.6399658765250907
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "network_fall_breadth_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.5926937837056634
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "network_rise_breadth_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.5445486615804583
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "lga_trough_breadth_delta_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "lga_trough_propagation",
+      "cross_candidate": false,
+      "abs_rho": 0.44855425138311283
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "station_px_change_3d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.44526585497117893
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "station_px_change_3d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.43995970124437206
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "network_rise_breadth_delta_2d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.4386093241883593
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "station_px_change_14d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.42624782219610957
+    },
+    {
+      "column_a": "station_px_change_3d",
+      "column_b": "station_px_change_14d",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": false,
+      "abs_rho": 0.4001642821234004
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "network_rise_breadth_delta_2d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": false,
+      "abs_rho": 0.36191192547780593
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "station_px_change_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.36139921863045193
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "station_px_change_14d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.36029789569344445
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "station_descent_decel",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.3358145031501578
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "station_descent_decel",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.3104539033668867
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "network_rise_breadth_delta_2d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.3061852646594555
+    },
+    {
+      "column_a": "network_rise_breadth_delta_2d",
+      "column_b": "station_descent_decel",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.2887073445268706
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "station_descent_decel",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.2848757498628999
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "station_px_change_14d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.2782032420577063
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "network_rise_breadth_delta_2d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": false,
+      "abs_rho": 0.20919318413895532
+    },
+    {
+      "column_a": "network_rise_breadth_delta_2d",
+      "column_b": "station_px_change_3d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.2060630573119704
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.20420658441438377
+    },
+    {
+      "column_a": "station_px_change_14d",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.19212295566653056
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "station_descent_decel",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.16557515499928452
+    },
+    {
+      "column_a": "station_px_change_14d",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.16138026068936248
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.15907267914015813
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.15413345566668898
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "station_px_change_14d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.15208554216440262
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.14297982179818286
+    },
+    {
+      "column_a": "network_rise_breadth_delta_2d",
+      "column_b": "station_px_change_14d",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.13581740529777142
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "network_rise_breadth_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.13554872727912365
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.1322680638036312
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.12997691290759655
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "station_px_change_14d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.12381372712364891
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.10566820199215007
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "network_fall_breadth_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.1004290221416403
+    },
+    {
+      "column_a": "station_px_change_3d",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.09001706376254359
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.09000976231016361
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "lga_leader_lead_days",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "lga_trough_propagation",
+      "cross_candidate": false,
+      "abs_rho": 0.08952363350735505
+    },
+    {
+      "column_a": "station_descent_decel",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.07925339856005234
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.06347767014345113
+    },
+    {
+      "column_a": "station_px_change_3d",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.058566040493931895
+    },
+    {
+      "column_a": "network_rise_breadth_delta_2d",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.05766077436725381
+    },
+    {
+      "column_a": "station_px_change_3d",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.04425730144167788
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.04311958858633118
+    },
+    {
+      "column_a": "abs_sticky_x_phase",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "stickiness_phase_saddle",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.04152596639956799
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "lga_leader_lead_days",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "lga_trough_propagation",
+      "cross_candidate": false,
+      "abs_rho": 0.04017559277101212
+    },
+    {
+      "column_a": "station_px_change_14d",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.0400724167403699
+    },
+    {
+      "column_a": "network_rise_breadth_delta_2d",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.037683366291223895
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "station_descent_decel",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.036820969937989806
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "station_px_change_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.033338386143745194
+    },
+    {
+      "column_a": "station_px_change_14d",
+      "column_b": "station_descent_decel",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": false,
+      "abs_rho": 0.03306070925554943
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "station_px_change_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "station_descent_dynamics",
+      "cross_candidate": true,
+      "abs_rho": 0.03161815800933391
+    },
+    {
+      "column_a": "network_rise_breadth_delta_2d",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.03072937036726516
+    },
+    {
+      "column_a": "station_descent_decel",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.027430581863578128
+    },
+    {
+      "column_a": "station_descent_decel",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.02629043531212656
+    },
+    {
+      "column_a": "sticky_x_phase",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "stickiness_phase_saddle",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": false,
+      "abs_rho": 0.024407493873090144
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "network_rise_breadth_delta_2d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.02257967285775101
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "network_fall_breadth_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.02250776324036367
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.02087777032689903
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "network_rise_breadth_3d",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "network_move_breadth",
+      "cross_candidate": true,
+      "abs_rho": 0.020608419493728405
+    },
+    {
+      "column_a": "abs_sticky_x_phase",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "stickiness_phase_saddle",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.01958783784631888
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.019333061387680935
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.016018316449587556
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.01521600278519774
+    },
+    {
+      "column_a": "station_px_change_14d",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.010317647530623085
+    },
+    {
+      "column_a": "network_fall_breadth_3d",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.010092986655465434
+    },
+    {
+      "column_a": "lga_trough_breadth_7d",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.009336943790327883
+    },
+    {
+      "column_a": "sticky_x_phase",
+      "column_b": "tgp_cycle_displacement_frac_amp",
+      "candidate_a": "stickiness_phase_saddle",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.009043228773068911
+    },
+    {
+      "column_a": "network_rise_breadth_3d",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.007950721984968863
+    },
+    {
+      "column_a": "network_rise_breadth_delta_2d",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "network_move_breadth",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.006840170137835246
+    },
+    {
+      "column_a": "station_descent_decel",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.006694505933292995
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "abs_sticky_x_phase",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.004763468611608909
+    },
+    {
+      "column_a": "sticky_x_phase",
+      "column_b": "tgp_cycle_displacement_cents",
+      "candidate_a": "stickiness_phase_saddle",
+      "candidate_b": "tgp_cycle_displacement",
+      "cross_candidate": true,
+      "abs_rho": 0.0021363828452493974
+    },
+    {
+      "column_a": "station_px_change_3d",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "station_descent_dynamics",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.0018633309770244612
+    },
+    {
+      "column_a": "lga_trough_breadth_delta_3d",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.001081554086628082
+    },
+    {
+      "column_a": "lga_leader_lead_days",
+      "column_b": "sticky_x_phase",
+      "candidate_a": "lga_trough_propagation",
+      "candidate_b": "stickiness_phase_saddle",
+      "cross_candidate": true,
+      "abs_rho": 0.00030253255783837266
+    }
+  ],
+  "gate_violations": [],
+  "uncomputable_pairs": []
+}
