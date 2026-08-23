@@ -53,6 +53,12 @@ experiments/**/*.joblib
 experiments/**/*.pkl
 experiments/**/*.parquet
 
+# Exception: dossier_tables.py's plots ARE the point for a written-up
+# candidate run — the README embeds them by filename, and GitHub can't render
+# them without this. Narrow to experiments/candidates/** (the AI-sourced
+# pipeline's own output dirs) rather than lifting the blanket rule everywhere.
+!experiments/candidates/**/*.png
+
 # Smoke-run outputs (CADENCE_FOLDS=... and friends): fold-subset artifacts that
 # share filenames with a full run. Committing them puts a 1-fold ledger next to a
 # 14-fold one, which reads as a like-for-like comparison and is not one.
