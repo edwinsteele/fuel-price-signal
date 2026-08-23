@@ -201,9 +201,6 @@ that touches this candidate is either a human reading the README, or the retrosp
 
 ## Known gaps to flag, not silently work around
 
-- **Run-directory model (fps-icv, CONFIRMED BROKEN, not a hypothetical).** See Step 0 above — every
-  candidate after the first in a multi-candidate batch is silently never dossiered until this is
-  fixed in `launch.py`/`runner.py`. Do not hand-write a dossier to compensate; surface it instead.
 - **`noise_floor.json` per-batch step.** `batch_freeze.py` computes this as its own final step
   (`fps-cf8`), so a batch frozen normally always has one. `facts["noise_band"]["available"]`
   still reads `false` in three cases: an older batch frozen before `fps-cf8` or with
