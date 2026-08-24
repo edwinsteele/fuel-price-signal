@@ -222,12 +222,27 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    experiment content. One commit per run if several are queued in one session (keeps `git blame`
    readable per candidate).
 
+7. **Close the candidate's bead: `bd close <bead_id>` (from `facts["provenance"]["bead_id"]`),
+   then `bd dolt push`.** Mechanical, every time step 6 fires — this is not a judgement about the
+   candidate's merit, only a record that the run is finished and written up (a rejected or
+   inconclusive candidate gets closed exactly the same as any other; `outcome` in the ledger is
+   the merit verdict, bead status is not). Found missing 2026-08-24 (fps-2l9 sat `in_progress`
+   after being fully dossiered, with no close step anywhere) — a real process hole, not tidiness:
+   a batch's retrospective bead (`fps-3jj.18.1`-style, one per batch — see § batch parent bead
+   below) is `blocks`-blocked on every candidate bead being CLOSED, not on its README existing on
+   disk, so a missed close here silently leaves the retrospective looking blocked forever even
+   once every candidate has actually run. Skip this step only in the arity-refusal case above,
+   where step 6 itself is skipped (no README, no ledger entry, no bead touch — the run goes back
+   in the queue, not to closure).
+
 ### Step 2 — summary
 
 Print one line per run processed (candidate name, outcome, one-clause verdict) and one line per
 run the deterministic scan logged as `failed, skipping`. No PR, no further action — the next thing
-that touches this candidate is either a human reading the README, or the retrospective bead
-(`fps-3jj.8`) once the whole batch is in.
+that touches this candidate is either a human reading the README, or (once every candidate bead in
+a batch is closed) the batch's retrospective bead — see `docs/routines/generator.md` § Filing for
+the current parent/child bead structure; earlier revisions of this doc named a standalone
+`fps-3jj.8`, superseded by the per-batch parent-bead convention.
 
 ## Known gaps to flag, not silently work around
 
