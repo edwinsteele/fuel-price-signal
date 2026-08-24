@@ -235,6 +235,22 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    where step 6 itself is skipped (no README, no ledger entry, no bead touch — the run goes back
    in the queue, not to closure).
 
+   **`bd close` also writes a `field_change` row to the git-tracked
+   `.beads/interactions.jsonl`** (`bd dolt push` syncs the separate Dolt remote — a different
+   system, see `feedback_beads_commit_tracked_state` — and does not touch git at all). Step 6's
+   commit already landed before this bead close happens, so that row is left as an uncommitted
+   change in the primary worktree at the end of every run unless committed separately. Found
+   2026-08-25 (fps-6to's close left `.beads/interactions.jsonl` dirty, caught only by the owner
+   checking `git status` after the run) — until now this was patched after the fact by a human or
+   a later session noticing and pushing a standalone `chore: record <id> closure in the
+   interaction log` commit (see git history for several examples). Fold that into this step
+   instead of leaving it dangling: immediately after `bd close` (and whether or not `bd dolt push`
+   succeeds — the two are independent), run
+   `git add .beads/interactions.jsonl && git commit -m "chore: record <id> closure in the
+   interaction log"`. If several candidates are dossiered in one session, one commit per close (or
+   a single trailing commit covering all of them) both work — just don't let the run end with
+   `.beads/interactions.jsonl` dirty.
+
 ### Step 2 — summary
 
 Print one line per run processed (candidate name, outcome, one-clause verdict) and one line per
