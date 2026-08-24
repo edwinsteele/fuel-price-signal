@@ -1,0 +1,332 @@
+{
+  "status": "graded",
+  "candidate": {
+    "name": "station_descent_dynamics",
+    "hypothesis": "The retail descent is a sequence of discrete cuts, and the SHAPE of a station's own cut sequence says how much of the descent is left. A station still cutting 1-2 c/day is mid-descent; a station whose recent pace has collapsed toward zero while its 14-day pace was steep has arrived at its floor and is now exposed to the restoration. The lock cannot express this: every dynamic column in it is network-level (one value per date), so the model sees the Sydney-average clock and each station's contemporaneous LEVEL, but never the station's own rate of change. station_minus_last_min_cents is the closest substitute and is a distance to a NETWORK trough, not a station velocity.",
+    "predicted_signature": "Decision-timing, not accuracy: the model should stop waiting earlier on rows where station_descent_decel has gone positive (recent pace slower than the trailing pace) at moderate cycle_pct_through, and should keep waiting longer on rows where it is negative (the cuts are still accelerating). Expect a MODEST number of buy/wait flips concentrated in elongated cycles, where the network clock and the station's own pace diverge most \u2014 i.e. exactly the shallow-vs-steep-within-elongated distinction the #214 oracle diagnostic found invisible in network_px_std until phase > 1.4. If the mechanism is real, the per-fold contributions should be largest in folds 3 and 7 (the two folds the ledger names on the elongation axis) and near-zero elsewhere; a uniform improvement across all 14 folds would be evidence the columns are working as generic momentum rather than as a descent-shape reading.",
+    "confidence_effect": 0.45,
+    "confidence_zone": 0.3,
+    "columns": [
+      "station_px_change_3d",
+      "station_px_change_14d",
+      "station_descent_decel"
+    ],
+    "inputs": [
+      "station_code",
+      "price_date",
+      "station_price_cents"
+    ],
+    "prior_art": "Adjacent to three rejected attempts on the shallow-elongated corner, all of which built their fix out of family A (network_px_std): elongation_ratio + cycle_descent_slope_so_far (R_raw, #214 \u2014 rejected, fold 7 +0.0092), is_extended_shallow_descent (null, ~-0.0001), and A_x_shallow_elong/A_x_other/A_x_smooth (#231 \u2014 rejected and BACKWARDS, fold 7 went +0.018 -> +0.040). What differs mechanically: all three supplied the model with derived NETWORK quantities (dispersion, network cycle elongation, network descent slope). The ledger's own not_tested on the A_x_* entry says the open ground is 'whether any OTHER intra-series signal carries the shallow-vs-steep-within-elongated distinction \u2014 the oracle diagnostic tested A specifically and is silent about trough-proximity, cross-LGA/brand late-descent consensus...'. These columns are neither A nor a network aggregate: they are the individual station's own cut sequence, a quantity with no representative at all in the 54-column lock. Also adjacent to cycle_mean_length (rejected, accuracy != objective): note this candidate makes no claim to estimate the cycle better, only to change WHEN the model acts.",
+    "mechanism_family": "station-own-price-dynamics",
+    "target": {
+      "axis": "regime",
+      "expect_concentration_in": [],
+      "folds": [
+        3,
+        7
+      ]
+    }
+  },
+  "effect_resolved": true,
+  "effect_delta_cpl_held": -0.02717166842361962,
+  "zone": {
+    "resolved": false,
+    "target_delta_cpl_own": 0.013785557986864205,
+    "other_delta_cpl_own": -0.03447060857908468,
+    "n_target_candidate_fills": 431,
+    "n_other_candidate_fills": 1906
+  },
+  "grading_error": null,
+  "aggregate": [
+    {
+      "arm": "R0",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 192.99364583333386,
+      "cpl_own": 187.8211302592766,
+      "saving_own_pct": 2.68014812183203,
+      "cpl_held": 187.8211302592766,
+      "saving_held_pct": 2.68014812183203
+    },
+    {
+      "arm": "candidate",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 192.99364583333386,
+      "cpl_own": 187.79395859085298,
+      "saving_own_pct": 2.694227170034003,
+      "cpl_held": 187.79395859085298,
+      "saving_held_pct": 2.694227170034003
+    }
+  ],
+  "fold_run_deltas": [
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": 0.0018619906945165354,
+      "delta_ll_hard25_median": 0.002343434962203572
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.002642298804179627,
+      "delta_ll_hard25_median": -0.0647500338515643
+    },
+    {
+      "fold": 3,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 3,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.01661451873212849,
+      "delta_ll_hard25_median": -0.008695086585555956
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": 0.022354486670998985,
+      "delta_ll_hard25_median": -0.039080506274288496
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.0033409657345128685,
+      "delta_ll_hard25_median": 0.01277979829134368
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.011194221781548969,
+      "delta_ll_hard25_median": -0.07699901160889122
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.011494571482254134,
+      "delta_ll_hard25_median": 0.011819607644422803
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.004896364533232028,
+      "delta_ll_hard25_median": 0.019271372291510325
+    },
+    {
+      "fold": 9,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 9,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.003100645136829172,
+      "delta_ll_hard25_median": -0.003769855897044927
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.012141684352105137,
+      "delta_ll_hard25_median": -0.051311341820655
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.01933116168424387,
+      "delta_ll_hard25_median": -0.032208407360971525
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.0008894653480241987,
+      "delta_ll_hard25_median": 0.02327705181097528
+    },
+    {
+      "fold": 13,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 13,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.013603524780197773,
+      "delta_ll_hard25_median": -0.03959414468523714
+    },
+    {
+      "fold": 14,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 14,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.012648318808536785,
+      "delta_ll_hard25_median": -0.04233793182790535
+    }
+  ],
+  "seed_variance": {
+    "summary": {
+      "all": {
+        "cohort_median_seed_std": 0.007637941252957902,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 2
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.0279336986767388,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 0
+      }
+    },
+    "flags": [
+      {
+        "cohort": "all",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.04577158957845631,
+        "ratio_vs_cohort_median": 5.992660595645536
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.04510154120949116,
+        "ratio_vs_cohort_median": 5.904934289986185
+      }
+    ]
+  },
+  "error": null,
+  "meta": {
+    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1",
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "realised_seed": 42,
+    "n_windows": 14,
+    "tank_params": "50/3.571/1d/10%",
+    "realised_wall_seconds": 633.3775836250279,
+    "baseline_cache_used": true,
+    "baseline_cache_hit_folds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "wall_seconds": 1079.224838958995,
+    "pass_criterion": null,
+    "extra_feature_provider_hits": 5693,
+    "extra_feature_provider_misses": 607,
+    "git_sha": "f536e98b9c183e754620d46ee0a6ef13681e7c35",
+    "bead_id": "fps-6to",
+    "n_baseline_columns": 54,
+    "baseline_fingerprint": "54:1a6ec2d84a69"
+  }
+}

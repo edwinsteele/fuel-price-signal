@@ -46,6 +46,49 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: station_px_change_3d, station_px_change_14d, station_descent_decel
+    (a station's own cut-sequence velocity/deceleration)
+  inputs: [station_code, price_date, station_price_cents]
+  claim: >-
+    The retail descent is a sequence of discrete cuts, and the SHAPE of a
+    station's own cut sequence says how much of the descent is left -- a
+    station whose recent pace has collapsed toward zero while its 14-day pace
+    was steep has arrived at its floor and is exposed to the restoration. The
+    lock has no station-level velocity column (every dynamic column is
+    network-level), so the model should stop waiting earlier where
+    station_descent_decel goes positive, concentrated in elongated cycles
+    (predicted largest in folds 3 and 7) with a modest, concentrated flip
+    count.
+  falsified: >-
+    The predicted mechanism specifically, not the columns outright. The
+    pipeline's own zone test on the candidate's declared target (folds 3, 7)
+    reads resolved=false: those folds show a small WORSENING
+    (target_delta_cpl_own=+0.0138) while the rest of the run carries the
+    improvement (other_delta_cpl_own=-0.0345). Folds 3/7 individually are
+    unremarkable (-0.15 / +0.20 c/L) next to fold 13's -1.28 or fold 11's
+    -0.57, neither predicted. Flip count is large and diffuse (439 across all
+    14 folds, tens per fold) not modest and concentrated. What aggregate
+    improvement exists traces mostly to shock-regime folds (per-regime: shock
+    -0.2837 vs normal +0.0706 c/L), a mechanism never proposed. None of this
+    reaches the arbiter either way -- headline -0.0272 c/L held-tau sits well
+    inside batch1's own noise band (z=-0.52 vs threshold 1.92, 60th
+    percentile of the noise draws).
+  not_tested: >-
+    Whether these columns carry a real shock-regime mechanism -- the run's
+    actual (noise-indistinguishable) improvement concentrated in shock folds,
+    not the elongated-normal folds the candidate was built around; a
+    follow-up could re-target these columns at "has this station's own pace
+    already stalled going into a shock" rather than the late-descent-shape
+    story tested here. Whether the effect is real but underpowered rather
+    than absent -- sitting inside the noise band is not rejection. Fold 1's
+    "candidate stopped buying" shape (21 baseline-only fills, zero
+    candidate-only) is untouched. Per-column attribution (which of the three
+    columns is doing anything) needs SHAP interaction values on the fitted
+    candidate model, which the pipeline doesn't currently persist -- same gap
+    noted on network_move_breadth.
+  outcome: inconclusive
+  evidence: experiments/candidates/batch1/station_descent_dynamics/
+
 - candidate: network_rise_breadth_3d, network_fall_breadth_3d, network_rise_breadth_delta_2d
     (directional network-breadth participation counts)
   inputs: [station_code, price_date, station_price_cents]
