@@ -1,0 +1,399 @@
+{
+  "status": "graded",
+  "candidate": {
+    "name": "lga_trough_propagation",
+    "hypothesis": "The Sydney trough is not a moment, it is a wave: individual LGAs bottom on different days and the wave runs from a known set of early LGAs outward. The 35 days_since_trough_entry_<lga> clocks are all in the lock, but the model reduces them through 35 axis-aligned splits, and the ONE cross-sectional summary it is handed (lga_phase_std) is a dispersion statistic \u2014 sign-blind and order-blind. Std cannot distinguish 'a third of the network has just bottomed and the rest is about to follow' from 'a third bottomed six weeks ago and the rest is mid-descent', yet those are opposite buy/wait situations. Breadth (how many have turned), its velocity (is the wave still spreading), and the leaders' head start (is there anyone left to follow) recover exactly what the std discards.",
+    "predicted_signature": "Decision-timing: the model should keep waiting while lga_trough_breadth_delta_3d is positive and lga_leader_lead_days is large (the wave is still arriving, so cheaper prices are still spreading), and should buy once breadth velocity rolls over toward zero with leader lead already collapsed (everyone who was going to cut has cut, and the restoration is next). Expect the flips to be WAIT->BUY moves a few days earlier than the lock makes them, and to concentrate on non-shock folds: the wave is a property of the ordinary cycle, and in a shock window the wholesale move overrides the propagation order entirely. A signature that would falsify the mechanism: gains driven by lga_trough_breadth_7d's LEVEL alone with the velocity and leader-lead columns inert \u2014 that would mean this is lga_phase_std in different clothes rather than the order information it claims to add.",
+    "confidence_effect": 0.45,
+    "confidence_zone": 0.45,
+    "columns": [
+      "lga_trough_breadth_7d",
+      "lga_trough_breadth_delta_3d",
+      "lga_leader_lead_days"
+    ],
+    "inputs": [
+      "price_date",
+      "days_since_trough_entry_bayside",
+      "days_since_trough_entry_blacktown",
+      "days_since_trough_entry_blue_mountains",
+      "days_since_trough_entry_botany_bay",
+      "days_since_trough_entry_burwood",
+      "days_since_trough_entry_camden",
+      "days_since_trough_entry_campbelltown",
+      "days_since_trough_entry_canada_bay",
+      "days_since_trough_entry_canterbury_bankstown",
+      "days_since_trough_entry_cumberland",
+      "days_since_trough_entry_fairfield",
+      "days_since_trough_entry_georges_river",
+      "days_since_trough_entry_hawkesbury",
+      "days_since_trough_entry_hornsby",
+      "days_since_trough_entry_hunters_hill",
+      "days_since_trough_entry_inner_west",
+      "days_since_trough_entry_ku_ring_gai",
+      "days_since_trough_entry_lane_cove",
+      "days_since_trough_entry_liverpool",
+      "days_since_trough_entry_mosman",
+      "days_since_trough_entry_north_sydney",
+      "days_since_trough_entry_northern_beaches",
+      "days_since_trough_entry_parramatta",
+      "days_since_trough_entry_penrith",
+      "days_since_trough_entry_randwick",
+      "days_since_trough_entry_rockdale",
+      "days_since_trough_entry_ryde",
+      "days_since_trough_entry_strathfield",
+      "days_since_trough_entry_sutherland_shire",
+      "days_since_trough_entry_sydney",
+      "days_since_trough_entry_the_hills_shire",
+      "days_since_trough_entry_waverley",
+      "days_since_trough_entry_willoughby",
+      "days_since_trough_entry_wollondilly",
+      "days_since_trough_entry_woollahra"
+    ],
+    "prior_art": "Directly adjacent to family C (lga_phase_std, lga_phase_std_delta_3d \u2014 GRADUATED, in the lock), whose ledger entry records exactly this as untested: 'Whether a leader-WEIGHTED consensus beats an unweighted LGA std -- the lead/lag roles are known ... but were never used to weight this statistic.' What differs mechanically: lga_phase_std is the sample std of the same 35 clocks, a scale statistic that is invariant to which LGAs hold which values; these columns are order/level statistics over the same panel and are invariant to nothing. Also adjacent to family A (network_px_std, graduated) and, through it, to the memory note that A and C both decode 'the network is converging on a trough' \u2014 this candidate is in that same super-family and the batch record should be read with that in mind. It is NOT a reparameterisation: a dispersion measure and a breadth count can move in opposite directions (std rises when a few LGAs run far ahead; breadth rises only when many have already turned). Caveat carried from project_lga_leadership: LGA leadership is TIME-VARYING, and the Phase 4 SHAP verdict retired Penrith (directionally right, predictively inert -- absorbed by stickiness_score + station_minus_last_min) and Sutherland Shire (flat) while confirming Blue Mountains and Randwick. The leader set below is therefore the two SHAP-confirmed rise leaders only, not the full user-observed prior.",
+    "mechanism_family": "lead-lag-propagation",
+    "target": {
+      "axis": "regime",
+      "expect_concentration_in": [
+        "normal"
+      ],
+      "folds": []
+    }
+  },
+  "effect_resolved": true,
+  "effect_delta_cpl_held": -0.0674551511851007,
+  "zone": {
+    "resolved": false,
+    "target_delta_cpl_own": 0.04633359273978499,
+    "other_delta_cpl_own": -0.3794484834587877,
+    "n_target_candidate_fills": 1633,
+    "n_other_candidate_fills": 693
+  },
+  "grading_error": null,
+  "aggregate": [
+    {
+      "arm": "R0",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 192.99364583333386,
+      "cpl_own": 187.8211302592766,
+      "saving_own_pct": 2.68014812183203,
+      "cpl_held": 187.8211302592766,
+      "saving_held_pct": 2.68014812183203
+    },
+    {
+      "arm": "candidate",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 192.99364583333386,
+      "cpl_own": 187.7536751080915,
+      "saving_own_pct": 2.7151001280982645,
+      "cpl_held": 187.7536751080915,
+      "saving_held_pct": 2.7151001280982645
+    }
+  ],
+  "fold_run_deltas": [
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": 0.010866016892888186,
+      "delta_ll_hard25_median": 0.03361212582358064
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.014023238225214563,
+      "delta_ll_hard25_median": -0.05842903433755953
+    },
+    {
+      "fold": 3,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 3,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.005448239371061425,
+      "delta_ll_hard25_median": -0.0341434309872779
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": 0.002707519557863025,
+      "delta_ll_hard25_median": 0.019930770047856816
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.0006121282453931398,
+      "delta_ll_hard25_median": -0.00870183767954702
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.0010426225785577226,
+      "delta_ll_hard25_median": -0.009447707549163686
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.01477524767799665,
+      "delta_ll_hard25_median": 0.04066313042451419
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.004330290343399712,
+      "delta_ll_hard25_median": 0.020500246085768725
+    },
+    {
+      "fold": 9,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 9,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.00985233398408114,
+      "delta_ll_hard25_median": -0.03692891076218263
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.003626793564682207,
+      "delta_ll_hard25_median": -0.012042110213102086
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.0004620624938751483,
+      "delta_ll_hard25_median": -0.008650390977411604
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.004947856960008601,
+      "delta_ll_hard25_median": -0.021981047201914405
+    },
+    {
+      "fold": 13,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 13,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.005580829641831708,
+      "delta_ll_hard25_median": -0.018278901529152236
+    },
+    {
+      "fold": 14,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 14,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.006207168602200663,
+      "delta_ll_hard25_median": 0.02000442344162434
+    }
+  ],
+  "seed_variance": {
+    "summary": {
+      "all": {
+        "cohort_median_seed_std": 0.007107184439516067,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 3
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.022478277532672567,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 4
+      }
+    },
+    "flags": [
+      {
+        "cohort": "all",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.04577158957845631,
+        "ratio_vs_cohort_median": 6.4401859791291605
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.04510154120949116,
+        "ratio_vs_cohort_median": 6.3459083682598445
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "candidate",
+        "seed_std": 0.5359292259261949,
+        "ratio_vs_cohort_median": 75.40668607760047
+      },
+      {
+        "cohort": "hard25",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.13260218587337955,
+        "ratio_vs_cohort_median": 5.899125752880307
+      },
+      {
+        "cohort": "hard25",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.12581970347391533,
+        "ratio_vs_cohort_median": 5.5973907827694624
+      },
+      {
+        "cohort": "hard25",
+        "fold": 3,
+        "run": "candidate",
+        "seed_std": 0.14761149076929037,
+        "ratio_vs_cohort_median": 6.566850620770853
+      },
+      {
+        "cohort": "hard25",
+        "fold": 5,
+        "run": "R0",
+        "seed_std": 0.12047042226982245,
+        "ratio_vs_cohort_median": 5.359415199617346
+      }
+    ]
+  },
+  "error": null,
+  "meta": {
+    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1",
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "realised_seed": 42,
+    "n_windows": 14,
+    "tank_params": "50/3.571/1d/10%",
+    "realised_wall_seconds": 740.0926273330115,
+    "baseline_cache_used": true,
+    "baseline_cache_hit_folds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "wall_seconds": 1270.9314527920214,
+    "pass_criterion": null,
+    "extra_feature_provider_hits": 5693,
+    "extra_feature_provider_misses": 607,
+    "git_sha": "b8c01f8aa5e73d9ceaa57f7d41b9ec9393b5dd61",
+    "bead_id": "fps-cgf",
+    "n_baseline_columns": 54,
+    "baseline_fingerprint": "54:1a6ec2d84a69"
+  }
+}

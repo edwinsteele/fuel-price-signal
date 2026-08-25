@@ -46,6 +46,65 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: lga_trough_breadth_7d, lga_trough_breadth_delta_3d, lga_leader_lead_days
+    (cross-sectional breadth/velocity/leader-lag over the 35 LGA trough clocks)
+  inputs: [price_date, days_since_trough_entry_bayside, days_since_trough_entry_blacktown,
+    days_since_trough_entry_blue_mountains, days_since_trough_entry_botany_bay,
+    days_since_trough_entry_burwood, days_since_trough_entry_camden,
+    days_since_trough_entry_campbelltown, days_since_trough_entry_canada_bay,
+    days_since_trough_entry_canterbury_bankstown, days_since_trough_entry_cumberland,
+    days_since_trough_entry_fairfield, days_since_trough_entry_georges_river,
+    days_since_trough_entry_hawkesbury, days_since_trough_entry_hornsby,
+    days_since_trough_entry_hunters_hill, days_since_trough_entry_inner_west,
+    days_since_trough_entry_ku_ring_gai, days_since_trough_entry_lane_cove,
+    days_since_trough_entry_liverpool, days_since_trough_entry_mosman,
+    days_since_trough_entry_north_sydney, days_since_trough_entry_northern_beaches,
+    days_since_trough_entry_parramatta, days_since_trough_entry_penrith,
+    days_since_trough_entry_randwick, days_since_trough_entry_rockdale,
+    days_since_trough_entry_ryde, days_since_trough_entry_strathfield,
+    days_since_trough_entry_sutherland_shire, days_since_trough_entry_sydney,
+    days_since_trough_entry_the_hills_shire, days_since_trough_entry_waverley,
+    days_since_trough_entry_willoughby, days_since_trough_entry_wollondilly,
+    days_since_trough_entry_woollahra]
+  claim: >-
+    The Sydney trough is a wave, not a moment: individual LGAs bottom on
+    different days and the wave runs from a known set of early LGAs outward.
+    lga_phase_std (family C, graduated) is a dispersion statistic over the
+    same 35 clocks -- sign-blind and order-blind, so it can't tell "a third
+    of the network has just bottomed, the rest about to follow" from "a third
+    bottomed six weeks ago, the rest mid-descent." Breadth, its velocity, and
+    the leaders' head start recover exactly what the std discards, predicting
+    earlier WAIT->BUY flips concentrated on non-shock folds (a shock's
+    wholesale move overrides propagation order).
+  falsified: >-
+    The predicted mechanism specifically. The pipeline's own zone test on the
+    candidate's declared target (normal/non-shock folds) reads resolved=false:
+    the target zone is slightly WORSE for the candidate (target_delta_cpl_own
+    =+0.0463) while the entire favourable effect sits in the zone predicted
+    to be inert (shock, other_delta_cpl_own=-0.3794) -- the reverse of the
+    prediction, not merely an absence of one. The headline realised delta
+    (-0.0675 c/L held-tau) also sits inside batch1's single-candidate noise
+    band (z=-0.93 vs threshold 1.92, arity-3 floor).
+  not_tested: >-
+    Whether the mechanism helps at all within ordinary (non-shock) cycles --
+    the regime it was built for. The observed sign there is negative, not
+    merely flat, but fold 3 (the worst-offending fold, +10.78 c/L flip delta)
+    is also the most seed-unstable cell in the run (candidate/all cohort,
+    75.4x cohort-median seed_std, an order of magnitude past every other
+    flagged cell) -- a fold-3-excluded re-read or wider seed sweep would
+    separate a real mild harm from a noisy draw. The candidate's own proposed
+    falsification test (level-only vs velocity/leader-lead-driven) is
+    untested -- needs per-column SHAP/attribution against the candidate's
+    fitted model, which this pipeline doesn't currently persist (same gap
+    network_move_breadth's dossier already named). Whether a genuine
+    shock-fold restoration mechanism exists here (folds 4 and 13 both show
+    large favourable effects during shocks, never predicted) is undetermined
+    on this run alone. Whether combining this with network_move_breadth (same
+    batch, same cross-sectional-consensus family, same folds 11-13 cluster)
+    does better than either alone.
+  outcome: inconclusive
+  evidence: experiments/candidates/batch1/lga_trough_propagation/
+
 - candidate: station_px_change_3d, station_px_change_14d, station_descent_decel
     (a station's own cut-sequence velocity/deceleration)
   inputs: [station_code, price_date, station_price_cents]
