@@ -214,8 +214,10 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
     any more — the caller (`compute_retrospective`) still computes and reports it at the
     payload's top level, but this function has no use for it.
 
-    Raises ValueError for a dossiered candidate whose facts.json carries a
-    `delta_cpl_held` but no `provenance.tank_params` (fps-aam) — see the guard below.
+    Raises ValueError (fps-aam) for a dossiered candidate whose facts.json carries a
+    `delta_cpl_held` but no `provenance.tank_params`, and for a batch whose rows don't
+    all share ONE cadence — ranking is a comparison, and a cross-cadence one isn't
+    valid. See the two guards below.
     """
     rows = []
     for entry in entries:
@@ -280,6 +282,32 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
                     z is not None and family_wise_z_gate is not None and z <= -family_wise_z_gate
                 ),
             }
+        )
+    stamps: dict[str, list[str]] = {}
+    for row in rows:
+        if row["tank_params"] is not None:
+            stamps.setdefault(row["tank_params"], []).append(row["candidate"])
+    if len(stamps) > 1:
+        # Carrying the stamp is not enough on its own: every sort branch below, and
+        # `clears_family_wise_threshold`, ASSERT that these deltas are commensurable.
+        # They are not across cadences — fps-fii measured realised CPL at
+        # 189.67/187.85/187.82 c/L across 7/2/1-day on an otherwise identical run,
+        # which is an order of magnitude larger than the deltas this function ranks,
+        # so the ordering would be reporting the cadence and not the candidates.
+        #
+        # Raising rather than reporting an "unranked" leaderboard, because there is no
+        # legitimate mixed-cadence batch to report: batch_freeze stamps ONE cadence
+        # "for every candidate run against it" (freeze.json's tank_params), and
+        # noise_floor.py enforces it across every draw. Reaching here means something
+        # upstream already broke that declaration, which is a human's call to make
+        # (re-run the odd candidates, or re-freeze the batch), not this module's.
+        detail = "; ".join(f"{stamp} ({', '.join(sorted(names))})" for stamp, names in sorted(stamps.items()))
+        raise ValueError(
+            f"leaderboard spans {len(stamps)} cadences — {detail} — and delta_cpl_held is "
+            "not comparable across them (fps-aam/fps-fii), so ranking them against each "
+            "other would report the cadence, not the candidates. A batch declares ONE "
+            "cadence for every candidate run against it (freeze.json's tank_params); "
+            "re-run the candidates that disagree with it, or re-freeze the batch."
         )
     has_z = any(r["noise_band_z"] is not None for r in rows)
     if has_z:

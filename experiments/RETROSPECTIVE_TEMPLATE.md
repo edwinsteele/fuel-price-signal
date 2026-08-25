@@ -27,8 +27,10 @@ ascending.
 (`fps-fii` measured realised CPL at 189.67/187.85/187.82 c/L across 7/2/1-day evaluation
 intervals on an otherwise identical run — larger than the deltas this table ranks). Rows
 carry `tank_params` from their own dossier and `noise_floor.tank_params` stamps the band
-(`fps-aam`); transcribe them, and if they are not all the same string, say so and do not
-rank across the difference — that is a mixed-cadence leaderboard, not a result.
+(`fps-aam`); transcribe them. They will all be the same string — a batch declares one
+cadence for every candidate run against it, and `build_leaderboard` refuses to rank a
+batch whose rows disagree rather than producing a mixed-cadence table — but state which
+cadence, because the table is unreadable without it.
 
 **Multiple-comparisons note:** with N candidates graded against the same noise band,
 picking the best of N is a different question from grading one candidate alone — the

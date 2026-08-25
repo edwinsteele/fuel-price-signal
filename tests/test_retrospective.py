@@ -644,13 +644,12 @@ def test_leaderboard_rows_carry_tank_params_from_the_dossiers_provenance():
     """
     entries = [
         {"candidate": "a", "state": "dossiered", "facts": _facts("a", delta=-0.05)},
-        {"candidate": "b", "state": "dossiered",
-         "facts": _facts("b", delta=0.02, tank_params="50/3.571/7d/10%")},
+        {"candidate": "b", "state": "dossiered", "facts": _facts("b", delta=0.02)},
     ]
 
     rows = build_leaderboard(entries, family_wise_z_gate=None)
 
-    assert {r["candidate"]: r["tank_params"] for r in rows} == {"a": TANK_1D, "b": "50/3.571/7d/10%"}
+    assert {r["candidate"]: r["tank_params"] for r in rows} == {"a": TANK_1D, "b": TANK_1D}
 
 
 def test_build_leaderboard_refuses_a_delta_cpl_with_no_tank_params():
@@ -769,3 +768,51 @@ def _strip_keys(obj: object, key: str) -> object:
     if isinstance(obj, list):
         return [_strip_keys(v, key) for v in obj]
     return obj
+
+
+def test_build_leaderboard_refuses_to_rank_across_two_cadences():
+    """Carrying the stamp is not enough: every sort branch, and
+    `clears_family_wise_threshold`, assert these deltas are commensurable, and across
+    cadences they are not (fps-fii: 189.67/187.85/187.82 c/L at 7/2/1-day, an order of
+    magnitude above the deltas being ranked). A batch declares ONE cadence for every
+    candidate run against it (batch_freeze), so this state is an upstream violation, not
+    a batch shape to report."""
+    entries = [
+        {"candidate": "one_day", "state": "dossiered", "facts": _facts("one_day", delta=-0.05)},
+        {"candidate": "seven_day", "state": "dossiered",
+         "facts": _facts("seven_day", delta=0.02, tank_params="50/3.571/7d/10%")},
+    ]
+
+    with pytest.raises(ValueError, match="spans 2 cadences"):
+        build_leaderboard(entries, family_wise_z_gate=None)
+
+
+def test_build_leaderboard_refuses_a_mixed_cadence_batch_with_no_noise_floor():
+    """The reachable path specifically: with no noise floor the ranking falls back to raw
+    delta_cpl_held ascending, which is where a cross-cadence comparison would otherwise be
+    made silently — no z, no percentile, and every `clears_family_wise_threshold` already
+    False, so nothing else in the payload would have hinted at it."""
+    no_band = {"available": False}
+    entries = [
+        {"candidate": "one_day", "state": "dossiered",
+         "facts": _facts("one_day", delta=-0.05, noise_band=no_band)},
+        {"candidate": "seven_day", "state": "dossiered",
+         "facts": _facts("seven_day", delta=-0.40, noise_band=no_band,
+                         tank_params="50/3.571/7d/10%")},
+    ]
+
+    with pytest.raises(ValueError, match="not comparable across them"):
+        build_leaderboard(entries, family_wise_z_gate=None)
+
+
+def test_build_leaderboard_ranks_normally_when_only_stamped_rows_share_a_cadence():
+    """A non-graded candidate contributes a null stamp, not a second cadence — it has no
+    delta_cpl_held to be incomparable with, so it must not trip the mixed-cadence guard."""
+    entries = [
+        {"candidate": "graded", "state": "dossiered", "facts": _facts("graded", delta=-0.05)},
+        {"candidate": "dq", "state": "dossiered", "facts": _disqualified_facts("dq")},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert [r["candidate"] for r in rows] == ["graded", "dq"]

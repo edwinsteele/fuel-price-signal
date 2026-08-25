@@ -49,8 +49,11 @@ Four sections, matching the parent bead's acceptance criteria:
    don't silently read their absence as "these did nothing," they simply have no result.
    Each row carries the `tank_params` its own dossier ran at, and `noise_floor.tank_params`
    stamps the band (`fps-aam`, extending `fps-15c` to this artifact) — a `delta_cpl_held`
-   is only readable in its own cadence's units. Transcribe the stamp with the number, and
-   if the rows don't all share one cadence, flag it rather than ranking across it.
+   is only readable in its own cadence's units. Transcribe the stamp with the number. A
+   batch declares ONE cadence for every candidate run against it (`freeze.json`), so
+   `build_leaderboard` REFUSES outright if the rows disagree rather than ranking across
+   them — if you hit that error, the fix is upstream (re-run the odd candidates or
+   re-freeze the batch), not in the write-up.
 
 2. **Noise-band comparison, with the multiple-comparisons correction already applied.**
    `family_wise_z_threshold` (fps-awz) is a Bonferroni correction, computed over the number
