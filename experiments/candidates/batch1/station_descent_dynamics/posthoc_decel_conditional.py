@@ -12,7 +12,14 @@ station_px_change_3d at t+3 == price(t+3) - price(t). No new data is loaded and 
 model is refit; this is a conditional-distribution read of columns already computed
 and PIT-validated by the graded run.
 
-Caveat: forward return != realised saving. It ignores the tank/forced-fill mechanics
+Caveat 2 (coverage): 4.3% of rows have no forward window because the station's
+series stops there. That is the same artifact behind the NaN band in
+candidate_over_time.png -- 245 coverage holes across 198 of 714 stations, median
+132 days (see fps-ghr). Those rows are dropped, not imputed. The drop is tied to
+data availability rather than to decel, so it should not bias the buckets, but it
+has not been tested for that.
+
+Caveat 1: forward return != realised saving. It ignores the tank/forced-fill mechanics
 that amplified fold 13, so the edge measured here is a LOWER bound on what acting on
 the signal is worth, and says nothing about whether the model can capture it.
 
