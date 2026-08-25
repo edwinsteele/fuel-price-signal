@@ -47,6 +47,10 @@ Four sections, matching the parent bead's acceptance criteria:
    ascending (it's a COST — more negative is better). Candidates that never reached a
    dossier are NOT in the leaderboard; they're in `outcome_tally` instead (see below) —
    don't silently read their absence as "these did nothing," they simply have no result.
+   Each row carries the `tank_params` its own dossier ran at, and `noise_floor.tank_params`
+   stamps the band (`fps-aam`, extending `fps-15c` to this artifact) — a `delta_cpl_held`
+   is only readable in its own cadence's units. Transcribe the stamp with the number, and
+   if the rows don't all share one cadence, flag it rather than ranking across it.
 
 2. **Noise-band comparison, with the multiple-comparisons correction already applied.**
    `family_wise_z_threshold` (fps-awz) is a Bonferroni correction, computed over the number
@@ -101,9 +105,10 @@ In the run directory (`<batch_dir>/RETROSPECTIVE.md`), using
 candidate dossier:
 
 - **Facts**: transcribed from `retrospective_facts.json` — no new arithmetic. Leaderboard
-  table, the multiple-comparisons threshold and which candidates (if any) clear it,
-  outcome tally table, confidence-calibration pairs (and means, if not
-  `insufficient_data`).
+  table (including each row's cadence stamp), the multiple-comparisons threshold and which
+  candidates (if any) clear it, outcome tally table, confidence-calibration pairs (and
+  means, if not `insufficient_data`). No CPL-shaped number reaches the prose without the
+  `tank_params` it was produced at — same rule one artifact upstream (`fps-15c`).
 - **Judgement**: did the batch's standout candidate(s) hold up against noise at the
   batch-corrected bar? Did the generator's confidence priors predict what happened, to
   the extent the data supports saying anything? **One-at-a-time additive screening never
@@ -130,6 +135,14 @@ Commit `RETROSPECTIVE.md` + `retrospective_facts.json` together, straight to `ma
   band's own draw count. The mechanism is exercised end-to-end from batch 0, but the real
   payoff (a leaderboard that actually differentiates candidates, and the start of a real
   confidence-calibration read) arrives with `batch1` (5 candidates) and beyond.
+- **Batch 0's committed `retrospective_facts.json` predates two reworks and is NOT
+  regenerated.** It carries no `tank_params` anywhere (`fps-aam`) and its `noise_floor`
+  block reads `available: true` against a floor today's `dossier_tables._noise_band` would
+  refuse (no `null_method`, i.e. the pre-`fps-awz` seed-swap null). It is a dated record of
+  what was computed on 2026-08-19 — `computed_at`/`git_sha` say so — and `RETROSPECTIVE.md`'s
+  prose was written from it, so re-running with `--force` would silently rewrite a published
+  finding rather than just add a stamp. Read it as history; don't diff it against this
+  schema.
 - **`family_wise_z_threshold` needs `n_draws >= 2`.** With fewer draws the band's std can't
   be estimated at all (no degrees of freedom for a t-critical value) — the payload's
   top-level `family_wise_z_threshold` (a scalar) is `None` and every row's

@@ -64,6 +64,7 @@ from experiments.pipeline.batch_freeze import DEFAULT_BATCHES_DIR
 from experiments.pipeline.dossier_tables import (
     FACTS_FILENAME,
     FAMILY_WISE_ALPHA,
+    NOISE_FLOOR_FILENAME,
     _noise_band,
     family_wise_z_threshold,
 )
@@ -149,10 +150,36 @@ def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
     own math rather than re-deriving it — single-sourced the same way BASELINE_COLUMNS is
     (fps-zci). The dummy delta below only feeds the per-candidate percentile/z fields, which this
     function discards; mean/std/n_draws/available/reason don't depend on it.
+
+    `tank_params` (fps-aam) is read verbatim off the batch's own noise_floor.json — the file
+    `_noise_band` just graded this band from — never re-derived from a TankParams here. The
+    band's mean/std ARE CPL deltas, in whatever cadence's units the floor was computed at
+    (fps-fii measured realised CPL moving 189.67/187.85/187.82 c/L across 7/2/1-day cadence),
+    so the summary is unreadable without the stamp the same way results.csv was before fps-15c.
     """
     band = _noise_band({"effect_delta_cpl_held": 0.0}, batch_dir, check_fingerprint=False)
     if not band.get("available"):
+        # No CPL value in a refusal dict, so nothing to stamp — returned verbatim, including
+        # its `reason` (which is the actionable half for a reader).
         return band
+    # `_noise_band` already read this file; re-reading it here rather than threading the raw
+    # value out through that shared return keeps fps-15c's facts.json contract (already
+    # closed) untouched — this is the one CPL-carrying artifact fps-15c left unstamped.
+    noise_floor = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
+    tank_params = noise_floor.get("tank_params")
+    if not tank_params:
+        # Same refusal as dossier_tables.build_facts' (fps-15c): a band mean/std is a CPL, and
+        # a CPL with no cadence beside it is the ambiguity the stamp exists to remove. Note
+        # `_noise_band` was called with check_fingerprint=False, which skips COMPARING the
+        # floor's stamp against a run's — it does not excuse the stamp being absent, and this
+        # summary is the batch-level artifact where that distinction has to be re-asserted.
+        raise ValueError(
+            f"{batch_dir / NOISE_FLOOR_FILENAME}: carries deltas_cpl_held (this summary is "
+            "about to report their mean/std) but no tank_params — refusing to write an "
+            "unstamped CPL into the retrospective (fps-aam/fps-15c). Recompute the floor with "
+            "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor "
+            f"{batch_dir.name} --force`, or backfill the cadence it actually ran at."
+        )
     return {
         "available": True,
         "n_draws": band["n_draws"],
@@ -161,6 +188,7 @@ def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
         # whether that comparison is like-for-like is a fact about the ruler, not about any
         # single row.
         "n_placebo_columns": band["n_placebo_columns"],
+        "tank_params": tank_params,
         "band_mean_delta_cpl_held": band["band_mean_delta_cpl_held"],
         "band_std_delta_cpl_held": band["band_std_delta_cpl_held"],
     }
@@ -185,6 +213,9 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
     gate's own ordering. There is no `family_wise_threshold` (percentile-space) parameter here
     any more — the caller (`compute_retrospective`) still computes and reports it at the
     payload's top level, but this function has no use for it.
+
+    Raises ValueError for a dossiered candidate whose facts.json carries a
+    `delta_cpl_held` but no `provenance.tank_params` (fps-aam) — see the guard below.
     """
     rows = []
     for entry in entries:
@@ -202,6 +233,26 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
         candidate_conf = facts.get("candidate", {})
         percentile = noise_band.get("candidate_percentile_better_than_noise") if noise_band.get("available") else None
         z = noise_band.get("candidate_z_vs_band") if noise_band.get("available") else None
+        provenance = facts.get("provenance") or {}
+        delta_cpl_held = realised.get("delta_cpl_held")
+        tank_params = provenance.get("tank_params")
+        if delta_cpl_held is not None and not tank_params:
+            # fps-aam, the same refusal dossier_tables.build_facts makes one artifact
+            # upstream: this row is about to carry a realised CPL delta, and the facts.json
+            # it came from names no cadence to label it with. A null stamp beside a real
+            # CPL is worse than none — experiments.lib.io.artifact_has_unstamped_cpl is a
+            # whole-document "a stamp exists somewhere" check (deliberately coarse, see its
+            # docstring), so ONE stamped row would mask an unstamped sibling and the
+            # backstop would pass on an artifact this bead exists to make readable.
+            raise ValueError(
+                f"candidate {entry['candidate']!r}: facts.json carries "
+                f"delta_cpl_held={delta_cpl_held!r} but provenance.tank_params is "
+                f"{tank_params!r} — refusing to rank an unstamped CPL (fps-aam/fps-15c). "
+                "Its dossier predates the stamp: re-run "
+                "`PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables` for "
+                "that candidate (backfilling its results.json meta first if that is where "
+                "the cadence is missing)."
+            )
         rows.append(
             {
                 "candidate": entry["candidate"],
@@ -210,8 +261,14 @@ def build_leaderboard(entries: list[dict], *, family_wise_z_gate: float | None) 
                 # candidates that all tell one story is the finding about the generator
                 # that generator.md's diversity rule exists to surface.
                 "mechanism_family": (facts.get("candidate") or {}).get("mechanism_family"),
-                "status": facts.get("provenance", {}).get("status"),
-                "delta_cpl_held": realised.get("delta_cpl_held"),
+                "status": provenance.get("status"),
+                # The cadence this row's delta_cpl_held was produced at (fps-aam), read
+                # straight off the candidate's own facts.json provenance — never
+                # re-derived from a TankParams here, so a row can never disagree with the
+                # dossier it is a summary of. Null only for a non-graded candidate, which
+                # has no delta_cpl_held to label (the guard above enforces that pairing).
+                "tank_params": tank_params,
+                "delta_cpl_held": delta_cpl_held,
                 "effect_resolved": realised.get("effect_resolved"),
                 "zone_resolved": zone.get("resolved"),
                 "confidence_effect": candidate_conf.get("confidence_effect"),
