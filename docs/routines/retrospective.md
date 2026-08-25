@@ -123,7 +123,11 @@ candidate dossier:
   human) do with this batch's result?
 
 Commit `RETROSPECTIVE.md` + `retrospective_facts.json` together, straight to `main`
-(`experiments/**` is PR-exempt) — same convention as a candidate dossier.
+(`experiments/**` is PR-exempt) — same convention as a candidate dossier — then
+**`git push`**. Finish by confirming `git status --short` and
+`git log --oneline origin/main..main` are both empty (docs/CONVENTIONS.md § the
+exemption): the batch retrospective is the artifact other work cites, so an unpushed
+one is invisible to everyone but this machine.
 
 ## Known gaps to flag, not silently work around
 

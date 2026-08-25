@@ -216,11 +216,14 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    statuses can't reach this step at all — see Step 0.
 
 6. **Commit `README.md` + the run's updated `facts.json` (`grading` filled in) + the PNGs +
-   `experiments/ledger.yaml` + `experiments/INDEX.md` together, straight to `main`** —
-   `experiments/**` is PR-exempt (`CLAUDE.md`), and `ledger.yaml`/`INDEX.md` are prose/data files
-   under the same exemption since they only ever get written by this routine or hand-backfills of
-   experiment content. One commit per run if several are queued in one session (keeps `git blame`
-   readable per candidate).
+   `experiments/ledger.yaml` + `experiments/INDEX.md` together, straight to `main`, and
+   `git push`** — `experiments/**` is PR-exempt (`CLAUDE.md`), and `ledger.yaml`/`INDEX.md` are
+   prose/data files under the same exemption since they only ever get written by this routine or
+   hand-backfills of experiment content. One commit per run if several are queued in one session
+   (keeps `git blame` readable per candidate). **The push is not optional and not deferrable to
+   "later" or "a human":** direct-to-`main` means landed on the remote (docs/CONVENTIONS.md §
+   the exemption), and this routine is unattended, so a commit it leaves behind is a commit
+   nobody is watching for.
 
 7. **Close the candidate's bead: `bd close <bead_id>` (from `facts["provenance"]["bead_id"]`),
    then `bd dolt push`.** Mechanical, every time step 6 fires — this is not a judgement about the
@@ -247,14 +250,32 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    instead of leaving it dangling: immediately after `bd close` (and whether or not `bd dolt push`
    succeeds — the two are independent), run
    `git add .beads/interactions.jsonl && git commit -m "chore: record <id> closure in the
-   interaction log"`. If several candidates are dossiered in one session, one commit per close (or
-   a single trailing commit covering all of them) both work — just don't let the run end with
-   `.beads/interactions.jsonl` dirty.
+   interaction log" && git push`. If several candidates are dossiered in one session, one commit
+   per close (or a single trailing commit covering all of them) both work — just don't let the run
+   end with `.beads/interactions.jsonl` dirty.
+
+   **The push belongs in this step too, for the reason the step itself demonstrates.** The
+   revision that added the commit half above (2026-08-25) was written, committed to a local
+   `main`, and never pushed — so the instruction telling this routine not to leave work dangling
+   was itself left dangling, and shipped only on 2026-08-26 when the eight-commit backlog was
+   found. A rule about finishing that doesn't itself get finished is the sharpest possible
+   demonstration that "commit" and "landed" are different things.
 
 ### Step 2 — summary
 
 Print one line per run processed (candidate name, outcome, one-clause verdict) and one line per
-run the deterministic scan logged as `failed, skipping`. No PR, no further action — the next thing
+run the deterministic scan logged as `failed, skipping`.
+
+**Before printing that summary, verify the run actually landed** — `git status --short` empty
+(nothing left dirty, including a `bd`-written `.beads/interactions.jsonl` row) and
+`git log --oneline origin/main..main` empty (nothing left unpushed). Both are one command and
+neither depends on remembering what this run happened to touch, which is the point: the two
+failures this routine has actually had — a dirty interactions log (2026-08-25) and an unpushed
+backlog (2026-08-26) — are each caught by one of them. Report the run as done only once both are
+clean; if either isn't, finish the commit/push before summarising rather than noting it as a
+caveat.
+
+No PR, no further action — the next thing
 that touches this candidate is either a human reading the README, or (once every candidate bead in
 a batch is closed) the batch's retrospective bead — see `docs/routines/generator.md` § Filing for
 the current parent/child bead structure; earlier revisions of this doc named a standalone

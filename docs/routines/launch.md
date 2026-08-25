@@ -66,6 +66,21 @@ instructions nobody remembers to update.
 3. On an unexpected non-zero exit (a genuine bug, not one of the above), surface the traceback —
    don't retry blindly, and don't fall back to running `bd`/`git` commands by hand to route around
    it. This routine's only job is a 10-minute burst; if it's broken, report it and stop.
+4. **Check `git status --short` before exiting, even though this routine writes no repo files of
+   its own.** It doesn't commit anything — but it *does* claim beads, release stale claims, and
+   comment on them, and `bd` records status transitions as rows in the git-tracked
+   `.beads/interactions.jsonl` (`bd dolt push` syncs the Dolt database, a separate system; it
+   never touches git — see `feedback_beads_commit_tracked_state`). A claim or a stale-claim
+   release therefore leaves a tracked file dirty in a routine whose whole design is "launch and
+   exit", with nobody watching. If it is dirty:
+   `git add .beads/interactions.jsonl && git commit -m "chore: record launch-routine bead
+   activity in the interaction log" && git push`. Then confirm
+   `git log --oneline origin/main..main` is empty (docs/CONVENTIONS.md § the exemption).
+
+   Not every `bd` write produces a row — the log holds transitions like `open->in_progress` and
+   `in_progress->open`, but a claim made 2026-08-25 produced none — so **check the file's state
+   rather than reasoning about which commands should have written to it.** That's the whole
+   reason the postcondition is `git status`, not a list of commands to watch for.
 
 ## Candidate-bead convention
 

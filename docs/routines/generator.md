@@ -389,7 +389,7 @@ risk on a one-machine setup; not worth a second implementation of the same check
 ## Candidate module format
 
 One Python file per candidate, written to `experiments/candidates/<batch>/`.
-(`experiments/**` is exempt from the PR rule — commit these straight to `main`.)
+(`experiments/**` is exempt from the PR rule — commit **and push** these straight to `main`; the push is part of the exemption, not a separate step to remember.)
 
 ```python
 NAME = "tgp_accel_7d"
@@ -502,7 +502,10 @@ Per-candidate *dossier* runs get no bead: the dossier routine writes those unsup
 Then, for each candidate that clears the diversity gate and the redundancy checks:
 
 1. Write `experiments/candidates/<batch>/<NAME>.py` in the format above; commit
-   straight to `main` (`experiments/**` is PR-exempt).
+   **and `git push`** straight to `main` (`experiments/**` is PR-exempt). The launch
+   routine claims these candidates from a bead queue that any clone can serve — a
+   module still sitting on one machine's local `main` is a candidate the launcher
+   cannot run.
 2. `bd create` one issue per candidate, labelled `experiment`, `--parent` the batch bead
    — the launch routine
    (fps-3jj.5, `experiments/pipeline/launch.py`) queries `bd ready --label experiment`
@@ -529,6 +532,14 @@ Then, for each candidate that clears the diversity gate and the redundancy check
    arity calibration is sized from the batch's real arities, and reading them back off
    the modules later is strictly worse than having the generator state them.
 3. `bd dolt push` after filing the batch.
+4. **Confirm the batch actually left this machine**: `git status --short` empty (the
+   `batch.md`/`batch.json` the redundancy screen wrote, and any `bd`-written
+   `.beads/interactions.jsonl` row, are both committed) and
+   `git log --oneline origin/main..main` empty (everything pushed). `bd dolt push` in
+   step 3 syncs the Dolt database only — it is a different system and never touches git,
+   so a green `bd dolt push` says nothing about whether the candidate modules landed.
+   That split is the exact shape of the failure: beads visible to the launch routine,
+   modules still on one laptop. See docs/CONVENTIONS.md § the exemption.
 
 ## Batch record
 
