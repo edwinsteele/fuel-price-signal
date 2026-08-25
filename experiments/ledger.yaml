@@ -74,18 +74,33 @@
     inside batch1's own noise band (z=-0.52 vs threshold 1.92, 60th
     percentile of the noise draws).
   not_tested: >-
-    Whether these columns carry a real shock-regime mechanism -- the run's
-    actual (noise-indistinguishable) improvement concentrated in shock folds,
-    not the elongated-normal folds the candidate was built around; a
-    follow-up could re-target these columns at "has this station's own pace
-    already stalled going into a shock" rather than the late-descent-shape
-    story tested here. Whether the effect is real but underpowered rather
-    than absent -- sitting inside the noise band is not rejection. Fold 1's
-    "candidate stopped buying" shape (21 baseline-only fills, zero
-    candidate-only) is untouched. Per-column attribution (which of the three
-    columns is doing anything) needs SHAP interaction values on the fitted
-    candidate model, which the pipeline doesn't currently persist -- same gap
-    noted on network_move_breadth.
+    Whether an evaluation that can SEE a fat-tailed payoff would resolve
+    these columns. A post-hoc conditional read of this run's own rowpreds
+    (714 stations, 770,799 rows -- NOT pipeline-generated, see
+    posthoc_decel_conditional.py) shows the columns are not inert: within
+    steep descents (px_change_14d <= -15), station_descent_decel separates
+    3-day restoration-cliff risk from 2.22% (decel < 0, cuts still
+    accelerating) to 6.6-6.8% (decel +2..+6, descent stalled) against a
+    5.37% base rate -- the direction the claim predicted, on 200k+ rows.
+    But the edge is ~0.67 c/L per firing arriving in ~7% of firings, which
+    is not a shape a 14-fold pooled-CPL arbiter can resolve; fold 13's
+    -1.28 c/L is that tail sampled twice, amplified by R0's tank running dry
+    inside both plateaus (964 L, 56% of the fold, bought at a 19.4 c/L
+    forced-fill premium). So the open ground is the INSTRUMENT before the
+    hypothesis: more folds, tail-avoidance scoring (frequency of buying
+    within N days of a >25 c/L step) instead of pooled CPL, or
+    block-bootstrap CIs on per-fold deltas. Also still open: whether the
+    MODEL can capture an edge the columns demonstrably contain (the post-hoc
+    read is of the columns, not of any fitted model); and per-column
+    attribution (which of the three does anything), which needs SHAP
+    interaction values on the fitted candidate model the pipeline doesn't
+    persist -- same gap noted on network_move_breadth. Fold 1's flip-null is
+    now resolved and was an instrument artifact, not a finding: total litres
+    are identical across arms and the candidate's fill dates are a strict
+    subset of R0's (deferral onto fewer, larger, later fills). decision_flips
+    keys on (fold, station_code, date) and so cannot see same-date
+    volume changes -- 150 hidden behind this run's 439 date-flips; filed as
+    fps-gzz.
   outcome: inconclusive
   evidence: experiments/candidates/batch1/station_descent_dynamics/
 

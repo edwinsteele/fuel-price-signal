@@ -171,6 +171,56 @@ fold 1's null is entirely an artifact of this blind spot. Tracked as
 ![](candidate_over_time.png)
 ![](external_series_overlay.png)
 
+## Post-hoc analysis (2026-08-25, NOT pipeline-generated)
+
+Added while reviewing this dossier, to separate two readings the graded run
+cannot tell apart: are the columns inert, or is the edge real but too small
+and too fat-tailed for 14 folds to resolve? Script and output:
+`posthoc_decel_conditional.py` / `.log`. No new data, no refit — a
+conditional-distribution read of this run's own `rowpreds.parquet`, across
+all **714 stations / 770,799 rows**, far wider than the 5 preferred
+stations the backtest fills cover. Forward 3-day change is recovered from
+the backward change observed three days later.
+
+Base rate: mean forward-3d **-0.06 c/L**, P(cliff > +25 c/L) **5.37%**.
+
+Within steep descents (`station_px_change_14d <= -15`), by
+`station_descent_decel`:
+
+| decel | n | mean fwd 3d | edge vs base | P(cliff >+25c) | label |
+|---|---|---|---|---|---|
+| [-99, 0) cuts still accelerating | 79,082 | -2.41 | -2.35 | **2.22%** | 0.203 |
+| [0, +2) | 41,747 | -1.10 | -1.03 | 4.25% | 0.292 |
+| [+2, +4) | 51,164 | +0.45 | +0.52 | 6.82% | 0.352 |
+| **[+4, +6)** (both decisive fold-13 buys) | 32,010 | +0.61 | **+0.67** | 6.62% | 0.411 |
+| [+6, +8) | 10,052 | +0.29 | +0.35 | 5.41% | 0.442 |
+| [+8, +99) | 2,157 | -0.13 | -0.07 | 3.71% | 0.503 |
+
+**The columns carry real information.** A station whose cuts are still
+accelerating is **3x safer to wait on** (2.22% cliff risk) than one whose
+descent has stalled (6.6-6.8%) — the direction the hypothesis predicted,
+on a sample far too large to be noise.
+
+**But the edge per opportunity is ~0.67 c/L**, and the payoff is
+fat-tailed: in the [+4,+6) cell you gain roughly nothing ~93% of the time
+and dodge a 25-45 c/L step ~7% of the time.
+
+**Fold 13 sampled that tail twice** — 18517 on 2024-10-20 (decel +4.93,
+174.9 -> 207.9 overnight, pinned 17 days) and 585 on 2024-11-20 (decel
++5.36, 172.9 -> 207.9, pinned 9 days). A second multiplier then stacked on
+top: R0's tank ran dry inside both plateaus, so it did not merely pay more
+later, it was FORCED to buy — 964 L (56% of the fold's litres) at 195.57
+c/L against 176.14 voluntary, a 19.4 c/L forced-fill premium. Fold 13's
+-1.28 c/L is a real edge's lucky realisation, not a repeatable magnitude.
+
+Caveats: forward return is not realised saving — it ignores the tank
+mechanics, so +0.67 c/L is a LOWER bound on what acting on the signal is
+worth, and is silent on whether the MODEL can capture it. The buckets are
+also not clean everywhere: unconditioned on `px_change_14d`, high decel
+mixes "deep descent stalled" with "just restored" (a +34/+16 post-jump row
+scores decel +30.6), which is why the table conditions on steep descents
+first.
+
 ## Judgement
 
 **Signature grading: contradicted.** The candidate made a specific,
@@ -195,13 +245,18 @@ from noise at all, regardless of the mechanism question above.
 
 **not_tested:**
 
-- **Whether these columns carry a real shock-regime mechanism.** The
-  run's actual (noise-indistinguishable) improvement concentrated in shock
-  folds, not the elongated-normal folds the candidate was built around. A
-  follow-up could re-target `station_px_change_3d`/`_14d`/
-  `station_descent_decel` at shock-restoration dynamics — "has this
-  station's own pace already stalled going into a shock" — rather than
-  the late-descent-shape story tested here.
+- **Whether an evaluation that can SEE a fat-tailed payoff would resolve
+  these columns.** Superseded the old "is there a shock-regime mechanism"
+  item: the post-hoc analysis above shows there is one, and names it —
+  stalled-descent rows carry 3x the cliff risk of still-cutting rows. What
+  remains untested is whether pooled realised CPL over 14 folds can ever
+  resolve an edge of ~0.67 c/L whose payoff arrives in ~7% of firings.
+  Candidate designs: many more folds; scoring on tail-avoidance (frequency
+  of buying within N days of a >25 c/L step) rather than pooled CPL; or
+  block-bootstrap CIs on the per-fold deltas instead of a single pooled
+  headline. Note the graded run's own instruments were not wrong — the
+  noise-band verdict is correct — the question is whether the arbiter has
+  the resolution for this shape of effect at all.
 - **Whether the effect is real but underpowered**, not absent. The
   headline sits inside the noise band, which per the ledger's own header is
   not the same as rejection — more data, or a different arm reading the
@@ -220,9 +275,17 @@ from noise at all, regardless of the mechanism question above.
 specific mechanism predicted (elongated-fold concentration) is
 contradicted by the pipeline's own zone test — but the headline itself is
 inside the noise band, so this is inconclusive rather than a rejection of
-the underlying columns. If this series is revisited, the next hypothesis
-should be built around the shock-regime pattern this run actually showed,
-not the elongated-descent story tested here.
+the underlying columns.
+
+The post-hoc analysis sharpens what to do next. The columns are **not
+inert** — `station_descent_decel` separates cliff risk 2.22% vs 6.6-6.8%
+within steep descents, in the predicted direction, on 200k+ rows. The
+problem is resolution, not existence: an edge of ~0.67 c/L per firing,
+realised in ~7% of firings, is not something a 14-fold pooled-CPL arbiter
+can distinguish from noise. So if this series is revisited, the change
+should be to the EVALUATION before the hypothesis — give the run an
+instrument that can see a fat-tailed payoff — rather than re-targeting the
+columns at a shock-restoration story and scoring it the same way.
 
 ## Followups
 
