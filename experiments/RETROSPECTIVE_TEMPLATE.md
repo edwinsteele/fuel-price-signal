@@ -19,9 +19,18 @@ Ranked by noise-band z (`noise_band_z` — lower/more-negative is better, `delta
 is a COST) where the batch has a noise floor with a usable z, else by raw `delta_cpl_held`
 ascending.
 
-| candidate | status | delta_cpl_held | noise-band z | noise-band percentile (colour) | clears batch threshold? |
-|---|---|---|---|---|---|
-| ... | ... | ... | ... | ... | ... |
+| candidate | status | cadence (`tank_params`) | delta_cpl_held | noise-band z | noise-band percentile (colour) | clears batch threshold? |
+|---|---|---|---|---|---|---|
+| ... | ... | ... | ... | ... | ... | ... |
+
+**Cadence:** every `delta_cpl_held` above is in the units of the cadence its own run used
+(`fps-fii` measured realised CPL at 189.67/187.85/187.82 c/L across 7/2/1-day evaluation
+intervals on an otherwise identical run — larger than the deltas this table ranks). Rows
+carry `tank_params` from their own dossier and `noise_floor.tank_params` stamps the band
+(`fps-aam`); transcribe them. They will all be the same string — a batch declares one
+cadence for every candidate run against it, and `build_leaderboard` refuses to rank a
+batch whose rows disagree rather than producing a mixed-cadence table — but state which
+cadence, because the table is unreadable without it.
 
 **Multiple-comparisons note:** with N candidates graded against the same noise band,
 picking the best of N is a different question from grading one candidate alone — the

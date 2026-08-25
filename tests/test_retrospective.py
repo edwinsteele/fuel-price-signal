@@ -7,6 +7,7 @@ import pathlib
 import pytest
 from click.testing import CliRunner
 
+from experiments.lib.io import artifact_has_unstamped_cpl
 from experiments.pipeline.retrospective import (
     RETROSPECTIVE_FILENAME,
     _candidate_entry,
@@ -19,6 +20,13 @@ from experiments.pipeline.retrospective import (
     find_batch_candidates,
     main,
 )
+
+# The cadence stamp dossier_tables.build_facts writes into every graded facts.json
+# (fps-15c) — format_tank_params(TankParams()), the repo's canonical 1d tank. Literal
+# rather than computed: these fixtures are asserting on the SHAPE a retrospective row
+# propagates, and a fixture that re-derived the string from TankParams could not catch a
+# propagation bug that dropped it.
+TANK_1D = "50/3.571/1d/10%"
 
 
 def _facts(
@@ -33,11 +41,13 @@ def _facts(
     noise_band: dict | None = None,
     mechanism_family: str | None = "test-family",
     abort_reason: str | None = None,
+    tank_params: str | None = TANK_1D,
 ) -> dict:
     return {
         "candidate": {"name": name, "confidence_effect": confidence_effect,
                       "confidence_zone": confidence_zone, "mechanism_family": mechanism_family},
-        "provenance": {"batch": batch, "status": status, "abort_reason": abort_reason},
+        "provenance": {"batch": batch, "status": status, "abort_reason": abort_reason,
+                       "tank_params": tank_params},
         "headline": {
             "realised": {"delta_cpl_held": delta, "effect_resolved": effect_resolved},
             "zone": {"resolved": zone_resolved},
@@ -524,7 +534,7 @@ def test_compute_retrospective_returned_payload_matches_written_file_with_nan_st
     (batch_dir / "noise_floor.json").write_text(
         json.dumps({
             "deltas_cpl_held": [0.01], "partial": False,
-            "null_method": "placebo_column",
+            "null_method": "placebo_column", "tank_params": TANK_1D,
         })
     )
 
@@ -554,7 +564,7 @@ def test_compute_retrospective_z_gate_end_to_end(tmp_path):
     (batch_dir / "noise_floor.json").write_text(
         json.dumps({
             "deltas_cpl_held": [0.0, 0.01, -0.01, 0.02, -0.02], "partial": False,
-            "null_method": "placebo_column",
+            "null_method": "placebo_column", "tank_params": TANK_1D,
         })
     )
 
@@ -621,3 +631,188 @@ def test_leaderboard_rows_carry_mechanism_family():
     rows = build_leaderboard(entries, family_wise_z_gate=None)
 
     assert {r["mechanism_family"] for r in rows} == {"wholesale-lead"}
+
+
+# ── cadence stamp propagation (fps-aam) ─────────────────────────────────────
+
+def test_leaderboard_rows_carry_tank_params_from_the_dossiers_provenance():
+    """fps-15c stamped every CPL-writing production artifact; retrospective_facts.json is
+    the derived view built from them and was left out of that bead's six named sites.
+    `delta_cpl_held` moves materially with cadence (fps-fii: 189.67/187.85/187.82 c/L at
+    7/2/1-day on an otherwise identical run), so a leaderboard row without the stamp is a
+    number a reader cannot place — and the leaderboard is where max-of-N promotion happens.
+    """
+    entries = [
+        {"candidate": "a", "state": "dossiered", "facts": _facts("a", delta=-0.05)},
+        {"candidate": "b", "state": "dossiered", "facts": _facts("b", delta=0.02)},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert {r["candidate"]: r["tank_params"] for r in rows} == {"a": TANK_1D, "b": TANK_1D}
+
+
+def test_build_leaderboard_refuses_a_delta_cpl_with_no_tank_params():
+    """The pairing, not just the key: a row carrying a real delta_cpl_held beside a null
+    stamp would still satisfy artifact_has_unstamped_cpl (a deliberately coarse whole-
+    document check — one stamped sibling row masks it), which is exactly the gap that would
+    make this bead's backstop nominal rather than real."""
+    entries = [
+        {"candidate": "stamped", "state": "dossiered", "facts": _facts("stamped", delta=-0.05)},
+        {"candidate": "unstamped", "state": "dossiered",
+         "facts": _facts("unstamped", delta=-0.09, tank_params=None)},
+    ]
+
+    with pytest.raises(ValueError, match="unstamped.*delta_cpl_held"):
+        build_leaderboard(entries, family_wise_z_gate=None)
+
+
+def test_leaderboard_row_for_a_non_graded_candidate_has_no_stamp_and_no_cpl():
+    """A disqualified/aborted candidate never reaches the scoring stages, so build_facts
+    doesn't require a stamp for it either (its own fps-15c guard is gated on
+    status=='graded'). No CPL, nothing to label — the row must not be refused."""
+    entries = [{"candidate": "dq", "state": "dossiered", "facts": _disqualified_facts("dq")}]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert rows[0]["delta_cpl_held"] is None
+    assert rows[0]["tank_params"] is None
+
+
+def test_noise_floor_summary_carries_the_floors_own_tank_params(tmp_path):
+    """The band's mean/std are CPL deltas in whatever cadence the floor was computed at —
+    read verbatim off noise_floor.json, not re-derived from a TankParams here."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1"))
+    batch_dir = batches_dir / "batch1"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "noise_floor.json").write_text(
+        json.dumps({
+            "deltas_cpl_held": [0.0, 0.01, -0.01], "partial": False,
+            "null_method": "placebo_column", "tank_params": TANK_1D,
+        })
+    )
+
+    payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+    assert payload["noise_floor"]["tank_params"] == TANK_1D
+    assert payload["noise_floor"]["band_mean_delta_cpl_held"] == pytest.approx(0.0)
+
+
+def test_noise_floor_summary_refuses_a_floor_with_no_tank_params(tmp_path):
+    """`_batch_noise_summary` calls _noise_band with check_fingerprint=False, which skips
+    COMPARING the floor's stamp against a run's — it must not be read as excusing the stamp
+    being absent altogether."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1"))
+    batch_dir = batches_dir / "batch1"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "noise_floor.json").write_text(
+        json.dumps({
+            "deltas_cpl_held": [0.0, 0.01, -0.01], "partial": False,
+            "null_method": "placebo_column",
+        })
+    )
+
+    with pytest.raises(ValueError, match="no tank_params"):
+        compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+
+def test_unavailable_noise_floor_summary_is_returned_verbatim_without_a_stamp(tmp_path):
+    """A refusal dict carries no CPL, so there is nothing to stamp — and its `reason` (the
+    actionable half for a reader) must survive untouched."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1"))
+    (batches_dir / "batch1").mkdir(parents=True)  # no noise_floor.json at all
+
+    payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+    assert payload["noise_floor"]["available"] is False
+    assert "tank_params" not in payload["noise_floor"]
+    assert "noise-floor calibration" in payload["noise_floor"]["reason"]
+
+
+def test_retrospective_facts_passes_the_unstamped_cpl_backstop(tmp_path):
+    """fps-aam's acceptance criterion, end to end: the generic backstop
+    experiments.lib.io.artifact_has_unstamped_cpl must not flag the written artifact. The
+    stripped-copy control keeps the assertion from being vacuous — it proves the payload
+    really does carry CPL-shaped keys the checker would otherwise fire on."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1"))
+    batch_dir = batches_dir / "batch1"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "noise_floor.json").write_text(
+        json.dumps({
+            "deltas_cpl_held": [0.0, 0.01, -0.01], "partial": False,
+            "null_method": "placebo_column", "tank_params": TANK_1D,
+        })
+    )
+
+    payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+    on_disk = json.loads((batch_dir / RETROSPECTIVE_FILENAME).read_text())
+
+    assert artifact_has_unstamped_cpl(payload) is False
+    assert artifact_has_unstamped_cpl(on_disk) is False
+    assert artifact_has_unstamped_cpl(_strip_keys(on_disk, "tank_params")) is True
+
+
+def _strip_keys(obj: object, key: str) -> object:
+    """Deep copy with every occurrence of `key` removed — the negative control for the
+    backstop assertion above."""
+    if isinstance(obj, dict):
+        return {k: _strip_keys(v, key) for k, v in obj.items() if k != key}
+    if isinstance(obj, list):
+        return [_strip_keys(v, key) for v in obj]
+    return obj
+
+
+def test_build_leaderboard_refuses_to_rank_across_two_cadences():
+    """Carrying the stamp is not enough: every sort branch, and
+    `clears_family_wise_threshold`, assert these deltas are commensurable, and across
+    cadences they are not (fps-fii: 189.67/187.85/187.82 c/L at 7/2/1-day, an order of
+    magnitude above the deltas being ranked). A batch declares ONE cadence for every
+    candidate run against it (batch_freeze), so this state is an upstream violation, not
+    a batch shape to report."""
+    entries = [
+        {"candidate": "one_day", "state": "dossiered", "facts": _facts("one_day", delta=-0.05)},
+        {"candidate": "seven_day", "state": "dossiered",
+         "facts": _facts("seven_day", delta=0.02, tank_params="50/3.571/7d/10%")},
+    ]
+
+    with pytest.raises(ValueError, match="spans 2 cadences"):
+        build_leaderboard(entries, family_wise_z_gate=None)
+
+
+def test_build_leaderboard_refuses_a_mixed_cadence_batch_with_no_noise_floor():
+    """The reachable path specifically: with no noise floor the ranking falls back to raw
+    delta_cpl_held ascending, which is where a cross-cadence comparison would otherwise be
+    made silently — no z, no percentile, and every `clears_family_wise_threshold` already
+    False, so nothing else in the payload would have hinted at it."""
+    no_band = {"available": False}
+    entries = [
+        {"candidate": "one_day", "state": "dossiered",
+         "facts": _facts("one_day", delta=-0.05, noise_band=no_band)},
+        {"candidate": "seven_day", "state": "dossiered",
+         "facts": _facts("seven_day", delta=-0.40, noise_band=no_band,
+                         tank_params="50/3.571/7d/10%")},
+    ]
+
+    with pytest.raises(ValueError, match="not comparable across them"):
+        build_leaderboard(entries, family_wise_z_gate=None)
+
+
+def test_build_leaderboard_ranks_normally_when_only_stamped_rows_share_a_cadence():
+    """A non-graded candidate contributes a null stamp, not a second cadence — it has no
+    delta_cpl_held to be incomparable with, so it must not trip the mixed-cadence guard."""
+    entries = [
+        {"candidate": "graded", "state": "dossiered", "facts": _facts("graded", delta=-0.05)},
+        {"candidate": "dq", "state": "dossiered", "facts": _disqualified_facts("dq")},
+    ]
+
+    rows = build_leaderboard(entries, family_wise_z_gate=None)
+
+    assert [r["candidate"] for r in rows] == ["graded", "dq"]
