@@ -138,7 +138,31 @@ not the same quantity as `delta_cpl_own` above, which pools every fill):
 
 Fold 1's `flip_cpl_delta` is unavailable (`null`): R0 has 21 baseline-only
 fills there and the candidate has zero candidate-only fills to compare
-against — a pure "candidate stopped buying" shape, not a swapped-timing one.
+against, so `flip_cpl_candidate` is 0/0. The shape is **deferral, not
+reduced buying**: total litres are identical (1539.286 L in both arms —
+consumption is fixed, so the arms always buy the same fuel), and the
+candidate's fill *dates* are a strict subset of R0's. Reconstructing tank
+level day by day, the candidate is never AHEAD of R0 on cumulative litres
+in this fold (behind on 14 days, level on 76) — it runs a leaner tank, buys
+later, and because its later buys are large it never needs R0's string of
+3.571 L top-ups (exactly one day's consumption at this cadence — the
+"wait" outcome). Fill-level: 153 byte-identical, 16 same-date-different-
+volume, 21 R0-only dates, 0 candidate-only. Example, station 18517:
+R0 takes 46.4 L @165.9 on 2021-11-17; the candidate takes 21.4 L that day
+and 28.6 L on 11-18 @**155.9** — same fuel, one day later, 10 c/L cheaper.
+
+Note fold 13 is the mirror image (candidate ahead on 41 days, level on 44,
+behind on 5): the same three columns produce opposite timing bias in the
+two folds, which is consistent with them reading descent SHAPE rather than
+carrying a fixed buy-earlier or buy-later tilt.
+
+**Instrument caveat:** `decision_flips` keys on `(fold, station_code,
+date)`, so a fill that occurs on the same day in both arms at a DIFFERENT
+volume is counted as common, not as a flip. Across this run that hides 150
+volume-only changes behind the 439 counted date-flips — fold 12 is the
+sharpest case (13 volume-only changes against only 14 date-flips), and
+fold 1's null is entirely an artifact of this blind spot. Tracked as
+`fps-gzz`.
 
 ![](per_fold_delta_bars.png)
 ![](seed_mean_vs_median.png)
@@ -182,10 +206,11 @@ from noise at all, regardless of the mechanism question above.
   headline sits inside the noise band, which per the ledger's own header is
   not the same as rejection — more data, or a different arm reading the
   same station-level cut sequence, is legitimate open ground.
-- **Fold 1's "candidate stopped buying" shape** (21 baseline-only fills,
-  zero candidate-only) is untouched — is that itself informative about
-  what `station_descent_decel` reads on a shock fold's early cuts, or
-  incidental.
+- **Whether fold 1's deferral shape is mechanism or incident.** The
+  candidate's fill dates are a strict subset of R0's there and it is never
+  ahead on cumulative litres — is that informative about what
+  `station_descent_decel` reads on a shock fold's early cuts, or a
+  coincidence of that fold's price path? Not tested.
 - **Per-column attribution** (which of the three columns is doing
   anything, vs. inert or reinforcing) needs SHAP interaction values on the
   fitted candidate model, which the pipeline doesn't currently persist —
