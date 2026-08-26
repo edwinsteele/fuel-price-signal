@@ -81,7 +81,12 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    an explicit **Facts / Judgement split**:
 
    - **Facts** (traceable to `facts.json`, verbatim or lightly tabulated — no new numbers):
-     provenance (candidate, batch, snapshot date, git SHA, seeds, bead), the headline realised-CPL
+     provenance (candidate, batch, snapshot date, git SHA, seeds, bead) — and state plainly
+     that those seeds are the **WFCV screen only**, while the realised arbiter ran on the
+     single `results.json` `meta.realised_seed`, so every `delta_cpl_own` is one draw with no
+     error bar (`facts.json` does not carry this field — read it from `results.json`; `fps-qbv`
+     will surface it) — the
+     headline realised-CPL
      delta and its `effect_resolved` verdict, the WFCV log-loss delta labelled as descriptive
      colour, the per-fold / per-regime / per-axis breakdown tables (mark suppressed cells plainly —
      "n=18, below the min-cell-n guard, not a finding"; if `per_axis` is present, also carry
@@ -96,7 +101,18 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      section as evidence — if a candidate's whole claim rests on one, say plainly that the claim is
      untestable as posed and that the zone should be re-expressed as a set of folds), the
      `seed_flags` list (if empty,
-     say so — "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating),
+     say so — "no cells exceeded 5× cohort median seed_std" is itself a fact worth stating).
+     **Every `seed_std` is WFCV LOG-LOSS, not CPL** (`experiments/lib/gates.py`'s
+     `seed_variance_gate` runs on `ll_all`/`ll_hard25`) — say so, and never let a seed flag
+     be read as instability in a `delta_cpl_own`, which is not seed-measured at all.
+     Quote the raw `seed_std` beside the ratio: the ratio self-normalises against the run's
+     own spread (right call) but cannot be compared to the effect size, and the comparison
+     that matters is raw seed_std against `delta_ll_*` (0.5359 against -0.0003 is ~1700×,
+     which a bare "75.4×" hides). **If any flagged cell is on the CANDIDATE arm, render a
+     fold × arm table rather than prose** — the diagnostic is the within-fold R0-vs-candidate
+     comparison (a jump there means the added columns destabilised an otherwise-ordinary fit,
+     a redundancy tell), and prose destroys it. R0-only flags are a property of the window,
+     not the candidate; one line is enough for those,
      validation (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
      (`facts["noise_band"]`) — if `floor_arity_exceeds_run` is `true`, say so: this run was
      graded against a ruler built from MORE columns than the candidate has, which is allowed
