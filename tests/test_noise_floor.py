@@ -19,7 +19,12 @@ from click.testing import CliRunner
 
 import experiments.pipeline.noise_floor as noise_floor_module
 from experiments.pipeline.batch_freeze import BaselineContractMismatch, resolve_baseline_columns
-from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME, NULL_METHOD_PLACEBO_COLUMN
+from experiments.pipeline.dossier_tables import (
+    NOISE_FLOOR_FILENAME,
+    NULL_METHOD_PLACEBO_COLUMN,
+    NULL_METHOD_PLACEBO_PINNED_COLUMN,
+    _noise_band,
+)
 from experiments.pipeline.noise_floor import (
     FIT_STABILITY_FILENAME,
     compute_fit_stability_diagnostic,
@@ -996,3 +1001,123 @@ def test_cli_arity_and_out_name(tmp_path, monkeypatch):
     payload = json.loads((batch_dir / "noise_floor_k3.json").read_text())
     assert payload["n_placebo_columns"] == 3
     assert not (batch_dir / NOISE_FLOOR_FILENAME).exists()
+
+
+# ── --same-source-column: the texture-ICC diagnostic (fps-3jj.23) ──────────────
+
+def test_same_source_columns_pins_every_draw_and_stamps_them(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    pinned = resolve_baseline_columns(df)[:2]
+    _stub_realised_by_draw(monkeypatch, [1.0, 2.0, 3.0, 4.0])
+
+    payload = compute_noise_floor(
+        batch_dir, n_draws=4, same_source_columns=pinned, verbose=False
+    )
+
+    columns = [d["source_column"] for d in payload["placebo_draws"]]
+    assert set(columns) == set(pinned)
+    assert columns == [pinned[0], pinned[1], pinned[0], pinned[1]]
+    assert payload["same_source_columns"] == pinned
+    assert len(set(d["block_seed"] for d in payload["placebo_draws"])) == 4
+
+
+def test_same_source_columns_gets_its_own_null_method(tmp_path, monkeypatch):
+    """The property that lets a pinned bank measure the ICC — draws repeating a source
+    column, so their deltas share texture exactly — is the same property that makes its band
+    too NARROW to grade against. A distinct null_method makes that structural: _noise_band
+    already refuses anything that isn't NULL_METHOD_PLACEBO_COLUMN."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    pinned = resolve_baseline_columns(df)[:1]
+    _stub_realised_by_draw(monkeypatch, [1.0, 2.0])
+
+    payload = compute_noise_floor(
+        batch_dir, n_draws=2, same_source_columns=pinned, verbose=False
+    )
+
+    assert payload["null_method"] == NULL_METHOD_PLACEBO_PINNED_COLUMN
+    assert payload["null_method"] != NULL_METHOD_PLACEBO_COLUMN
+
+
+def test_dossier_tables_refuses_to_grade_against_a_pinned_floor(tmp_path, monkeypatch):
+    """Written to the RULER's own filename on purpose — the refusal must not depend on
+    whoever ran it having chosen a safe --out-name."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    pinned = resolve_baseline_columns(df)[:2]
+    _stub_realised_by_draw(monkeypatch, [1.0, 2.0, 3.0, 4.0])
+    payload = compute_noise_floor(
+        batch_dir, n_draws=4, same_source_columns=pinned, out_name=NOISE_FLOOR_FILENAME,
+        verbose=False,
+    )
+
+    band = _noise_band(
+        {"meta": {"baseline_fingerprint": payload["baseline_fingerprint"],
+                  "tank_params": payload["tank_params"]}},
+        batch_dir,
+    )
+
+    assert band["available"] is False
+    assert "null_method" in band["reason"]
+
+
+def test_same_source_columns_leaves_an_ordinary_floor_untouched(tmp_path, monkeypatch):
+    """The new key must be absent-or-null exactly where it used to be absent, and the ordinary
+    path's null_method must not move — every dossier so far was graded on it."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [1.0, 2.0, 3.0])
+
+    payload = compute_noise_floor(batch_dir, n_draws=3, verbose=False)
+
+    assert payload["same_source_columns"] is None
+    assert payload["null_method"] == NULL_METHOD_PLACEBO_COLUMN
+
+
+def test_same_source_columns_refuses_arity_above_one(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    pinned = resolve_baseline_columns(df)[:2]
+    _stub_realised_by_draw(monkeypatch, [1.0] * 4)
+
+    with pytest.raises(ValueError, match="DISTINCT source columns"):
+        compute_noise_floor(
+            batch_dir, n_draws=4, arity=2, same_source_columns=pinned, verbose=False
+        )
+
+
+def test_same_source_columns_refuses_a_column_outside_the_baseline_contract(tmp_path, monkeypatch):
+    """The ICC being measured is the one effective_n_draws charges for reuse of a BASELINE
+    column, so a pinned column that merely exists in the frame is not enough."""
+    df = _baseline_features_df()
+    df["not_locked"] = [float(i % 17) for i in range(len(df))]
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [1.0] * 4)
+
+    with pytest.raises(ValueError, match="baseline contract"):
+        compute_noise_floor(
+            batch_dir, n_draws=4, same_source_columns=["not_locked"], verbose=False
+        )
+
+
+def test_cli_same_source_column_is_repeatable(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    batch_dir = _write_batch_dir(batches_dir, df)
+    pinned = resolve_baseline_columns(df)[:2]
+    _stub_realised_by_draw(monkeypatch, [0.0] * 6)
+
+    result = CliRunner().invoke(
+        main,
+        ["batch1", "--batches-dir", str(batches_dir), "--n-draws", "6",
+         "--same-source-column", pinned[0], "--same-source-column", pinned[1],
+         "--out-name", "noise_floor_icc.json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((batch_dir / "noise_floor_icc.json").read_text())
+    assert payload["same_source_columns"] == pinned
+    assert payload["null_method"] == NULL_METHOD_PLACEBO_PINNED_COLUMN
+    assert "NOT a grading ruler" in result.output

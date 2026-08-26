@@ -24,6 +24,7 @@ from experiments.pipeline.placebo import (
     placebo_column_names,
     screen_draw_groups,
     screen_draws,
+    screen_pinned_column_draws,
     select_draws,
 )
 
@@ -793,3 +794,95 @@ def test_make_placebo_frame_members_do_not_share_a_block_order():
     distinct_seeds = [("col0", 97, 0.0), ("col0", 101, 0.0)]
     varied = make_placebo_frame(df, distinct_seeds)
     assert not varied["__placebo_1__"].equals(varied["__placebo_2__"])
+
+
+# ── screen_pinned_column_draws (the texture-ICC bank, fps-3jj.23) ──────────────
+
+def test_pinned_column_draws_use_only_the_pinned_columns():
+    df = _fixture_df()
+    groups = screen_pinned_column_draws(df, ["mw_col"], 6, max_self_correlation=0.9)
+    assert [len(g) for g in groups] == [1] * 6
+    assert {col for g in groups for col, _seed, _corr in g} == {"mw_col"}
+
+
+def test_pinned_column_draws_never_repeat_a_block_seed():
+    """The whole bank comes off one flat counter, exactly as `candidate_sequence` does — two
+    draws sharing a seed would share a REARRANGEMENT, which is the one thing that would make
+    a same-column pair identical rather than merely same-textured, and would send the measured
+    ICC to 1 for a reason that has nothing to do with texture."""
+    df = _fixture_df()
+    groups = screen_pinned_column_draws(df, ["mw_col", "station_col"], 12, max_self_correlation=0.9)
+    seeds = [seed for g in groups for _col, seed, _corr in g]
+    assert len(set(seeds)) == len(seeds) == 12
+
+
+def test_pinned_column_draws_cycle_columns_round_robin_and_stay_balanced():
+    """The by-column ANOVA's power depends on the design being balanced, so an unbalanced
+    bank must be a deliberate choice of n_draws, never an artefact of the ordering."""
+    df = _fixture_df()
+    groups = screen_pinned_column_draws(df, ["mw_col", "station_col"], 7, max_self_correlation=0.9)
+    columns = [col for g in groups for col, _seed, _corr in g]
+    assert columns[:4] == ["mw_col", "station_col", "mw_col", "station_col"]
+    counts = {c: columns.count(c) for c in set(columns)}
+    assert max(counts.values()) - min(counts.values()) <= 1
+
+
+def test_pinned_column_draws_refuse_to_substitute_a_different_column():
+    """The defect this guards is silent, not loud: substituting on a screen failure — which is
+    correct for a grading ruler — would turn a same-column pair into a different-column pair
+    and bias the measured ICC toward ZERO, the direction that reads 'no problem'."""
+    df = _fixture_df()
+    df["dead_col"] = float("nan")
+    with pytest.raises(ValueError, match="must NOT substitute"):
+        screen_pinned_column_draws(df, ["dead_col"], 3, max_self_correlation=0.6)
+
+
+def test_pinned_column_draws_reject_a_repeated_column_in_the_request():
+    df = _fixture_df()
+    with pytest.raises(ValueError, match="repeats"):
+        screen_pinned_column_draws(df, ["mw_col", "mw_col"], 4, max_self_correlation=0.9)
+
+
+def test_pinned_column_draws_reject_a_column_absent_from_the_frame():
+    df = _fixture_df()
+    with pytest.raises(ValueError, match="not present in the batch frame"):
+        screen_pinned_column_draws(df, ["no_such_col"], 4, max_self_correlation=0.9)
+
+
+def test_pinned_column_draws_reject_an_empty_column_list():
+    df = _fixture_df()
+    with pytest.raises(ValueError, match="at least one column"):
+        screen_pinned_column_draws(df, [], 4, max_self_correlation=0.9)
+
+
+def test_pinned_column_draws_retry_a_failing_seed_before_giving_up():
+    """A pinned column that fails at one rearrangement may pass at the next — retrying seeds
+    is the only substitution a pinned bank is allowed to make."""
+    df = _fixture_df()
+    real = make_placebo_series
+    rejected: list[int] = []
+
+    def _fake(frame, source_column, seed):
+        series = real(frame, source_column, seed)
+        if seed == PLACEBO_BLOCK_SEED_POOL[0]:
+            rejected.append(seed)
+            return pd.Series(float("nan"), index=frame.index)  # unverifiable -> screen failure
+        return series
+
+    import experiments.pipeline.placebo as placebo_module
+    original = placebo_module.make_placebo_series
+    placebo_module.make_placebo_series = _fake
+    try:
+        groups = screen_pinned_column_draws(df, ["mw_col"], 2, max_self_correlation=0.9)
+    finally:
+        placebo_module.make_placebo_series = original
+
+    assert rejected == [PLACEBO_BLOCK_SEED_POOL[0]]
+    assert [seed for g in groups for _c, seed, _r in g] == list(PLACEBO_BLOCK_SEED_POOL[1:3])
+
+
+def test_pinned_column_draws_are_deterministic():
+    df = _fixture_df()
+    a = screen_pinned_column_draws(df, ["mw_col"], 5, max_self_correlation=0.9)
+    b = screen_pinned_column_draws(df, ["mw_col"], 5, max_self_correlation=0.9)
+    assert a == b

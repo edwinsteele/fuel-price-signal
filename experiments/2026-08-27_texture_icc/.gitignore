@@ -1,0 +1,5 @@
+# The 32-draw run's console output (bd fps-3jj.23). The README quotes every number that
+# matters and the bank itself is persisted as batch1/noise_floor_icc.json, so the log is a
+# ~6h transcript nobody needs to read twice.
+run.log
+*.csv
