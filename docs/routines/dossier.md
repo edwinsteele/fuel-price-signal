@@ -230,12 +230,7 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          band" (that's what `-t < z < t` is for, and it doesn't apply when either side is `null`)
          — this branch must be checked **before** the three regions below, not folded into them.
        - Otherwise read `z = facts["noise_band"]["candidate_z_vs_band"]` and
-         `t = facts["noise_band"]["single_candidate_z_threshold"]` (both non-null at this point).
-         **`single_candidate_z_threshold` is the authoritative one** — there is also a
-         `single_candidate_z_threshold_nominal` sitting beside it, which exists only so the bar's
-         thinness and reuse components can be reported separately above. Never grade against the
-         nominal one: it ignores the reuse correction and is therefore too easy, which is the
-         whole bias this machinery removes. —
+         `t = facts["noise_band"]["single_candidate_z_threshold"]` (both non-null at this point) —
          already computed by
          `dossier_tables._noise_band` (`t` is `family_wise_z_threshold(n_candidates=1, n_draws=...)`,
          i.e. the *single*-candidate detection bar, docs/CONVENTIONS.md's "-0.17 c/L judged
@@ -243,6 +238,14 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          gate, which needs the whole batch dossiered and exists to answer a different question —
          "is any candidate surprising after correcting for picking the best of N", the retrospective
          routine's job, not this one's):
+
+         **`single_candidate_z_threshold` is the authoritative `t`.** A
+         `single_candidate_z_threshold_nominal` sits beside it in the same object and exists only
+         so the bar's thinness and reuse components can be reported separately (see the
+         noise-floor fields above). **Never grade against the nominal one** — it ignores the
+         reuse correction and is therefore too easy, which is the whole bias this machinery
+         removes.
+
          - `z >= t` → `outcome: rejected`. `delta_cpl_held` is clearly the WRONG SIGN by more than
            this batch's own noise band — measurably worse than a placebo column, not merely
            unresolved.

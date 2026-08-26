@@ -306,12 +306,23 @@ PYTHONPATH=. uv run python -c "
 import json, pathlib, sys
 from fuel_signal.features import load_features
 b = pathlib.Path(sys.argv[1])
-f = load_features(b / 'features.csv')
+if not (b / 'features.parquet').exists():
+    raise SystemExit(
+        f'{b}/features.parquet is not in this checkout. The frozen frame is gitignored '
+        '(.gitignore: experiments/**/*.parquet), so it exists only in the clone that ran '
+        'the freeze — not in a fresh clone or a git worktree. Re-run this from that clone.'
+    )
+f = load_features(b / 'features.csv')  # load_features reads the .parquet sibling
 cols = json.loads((b / 'baseline_columns.json').read_text())
 usable = [c for c in cols if f[c].notna().any()]
 print(f'{len(usable)} usable of {len(cols)} declared')
 " experiments/batches/batch1
 ```
+
+The guard is there because the frozen frame is **gitignored**. Without it the command dies on
+`FileNotFoundError: .../features.csv` — a file no writer ever creates, since `load_features`
+swaps in the `.parquet` sibling — which says nothing about what is actually missing and leaves
+you back at 54 as the only number in reach.
 
 In practice this only binds on a candidate with **dozens** of columns, and no proposal has come
 close. If you are within a few columns of the usable count, say so in the candidate's
