@@ -40,13 +40,20 @@ committed 20-draw `noise_floor_k1.json`:
 
 | draws | hours | smallest resolvable ICC | 95% upper bound if the point estimate lands at 0 |
 |---|---|---|---|
-| 10 | 1.9 | 0.729 | **0.653** |
-| 15 | 2.9 | 0.650 | 0.622 |
-| 20 | 3.8 | 0.604 | 0.604 |
-| 30 | 5.7 | 0.552 | 0.584 |
+| 10 | 1.9 | 0.661 | **0.587** |
+| 15 | 2.9 | 0.583 | 0.557 |
+| 20 | 3.8 | 0.539 | 0.539 |
+| 30 | 5.7 | 0.489 | 0.519 |
 
-The bead budgets 10 draws. That design's **best possible outcome is an upper bound of 0.653** —
-looser than the 0.391 already shipped — and it cannot call anything under 0.729 significant. Two
+Every figure in this section is a **one-sided 95% bound at the 5% tail** — the same tail
+`texture_channel.py` used to produce the 0.391 being replaced, so the two are like-for-like.
+An earlier revision priced Design A at the two-sided 0.975/0.025 pair while Design B used the
+5% tail, printing 97.5% bounds and 95% bounds in the same column: that inflated Design A's
+numbers (10 draws read 0.653 rather than 0.587) and inflated the gap between the designs.
+Found in review of PR #337; the conclusion is unchanged, every number moved.
+
+The bead budgets 10 draws. That design's **best possible outcome is an upper bound of 0.587** —
+looser than the 0.391 already shipped — and it cannot call anything under 0.661 significant. Two
 hours of fits would produce a *worse* number than the one being replaced, whatever the deltas
 came out as. The cost is structural, not bad luck: it is an unpaired variance ratio between two
 separately-computed banks, on `F(9, 19)`, and a variance ratio needs a lot of both.

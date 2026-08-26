@@ -196,8 +196,8 @@ every candidate this batch ran — its *whole range* moves the bar by ≤ 0.011 
 load-bearing for wide groups only. Second, the construction sketched in the next sentence (one
 same-source column, variance compared against the multi-column floor) **cannot discharge the
 bead at the ~2.3h budgeted here**: it is an unpaired variance ratio on `F(9,19)`, resolvable only
-above 0.729, and its best possible outcome is a 0.653 upper bound — looser than the 0.391 it
-would replace. The design that works groups several pinned columns and runs the ANOVA **by
+above 0.661, and its best possible outcome is a 0.587 upper bound — looser than the 0.391 it
+would replace (both at the one-sided 5% tail, the tail `texture_channel.py` used for 0.391). The design that works groups several pinned columns and runs the ANOVA **by
 column**, at 32 draws (~6.1h).
 
 **It is not established as conservative, despite being an upper bound.** The bound is on the ICC

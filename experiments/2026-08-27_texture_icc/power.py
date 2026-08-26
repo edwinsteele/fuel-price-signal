@@ -24,14 +24,11 @@ import json
 import pathlib
 
 import numpy as np
+from bank_model import model_bank  # sibling module; this dir is sys.path[0] when run as a script
 from scipy.stats import f as f_dist
 
 from experiments.pipeline.dossier_tables import family_wise_z_threshold
-from experiments.pipeline.placebo import (
-    TEXTURE_ICC_BOUND,
-    candidate_sequence,
-    effective_n_draws,
-)
+from experiments.pipeline.placebo import TEXTURE_ICC_BOUND, effective_n_draws
 
 BATCH = pathlib.Path("experiments/batches/batch1")
 
@@ -50,9 +47,9 @@ MULTI_FLOOR = "noise_floor_k1.json"
 #: grades, while the ICC arithmetic needs k1's 20 distinct-column draws.
 GRADING_FLOOR = "noise_floor.json"
 
-#: Usable (non-all-NaN) batch1 lock columns. batch1 declares 54; five
-#: `days_since_trough_entry_<lga>` columns are entirely NaN in the frozen frame and are
-#: skipped by the screen on every lap (placebo.py's module docstring).
+#: Usable (non-all-NaN) batch1 lock columns — the ceiling on how many DISTINCT columns a
+#: design can pin. batch1 declares 54; `bank_model.BATCH1_UNSCREENABLE` names the five that
+#: are entirely NaN in the frozen frame and are skipped by the screen on every lap.
 N_USABLE_COLUMNS = 49
 
 
@@ -72,6 +69,8 @@ def icc_from_anova_design(k_columns: int, m_seeds: int) -> tuple[float, float]:
     resolvable = (f_crit - 1.0) / (f_crit + m_seeds - 1.0)
     # Upper confidence limit when the observed F is exactly 1 (point estimate ICC = 0) — the
     # best case for the design, and therefore the honest way to price it before running.
+    # ONE-SIDED 5% tail, the same one `texture_channel.py` used to produce the 0.391 this would
+    # replace; `icc_from_ratio_design` is held to the identical tail so the two are comparable.
     f_upper = 1.0 / f_dist.ppf(0.05, df1, df2)
     upper = (f_upper - 1.0) / (f_upper + m_seeds - 1.0)
     return resolvable, upper
@@ -86,29 +85,15 @@ def icc_from_ratio_design(n_pinned: int, n_multi: int = 20) -> tuple[float, floa
     goes: the F has df (n_pinned - 1, n_multi - 1), and a variance ratio needs a lot of both.
     """
     df1, df2 = n_pinned - 1, n_multi - 1
-    resolvable = 1.0 - f_dist.ppf(0.025, df1, df2)
-    upper = 1.0 - 1.0 / f_dist.ppf(0.975, df1, df2)
+    # ONE-SIDED 5% tail, matching how the 0.391 being replaced was itself derived
+    # (`texture_channel.py`: `f_stat / f.ppf(0.05, df1, df2)`). An earlier version used the
+    # 0.975/0.025 two-sided pair here while `icc_from_anova_design` used the one-sided 5% tail,
+    # so the two designs were printed in the same column under the same header at DIFFERENT
+    # alphas — Design A's numbers were 97.5% bounds masquerading as 95% ones, which inflated
+    # both its own figures and the gap between the designs (PR #337 review).
+    resolvable = 1.0 - f_dist.ppf(0.05, df1, df2)
+    upper = 1.0 - 1.0 / f_dist.ppf(0.95, df1, df2)
     return resolvable, upper
-
-
-def _bank(baseline_columns: list[str], n_draws: int, arity: int) -> list[list[tuple[str, int, float]]]:
-    """The bank `_assemble_draws` would build at this shape, screen aside — structure only, so
-    the overlap `effective_n_draws` prices is the real one rather than a model of it."""
-    sequence = candidate_sequence(baseline_columns[:N_USABLE_COLUMNS], n_draws * arity)
-    groups: list[list[tuple[str, int, float]]] = []
-    current: list[tuple[str, int, float]] = []
-    used: set[str] = set()
-    for column, seed in sequence:
-        if column in used:
-            continue
-        current.append((column, seed, 0.0))
-        used.add(column)
-        if len(current) == arity:
-            groups.append(current)
-            current, used = [], set()
-            if len(groups) == n_draws:
-                return groups
-    raise AssertionError("candidate_sequence is unbounded — this cannot be reached")
 
 
 def main() -> None:
@@ -127,6 +112,7 @@ def main() -> None:
 
     print("Design A — the bead as written: 1 pinned column x n seeds, variance ratio against")
     print(f"           the committed {MULTI_FLOOR} (20 draws).")
+    print("  (both designs at the ONE-SIDED 5% tail — the tail 0.391 itself was derived at)")
     print(f"  {'draws':>6} {'hours':>6} {'resolvable ICC':>15} {'upper bnd @ICC=0':>17}")
     for n in (10, 15, 20, 30):
         res, upper = icc_from_ratio_design(n)
@@ -172,7 +158,7 @@ def main() -> None:
     iccs = [0.0, 0.2, TEXTURE_ICC_BOUND, 0.6, 0.8, 1.0]
     print(f"  {'arity':>5} " + " ".join(f"{i:>8.3f}" for i in iccs) + f" {'spread':>8}")
     for arity in (1, 2, 3, 4, 6, 10, 20, 35):
-        bank = _bank(baseline_columns, 20, arity)
+        bank = model_bank(baseline_columns, 20, arity)
         row = []
         for icc in iccs:
             n_eff = effective_n_draws(bank, icc=icc)

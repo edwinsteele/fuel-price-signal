@@ -259,7 +259,8 @@ PLACEBO_SEED_EXTENSION_BASE = 1_000_000
 # (`screen_pinned_column_draws`, `noise_floor --same-source-column`). Note when reading that
 # bead: the cheap version it proposes cannot discharge it. One pinned column x 10 seeds against
 # the committed 20-draw floor is an unpaired variance ratio on F(9,19), resolvable only above
-# 0.729, whose BEST case is a 0.653 upper bound — looser than this value. The design that works
+# 0.661, whose BEST case is a 0.587 upper bound — looser than this value (both at the one-sided
+# 5% tail, the tail this constant itself was derived at). The design that works
 # is a one-way ANOVA by COLUMN over several pinned columns, at 32 draws (~6.1h). When it lands,
 # replace this constant with the measured value.
 TEXTURE_ICC_BOUND = 0.391

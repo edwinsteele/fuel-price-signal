@@ -762,6 +762,14 @@ def main(
     """Compute and persist the noise-floor calibration for an already-frozen batch."""
     batch_dir = pathlib.Path(batches_dir) / batch_name
     subset = _parse_fold_subset(fold_subset)
+    if fit_stability and same_source_column:
+        # The seed-swap diagnostic has no placebo columns at all, so it cannot honour a pinned
+        # source. Returning early (as this used to) accepted the flag and silently ignored it,
+        # which would look like a texture-ICC run and produce a fit_stability.json.
+        raise click.BadParameter(
+            "--same-source-column has no meaning with --fit-stability: that diagnostic swaps "
+            "SEEDS on the unchanged baseline and adds no placebo column to pin. Drop one."
+        )
     if fit_stability:
         compute_fit_stability_diagnostic(batch_dir, fold_subset=subset, force=force)
         click.echo(f"Wrote fit-stability diagnostic for batch '{batch_name}' -> {batch_dir / FIT_STABILITY_FILENAME}")

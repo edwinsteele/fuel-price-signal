@@ -44,6 +44,7 @@ import pathlib
 
 import numpy as np
 import pandas as pd
+from bank_model import model_bank  # sibling module; this dir is sys.path[0] when run as a script
 from scipy.stats import f as f_dist
 
 from experiments.pipeline.dossier_tables import (
@@ -64,12 +65,23 @@ GRADING_FLOOR = BATCH / "noise_floor.json"
 #: supposed to be the ONLY thing that changed.
 HELD_FIXED = ("baseline_fingerprint", "tank_params", "seed", "n_windows")
 
+#: The multi-column floor must ALSO be arity 1 and the expected draw count. Checked separately
+#: from HELD_FIXED because arity is stored as `n_placebo_columns` and a pre-fps-3jj.14 floor
+#: omits it entirely, which reads as 1 — the same absent-as-1 rule `_noise_band` applies.
+#: Without this guard batch1's `noise_floor.json` (arity 3, 10 draws) clears every other check
+#: — it shares fingerprint, tank_params, seed AND n_windows with `noise_floor_k1.json` — so
+#: `--multi .../noise_floor.json` would report an "ICC by variance ratio" against a 3-column
+#: band, which is not the alignment+texture quantity the estimator subtracts (PR #337 review).
+MULTI_FLOOR_ARITY = 1
+
 
 def _load(path: pathlib.Path) -> dict:
     if not path.exists():
         raise SystemExit(
-            f"missing {path}. Build the pinned bank first — see this directory's README for "
-            "the exact command and for why the draw count is not a free choice."
+            f"missing {path}. If that is the pinned bank, build it first — see this "
+            "directory's README for the command and for why the draw count is not a free "
+            "choice. If it is the comparison floor or the grading ruler, it is a committed "
+            "artifact of the batch: check --multi, or that the batch dir is the real one."
         )
     payload = json.loads(path.read_text())
     payload["_deltas"] = np.asarray(payload["deltas_cpl_held"], dtype=float)
@@ -84,12 +96,26 @@ def _anova_icc(frame: pd.DataFrame) -> dict:
     can never unbalance it, but a non-multiple `n_draws` can) is priced correctly rather than
     silently treated as balanced.
     """
-    groups = [g["delta"].to_numpy() for _, g in frame.groupby("source_column") if len(g) > 1]
+    # EVERY group, including one with a single draw. A singleton contributes nothing to the
+    # WITHIN-column sum of squares (correctly — it has no within-column variation) but it does
+    # contribute to the BETWEEN-column sum of squares, and dropping it discards that. The
+    # earlier `if len(g) > 1` filter silently deleted such columns AND reported the post-drop
+    # `n`/`k`, so nothing in the output revealed the loss: a 5-draw, 3-column bank printed
+    # `n=4, k=2`. `icc_upper` is what the verdict at the bottom of this script turns on, so a
+    # quietly dropped draw could flip the printed recommendation (PR #337 review). Inherited
+    # from `2026-08-26_placebo_draw_independence/texture_channel.py`, which still has it —
+    # tracked separately, that file is outside this change.
+    groups = [g["delta"].to_numpy() for _, g in frame.groupby("source_column")]
     if len(groups) < 2:
         raise SystemExit(
-            "the pinned bank has fewer than two source columns with more than one draw each — "
-            "an ICC BY COLUMN needs both between-column and within-column variation. Rebuild "
-            "with several --same-source-column flags."
+            "the pinned bank has fewer than two source columns — an ICC BY COLUMN needs "
+            "between-column variation. Rebuild with several --same-source-column flags."
+        )
+    if sum(len(g) for g in groups) <= len(groups):
+        raise SystemExit(
+            f"every one of the {len(groups)} pinned columns has exactly one draw — there is no "
+            "WITHIN-column variation to separate alignment from texture. Raise --n-draws to at "
+            "least twice the pinned column count."
         )
     n = int(sum(len(g) for g in groups))
     k = len(groups)
@@ -114,7 +140,13 @@ def _anova_icc(frame: pd.DataFrame) -> dict:
         "n": n, "k": k, "k_bar": k_bar, "df1": df1, "df2": df2,
         "f_stat": f_stat, "p_value": p_value,
         "icc": _icc(f_stat),
-        "icc_lower": _icc(f_stat / f_dist.ppf(0.975, df1, df2)),
+        # A SYMMETRIC two-sided 95% interval. The earlier version paired a 2.5%-tail lower with
+        # a 5%-tail upper and called the pair a "95% CI" (PR #337 review).
+        "icc_ci_lower": _icc(f_stat / f_dist.ppf(0.975, df1, df2)),
+        "icc_ci_upper": _icc(f_stat / f_dist.ppf(0.025, df1, df2)),
+        # The decision quantity, reported separately and labelled: a ONE-SIDED 95% upper bound
+        # at the 5% tail — the identical construction `texture_channel.py` used to produce the
+        # 0.391 this run would replace, so the two are directly comparable.
         "icc_upper": _icc(f_stat / f_dist.ppf(0.05, df1, df2)),
         "icc_resolvable": _icc(f_crit),
         "ms_within": ms_within,
@@ -128,6 +160,14 @@ def _ratio_icc(var_within: float, df_within: int, multi: dict) -> dict:
     `var_within` is the pinned bank's WITHIN-column variance (alignment alone), not its total:
     a multi-pinned-column bank's total variance contains between-column texture, which is
     exactly what is being isolated. At one pinned column the two coincide.
+
+    **STATED ASSUMPTION, not a demonstrated fact: Var(alignment) is the same in both banks.**
+    The two variances come from separately-computed banks, so `1 - var_within / var_multi` is
+    the ICC only if a draw's alignment variance does not itself depend on which source column
+    it was built from. Plausible — same batch, same seed, same folds, same fit path, and the
+    same block-permutation construction — but assumed. The ANOVA estimator above does not need
+    it, which is why that one is primary and this one is reported for continuity (PR #337
+    review).
     """
     var_multi = float(multi["_deltas"].var(ddof=1))
     df_multi = multi["_deltas"].size - 1
@@ -150,24 +190,11 @@ def _ratio_icc(var_within: float, df_within: int, multi: dict) -> dict:
 
 def _bars(icc: float, mean: float, std: float, arities=(1, 3, 4, 10, 35)) -> dict[int, float]:
     """Single-candidate bar at each arity for a 20-draw bank, using the shipped
-    `effective_n_draws` on the real overlap structure rather than a model of it."""
-    from experiments.pipeline.placebo import candidate_sequence
-
-    columns = json.loads((BATCH / "baseline_columns.json").read_text())[:49]
+    `effective_n_draws` over `bank_model.model_bank`'s reconstruction of the overlap."""
+    columns = json.loads((BATCH / "baseline_columns.json").read_text())
     out: dict[int, float] = {}
     for arity in arities:
-        groups, current, used = [], [], set()
-        for column, seed in candidate_sequence(columns, 20 * arity):
-            if column in used:
-                continue
-            current.append((column, seed, 0.0))
-            used.add(column)
-            if len(current) == arity:
-                groups.append(current)
-                current, used = [], set()
-                if len(groups) == 20:
-                    break
-        n_eff = effective_n_draws(groups, icc=icc)
+        n_eff = effective_n_draws(model_bank(columns, 20, arity), icc=icc)
         out[arity] = (
             mean - family_wise_z_threshold(n_candidates=1, n_draws=n_eff) * std
             if n_eff >= 2 else float("nan")
@@ -202,8 +229,30 @@ def main() -> None:
                 f"floors differ on {key} ({pinned.get(key)!r} vs {multi.get(key)!r}) — not "
                 "comparable; the pinned source columns are supposed to be the only difference."
             )
+    # Absent `n_placebo_columns` reads as 1 (what a pre-fps-3jj.14 floor in fact was), the same
+    # rule `_noise_band` applies. batch1's live ruler shares every HELD_FIXED key with the k1
+    # floor, so without this it would sail through as a comparison band at the wrong arity.
+    multi_arity = multi.get("n_placebo_columns") or 1
+    if multi_arity != MULTI_FLOOR_ARITY:
+        raise SystemExit(
+            f"{args.multi} is an arity-{multi_arity} floor. The ratio estimator subtracts a "
+            "1-column bank's alignment variance from a 1-column bank's total; a "
+            f"{multi_arity}-column band measures a different, wider quantity and would "
+            "understate the ICC. Pass the arity-1 floor (batch1: noise_floor_k1.json)."
+        )
+    pinned_arity = pinned.get("n_placebo_columns") or 1
+    if pinned_arity != 1:
+        raise SystemExit(f"the pinned bank declares arity {pinned_arity}; it must be 1.")
 
     frame = pd.DataFrame(pinned["placebo_draws"])
+    # One record per draw MEMBER, so this positional join is only correct at arity 1 (checked
+    # above, and enforced by compute_noise_floor). Asserted rather than assumed: at arity > 1
+    # it would silently mis-pair deltas with columns.
+    if len(frame) != len(pinned["deltas_cpl_held"]):
+        raise SystemExit(
+            f"{len(frame)} draw records against {len(pinned['deltas_cpl_held'])} deltas — "
+            "expected one record per draw (arity 1)."
+        )
     frame["delta"] = np.asarray(pinned["deltas_cpl_held"], dtype=float)[frame["draw"] - 1]
 
     print(f"pinned bank: {args.pinned}")
@@ -222,8 +271,11 @@ def main() -> None:
     print("\n=== ICC by COLUMN — one-way ANOVA (PRIMARY) ===")
     print(f"  F({anova['df1']},{anova['df2']}) = {anova['f_stat']:.3f}, p = {anova['p_value']:.3f}"
           f"   (k={anova['k']} columns, k_bar={anova['k_bar']:.2f} draws each)")
-    print(f"  ICC                                   {anova['icc']:+.3f}")
-    print(f"  95% CI                                [{anova['icc_lower']:+.3f}, {anova['icc_upper']:+.3f}]")
+    print(f"  ICC                                    {anova['icc']:+.3f}")
+    print(f"  95% CI (two-sided)                     "
+          f"[{anova['icc_ci_lower']:+.3f}, {anova['icc_ci_upper']:+.3f}]")
+    print(f"  95% upper bound (ONE-SIDED, 5% tail)   {anova['icc_upper']:+.3f}"
+          "   <- compare to 0.391, derived the same way")
     print(f"  smallest ICC this design could resolve {anova['icc_resolvable']:.3f}"
           "   <- below this reads 'could not see it', NEVER 'it is not there'")
 
