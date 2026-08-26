@@ -68,7 +68,7 @@ from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
 from experiments.lib.flips import summarise_flips
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
-from experiments.pipeline.placebo import TEXTURE_ICC_BOUND
+from experiments.pipeline.placebo import TEXTURE_ICC_BOUND, effective_n_draws
 from experiments.pipeline.runner import (
     BASELINE_ARM,
     CANDIDATE_ARM,
@@ -424,6 +424,46 @@ def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
     return {"pit_test": pit_test, "inputs_check": inputs_check, "candidate_column_nan_rate": nan_rates}
 
 
+def _resolve_effective_n_draws(noise_floor: dict, *, nominal: int) -> float:
+    """The band's EFFECTIVE draw count — stamped if present, RECONSTRUCTED if not.
+
+    `compute_noise_floor` stamps `effective_n_draws` from `fps-3jj.25` onward. Older floors do
+    not carry it, and the first version of this fallback simply used the nominal count on the
+    reasoning that such floors "predate column reuse entirely, so nominal IS effective".
+
+    **That reasoning was wrong for a real window** (review of PR #336). `fps-3jj.21` landed the
+    unbounded, reuse-capable `candidate_sequence` one PR BEFORE the stamp existed, so any floor
+    built from main in between can contain genuine reuse and no stamp — e.g. 20 draws at arity 3
+    is 60 picks from ~49 usable columns, worth ~17.5 effective draws, and would have been graded
+    at 20. Silent, and in the too-easy direction: exactly the bias this machinery exists to
+    remove.
+
+    So reconstruct rather than assume. A floor records `placebo_draws` (one entry per placebo
+    COLUMN, with its `source_column`) and `n_placebo_columns`, which is enough to rebuild the
+    bank's overlap structure exactly and re-price it. Only a floor missing `placebo_draws`
+    altogether falls back to nominal, and that is genuinely safe: no such floor could have been
+    written by any construction that reuses columns.
+    """
+    stamped = noise_floor.get("effective_n_draws")
+    if stamped:
+        return float(stamped)
+
+    members = noise_floor.get("placebo_draws") or []
+    arity = int(noise_floor.get("n_placebo_columns", 1) or 1)
+    if not members or arity < 1 or len(members) % arity:
+        return float(nominal)
+    draws = [
+        [
+            (str(m.get("source_column")), int(m.get("block_seed", 0)), 0.0)
+            for m in members[i:i + arity]
+        ]
+        for i in range(0, len(members), arity)
+    ]
+    if not draws:
+        return float(nominal)
+    return effective_n_draws(draws)
+
+
 def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerprint: bool = True) -> dict:
     """`check_fingerprint=False` is for retrospective.py's `_batch_noise_summary`,
     which reuses this function's math to summarise a batch's floor on its own
@@ -563,14 +603,16 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         return {"available": False, "reason": "empty noise-floor sample or unresolved effect_delta_cpl_held"}
     band_mean = float(np.mean(deltas))
     band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
-    # fps-3jj.25: grade against the band's EFFECTIVE draw count, not its nominal one. A floor
-    # written before this carries no `effective_n_draws`; those banks predate column reuse
-    # entirely (the pools could not supply it), so their nominal count IS their effective count
-    # and falling back to it is exact rather than optimistic.
-    n_eff = float(noise_floor.get("effective_n_draws") or deltas.size)
+    # fps-3jj.25: grade against the band's EFFECTIVE draw count, not its nominal one.
+    n_eff = _resolve_effective_n_draws(noise_floor, nominal=int(deltas.size))
     band_estimable = bool(np.isfinite(band_std) and band_std > 0 and n_eff >= 2)
     single_z = (
         family_wise_z_threshold(n_candidates=1, n_draws=n_eff) if band_estimable else None
+    )
+    single_z_nominal = (
+        family_wise_z_threshold(n_candidates=1, n_draws=int(deltas.size))
+        if band_estimable
+        else None
     )
     return {
         "available": True,
@@ -600,6 +642,9 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # (docs/routines/dossier.md § Step 1.4, fps-3jj.17); None when band_std isn't estimable
         # (deltas.size < 2), same guard as candidate_z_vs_band itself.
         "single_candidate_z_threshold": single_z,
+        # The same threshold computed on the NOMINAL draw count — i.e. before the reuse
+        # correction. Emitted so the two components of the bar can be told apart below.
+        "single_candidate_z_threshold_nominal": single_z_nominal,
         # fps-3jj.21: the same bar in c/L rather than in band-std units — the form a reader can
         # actually compare against `experiments/results.csv`'s 0.03-0.26 c/L history and against
         # another candidate's. `delta_cpl_held` is a COST, so clearing the bar means coming in
@@ -619,14 +664,35 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # any finite-n threshold, so a LARGER penalty reads as a MORE NEGATIVE number. Named
         # "shift" rather than "penalty" for exactly that reason (review of PR #335): it is the
         # signed move of a cost, on the same scale and in the same direction as the bar itself,
-        # not a magnitude. The t-critical carries
+        # not a magnitude.
+        #
+        # Computed against the NOMINAL draw count on purpose (review of PR #336). Once
+        # `family_wise_z_threshold` took the EFFECTIVE count, deriving this from the effective
+        # threshold silently folded an arity-driven reuse effect into a number whose entire
+        # job is to separate draw thinness from everything else —
+        # `experiments/2026-08-23_placebo_arity/` used exactly this quantity to attribute two
+        # thirds of batch1's k=1 -> k=3 bar move to thinness rather than arity, and the
+        # conflated version would have credited reuse to "draw count". The reuse charge is
+        # emitted separately as `bar_reuse_shift_cpl_held`; the two sum to the full distance
+        # between the large-sample bar and the one actually applied. The t-critical carries
         # `df = n_draws - 1`, so a floor estimated from few draws sets a harder bar than the
         # same band estimated from many — and `experiments/2026-08-23_placebo_arity/` measured
         # two thirds of batch1's k=1 -> k=3 bar move as exactly this, not as the arity effect it
         # was being read as. Quoted against the large-sample limit (the band known rather than
         # estimated), so it is a property of this floor alone and comparable across floors.
         "bar_draw_count_shift_cpl_held": (
-            (_LARGE_SAMPLE_Z - single_z) * band_std if single_z is not None else None
+            (_LARGE_SAMPLE_Z - single_z_nominal) * band_std
+            if single_z_nominal is not None
+            else None
+        ),
+        # The rest of the distance: how much harder the bar is because the bank's draws REUSE
+        # source columns and so are worth less than their count (fps-3jj.25). Zero for a
+        # reuse-free bank. Kept separate from the thinness shift above so neither can absorb
+        # the other; together they span large-sample bar -> applied bar.
+        "bar_reuse_shift_cpl_held": (
+            (single_z_nominal - single_z) * band_std
+            if single_z is not None and single_z_nominal is not None
+            else None
         ),
         # Columns by which the ruler is WIDER-armed than the run it grades. Allowed (a wider
         # ruler can only raise the bar) but it means a candidate failing here has not been shown

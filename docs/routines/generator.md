@@ -280,8 +280,14 @@ c/L, 10 columns **−0.171**, 35 columns **−0.287**. Harder as it widens, whic
 band at all** above 17 columns.
 
 **So propose the honest shape and let the bar adjust.** The only hard limit left is physical: a
-placebo draw needs one distinct source column per candidate column, so arity cannot exceed the
-54-column lock. The one number still resting on an estimate is the texture ICC behind the
+placebo draw needs one distinct source column per candidate column, **and that column has to
+survive screening** — so the ceiling is the count of *usable* baseline columns, not the nominal
+54. On batch1 that is **49**: five `days_since_trough_entry_<lga>` columns are all-NaN (no
+station ever classified into that LGA) and are skipped as unverifiable. `screen_draw_groups`
+only guards against exceeding the nominal count, so a candidate between the two numbers passes
+that guard, burns a night of compute, and then cannot have a floor built — the no-verdict
+failure this whole change exists to eliminate. Treat ~45 as the practical ceiling and check the
+batch's own `baseline_columns.json` if you are anywhere near it. The one number still resting on an estimate is the texture ICC behind the
 pricing — bounded at ≤ 0.391 by an underpowered ANOVA and measured directly in bd `fps-3jj.23`.
 It is deliberately set at the pessimistic end, so every bar is currently a little harder than it
 probably needs to be.

@@ -243,8 +243,10 @@ def compute_noise_floor(
     `n_draws * arity`, so a wider candidate got a thinner band, and `family_wise_z_threshold`
     turns a thinner band into a much harder bar (`df = n_draws - 1`) for a reason unrelated to
     arity. Both pools are unbounded now — pick `n_draws` for the certainty wanted and pay the
-    compute. Arity is capped separately at `placebo.MAX_RULER_ARITY`, on a measured limit
-    rather than a pool size; see that constant.
+    compute. Arity is NOT capped either (`fps-3jj.25`): source-column reuse is priced into the
+    threshold by `placebo.effective_n_draws`, so a wider candidate gets a wider, harder bar
+    rather than being refused. The only arity limit is physical — a draw needs `arity` distinct
+    source columns that pass screening.
 
     out_name: the filename written under `batch_dir`. Defaults to the batch's real ruler,
     `noise_floor.json`. An arity-calibration run is a MEASUREMENT of the ruler's arity
@@ -271,9 +273,9 @@ def compute_noise_floor(
         graded against; overwriting it silently (e.g. from a re-run) would move that ruler
         under them after the fact.
       - BaselineContractMismatch (via check_baseline_contract) on column drift.
-      - ValueError (via placebo.screen_draw_groups) if arity exceeds
-        `placebo.MAX_RULER_ARITY` — a band that wide is computable but not meaningful, so it
-        is refused rather than written; see that constant and bd fps-3jj.22.
+      - ValueError (via placebo.screen_draw_groups) if arity exceeds the baseline column
+        count — a draw needs that many DISTINCT source columns. There is no longer any
+        STATISTICAL arity refusal (fps-3jj.25); reuse is priced, not capped.
       - ValueError (via placebo.screen_draw_groups) if this batch's data can't support
         n_draws draws at this arity passing MAX_SELF_CORRELATION even after exhausting the
         candidate sequence — rare, but a real outcome on a real batch (unlike the config-drift
@@ -660,8 +662,10 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     "match a batch whose candidates are multi-column GROUPS — a k-column candidate graded "
     "against a 1-column band is graded favourably by an unmeasured amount. --n-draws is "
     "INDEPENDENT of this (fps-3jj.21): pick the draw count for the certainty you want and "
-    "pay the compute. Capped at placebo.MAX_RULER_ARITY, which is a measured limit on how "
-    "independent the draws can stay, not a pool size.",
+    "pay the compute. Arity is NOT capped (fps-3jj.25) — source-column reuse is priced into "
+    "the bar by placebo.effective_n_draws, so a wider ruler is graded, not refused. The limit "
+    "is physical: a draw needs that many distinct source columns that pass screening, so it "
+    "cannot exceed the count of USABLE baseline columns (all-NaN columns do not count).",
 )
 @click.option(
     "--out-name", default=NOISE_FLOOR_FILENAME, show_default=True,

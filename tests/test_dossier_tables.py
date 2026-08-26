@@ -914,6 +914,75 @@ def test_noise_band_uses_effective_draws_not_nominal_for_the_threshold(tmp_path)
     assert thin_band["single_candidate_z_threshold"] > full_band["single_candidate_z_threshold"]
 
 
+def test_noise_band_reconstructs_effective_draws_from_an_unstamped_reusing_floor(tmp_path):
+    """Review of PR #336. fps-3jj.21 landed reuse-capable `candidate_sequence` one PR BEFORE
+    the `effective_n_draws` stamp existed, so a floor built from main in that window can carry
+    real reuse and no stamp. Assuming nominal there would grade a ~17.5-draw bank at 20 —
+    silent, and in the too-easy direction. `placebo_draws` records the source column of every
+    member, so the overlap is RECOVERABLE and must be recovered, not assumed."""
+    reused = {
+        "n_placebo_columns": 2,
+        # 4 draws x 2 columns over 4 distinct columns — heavy, deliberate overlap.
+        "placebo_draws": [
+            {"source_column": c, "block_seed": i, "self_correlation": 0.0}
+            for i, c in enumerate(["a", "b", "a", "b", "c", "d", "c", "d"])
+        ],
+    }
+
+    def _write(batch_dir):
+        _floor_with(arity=2, n=4)(batch_dir)
+        path = batch_dir / dt.NOISE_FLOOR_FILENAME
+        payload = json.loads(path.read_text())
+        payload.update(reused)
+        payload.pop("effective_n_draws", None)
+        path.write_text(json.dumps(payload))
+
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_write)
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is True
+    assert band["effective_n_draws"] < 4.0, "reuse was assumed away instead of reconstructed"
+
+
+def test_noise_band_separates_the_reuse_charge_from_the_thinness_charge(tmp_path):
+    """Review of PR #336. `bar_draw_count_shift_cpl_held` exists to isolate band THINNESS —
+    `experiments/2026-08-23_placebo_arity/` used exactly this quantity to attribute two thirds
+    of batch1's k=1 -> k=3 bar move to draw count rather than arity. Once the threshold took
+    the EFFECTIVE count, deriving the shift from it would have folded an arity-driven reuse
+    effect into the very number meant to separate them. So the thinness shift is computed on
+    NOMINAL draws and the reuse charge is emitted alongside; the two must span the whole
+    distance from the large-sample bar to the applied one."""
+    def _write(batch_dir):
+        _floor_with(arity=1, n=20)(batch_dir)
+        path = batch_dir / dt.NOISE_FLOOR_FILENAME
+        payload = json.loads(path.read_text())
+        payload["effective_n_draws"] = 9.04
+        path.write_text(json.dumps(payload))
+
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_write)
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    std = band["band_std_delta_cpl_held"]
+    thinness = band["bar_draw_count_shift_cpl_held"]
+    reuse = band["bar_reuse_shift_cpl_held"]
+
+    # The thinness charge must be the NOMINAL-draw one, untouched by reuse.
+    assert thinness == pytest.approx(
+        (dt._LARGE_SAMPLE_Z - band["single_candidate_z_threshold_nominal"]) * std
+    )
+    assert reuse < 0, "reuse must make the bar harder, i.e. more negative"
+    # Together they span large-sample bar -> applied bar, with nothing double-counted.
+    assert thinness + reuse == pytest.approx(
+        (dt._LARGE_SAMPLE_Z - band["single_candidate_z_threshold"]) * std
+    )
+
+
+def test_noise_band_reports_no_reuse_charge_for_a_reuse_free_bank(tmp_path):
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with(arity=1, n=20))
+    band = dt.build_facts(run_dir)["noise_band"]
+    assert band["bar_reuse_shift_cpl_held"] == pytest.approx(0.0)
+
+
 def test_noise_band_falls_back_to_nominal_draws_on_a_pre_fps_3jj_25_floor(tmp_path):
     """A floor written before effective_n_draws existed predates column reuse entirely — the
     pools could not supply it — so its nominal count IS its effective count. Falling back is
