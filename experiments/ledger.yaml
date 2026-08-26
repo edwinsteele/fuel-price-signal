@@ -46,6 +46,47 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: sticky_x_phase, abs_sticky_x_phase (stickiness x cycle-phase product,
+    signed and absolute)
+  inputs: [stickiness_score, cycle_pct_through]
+  claim: >-
+    cycle_pct_through is a NETWORK clock (one value per date), but a
+    station's willingness to follow it is per-station: a chronically cheap,
+    competitive station tracks the cycle closely, a chronically dear or
+    erratic one is only loosely coupled. The lock hands the model both
+    terms separately and nothing else; a tree can only approximate their
+    product through nested axis-aligned splits. Predicted decision-timing:
+    near-zero stickiness stations essentially unchanged, flips concentrated
+    on the stickiness-distribution tails, buying EARLIER on high-|stickiness|
+    stations at late phase, and -- the distinctive signature -- SIGNED and
+    ABSOLUTE columns both used and disagreeing in orientation somewhere in
+    the SHAP surface (if only the absolute column is used, the real content
+    is a weaker "outliers are decoupled" claim, not a saddle).
+  falsified: >-
+    Not resolved either way. Realised delta (-0.0735 c/L held-tau,
+    favourable direction) and 303 decision flips spread across 13 of 14
+    folds match the predicted diffuse, not fold-concentrated, shape. But the
+    effect sits inside batch1's single-candidate noise band (z=-0.99 vs
+    threshold 1.92, 80th percentile of the noise draws -- graded against a
+    ruler built at arity 3, wider than this candidate's own arity 2,
+    floor_arity_exceeds_run=true). facts.json carries no SHAP
+    importance/orientation data, so the candidate's own distinguishing
+    mechanism test (signed vs absolute disagreement) was never run --
+    dossier_tables.py has no field for it, filed as fps-1l1.
+  not_tested: >-
+    Whether the SHAP signature the candidate predicted exists at all --
+    tracked as fps-1l1, a real gap in dossier_tables.py, not computed in
+    this session. Whether a floor matching this candidate's own 2-column
+    arity (rather than the batch's 3-column floor) would move the call; the
+    candidate cleared the 80th percentile of the wider ruler's noise draws.
+    Whether the more specific claim -- flips concentrated on the
+    stickiness-distribution tails, near-zero elsewhere -- holds at the row
+    level; decision_flips carries no station-level stickiness data, so only
+    the coarser "spread across folds" half of the prediction is checkable,
+    and it matches.
+  outcome: inconclusive
+  evidence: experiments/candidates/batch1/stickiness_phase_saddle/
+
 - candidate: lga_trough_breadth_7d, lga_trough_breadth_delta_3d, lga_leader_lead_days
     (cross-sectional breadth/velocity/leader-lag over the 35 LGA trough clocks)
   inputs: [price_date, days_since_trough_entry_bayside, days_since_trough_entry_blacktown,
