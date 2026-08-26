@@ -207,3 +207,37 @@ calendar window" rather than "restoration timing during shocks."
 - The rise/fall per-column attribution gap (SHAP, needs the candidate model
   persisted) remains open — worth its own bead if a future candidate's
   grading depends on it, rather than building it speculatively now.
+
+## Addendum — 2026-08-26: batch-wide coverage caveat
+
+Found while reviewing `lga_trough_propagation`; it applies identically here, because
+every batch1 candidate replays the same station-day grid. **Not specific to this
+candidate, and it does not change this dossier's verdict.**
+
+This run's `results.json` `meta` records `extra_feature_provider_hits` 5693 /
+`extra_feature_provider_misses` 607 — the same split as both sibling candidates. The
+6300 total is 5 preferred stations × 14 folds × 90 days. All 607 misses are
+station-days where a Blue Mountains station has no feature row, and they are confined
+to **folds 1-8**; folds 9-14 are completely clean:
+
+| fold | window | missing | which |
+|---|---|---|---|
+| 1 | 2021-11-05..2022-02-02 (shock) | **180/450** | 414 and 18517, all 90 days |
+| 2 | 2022-02-03..2022-05-03 | 8 | 414, 18517 |
+| 4-8 | 2022-08-02..2023-10-25 | 67/90/90/90/82 | 414 |
+
+Verified against `data/cleaned/` raw prices: the 2021 gap is **not** a closure — both
+stations kept reporting through it (414: 44 raw rows inside, 18517: 75), at roughly a
+third of their prior update rate, which trips `fill.py`'s 28-day fill cap and then
+`labels.py`'s 7-before/90-after strip. 414's 2022-23 gap **is** a real year-long
+rebuild, but it reopened ~2023-07 while the frame stays dark to 2023-10-17, so fold 8's
+82 missing days are label-strip tail on a live, trading station.
+
+So folds 1-8 ran on a smaller — and council-skewed — universe than folds 9-14. Fold 1
+drops from 5 stations to 3, flipping the mix from 3 Blue Mountains / 2 Penrith to 1/2,
+which matters wherever a fold-level read is being compared across the run. This is
+reduced sample, **not corrupted sample**: a missing feature row means no fill was
+available and both arms skip it identically.
+
+Full analysis, including the per-fold decomposition and the `fps-ghr` implications:
+`experiments/candidates/batch1/lga_trough_propagation/README.md` § Review addendum.

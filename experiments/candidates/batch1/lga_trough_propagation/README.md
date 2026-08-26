@@ -274,8 +274,12 @@ year-long rebuild (zero raw rows 2022-09..2023-04), but it reopened ~2023-07 whi
 feature frame stays dark to 2023-10-17, so **fold 8's 82 missing days are label-strip
 tail on a live, trading station.**
 
-Consequences: fold 1's `delta_cpl_own` = 0.0000 with zero decision flips is a
-3-station fold, not a null — and the council mix flips from 3 Blue Mountains /
+Consequences: fold 1's `delta_cpl_own` = 0.0000 with zero decision flips comes
+from a 3-station fold. Coverage is not the whole explanation — this batch's other
+two candidates do flip decisions in fold 1 (`network_move_breadth` 4/2,
+`station_descent_dynamics` 21/0) — but a fold missing both of its dark stations
+from the SAME council is a thin substrate for an LGA-propagation feature
+specifically, so read the zero as thinned rather than as a clean null — and the council mix flips from 3 Blue Mountains /
 2 Penrith to 1/2, which matters for a candidate whose mechanism is LGA propagation
 (Blue Mountains lags the network trough by -1.45 days, Penrith by -1.14). Folds 4-7
 are honest 4-station markets. Fold 1 and fold 8 are measurement gaps. Note this is
