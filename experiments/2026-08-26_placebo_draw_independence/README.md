@@ -243,6 +243,53 @@ recompute, don't mix. batch1's committed ruler still carries its 0.965 pair; it 
 recomputed here, because doing so would move the ruler under dossiers already written against
 it.
 
+**Outcome (`fps-3jj.24`, decided 2026-08-27): it stays uncomputed, and the retrospective ranks
+against the committed ruler with the collision priced in prose rather than in the band.** Three
+things settled it.
+
+*First, `fps-3jj.25`'s reuse correction does not catch this collision and cannot.*
+`placebo.effective_n_draws` prices shared SOURCE COLUMNS; draw 1 and draw 10 share none —
+`cycle_pct_through / cycle_mean_length / cycle_last_max_cents` against `cycle_days_since_peak /
+cycle_last_min_cents / station_price_cents`, 30 picks and 30 distinct columns across the bank —
+so `dossier_tables._resolve_effective_n_draws` reconstructs the nominal **10.0 exactly**. This
+write-up's own table is why: the machinery charges *same column, different seed* (median |ρ|
+0.038) at `icc = 0.391` and charges *different column, same seed* (max |ρ| 0.971) **nothing**.
+It prices the cheap channel and ignores the expensive one. That inversion is harmless for every
+future floor — `block_seed`'s never-restarting counter closes the seed channel by construction —
+so it is a defect of two committed artifacts, not of the code, and `effective_n_draws` should
+**not** be changed to chase it.
+
+*Second, the bias is exactly computable with no compute, and it only ever points one way.*
+Pricing the collided pair at its observed 0.836 correlation through this project's own formula
+puts the bank at **8.57** effective draws:
+
+| gate | committed | corrected | shift |
+|---|---|---|---|
+| single candidate (`n_candidates=1`) | −0.1670 | −0.1727 | −0.0057 c/L |
+| batch gate (`n_candidates=5`) | −0.2706 | −0.2850 | −0.0144 c/L |
+
+The correction is monotone-HARDENING, so it can only demote a candidate, never promote one — the
+committed ruler wrongly fails nobody, and can only wrongly PASS a candidate sitting in
+|`z`| ∈ [1.9226, 1.9797) at `n_candidates=1` or [2.9591, 3.1030) at `n_candidates=5`. That is a
+free per-row check at write-up time, and `docs/routines/retrospective.md` now carries it as a
+standing instruction. None of the three candidates dossiered so far is inside it (|z| = 0.523 /
+0.926 / 1.805).
+
+*Third, the recompute was refused because it is a WORSE instrument than the arithmetic above,
+not merely a more expensive one.* A fresh 10-draw band estimates its own std to ±23.6%
+(`1/sqrt(2(n-1))`) — ±0.0697 c/L on the `n_candidates=5` bar, **4.8× the 0.0144 c/L bias it
+would remove**. Combined with the non-comparability rule stated just above, a recomputed floor
+could not answer "did the collision matter": a ranking change would be indistinguishable from
+resampling luck, and an unchanged ranking would prove nothing the closed form does not already
+give for free.
+
+*Incidental finding.* The retired `noise_floor_k1.json` carries the same defect — 20 draws at
+arity 1, two collided pairs (draws 1/19 on seed 97, draws 2/20 on seed 101), `n_eff` again
+reading the nominal 20.0. It is the k=1 baseline behind `docs/CONVENTIONS.md`'s "two thirds of
+the k=1 → k=3 bar move is draw thinness, not arity" attribution. Both floors are biased the same
+direction, so correcting both moves the gap only from −0.0536 to −0.0637 c/L at
+`n_candidates=5`: **the two-thirds claim survives.**
+
 ## How to reproduce
 
 ```bash

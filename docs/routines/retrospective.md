@@ -150,6 +150,62 @@ one is invisible to everyone but this machine.
   prose was written from it, so re-running with `--force` would silently rewrite a published
   finding rather than just add a stamp. Read it as history; don't diff it against this
   schema.
+- **batch1 ranks against its COMMITTED ruler, and that ruler's `effective_n_draws: 10.0` is
+  wrong (`fps-3jj.24`).** Decided 2026-08-27; do not re-open it in the write-up. batch1's
+  `noise_floor.json` carries the `fps-3jj.20` seed collision — draw 10 reuses draw 1's seeds
+  97/101/103, landing at placebo correlations 0.965 / 0.778 / 0.765 against it. **`fps-3jj.25`'s
+  reuse correction does not catch this and cannot**: `placebo.effective_n_draws` prices SHARED
+  SOURCE COLUMNS, and the two draws share none (30 picks, 30 distinct columns), so
+  `_resolve_effective_n_draws` returns the nominal 10.0 exactly. Against
+  `docs/CONVENTIONS.md`'s own measured table the machinery charges the cheap channel (same
+  column, different seed — median |ρ| 0.038) at `icc = 0.391` and the expensive one (different
+  column, same seed — max |ρ| 0.971) at zero. Closed by construction for every FUTURE floor
+  (`placebo.block_seed` never restarts), so this is a defect of two committed artifacts, not of
+  the code — do not "fix" `effective_n_draws` to chase it.
+
+  Priced by hand at the collided pair's observed 0.836 correlation, the bank is worth **8.57**
+  effective draws, and the bar is that much too EASY:
+
+  | gate | committed | collision-corrected | shift |
+  |---|---|---|---|
+  | single candidate (`n_candidates=1`) | −0.1670 | −0.1727 | −0.0057 c/L |
+  | batch gate (`n_candidates=5`) | −0.2706 | −0.2850 | −0.0144 c/L |
+
+  **Rank on the committed numbers anyway** — they are what all five dossiers were graded
+  against, and a retrospective citing a bar no dossier used would put the batch verdict and the
+  per-candidate write-ups in different units. A recompute was considered and REFUSED: a fresh
+  10-draw band estimates its std to ±23.6% (`1/sqrt(2(n-1))`), which is ±0.0697 c/L on the
+  `n_candidates=5` bar — **4.8× the 0.0144 c/L bias it would remove** — so the difference it
+  reported would be dominated by resampling luck, and `docs/CONVENTIONS.md` already says a
+  post-2026-08-26 recompute is not comparable draw-for-draw anyway. The closed form above is a
+  strictly better instrument than the ~2.3h run.
+
+  **What the write-up must do instead**, because the correction is monotone-HARDENING and so can
+  only ever demote a candidate, never promote one: no candidate is wrongly failed by the
+  committed ruler, only possibly wrongly PASSED. So check each cleared row against the flip
+  window and say so explicitly:
+
+  | gate | flip window on \|`noise_band_z`\| | on `delta_cpl_held` |
+  |---|---|---|
+  | `n_candidates=1` | [1.9226, 1.9797) | (−0.1727, −0.1670] |
+  | `n_candidates=5` | [2.9591, 3.1030) | (−0.2850, −0.2706] |
+
+  A row inside its window clears ONLY by the collision's optimism and must be reported as
+  not-established rather than as clearing. A row outside is unaffected, and the write-up says
+  one line — "the collision did not change any verdict" — and moves on. As of 2026-08-27 the
+  three dossiered candidates sit at |z| = 0.523 / 0.926 / **1.805**; the best
+  (`network_move_breadth`) misses the single-candidate bar under both rulers, so no verdict
+  moves. The two unrun candidates get the same check when they land.
+
+- **The retired `noise_floor_k1.json` carries the same defect, and one documented number rests
+  on it (`fps-3jj.24`).** 20 draws at arity 1, two collided pairs (draws 1/19 on seed 97, draws
+  2/20 on seed 101), and again `n_eff` reads the nominal 20.0. It is the k=1 baseline behind
+  `docs/CONVENTIONS.md`'s "two thirds of batch1's k=1 → k=3 bar move is draw thinness, not
+  arity" attribution. Both floors are biased the same direction, so it largely self-cancels:
+  correcting both moves the k1→k3 gap from −0.0536 to −0.0637 c/L at `n_candidates=5`. **The
+  two-thirds claim survives** — cite it without a caveat; this note exists so nobody re-derives
+  the concern from scratch.
+
 - **`family_wise_z_threshold` needs `n_draws >= 2`.** With fewer draws the band's std can't
   be estimated at all (no degrees of freedom for a t-critical value) — the payload's
   top-level `family_wise_z_threshold` (a scalar) is `None` and every row's
