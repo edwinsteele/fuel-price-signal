@@ -122,9 +122,26 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      available" and quote `facts["noise_band"]["reason"]` verbatim rather than omitting the
      line or paraphrasing it (as of `fps-cf8` there is more than one refusal reason — no floor
      yet, a partial `--fold-subset` floor, or a `baseline_fingerprint` mismatch against a
-     stale/re-locked floor — and the reason string already says which); if available, report
-     `candidate_percentile_better_than_noise` as-is (already oriented so higher = better —
-     don't re-derive or re-sign it). If `facts["decision_flips"]["computed"]` is `true` (arity 2+
+     stale/re-locked floor, a candidate above `placebo.MAX_RULER_ARITY` — and the reason string
+     already says which); if available, report `candidate_percentile_better_than_noise` as-is
+     (already oriented so higher = better — don't re-derive or re-sign it).
+
+     **Also print the bar in c/L, not only the percentile and z** (`fps-3jj.21`). A z against a
+     z-threshold says whether this candidate cleared; it says nothing about how strict the
+     ruler that judged it was, so two runs graded by different-shaped floors read identically.
+     Three fields make that legible and all three belong in the write-up:
+     - `single_candidate_bar_cpl_held` — the threshold in the units the rest of the project
+       quotes, comparable against `experiments/results.csv`'s 0.03–0.26 c/L history and against
+       a batch-mate. It is the **favourable side only**; a candidate can also be surprisingly
+       BAD, so judge the two-sided question on `abs(candidate_z_vs_band)` against
+       `single_candidate_z_threshold`, never on this number alone.
+     - `bar_draw_count_shift_cpl_held` — how much of that bar is band THINNESS rather than band
+       WIDTH (the `df = n_draws - 1` t-penalty), quoted against the large-sample limit. Signed
+       on the same scale as the bar, so a larger penalty is a more negative number. Print it
+       whenever it is a material fraction of the bar: two thirds of batch1's k=1 → k=3 bar move
+       was this, not the arity effect it was being read as.
+     - `floor_arity_excess` — how many columns wider the ruler is than the run, the magnitude
+       behind the `floor_arity_exceeds_run` flag above. If `facts["decision_flips"]["computed"]` is `true` (arity 2+
      and the noise-band call isn't a clean reject — `experiments/pipeline/dossier_tables.py`'s
      `_decision_flips`, fps-gez), report `n_flips` and the per-fold `n_baseline_only` /
      `n_candidate_only` / `flip_cpl_baseline` / `flip_cpl_candidate` / `flip_cpl_delta` table
