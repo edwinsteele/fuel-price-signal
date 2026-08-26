@@ -45,6 +45,10 @@ Transcribed from `facts.json` — no new arithmetic.
 
 **Provenance:** batch `batch1`, snapshot 2026-08-15, seeds [42, 43, 44, 45,
 46], wall 1270.9s, status `graded`, 54-column baseline (`54:1a6ec2d84a69`).
+Those five seeds are the **WFCV screen only**. The realised backtest — the arbiter —
+ran on a **single seed** (`results.json` `meta.realised_seed` = 42), so every
+`delta_cpl_own` below is one draw with no seed error bar. `facts.json`'s provenance
+block does not carry this field.
 
 **Headline (realised CPL, held τ — the arbiter):**
 
@@ -101,6 +105,13 @@ the ordinary 5.4–6.6× range (fold 2 `all`/R0, fold 3 `all`/R0, fold 2
 cohort, candidate run, 75.4× the cohort median** — an order of magnitude
 past every other flagged cell. Fold 3 is a `normal` (target-zone) fold and
 is also the single worst per-fold flip-delta in the table below.
+
+Every `seed_std` here is **WFCV log-loss**, not realised CPL —
+`experiments/lib/gates.py`'s `seed_variance_gate` runs on `ll_all`/`ll_hard25`.
+Fold 3's raw candidate `seed_std` is 0.5359 against a `Δll_all` of -0.0003: the
+fit's seed noise is ~1700× the log-loss effect being measured. The blow-up is in
+the EASY rows — the `hard25` cell for the same fold/arm is only 6.6×.
+**No seed-variance measurement on CPL exists in this run.**
 
 **Validation:** PIT passed (differential PIT truncation test found no
 leak). INPUTS check passed. Candidate column NaN rate 0.0% for all three
@@ -190,9 +201,10 @@ actually built to key off?
   candidate's fitted model, which this pipeline doesn't currently persist
   (same gap `network_move_breadth`'s dossier already named).
 - Whether there's a real shock-fold restoration mechanism here (distinct
-  from what was proposed) — folds 4 and 13 both show large favourable
-  effects during shocks specifically, which the candidate never predicted
-  and this run cannot distinguish from noise on its own.
+  from what was proposed) — **fold 13 alone** shows a large favourable effect
+  during a shock, which the candidate never predicted and this run cannot
+  distinguish from a single unusual window. (An earlier revision said "folds 4
+  and 13"; fold 4 is -0.0732 c/L — noise. See the addendum.)
 - Whether combining this with `network_move_breadth` (same batch, same
   cross-sectional-consensus family, same folds 11–13 pattern) does better
   than either alone — flagged from both sides now.
@@ -201,7 +213,9 @@ actually built to key off?
 framing as stated — the evidence points the opposite way from the
 prediction, and the one fold most responsible for that reading is also the
 most seed-unstable in the run. There may be a genuine shock-fold mechanism
-worth reframing as its own hypothesis (folds 4 and 13), but it should be
+worth reframing as its own hypothesis, but it rests on **fold 13 alone**, and
+fold 1 — another shock fold — turns out to be a measurement gap rather than a
+null (see the addendum). It should be
 checked jointly with `network_move_breadth` before either is pursued
 further, since both candidates in this batch cluster their wins in the same
 fold window through mechanisms neither one predicted.
@@ -215,3 +229,80 @@ fold window through mechanisms neither one predicted.
 - If the batch retrospective revisits the folds-11-13(-4) cluster shared
   between this candidate and `network_move_breadth`, treat it as one
   question, not two.
+
+## Review addendum — 2026-08-26
+
+A later interactive review of this dossier. Everything below is new analysis on the
+same run, kept out of Facts because it is not transcription from `facts.json`; each
+item names its own source. **The `contradicted` verdict is unchanged** — it rests on
+the target (normal) zone being wrong-signed, which none of this touches.
+
+**1. The shock-zone effect is one fold, not a zone.** Decomposing
+`per_regime`'s shock `delta_cpl_own` of -0.3794 over its four folds (fill-count
+weighted, so approximate — the reported figure is litre-weighted `pooled_cpl`, and
+`fills.parquet` was not retained):
+
+| fold | delta_cpl_own | n_fills | share of shock net |
+|---|---|---|---|
+| 1 | 0.0000 | 190 | 0% (zero flips either way) |
+| 4 | -0.0732 | 239 | 8% |
+| 9 | **+0.2326** | 112 | -12% (against) |
+| 13 | -1.5646 | 143 | **104%** |
+
+Excluding fold 13, the shock zone reads **+0.016** — sign flipped. The band's 0.0999
+std is on the *pooled* 14-fold delta, so a single fold's null is roughly √14× wider
+(~0.37); on that ruler fold 4 is 0.2σ, fold 9 is 0.6σ, and only fold 13 (4.2σ) is
+distinguishable. The Judgement's original "folds 4 and 13" is corrected above.
+
+**2. Folds 1-8 ran on a reduced station universe; folds 9-14 did not.** All 607 of
+this run's `extra_feature_provider_misses` (`results.json` `meta`; 6300 requested =
+5 preferred stations × 14 folds × 90 days) are station-days where two Blue Mountains
+stations have no feature row:
+
+| fold | window | missing | which |
+|---|---|---|---|
+| 1 | 2021-11-05..2022-02-02 (shock) | **180/450** | 414 and 18517, all 90 days |
+| 2 | 2022-02-03..2022-05-03 | 8 | 414, 18517 |
+| 4-8 | 2022-08-02..2023-10-25 | 67/90/90/90/82 | 414 |
+| 9-14 | — | 0 | clean |
+
+Verified against `data/cleaned/` raw prices: **the 2021 gap is not a closure.** Both
+stations kept reporting through it (414: 44 raw rows inside; 18517: 75), at ~1/3 their
+prior update rate — sparse enough to trip `fill.py`'s 28-day fill cap, after which
+`labels.py` strips 7 days before and 90 after. 414's 2022-23 gap **is** a real
+year-long rebuild (zero raw rows 2022-09..2023-04), but it reopened ~2023-07 while the
+feature frame stays dark to 2023-10-17, so **fold 8's 82 missing days are label-strip
+tail on a live, trading station.**
+
+Consequences: fold 1's `delta_cpl_own` = 0.0000 with zero decision flips is a
+3-station fold, not a null — and the council mix flips from 3 Blue Mountains /
+2 Penrith to 1/2, which matters for a candidate whose mechanism is LGA propagation
+(Blue Mountains lags the network trough by -1.45 days, Penrith by -1.14). Folds 4-7
+are honest 4-station markets. Fold 1 and fold 8 are measurement gaps. Note this is
+reduced sample, **not corrupted sample** — a missing feature row means no fill was
+available and both arms skip it identically.
+
+**3. The candidate's own falsification test is partly answerable already.** It asks
+whether this is `lga_phase_std` in different clothes. `experiments/candidates/batch1/batch.json`
+retains the generation-time R² of each column against the 54-column lock:
+
+```
+block_r2  0.685   (BLOCK_R2_FLAG = 0.9 — advisory, did not fire)
+  lga_trough_breadth_7d        0.705
+  lga_trough_breadth_delta_3d  0.497
+  lga_leader_lead_days         0.855
+```
+
+The most-reconstructible member is **`lga_leader_lead_days`**, not the breadth level
+the falsification test named. Note the block figure is the *mean* of the members, which
+dilutes a single redundant column by design (`docs/routines/generator.md` § Redundancy),
+and the hard |rho| >= 0.85 gate is **cross-candidate only** — it never compares a
+candidate to the lock. Neither number reaches `facts.json`, so the original grading
+could not see them. Correlation is not the model's *use* of a column, so this is
+corroboration, not proof — but it is independent of any attribution machinery, and it
+points the same way as fold 3's seed instability.
+
+**4. Retention gap.** Neither `fills.parquet` nor the fitted model was kept, so the
+fold-3-excluded re-read proposed in `not_tested` cannot actually be run against this
+run's artifacts — it needs a full re-run. Worth more than the SHAP stage the Followups
+contemplate.

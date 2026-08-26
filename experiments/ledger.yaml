@@ -97,9 +97,17 @@
     untested -- needs per-column SHAP/attribution against the candidate's
     fitted model, which this pipeline doesn't currently persist (same gap
     network_move_breadth's dossier already named). Whether a genuine
-    shock-fold restoration mechanism exists here (folds 4 and 13 both show
-    large favourable effects during shocks, never predicted) is undetermined
-    on this run alone. Whether combining this with network_move_breadth (same
+    shock-fold restoration mechanism exists here is undetermined on this run
+    alone -- and it rests on fold 13 ALONE (-1.56 c/L, 104% of the shock
+    zone's net; excluding it the zone flips to +0.016), not on folds 4 and 13
+    as an earlier revision of this entry said: fold 4 is -0.0732 c/L, noise.
+    Fold 1, the other shock fold, is a 3-station measurement gap (both Blue
+    Mountains stations dark, neither closed) rather than a null. Note also
+    that the realised arbiter ran on a SINGLE seed (meta.realised_seed=42;
+    the five seeds are the WFCV screen), and that the 75.4x seed_std flag
+    above is WFCV log-loss, not CPL -- no CPL seed-variance exists for this
+    run. See the 2026-08-26 review addendum in the evidence directory.
+    Whether combining this with network_move_breadth (same
     batch, same cross-sectional-consensus family, same folds 11-13 cluster)
     does better than either alone.
   outcome: inconclusive
