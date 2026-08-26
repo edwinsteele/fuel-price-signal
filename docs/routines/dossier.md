@@ -122,7 +122,7 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      available" and quote `facts["noise_band"]["reason"]` verbatim rather than omitting the
      line or paraphrasing it (as of `fps-cf8` there is more than one refusal reason — no floor
      yet, a partial `--fold-subset` floor, or a `baseline_fingerprint` mismatch against a
-     stale/re-locked floor, a candidate above `placebo.MAX_RULER_ARITY` — and the reason string
+     stale/re-locked floor, or a floor narrower than the run's own arity — and the reason string
      already says which); if available, report `candidate_percentile_better_than_noise` as-is
      (already oriented so higher = better — don't re-derive or re-sign it).
 
