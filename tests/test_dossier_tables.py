@@ -977,6 +977,35 @@ def test_noise_band_separates_the_reuse_charge_from_the_thinness_charge(tmp_path
     )
 
 
+def test_thinness_shift_survives_a_band_too_reused_to_estimate(tmp_path):
+    """Review of PR #336. `bar_draw_count_shift_cpl_held` is a function of the NOMINAL draw
+    count alone and is documented as "a property of this floor alone, comparable across floors".
+    Gating it on `band_estimable` — which carries the reuse condition `n_eff >= 2` — let a REUSE
+    property null out a quantity documented as independent of reuse, silently re-coupling the
+    two things the split had just separated.
+
+    Latent rather than live (rho_bar caps at TEXTURE_ICC_BOUND, so n_eff cannot fall under 2 at
+    20 draws), but a 5-draw fully-overlapping bank reaches n_eff 1.95 and would lose a thinness
+    value its nominal 5 supports perfectly well."""
+    def _write(batch_dir):
+        _floor_with(arity=1, n=5)(batch_dir)
+        path = batch_dir / dt.NOISE_FLOOR_FILENAME
+        payload = json.loads(path.read_text())
+        payload["effective_n_draws"] = 1.95  # every draw overlapping every other
+        path.write_text(json.dumps(payload))
+
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_write)
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    # The band itself cannot be graded — too few effective draws for a t-critical.
+    assert band["single_candidate_z_threshold"] is None
+    # But the NOMINAL-draw quantity is unaffected and must still be reported.
+    assert band["single_candidate_z_threshold_nominal"] is not None
+    assert band["bar_draw_count_shift_cpl_held"] is not None
+    # The reuse charge needs both, so it is legitimately None here.
+    assert band["bar_reuse_shift_cpl_held"] is None
+
+
 def test_noise_band_reports_no_reuse_charge_for_a_reuse_free_bank(tmp_path):
     run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with(arity=1, n=20))
     band = dt.build_facts(run_dir)["noise_band"]

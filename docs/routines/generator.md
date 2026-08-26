@@ -279,18 +279,44 @@ c/L, 10 columns **−0.171**, 35 columns **−0.287**. Harder as it widens, whic
 *usable* at every width. Before `fps-3jj.21` the same progression was −0.22, −0.78, and **no
 band at all** above 17 columns.
 
-**So propose the honest shape and let the bar adjust.** The only hard limit left is physical: a
-placebo draw needs one distinct source column per candidate column, **and that column has to
-survive screening** — so the ceiling is the count of *usable* baseline columns, not the nominal
-54. On batch1 that is **49**: five `days_since_trough_entry_<lga>` columns are all-NaN (no
-station ever classified into that LGA) and are skipped as unverifiable. `screen_draw_groups`
-only guards against exceeding the nominal count, so a candidate between the two numbers passes
-that guard, burns a night of compute, and then cannot have a floor built — the no-verdict
-failure this whole change exists to eliminate. Treat ~45 as the practical ceiling and check the
-batch's own `baseline_columns.json` if you are anywhere near it. The one number still resting on an estimate is the texture ICC behind the
-pricing — bounded at ≤ 0.391 by an underpowered ANOVA and measured directly in bd `fps-3jj.23`.
-It is deliberately set at the pessimistic end, so every bar is currently a little harder than it
-probably needs to be.
+**So propose the honest shape and let the bar adjust.** The one number still resting on an
+estimate is the texture ICC behind the pricing — bounded at ≤ 0.391 by an underpowered ANOVA and
+measured directly in bd `fps-3jj.23`. It is deliberately set at the pessimistic end, so every
+bar is currently a little harder than it probably needs to be.
+
+### The one hard limit, and how to check it
+
+It is physical, not statistical: a placebo draw needs **one distinct source column per candidate
+column**, and each of those has to survive screening. So the ceiling is the count of *usable*
+baseline columns — **not** the nominal 54. On batch1 it is **49**; five
+`days_since_trough_entry_<lga>` columns are all-NaN (no station was ever classified into that
+LGA) and are skipped as unverifiable.
+
+**Do not read that number off `baseline_columns.json`.** It is a flat list of the 54 declared
+names and carries no NaN information, so it will tell you 54 and you will believe you have
+headroom you do not have. `screen_draw_groups` only guards against exceeding the *nominal*
+count, so a candidate sitting between the two numbers passes that guard, burns a night of
+compute, and then cannot have a floor built — the no-verdict failure this whole change exists to
+eliminate.
+
+The usable count lives in the frozen frame. To get it for a batch:
+
+```bash
+PYTHONPATH=. uv run python -c "
+import json, pathlib, sys
+from fuel_signal.features import load_features
+b = pathlib.Path(sys.argv[1])
+f = load_features(b / 'features.csv')
+cols = json.loads((b / 'baseline_columns.json').read_text())
+usable = [c for c in cols if f[c].notna().any()]
+print(f'{len(usable)} usable of {len(cols)} declared')
+" experiments/batches/batch1
+```
+
+In practice this only binds on a candidate with **dozens** of columns, and no proposal has come
+close. If you are within a few columns of the usable count, say so in the candidate's
+`PRIOR_ART` rather than guessing — it is a fact about the batch, and the owner would rather
+know before a night of compute than after.
 
 **Why this is stated so plainly:** every feature win in this project's history arrived as
 a *group*, not a lone column. The 35 LGA event features went in together; the 4

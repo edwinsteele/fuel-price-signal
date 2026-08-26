@@ -452,13 +452,26 @@ def _resolve_effective_n_draws(noise_floor: dict, *, nominal: int) -> float:
     arity = int(noise_floor.get("n_placebo_columns", 1) or 1)
     if not members or arity < 1 or len(members) % arity:
         return float(nominal)
-    draws = [
-        [
-            (str(m.get("source_column")), int(m.get("block_seed", 0)), 0.0)
-            for m in members[i:i + arity]
+    # Group by the `draw` key when every member carries one (noise_floor.py has stamped it
+    # since fps-3jj.14), falling back to positional chunking otherwise — pre-fps-3jj.14 floors
+    # have no such key and are arity 1, where the two agree. Positional chunking alone is
+    # correct under every writer that exists, so this is belt-and-braces against a future one
+    # that emits members out of order rather than a fix for an observed defect.
+    if all("draw" in m for m in members):
+        grouped: dict[int, list[tuple[str, int, float]]] = {}
+        for m in members:
+            grouped.setdefault(int(m["draw"]), []).append(
+                (str(m.get("source_column")), int(m.get("block_seed", 0)), 0.0)
+            )
+        draws = [grouped[k] for k in sorted(grouped)]
+    else:
+        draws = [
+            [
+                (str(m.get("source_column")), int(m.get("block_seed", 0)), 0.0)
+                for m in members[i:i + arity]
+            ]
+            for i in range(0, len(members), arity)
         ]
-        for i in range(0, len(members), arity)
-    ]
     if not draws:
         return float(nominal)
     return effective_n_draws(draws)
@@ -605,13 +618,21 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
     # fps-3jj.25: grade against the band's EFFECTIVE draw count, not its nominal one.
     n_eff = _resolve_effective_n_draws(noise_floor, nominal=int(deltas.size))
-    band_estimable = bool(np.isfinite(band_std) and band_std > 0 and n_eff >= 2)
+    band_std_usable = bool(np.isfinite(band_std) and band_std > 0)
+    band_estimable = bool(band_std_usable and n_eff >= 2)
     single_z = (
         family_wise_z_threshold(n_candidates=1, n_draws=n_eff) if band_estimable else None
     )
+    # Gated on the NOMINAL count, deliberately NOT on `band_estimable` (review of PR #336).
+    # `bar_draw_count_shift_cpl_held` below is a function of the nominal draw count alone and is
+    # documented as "a property of this floor alone" — routing it through `band_estimable` would
+    # let a REUSE condition (`n_eff >= 2`) null it out, re-coupling the two quantities this
+    # commit just separated. Latent rather than live today (rho_bar caps at TEXTURE_ICC_BOUND,
+    # so n_eff cannot fall under 2 at 20 draws), but a 5-draw fully-overlapping bank reaches
+    # n_eff 1.95 and would lose a thinness value its nominal 5 supports perfectly well.
     single_z_nominal = (
         family_wise_z_threshold(n_candidates=1, n_draws=int(deltas.size))
-        if band_estimable
+        if band_std_usable and deltas.size >= 2
         else None
     )
     return {

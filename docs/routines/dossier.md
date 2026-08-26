@@ -129,17 +129,26 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      **Also print the bar in c/L, not only the percentile and z** (`fps-3jj.21`). A z against a
      z-threshold says whether this candidate cleared; it says nothing about how strict the
      ruler that judged it was, so two runs graded by different-shaped floors read identically.
-     Three fields make that legible and all three belong in the write-up:
+     Four fields make that legible and all four belong in the write-up:
      - `single_candidate_bar_cpl_held` — the threshold in the units the rest of the project
        quotes, comparable against `experiments/results.csv`'s 0.03–0.26 c/L history and against
        a batch-mate. It is the **favourable side only**; a candidate can also be surprisingly
        BAD, so judge the two-sided question on `abs(candidate_z_vs_band)` against
        `single_candidate_z_threshold`, never on this number alone.
      - `bar_draw_count_shift_cpl_held` — how much of that bar is band THINNESS rather than band
-       WIDTH (the `df = n_draws - 1` t-penalty), quoted against the large-sample limit. Signed
-       on the same scale as the bar, so a larger penalty is a more negative number. Print it
-       whenever it is a material fraction of the bar: two thirds of batch1's k=1 → k=3 bar move
-       was this, not the arity effect it was being read as.
+       WIDTH (the `df = n_draws - 1` t-penalty), quoted against the large-sample limit and
+       computed on the NOMINAL draw count. Signed on the same scale as the bar, so a larger
+       penalty is a more negative number. Print it whenever it is a material fraction of the
+       bar: two thirds of batch1's k=1 → k=3 bar move was this, not the arity effect it was
+       being read as.
+     - `bar_reuse_shift_cpl_held` — the REST of the bar's hardening: how much comes from the
+       bank's draws reusing source columns and so being worth less than their count. **Print it
+       alongside the thinness shift, never instead of it, and never omit it** — on a wide
+       candidate it is the larger of the two by an order of magnitude. On batch1's band a
+       35-column candidate splits −0.0127 thinness against **−0.1345** reuse, so quoting only
+       the thinness figure would explain 9% of why the bar moved from −0.152 to −0.287 and
+       silently attribute the other 91% to nothing. The two sum to the whole distance between
+       the large-sample bar and the one applied; a reuse-free bank reads 0.0.
      - `floor_arity_excess` — how many columns wider the ruler is than the run, the magnitude
        behind the `floor_arity_exceeds_run` flag above. If `facts["decision_flips"]["computed"]` is `true` (arity 2+
      and the noise-band call isn't a clean reject — `experiments/pipeline/dossier_tables.py`'s
@@ -221,7 +230,12 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          band" (that's what `-t < z < t` is for, and it doesn't apply when either side is `null`)
          — this branch must be checked **before** the three regions below, not folded into them.
        - Otherwise read `z = facts["noise_band"]["candidate_z_vs_band"]` and
-         `t = facts["noise_band"]["single_candidate_z_threshold"]` (both non-null at this point) —
+         `t = facts["noise_band"]["single_candidate_z_threshold"]` (both non-null at this point).
+         **`single_candidate_z_threshold` is the authoritative one** — there is also a
+         `single_candidate_z_threshold_nominal` sitting beside it, which exists only so the bar's
+         thinness and reuse components can be reported separately above. Never grade against the
+         nominal one: it ignores the reuse correction and is therefore too easy, which is the
+         whole bias this machinery removes. —
          already computed by
          `dossier_tables._noise_band` (`t` is `family_wise_z_threshold(n_candidates=1, n_draws=...)`,
          i.e. the *single*-candidate detection bar, docs/CONVENTIONS.md's "-0.17 c/L judged

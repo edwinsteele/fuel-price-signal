@@ -466,12 +466,19 @@ def compute_retrospective(
     # The EFFECTIVE draw count, not the nominal one (fps-3jj.25, fixed in review of PR #336).
     # `family_wise_z_threshold`'s contract is that it takes effective draws; passing nominal
     # here made the batch-level gate act as though the band were better estimated than it is —
-    # a bar too EASY, at precisely the step that corrects for taking the best of N. Measured on
-    # a 20-draw arity-35 floor (n_eff 3.23) with 5 candidates: the gate was 2.602 where the
-    # priced value is 6.96, so a candidate at z = -4.0 was stamped
-    # `clears_family_wise_threshold: true` here while failing its own
-    # `single_candidate_z_threshold` in facts.json. Falls back to the nominal count only when
-    # the summary predates the field.
+    # a bar too EASY, at precisely the step that corrects for taking the best of N.
+    #
+    # The invariant it violated, which is the cleanest statement of the defect: a family-wise
+    # correction over N candidates exists to make the bar STRICTER, so it can never come out
+    # easier than the uncorrected single-candidate bar. On a 20-draw arity-35 floor (n_eff
+    # 3.23) with 5 candidates the batch gate was 2.602 while the SINGLE-candidate bar was
+    # 3.118 — the corrected gate looser than the uncorrected one, which is only reachable by
+    # feeding the two paths different draw counts. Pinned as an invariant in
+    # tests/test_retrospective.py rather than at one operating point. (The window in which a
+    # candidate was actually mis-stamped is -3.118 < z <= -2.602; an earlier draft of this
+    # comment used z = -4.0, which clears both bars and demonstrates nothing.)
+    #
+    # Falls back to the nominal count only when the summary predates the field.
     n_draws = None
     if noise_floor_summary.get("available"):
         n_draws = noise_floor_summary.get("effective_n_draws") or noise_floor_summary.get("n_draws")
