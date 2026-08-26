@@ -856,8 +856,100 @@ def test_noise_band_refuses_a_multi_column_candidate_against_a_1_column_floor(tm
     assert "mv noise_floor_k3.json noise_floor.json" in band["reason"]
     # And it must steer away from the tempting-but-destructive alternative.
     assert "--force" in band["reason"]
-    # n_draws is derived from the seed pool, not hardcoded, so it cannot go stale.
-    assert "--n-draws 10" in band["reason"]
+    # n_draws is derived from the floor being REPLACED, not from a pool size (fps-3jj.21:
+    # the pools no longer bind, so the wider floor is computed at the same certainty as the
+    # one it supersedes — which is also what makes the two comparable).
+    assert "--n-draws 20" in band["reason"]
+
+
+def test_noise_band_refuses_a_candidate_wider_than_the_arity_cap(tmp_path):
+    """Above `placebo.MAX_RULER_ARITY` there is no remediation to spell out, because no ruler
+    can be built that wide: a draw needs `arity` distinct source columns, so wide draws are
+    forced to overlap (two 35-column draws out of 49 columns must share 21 of them, by
+    pigeonhole), their deltas stop being independent samples of the null, and the band's std
+    understates the true spread — a bar that is too EASY. The message must say that instead of
+    sending the reader to a command that would itself raise, and must still NOT read as a
+    rejection (fps-3jj.17: the run completed and graded fine)."""
+    wide = [f"c{i}" for i in range(dt.MAX_RULER_ARITY + 1)]
+    run_dir, _ = _write_run(tmp_path, columns=wide, batch_extras=_floor_with(arity=1))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    # Its own code, NOT floor_arity_below_run: that string is literally false here (this
+    # very test grades against a floor of arity 1, and the sibling test uses a WIDER one), and
+    # the two refusals want opposite instructions — see NOISE_BAND_REFUSAL_ARITY_CAP.
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY_CAP
+    assert f"above MAX_RULER_ARITY ({dt.MAX_RULER_ARITY})" in band["reason"]
+    assert "fps-3jj.22" in band["reason"]
+    assert "NOT rejected" in band["reason"]
+    # It must not hand over a recipe that cannot work.
+    assert "--arity" not in band["reason"]
+
+
+def test_noise_band_arity_cap_is_not_bypassed_by_an_equally_wide_floor(tmp_path):
+    """Review finding (PR #335). The cap check sat INSIDE the `run_arity > floor_arity`
+    branch, so a floor whose own arity already met or exceeded the run's — a pre-fps-3jj.21
+    wide floor, or a hand-built one — slipped a 5+ column candidate straight through to a
+    graded band the change declares meaningless. Precisely the case where a bad band already
+    exists on disk and looks gradeable, so the guard must not depend on the floor at all."""
+    wide = [f"c{i}" for i in range(dt.MAX_RULER_ARITY + 2)]
+    run_dir, _ = _write_run(
+        tmp_path, columns=wide, batch_extras=_floor_with(arity=len(wide))
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY_CAP
+    assert f"above MAX_RULER_ARITY ({dt.MAX_RULER_ARITY})" in band["reason"]
+
+
+def test_noise_band_reports_the_bar_in_cents_per_litre(tmp_path):
+    """fps-3jj.21's rendering half: `candidate_z_vs_band` against a z threshold is a
+    comparison in band-standard-deviation units, which says nothing about whether one
+    candidate's ruler is stricter than another's. The same bar in c/L is directly comparable —
+    against a batch-mate, and against results.csv's own 0.03-0.26 c/L history."""
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with(arity=1))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    mean, std = band["band_mean_delta_cpl_held"], band["band_std_delta_cpl_held"]
+    expected = mean - band["single_candidate_z_threshold"] * std
+    assert band["single_candidate_bar_cpl_held"] == pytest.approx(expected)
+    # delta_cpl_held is a COST, so the bar must sit BELOW the band's centre.
+    assert band["single_candidate_bar_cpl_held"] < mean
+
+
+def test_noise_band_separates_band_thinness_from_band_width(tmp_path):
+    """Two thirds of batch1's k=1 -> k=3 bar move was the t-penalty for estimating the band
+    from 10 draws instead of 20, not the arity effect it was being read as
+    (`experiments/2026-08-23_placebo_arity/`). A dossier that prints only the bar cannot
+    distinguish those, so the draw-count component is emitted separately — and a floor built
+    from fewer draws must carry a strictly larger one."""
+    (tmp_path / "thin").mkdir()
+    (tmp_path / "thick").mkdir()
+    thin = _write_run(tmp_path / "thin", columns=["a"], batch_extras=_floor_with(arity=1, n=5))[0]
+    thick = _write_run(tmp_path / "thick", columns=["a"], batch_extras=_floor_with(arity=1, n=40))[0]
+
+    thin_band = dt.build_facts(thin)["noise_band"]
+    thick_band = dt.build_facts(thick)["noise_band"]
+
+    # Reported as a signed move on a cost, so "harder" is MORE NEGATIVE.
+    assert thin_band["bar_draw_count_shift_cpl_held"] < 0
+    assert thin_band["bar_draw_count_shift_cpl_held"] < thick_band["bar_draw_count_shift_cpl_held"]
+
+
+def test_noise_band_discloses_how_much_wider_the_ruler_is(tmp_path):
+    """A floor ABOVE the run's arity is allowed (it can only raise the bar) but it means a
+    candidate failing against it has not been shown to fail against its OWN arity's band. The
+    boolean said that a difference existed; the excess says how big it is."""
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with(arity=3))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["floor_arity_exceeds_run"] is True
+    assert band["floor_arity_excess"] == 2
 
 
 def test_noise_band_treats_a_floor_with_no_arity_key_as_arity_1(tmp_path):

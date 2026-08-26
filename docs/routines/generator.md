@@ -244,7 +244,9 @@ batch's noise floor). Check the current batch's own `noise_floor.json` before ci
 number here; don't carry `-0.27` forward into a later batch by habit. It also depends
 on the batch's **arity** — see `docs/CONVENTIONS.md` § The band's ARITY must be at least
 the candidate's — so a batch whose candidates are shaped differently gets a different
-bar even on the same data.
+bar even on the same data. It no longer depends on the batch's *draw count* as a side
+effect of arity, which is what used to make that dependence so much larger than the
+arity effect itself (`fps-3jj.21`).
 
 ### A candidate is one MECHANISM — it may be one column or a group of related columns
 
@@ -253,6 +255,30 @@ candidate.** `COLUMNS` is a list. A candidate that expresses its mechanism as 2�
 related columns is as legitimate a proposal as a single column, and should be filed as
 one candidate with one `HYPOTHESIS`, one `TARGET` and one pair of `CONFIDENCE` fields —
 because it is one idea.
+
+**But the noise band can currently only grade up to THREE, so propose 1–3 columns
+(`fps-3jj.21`, 2026-08-26).** The instrument is narrower than this section's historical
+"2–4", and that gap is stated rather than hidden. They did not before: the placebo bank needed `arity`
+distinct source columns *per draw* out of 54, so a wider candidate got a thinner band,
+and a thinner band means a much harder bar (`family_wise_z_threshold` carries
+`df = n_draws − 1`). A 4-column candidate's bar was **0.04 c/L harder** than a 3-column
+batch-mate's purely from band thinness, and nothing said so. That is fixed — draw count
+no longer depends on arity at all — and the residual limit is a hard cap at
+`placebo.MAX_RULER_ARITY = 3`, set by measurement rather than by a pool running out. The cap
+is **provisional**: bd `fps-3jj.23` measures the quantity it rests on directly, and at that
+measurement's point estimate the cap could rise back to 4 or beyond. Until then the
+conservative setting holds, because a band that is too narrow makes the bar too EASY and
+writes noise into the ledger as a finding.
+
+**So: propose 1–3 columns. Do not propose 4 or more.** Above the cap the run still completes,
+but no meaningful band exists to grade it against, so `_noise_band` refuses and the
+dossier cannot be written — the candidate becomes a night of compute with no verdict.
+This is a real cost, not a formality: the 35 LGA event features that motivate this whole
+section could not be graded as one candidate today. Lifting it needs placebo sources
+from outside the lock (bd `fps-3jj.22`) or the ICC measurement (bd `fps-3jj.23`); until
+then, a mechanism that genuinely needs more columns should be **proposed as a narrower
+version** with a note in `PRIOR_ART` saying what was left out and why, not padded down
+silently.
 
 **Why this is stated so plainly:** every feature win in this project's history arrived as
 a *group*, not a lone column. The 35 LGA event features went in together; the 4
