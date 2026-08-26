@@ -101,6 +101,8 @@ from experiments.pipeline.batch_freeze import (
 from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME, NULL_METHOD_PLACEBO_COLUMN
 from experiments.pipeline.placebo import (
     DEFAULT_PLACEBO_ARITY,
+    TEXTURE_ICC_BOUND,
+    effective_n_draws,
     make_placebo_frame,
     placebo_column_names,
     screen_draw_groups,
@@ -419,6 +421,14 @@ def compute_noise_floor(
         # graded, until it's recomputed under this construction.
         "null_method": NULL_METHOD_PLACEBO_COLUMN,
         "n_draws": len(draws),
+        # fps-3jj.25: what this bank is WORTH once source-column reuse is priced in.
+        # `dossier_tables._noise_band` feeds this to `family_wise_z_threshold` in place of the
+        # nominal count, so a bank whose draws overlap gets a correspondingly wider, harder bar
+        # instead of the band being refused. Stamped here rather than derived at grading time
+        # because it is a property of the bank that actually got BUILT — screening substitutes
+        # columns, so which draws really overlap is not recoverable from n_draws and arity.
+        "effective_n_draws": effective_n_draws(draws),
+        "texture_icc_assumed": TEXTURE_ICC_BOUND,
         # fps-3jj.14: the arity this band measures. dossier_tables._noise_band refuses a
         # floor whose n_placebo_columns is below the run's own candidate column count —
         # a floor with no such key at all (pre-fps-3jj.14) reads as arity 1, which is what

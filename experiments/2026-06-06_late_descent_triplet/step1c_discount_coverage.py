@@ -81,7 +81,7 @@ print(f"LGAs with 5+ discount stations: "
       f"{(per_lga['n_discount']>=5).sum()} of {len(per_lga)}")
 
 # --- 3. Coverage table at relaxed thresholds ---
-print(f"\n=== Per-LGA coverage at relaxed discount thresholds ===")
+print("\n=== Per-LGA coverage at relaxed discount thresholds ===")
 print(f"{'LGA':<25}  {'<-10c':>5}  {'<-7c':>5}  {'<-5c':>5}  {'<-2c':>5}  {'total':>6}")
 for lga, _ in per_lga.iterrows():
     sub = mapped[mapped["lga"] == lga]
@@ -116,7 +116,7 @@ def divergence_gap(thresh_disc, thresh_sticky, label):
     print(f"\n  --- {label} (discount<{thresh_disc}c, comp ∈ [{thresh_disc},{thresh_sticky}]c) ---")
     print(f"    n discount stations: {df.loc[df['_is_disc']].station_code.nunique()}")
     print(f"    n competitive stations: {df.loc[df['_is_comp']].station_code.nunique()}")
-    print(f"    gap (comp_med − disc_med), by phase:")
+    print("    gap (comp_med − disc_med), by phase:")
     print(f"      early   (pct 0.05–0.30): mean={np.nanmean(e_vals):+.2f}c  std={np.nanstd(e_vals):.2f}c  n={(~np.isnan(e_vals)).sum():,}")
     print(f"      normal  (pct 0.30–0.50): mean={np.nanmean(n_vals):+.2f}c  std={np.nanstd(n_vals):.2f}c  n={(~np.isnan(n_vals)).sum():,}")
     print(f"      extended(pct ≥ 0.90)   : mean={np.nanmean(x_vals):+.2f}c  std={np.nanstd(x_vals):.2f}c  n={(~np.isnan(x_vals)).sum():,}")

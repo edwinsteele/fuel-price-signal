@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from experiments.lib.realised import ArmSpec, run_paired_realised_backtest
-from experiments.lib.zones import CYCLE_REGIME_BANDS, assign_regime, pooled_cpl
+from experiments.lib.zones import assign_regime, pooled_cpl
 from fuel_signal import db as _db
 from fuel_signal.backtest import TankParams, load_history, run_oracle_backtest
 from fuel_signal.config import PREFERRED_STATIONS

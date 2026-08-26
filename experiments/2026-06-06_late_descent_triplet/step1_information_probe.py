@@ -7,8 +7,8 @@ Usage: PYTHONPATH=. uv run python experiments/2026-06-06_late_descent_triplet/st
 from __future__ import annotations
 
 import json
-import time
 import pathlib
+import time
 
 import numpy as np
 import pandas as pd
@@ -79,7 +79,7 @@ t_load = time.perf_counter() - t0
 # Phase partition masks (computed once)
 normal_mask = (df.cycle_pct_through >= PHASE_NORMAL_LATE[0]) & (df.cycle_pct_through < PHASE_NORMAL_LATE[1])
 extended_mask = df.cycle_pct_through >= PHASE_EXTENDED[0]
-print(f"\nPhase partition (proxy for regime):")
+print("\nPhase partition (proxy for regime):")
 print(f"  normal late-descent (pct ∈ [{PHASE_NORMAL_LATE[0]}, {PHASE_NORMAL_LATE[1]})): {normal_mask.sum():>9,} rows")
 print(f"  extended descent    (pct ≥ {PHASE_EXTENDED[0]}                  ): {extended_mask.sum():>9,} rows")
 
@@ -319,13 +319,13 @@ print(f"Per-row signal sample written to {OUT_DIR / 'step1_signals_sample.csv'}"
 graduated = [r for r in results if r["verdict"] == "SEPARATES"]
 print("\n=== STEP 1 DECISION ===")
 if graduated:
-    print(f"GRADUATE to Step 2. Signals separating extended vs normal late-descent:")
+    print("GRADUATE to Step 2. Signals separating extended vs normal late-descent:")
     for r in graduated:
         print(f"  - {r['signal']}: SMD={r['smd_extended_minus_normal']:+.3f}")
 else:
     weak = [r for r in results if r["verdict"] == "weak"]
     if weak:
-        print(f"INCONCLUSIVE — only weak signals (0.15 ≤ |SMD| < 0.3):")
+        print("INCONCLUSIVE — only weak signals (0.15 ≤ |SMD| < 0.3):")
         for r in weak:
             print(f"  - {r['signal']}: SMD={r['smd_extended_minus_normal']:+.3f}")
         print("  Recommend manual review of histograms before deciding Step 2.")

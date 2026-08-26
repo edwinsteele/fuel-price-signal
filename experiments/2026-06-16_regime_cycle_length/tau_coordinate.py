@@ -1,6 +1,7 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+
 from fuel_signal.score_phase2 import threshold_sweep
 
 df = pd.read_parquet("experiments/2026-06-16_regime_cycle_length/rowpreds.parquet")

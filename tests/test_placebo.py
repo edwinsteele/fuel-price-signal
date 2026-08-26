@@ -7,17 +7,18 @@ import pandas as pd
 import pytest
 
 from experiments.pipeline.placebo import (
-    MAX_RULER_ARITY,
     MIN_BLOCKS,
     PLACEBO_BLOCK_DAYS,
     PLACEBO_BLOCK_SEED_POOL,
     PLACEBO_COLUMN_NAME,
+    TEXTURE_ICC_BOUND,
     _block_derangement,
     _effective_block_days,
     axis_is_market_wide,
     block_seed,
     candidate_pool,
     candidate_sequence,
+    effective_n_draws,
     make_placebo_frame,
     make_placebo_series,
     placebo_column_names,
@@ -617,7 +618,7 @@ def test_screen_draw_groups_draw_count_no_longer_trades_off_against_arity():
     df = _diverse_fixture_df(n_dates=200, n_cols=12)
     baseline_columns = [f"col{i}" for i in range(12)]
 
-    for arity in range(1, MAX_RULER_ARITY + 1):
+    for arity in range(1, 7):
         groups = screen_draw_groups(
             df, baseline_columns, n_draws=20, arity=arity, max_self_correlation=0.9
         )
@@ -625,20 +626,62 @@ def test_screen_draw_groups_draw_count_no_longer_trades_off_against_arity():
         assert all(len(g) == arity for g in groups)
 
 
-def test_screen_draw_groups_refuses_above_the_measured_arity_cap():
-    """Above MAX_RULER_ARITY a band is still COMPUTABLE and that is precisely the hazard: a
-    draw needs `arity` distinct columns, so wide draws are forced to overlap, their deltas
-    stop being independent samples of the null, the sample std understates the true spread and
-    the bar comes out too EASY — the bias direction fps-3jj.14 exists to remove. Refusing
-    beats returning a number that is not a ruler."""
-    df = _diverse_fixture_df(n_dates=200, n_cols=20)
-    baseline_columns = [f"col{i}" for i in range(20)]
+def test_screen_draw_groups_does_not_cap_arity():
+    """fps-3jj.25, and the inverse of a test that used to live here. An arity CAP made the
+    instrument dictate what shape of candidate the generator could propose — a constraint the
+    owner rejected twice, because constraining candidate shape to suit the ruler distorts the
+    thing being measured. Reuse degrades a bank gradually, so it is priced by
+    `effective_n_draws` rather than forbidden: a wide bank must BUILD."""
+    n_cols = 12
+    df = _diverse_fixture_df(n_dates=200, n_cols=n_cols)
+    baseline_columns = [f"col{i}" for i in range(n_cols)]
 
-    with pytest.raises(ValueError, match=r"exceeds MAX_RULER_ARITY"):
-        screen_draw_groups(
-            df, baseline_columns, n_draws=5, arity=MAX_RULER_ARITY + 1,
-            max_self_correlation=0.9,
+    for arity in (5, 8, n_cols):
+        groups = screen_draw_groups(
+            df, baseline_columns, n_draws=6, arity=arity, max_self_correlation=0.9
         )
+        assert len(groups) == 6
+        assert all(len(g) == arity for g in groups)
+        for group in groups:
+            sources = [c for c, _s, _r in group]
+            assert len(set(sources)) == arity, "a draw repeated one of its own columns"
+
+
+def test_effective_n_draws_equals_nominal_when_no_draw_shares_a_column():
+    """A bank small enough to need no reuse must be unaffected — including arity 1 and 2 at
+    the default 20 draws, which is what keeps existing floors' bars unchanged."""
+    draws = [[(f"col{i}", i, 0.0)] for i in range(20)]
+    assert effective_n_draws(draws) == pytest.approx(20.0)
+
+
+def test_effective_n_draws_falls_as_draws_share_columns():
+    disjoint = [[("a", 1, 0.0), ("b", 2, 0.0)], [("c", 3, 0.0), ("d", 4, 0.0)]]
+    half = [[("a", 1, 0.0), ("b", 2, 0.0)], [("a", 3, 0.0), ("d", 4, 0.0)]]
+    full = [[("a", 1, 0.0), ("b", 2, 0.0)], [("a", 3, 0.0), ("b", 4, 0.0)]]
+
+    assert effective_n_draws(disjoint) == pytest.approx(2.0)
+    assert effective_n_draws(full) < effective_n_draws(half) < effective_n_draws(disjoint)
+
+
+def test_effective_n_draws_charges_the_shared_FRACTION_not_any_overlap():
+    """The load-bearing modelling choice (fps-3jj.25). Two draws sharing 1 of 10 columns share
+    about a tenth of their texture, not all of it. Charging any overlap the FULL icc put a
+    20-draw arity-10 bank at 2.4 effective draws — which is what made an arity cap look
+    necessary. Scaled by share the same bank is ~9, and no cap is needed."""
+    one_of_four = [
+        [("a", 1, 0.0), ("b", 2, 0.0), ("c", 3, 0.0), ("d", 4, 0.0)],
+        [("a", 5, 0.0), ("e", 6, 0.0), ("f", 7, 0.0), ("g", 8, 0.0)],
+    ]
+    n_eff = effective_n_draws(one_of_four)
+    # Charged icc/4 for the single shared column, NOT the full icc.
+    assert n_eff == pytest.approx(2 / (1 + TEXTURE_ICC_BOUND / 4), rel=1e-9)
+    binary_charge = 2 / (1 + TEXTURE_ICC_BOUND)
+    assert n_eff > binary_charge
+
+
+def test_effective_n_draws_rejects_an_empty_bank():
+    with pytest.raises(ValueError, match="empty bank"):
+        effective_n_draws([])
 
 
 def test_assembly_survives_more_failures_than_one_lap_of_headroom(monkeypatch):
@@ -708,16 +751,15 @@ def test_candidate_sequence_is_unbounded():
 
 
 def test_screen_draw_groups_refuses_an_arity_wider_than_the_column_list():
-    """A separate refusal from the MAX_RULER_ARITY cap, and it has to stay reachable: a draw
-    needs `arity` DISTINCT columns, so a batch with fewer columns than that cannot build one
-    at any draw count. Exercised at exactly the cap so the cap check cannot mask it."""
-    n_cols = MAX_RULER_ARITY - 1
+    """The ONLY arity limit left after fps-3jj.25 removed the cap, and it is physical rather
+    than statistical: a draw needs `arity` DISTINCT source columns, so a batch cannot build one
+    wider than its own column list at any draw count."""
+    n_cols = 4
     df = _diverse_fixture_df(n_dates=200, n_cols=n_cols)
     baseline_columns = [f"col{i}" for i in range(n_cols)]
     with pytest.raises(ValueError, match=r"exceeds the baseline column count"):
         screen_draw_groups(
-            df, baseline_columns, n_draws=2, arity=MAX_RULER_ARITY,
-            max_self_correlation=0.9,
+            df, baseline_columns, n_draws=2, arity=n_cols + 1, max_self_correlation=0.9,
         )
 
 

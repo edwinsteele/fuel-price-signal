@@ -23,7 +23,6 @@ import pathlib
 import time
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 from experiments.lib.zones import CYCLE_REGIME_BANDS, assign_regime

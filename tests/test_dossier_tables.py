@@ -862,47 +862,69 @@ def test_noise_band_refuses_a_multi_column_candidate_against_a_1_column_floor(tm
     assert "--n-draws 20" in band["reason"]
 
 
-def test_noise_band_refuses_a_candidate_wider_than_the_arity_cap(tmp_path):
-    """Above `placebo.MAX_RULER_ARITY` there is no remediation to spell out, because no ruler
-    can be built that wide: a draw needs `arity` distinct source columns, so wide draws are
-    forced to overlap (two 35-column draws out of 49 columns must share 21 of them, by
-    pigeonhole), their deltas stop being independent samples of the null, and the band's std
-    understates the true spread — a bar that is too EASY. The message must say that instead of
-    sending the reader to a command that would itself raise, and must still NOT read as a
-    rejection (fps-3jj.17: the run completed and graded fine)."""
-    wide = [f"c{i}" for i in range(dt.MAX_RULER_ARITY + 1)]
-    run_dir, _ = _write_run(tmp_path, columns=wide, batch_extras=_floor_with(arity=1))
-
-    band = dt.build_facts(run_dir)["noise_band"]
-
-    assert band["available"] is False
-    # Its own code, NOT floor_arity_below_run: that string is literally false here (this
-    # very test grades against a floor of arity 1, and the sibling test uses a WIDER one), and
-    # the two refusals want opposite instructions — see NOISE_BAND_REFUSAL_ARITY_CAP.
-    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY_CAP
-    assert f"above MAX_RULER_ARITY ({dt.MAX_RULER_ARITY})" in band["reason"]
-    assert "fps-3jj.22" in band["reason"]
-    assert "NOT rejected" in band["reason"]
-    # It must not hand over a recipe that cannot work.
-    assert "--arity" not in band["reason"]
-
-
-def test_noise_band_arity_cap_is_not_bypassed_by_an_equally_wide_floor(tmp_path):
-    """Review finding (PR #335). The cap check sat INSIDE the `run_arity > floor_arity`
-    branch, so a floor whose own arity already met or exceeded the run's — a pre-fps-3jj.21
-    wide floor, or a hand-built one — slipped a 5+ column candidate straight through to a
-    graded band the change declares meaningless. Precisely the case where a bad band already
-    exists on disk and looks gradeable, so the guard must not depend on the floor at all."""
-    wide = [f"c{i}" for i in range(dt.MAX_RULER_ARITY + 2)]
+def test_noise_band_grades_a_wide_candidate_instead_of_refusing_it(tmp_path):
+    """fps-3jj.25 removed the arity cap. A candidate far wider than the ruler's own arity used
+    to get `available: false` and no verdict at all — a night of compute wasted, then an
+    unbounded nightly re-pick. It must now be GRADED, against a floor of at least its own
+    arity, with the reuse cost carried by the threshold rather than by a refusal."""
+    wide = [f"c{i}" for i in range(12)]
     run_dir, _ = _write_run(
-        tmp_path, columns=wide, batch_extras=_floor_with(arity=len(wide))
+        tmp_path, columns=wide, batch_extras=_floor_with(arity=12)
     )
 
     band = dt.build_facts(run_dir)["noise_band"]
 
-    assert band["available"] is False
-    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY_CAP
-    assert f"above MAX_RULER_ARITY ({dt.MAX_RULER_ARITY})" in band["reason"]
+    assert band["available"] is True
+    assert band["candidate_n_columns"] == 12
+    assert band["single_candidate_bar_cpl_held"] is not None
+
+
+def test_noise_band_uses_effective_draws_not_nominal_for_the_threshold(tmp_path):
+    """The correction that replaced the cap. A floor stamped with fewer EFFECTIVE draws than
+    nominal must produce a strictly harder bar — that is the whole mechanism by which a wide
+    candidate is priced rather than turned away. Passing the nominal count would act as though
+    the band were better estimated than it is: a bar too EASY, the bias this exists to remove."""
+    (tmp_path / "nominal").mkdir()
+    (tmp_path / "reused").mkdir()
+
+    def _floor(effective):
+        base = _floor_with(arity=1, n=20)
+
+        def _write(batch_dir):
+            base(batch_dir)
+            path = batch_dir / dt.NOISE_FLOOR_FILENAME
+            payload = json.loads(path.read_text())
+            if effective is not None:
+                payload["effective_n_draws"] = effective
+            path.write_text(json.dumps(payload))
+
+        return _write
+
+    full = _write_run(tmp_path / "nominal", columns=["a"], batch_extras=_floor(20.0))[0]
+    thin = _write_run(tmp_path / "reused", columns=["a"], batch_extras=_floor(9.04))[0]
+
+    full_band = dt.build_facts(full)["noise_band"]
+    thin_band = dt.build_facts(thin)["noise_band"]
+
+    assert full_band["effective_n_draws"] == pytest.approx(20.0)
+    assert thin_band["effective_n_draws"] == pytest.approx(9.04)
+    # Both bands are identical; only the effective draw count differs. delta_cpl_held is a
+    # COST, so "harder" is a MORE NEGATIVE bar.
+    assert thin_band["single_candidate_bar_cpl_held"] < full_band["single_candidate_bar_cpl_held"]
+    assert thin_band["single_candidate_z_threshold"] > full_band["single_candidate_z_threshold"]
+
+
+def test_noise_band_falls_back_to_nominal_draws_on_a_pre_fps_3jj_25_floor(tmp_path):
+    """A floor written before effective_n_draws existed predates column reuse entirely — the
+    pools could not supply it — so its nominal count IS its effective count. Falling back is
+    exact here, not optimistic, which is why this one does NOT follow the "cannot be shown to
+    match, so cannot be trusted" rule the fingerprint checks apply."""
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with(arity=1, n=20))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is True
+    assert band["effective_n_draws"] == pytest.approx(20.0)
 
 
 def test_noise_band_reports_the_bar_in_cents_per_litre(tmp_path):

@@ -164,7 +164,7 @@ def main() -> None:
                       f"{run_name:<12}  {seed:>4}  {ll:>7.4f}  {ll_h25:>7.4f}  "
                       f"{fit_s:>5.1f}s", flush=True)
 
-    print(f"\nWriting outputs ...")
+    print("\nWriting outputs ...")
     pred_df = pd.concat(pred_rows, ignore_index=True)
     out_parquet = OUT / "step5_rowpreds.parquet"
     pred_df.to_parquet(out_parquet, index=False, compression="zstd")

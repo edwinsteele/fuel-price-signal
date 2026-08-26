@@ -256,29 +256,35 @@ related columns is as legitimate a proposal as a single column, and should be fi
 one candidate with one `HYPOTHESIS`, one `TARGET` and one pair of `CONFIDENCE` fields —
 because it is one idea.
 
-**But the noise band can currently only grade up to THREE, so propose 1–3 columns
-(`fps-3jj.21`, 2026-08-26).** The instrument is narrower than this section's historical
-"2–4", and that gap is stated rather than hidden. They did not before: the placebo bank needed `arity`
-distinct source columns *per draw* out of 54, so a wider candidate got a thinner band,
-and a thinner band means a much harder bar (`family_wise_z_threshold` carries
-`df = n_draws − 1`). A 4-column candidate's bar was **0.04 c/L harder** than a 3-column
-batch-mate's purely from band thinness, and nothing said so. That is fixed — draw count
-no longer depends on arity at all — and the residual limit is a hard cap at
-`placebo.MAX_RULER_ARITY = 3`, set by measurement rather than by a pool running out. The cap
-is **provisional**: bd `fps-3jj.23` measures the quantity it rests on directly, and at that
-measurement's point estimate the cap could rise back to 4 or beyond. Until then the
-conservative setting holds, because a band that is too narrow makes the bar too EASY and
-writes noise into the ledger as a finding.
+**The noise band does not constrain this, and must not** (`fps-3jj.25`). There was briefly a
+cap: the ruler could only grade up to a fixed arity, so this section was rewritten to tell you
+to propose fewer columns. That was backwards. Constraining candidate shape to suit the
+instrument distorts the very thing the batch is measuring — and it constrains the one shape of
+feature work that has actually succeeded here.
 
-**So: propose 1–3 columns. Do not propose 4 or more.** Above the cap the run still completes,
-but no meaningful band exists to grade it against, so `_noise_band` refuses and the
-dossier cannot be written — the candidate becomes a night of compute with no verdict.
-This is a real cost, not a formality: the 35 LGA event features that motivate this whole
-section could not be graded as one candidate today. Lifting it needs placebo sources
-from outside the lock (bd `fps-3jj.22`) or the ICC measurement (bd `fps-3jj.23`); until
-then, a mechanism that genuinely needs more columns should be **proposed as a narrower
-version** with a note in `PRIOR_ART` saying what was left out and why, not padded down
-silently.
+The instrument was changed instead. Two defects, both now fixed:
+
+- **Draw count used to collapse as arity rose.** The placebo bank needed `arity` distinct source
+  columns *per draw* out of 54, so a wider candidate got a thinner band — and a thinner band
+  means a much harder bar, because `family_wise_z_threshold` carries `df = n_draws − 1`. A
+  4-column candidate's bar was **0.04 c/L harder** than a 3-column batch-mate's purely from band
+  thinness, and nothing said so. Draw count no longer depends on arity at all (`fps-3jj.21`).
+- **What reuse remains is now PRICED, not forbidden.** Source-column reuse degrades a bank
+  *gradually*, so `placebo.effective_n_draws` feeds the effective draw count into the threshold.
+  A wider candidate gets a wider, harder bar — automatically, in proportion — instead of no
+  verdict (`fps-3jj.25`).
+
+Concretely, on batch1's band, the single-candidate bar by candidate width: 1 column **−0.152**
+c/L, 10 columns **−0.171**, 35 columns **−0.287**. Harder as it widens, which is correct, and
+*usable* at every width. Before `fps-3jj.21` the same progression was −0.22, −0.78, and **no
+band at all** above 17 columns.
+
+**So propose the honest shape and let the bar adjust.** The only hard limit left is physical: a
+placebo draw needs one distinct source column per candidate column, so arity cannot exceed the
+54-column lock. The one number still resting on an estimate is the texture ICC behind the
+pricing — bounded at ≤ 0.391 by an underpowered ANOVA and measured directly in bd `fps-3jj.23`.
+It is deliberately set at the pessimistic end, so every bar is currently a little harder than it
+probably needs to be.
 
 **Why this is stated so plainly:** every feature win in this project's history arrived as
 a *group*, not a lone column. The 35 LGA event features went in together; the 4
