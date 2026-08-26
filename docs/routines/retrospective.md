@@ -193,9 +193,12 @@ one is invisible to everyone but this machine.
   A row inside its window clears ONLY by the collision's optimism and must be reported as
   not-established rather than as clearing. A row outside is unaffected, and the write-up says
   one line — "the collision did not change any verdict" — and moves on. As of 2026-08-27 the
-  three dossiered candidates sit at |z| = 0.523 / 0.926 / **1.805**; the best
+  four dossiered candidates sit at |z| = 0.523 / 0.926 / 0.987 / **1.805**; the best
   (`network_move_breadth`) misses the single-candidate bar under both rulers, so no verdict
-  moves. The two unrun candidates get the same check when they land.
+  moves. `tgp_cycle_displacement`, the one candidate still unrun, gets the same check when it
+  lands. Note that every one of those `facts.json` files emits `effective_n_draws: 10.0` — that
+  field is the thing this entry says is wrong, so do not quote it as evidence the band is
+  clean.
 
 - **The retired `noise_floor_k1.json` carries the same defect, and one documented number rests
   on it (`fps-3jj.24`).** 20 draws at arity 1, two collided pairs (draws 1/19 on seed 97, draws

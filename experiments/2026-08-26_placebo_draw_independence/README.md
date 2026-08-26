@@ -272,8 +272,9 @@ The correction is monotone-HARDENING, so it can only demote a candidate, never p
 committed ruler wrongly fails nobody, and can only wrongly PASS a candidate sitting in
 |`z`| ∈ [1.9226, 1.9797) at `n_candidates=1` or [2.9591, 3.1030) at `n_candidates=5`. That is a
 free per-row check at write-up time, and `docs/routines/retrospective.md` now carries it as a
-standing instruction. None of the three candidates dossiered so far is inside it (|z| = 0.523 /
-0.926 / 1.805).
+standing instruction. None of the four candidates dossiered so far is inside it (|z| = 0.523 /
+0.926 / 0.987 / 1.805), and each of their `facts.json` files emits a reassuring-looking
+`effective_n_draws: 10.0` that is exactly the number this section says to distrust.
 
 *Third, the recompute was refused because it is a WORSE instrument than the arithmetic above,
 not merely a more expensive one.* A fresh 10-draw band estimates its own std to ±23.6%
