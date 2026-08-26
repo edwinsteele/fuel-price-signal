@@ -27,7 +27,7 @@ degenerates to a no-op against a market-wide
 column (see placebo.py's module docstring for why that matters: 45 of the 54 locked columns
 are market-wide).
 
-`placebo.screen_draws` checks every candidate's `self_correlation` against
+`placebo.screen_draw_groups` checks every candidate's `self_correlation` against
 `MAX_SELF_CORRELATION` BEFORE any backtest fit and substitutes the next candidate on a
 violation, rather than committing to a fixed draw list up front (an earlier version of this
 module did exactly that, via `select_draws` alone, and could not produce a floor on batch0 at
@@ -235,7 +235,14 @@ def compute_noise_floor(
     does — so a k-column candidate graded against a 1-column band is graded against a ruler
     that does not know k, in the favourable direction. Stamped into the payload as
     `n_placebo_columns`; `dossier_tables._noise_band` refuses a floor whose arity is BELOW
-    the run's candidate arity. Note the pools bind on `n_draws * arity`, not `n_draws`.
+    the run's candidate arity.
+
+    `n_draws` and `arity` are INDEPENDENT (fps-3jj.21). They were not: both draw pools bound
+    `n_draws * arity`, so a wider candidate got a thinner band, and `family_wise_z_threshold`
+    turns a thinner band into a much harder bar (`df = n_draws - 1`) for a reason unrelated to
+    arity. Both pools are unbounded now — pick `n_draws` for the certainty wanted and pay the
+    compute. Arity is capped separately at `placebo.MAX_RULER_ARITY`, on a measured limit
+    rather than a pool size; see that constant.
 
     out_name: the filename written under `batch_dir`. Defaults to the batch's real ruler,
     `noise_floor.json`. An arity-calibration run is a MEASUREMENT of the ruler's arity
@@ -262,11 +269,12 @@ def compute_noise_floor(
         graded against; overwriting it silently (e.g. from a re-run) would move that ruler
         under them after the fact.
       - BaselineContractMismatch (via check_baseline_contract) on column drift.
-      - ValueError (via placebo.select_draws, inside screen_draws) if n_draws exceeds the
-        baseline column count or the block-seed pool size.
-      - ValueError (via placebo.screen_draws) if this batch's data can't support n_draws
-        placebo columns passing MAX_SELF_CORRELATION even after trying every baseline column
-        as a candidate — rare, but a real outcome on a real batch (unlike the config-drift
+      - ValueError (via placebo.screen_draw_groups) if arity exceeds
+        `placebo.MAX_RULER_ARITY` — a band that wide is computable but not meaningful, so it
+        is refused rather than written; see that constant and bd fps-3jj.22.
+      - ValueError (via placebo.screen_draw_groups) if this batch's data can't support
+        n_draws draws at this arity passing MAX_SELF_CORRELATION even after exhausting the
+        candidate sequence — rare, but a real outcome on a real batch (unlike the config-drift
         errors above, this is about the DATA, not a caller/environment mistake).
     """
     batch_dir = pathlib.Path(batch_dir)
@@ -288,7 +296,7 @@ def compute_noise_floor(
     frame, baseline_columns, db_path = _load_batch(batch_dir)
     # Screened BEFORE any backtest fit, not per-draw after one: a candidate that cannot be
     # decorrelated from its own source column is rejected by a correlation check rather than
-    # by a wasted fit, and screen_draws substitutes the next candidate in its pool so one
+    # by a wasted fit, and screen_draw_groups substitutes the next candidate in its pool so one
     # unusable column cannot abort the whole computation. Under the previous circular-shift
     # construction this fired on every batch0 run for CORRELATION (eight columns failed at
     # every offset); under block permutation all 49 usable batch0 columns pass, so that reason

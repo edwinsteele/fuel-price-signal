@@ -153,6 +153,9 @@ The per-station branch below reorders each station's own series instead, which c
 """
 from __future__ import annotations
 
+import itertools
+from collections.abc import Iterator
+
 import numpy as np
 import pandas as pd
 
@@ -197,15 +200,88 @@ PLACEBO_BLOCK_DAYS = 61
 # history has less texture to preserve, and unreliable decorrelation is the worse defect.
 MIN_BLOCKS = 24
 
-# Per-draw permutation seeds. Kept as the original construction's large-prime pool: the
-# values only need to be distinct and deterministic (they seed `np.random.default_rng`, they
-# are no longer shift offsets), and reusing the same pool keeps `select_draws`'s "one integer
-# per draw" shape unchanged.
+# The FIRST 30 per-draw permutation seeds. Retained verbatim from the original construction's
+# large-prime pool so every bank of 30 picks or fewer is byte-identical to what this module
+# produced before `block_seed` existed; `block_seed` continues the supply past the end of it.
+#
+# The values only need to be distinct and deterministic — they seed `np.random.default_rng`
+# and are no longer shift offsets, which is why the extension below can be plain consecutive
+# integers rather than more primes.
 PLACEBO_BLOCK_SEED_POOL: tuple[int, ...] = (
     97, 101, 103, 107, 109, 113, 127, 131, 137, 139,
     149, 151, 157, 163, 167, 173, 179, 181, 191, 193,
     197, 199, 211, 223, 227, 229, 233, 239, 241, 251,
 )
+
+# Where `block_seed` picks up once `PLACEBO_BLOCK_SEED_POOL` is exhausted. Chosen only to sit
+# clear of the pool's own values (all <= 251) so a seed printed in a `noise_floor.json` says
+# unambiguously which half of the supply it came from.
+PLACEBO_SEED_EXTENSION_BASE = 1_000_000
+
+# The largest candidate arity this construction can build a MEANINGFUL band for (fps-3jj.21).
+#
+# Not a pool limit — since `block_seed` and `candidate_pool` are both unbounded, a bank of any
+# arity is now computable. It is a MEASURED limit, and it binds for a reason no sampling rule
+# can remove: a draw needs `arity` distinct columns out of the ~49 usable ones, so as arity
+# rises, draws are forced to overlap, and two draws sharing a source column share that
+# column's TEXTURE exactly (same values, same NaN pattern, only re-dated). Shared texture
+# correlates their deltas, which shrinks the band's sample std and makes the bar too EASY —
+# the bias direction fps-3jj.14 exists to remove.
+#
+# Measured on batch1 (`experiments/2026-08-26_placebo_draw_independence/`): texture's share of
+# delta variance (the intraclass correlation of the committed 20-draw floor's deltas grouped
+# by texture family) could not be resolved below 0.359 and is bounded at <= 0.391. Carrying
+# that pessimistic bound through the reuse exposure of a 20-draw bank:
+#
+#     arity   picks   draw pairs sharing a column   effective draws @ ICC 0.391
+#       1        20               0%                        20.0
+#       2        40               0%                        20.0
+#       3        60               6%                        14.0
+#       4        80              16%                         9.0      <- the cap
+#       5       100              28%                         6.5      below today's ruler
+#       6       120              49%                         4.3
+#
+# Today's live 10-draw ruler is worth ~8.3 effective draws (one draw pair sits at placebo
+# correlation 0.965 — fps-3jj.20's seed collision, fixed here). Arity 4 is the last value
+# whose WORST case still beats that, so it is the cap. It also happens to be exactly the
+# "2-4 columns" `docs/routines/generator.md` already invites, so the ruler and the invitation
+# now agree rather than the ruler quietly being narrower.
+#
+# Above the cap the answer is not a better sampler — two 35-column draws out of 49 columns
+# must overlap in at least 21 of them, by pigeonhole. It needs placebo sources from OUTSIDE
+# the lock, which is bd `fps-3jj.22`, not this constant.
+MAX_RULER_ARITY = 4
+
+
+def block_seed(index: int) -> int:
+    """The block seed at flat position `index` of a bank, for any `index >= 0`.
+
+    Replaces indexing `PLACEBO_BLOCK_SEED_POOL` directly, which could only supply 30 seeds and
+    WRAPPED when it ran out (fps-3jj.20). The wrap was not a mild degradation: a block seed
+    selects a rearrangement of the date blocks, so two placebos built with the same seed get
+    the IDENTICAL rearrangement, which destroys each column's alignment to the target while
+    leaving the two columns' alignment TO EACH OTHER untouched. Applied to two source columns
+    that were already near-duplicates, the pair comes out of the shuffle as correlated as it
+    went in. That is live in batch1's committed grading ruler right now — `candidate_pool`'s
+    fallback tail restarted the seed cycle at index 0, so draw 10 (built entirely of
+    substitutes) reuses draw 1's seeds 97/101/103 and lands at placebo correlations
+    0.965/0.778/0.765 against it. Ten draws, one of which is a near-copy of another.
+    Deterministic, not unlucky: recomputing that floor reproduces it exactly.
+
+    An unbounded, never-restarting supply closes that by construction rather than making it
+    less likely — no two picks in a bank can share a rearrangement.
+
+    Consecutive integers are a legitimate extension: `np.random.default_rng` routes an int
+    through `SeedSequence`, which mixes it thoroughly, so adjacent seeds give well-separated
+    streams. NumPy documents this explicitly; the pool's primes were only ever primes because
+    the superseded circular-shift construction used the value as a SHIFT OFFSET, where being
+    coprime to the series length mattered. It is a seed now.
+    """
+    if index < 0:
+        raise ValueError(f"block seed index must be >= 0, got {index}")
+    if index < len(PLACEBO_BLOCK_SEED_POOL):
+        return PLACEBO_BLOCK_SEED_POOL[index]
+    return PLACEBO_SEED_EXTENSION_BASE + index
 
 
 def axis_is_market_wide(df: pd.DataFrame, column: str) -> bool:
@@ -323,17 +399,19 @@ def select_draws(baseline_columns: list[str], n_draws: int) -> list[tuple[str, i
     than clustering in whichever group happens to sort first, and each paired with a distinct
     seed from `PLACEBO_BLOCK_SEED_POOL`.
 
-    Raises ValueError if `n_draws` exceeds either pool — both are sized generously above the
-    ~20-draw default (fps-awz), so this only fires on a deliberately large override.
+    One EVEN SPREAD is by definition at most one pick per column, so this still raises above
+    `len(baseline_columns)`. That is no longer a ceiling on a bank, though — `candidate_pool`
+    lays further laps beyond this one, and the seed supply (`block_seed`) is unbounded, so a
+    caller wanting more picks than there are columns asks `candidate_pool`, not this function.
     """
     n_cols = len(baseline_columns)
     if n_draws < 1:
         raise ValueError(f"n_draws must be >= 1, got {n_draws}")
     if n_draws > n_cols:
-        raise ValueError(f"n_draws ({n_draws}) exceeds the baseline column count ({n_cols}).")
-    if n_draws > len(PLACEBO_BLOCK_SEED_POOL):
         raise ValueError(
-            f"n_draws ({n_draws}) exceeds the block-seed pool size ({len(PLACEBO_BLOCK_SEED_POOL)})."
+            f"n_draws ({n_draws}) exceeds the baseline column count ({n_cols}) — one even "
+            "spread holds at most one pick per column. Use candidate_pool() for a longer "
+            "sequence; it lays additional laps over the same columns."
         )
     indices = [round(i * n_cols / n_draws) % n_cols for i in range(n_draws)]
     # round() can collide on small n_cols/n_draws ratios; nudge forward to the next unused
@@ -346,29 +424,56 @@ def select_draws(baseline_columns: list[str], n_draws: int) -> list[tuple[str, i
         seen.add(idx)
         deduped.append(idx)
     return [
-        (baseline_columns[idx], PLACEBO_BLOCK_SEED_POOL[i])
+        (baseline_columns[idx], block_seed(i))
         for i, idx in enumerate(deduped)
     ]
 
 
-def candidate_pool(baseline_columns: list[str], n_draws: int) -> list[tuple[str, int]]:
-    """An ordered candidate sequence for `screen_draws`: `select_draws`'s own `n_draws`
-    (evenly spread, distinct seeds) FIRST, then every remaining baseline column as a
-    fallback tail (natural order, seeds cycling through `PLACEBO_BLOCK_SEED_POOL`) — used
-    when a primary candidate fails the `self_correlation` screen and a substitute is
-    needed. Deliberately longer than `n_draws`; `screen_draws` stops consuming it once it
-    has `n_draws` PASSING candidates, so the fallback tail is only touched on a real
-    failure — the common case (nothing fails) sees exactly `select_draws`'s own output and
-    behaves identically to before this existed.
+def candidate_pool(baseline_columns: list[str], n_picks: int) -> list[tuple[str, int]]:
+    """An ordered candidate sequence for `screen_draws`, of any requested length.
+
+    **Lap 0 is exactly what this function used to return in full**: `select_draws`'s even
+    spread (the primaries) followed by every remaining baseline column in natural order (the
+    fallback tail, used when a primary fails the `self_correlation` screen). Those two pieces
+    together are a permutation of the whole column list — one complete lap.
+
+    Past the end of lap 0 it lays further laps, each the column list rotated one position
+    further so a lap boundary does not reproduce the previous lap's adjacency. Columns
+    therefore REPEAT across a long sequence, as uniformly as possible: over `m` picks from
+    `n` columns every column is used `floor(m/n)` or `ceil(m/n)` times.
+
+    Two things changed here and both are deliberate (fps-3jj.21):
+
+    - **Repeats are allowed at all.** Requiring a distinct source column per draw is what
+      capped a bank at `floor(n_columns / arity)` draws and made the bar explode with arity,
+      and it buys much less than it looks like it does: two placebos built from the same
+      column under DIFFERENT seeds are about as uncorrelated as two built from different
+      columns (measured on batch1: median 0.038 against 0.015, both far under the 0.6 the
+      screen already tolerates on a placebo's correlation to its own source). The residual
+      cost is real but bounded, and `MAX_RULER_ARITY` is where it stops being affordable.
+    - **Seeds come off a flat counter that never restarts** (`block_seed(i)` at position `i`),
+      where the fallback tail used to restart the cycle at index 0. That restart is what put
+      batch1's substituted draw 10 on draw 1's own seeds — see `block_seed` for why a shared
+      seed is the one thing that genuinely destroys a bank's independence. Fixing it also
+      resolves bd `fps-3jj.20`.
+
+    Returns `n_picks + len(baseline_columns)` entries: the picks themselves plus one further
+    lap of substitution headroom, so a screen failure late in the sequence still has somewhere
+    to go. The old contract returned exactly `len(baseline_columns)` entries, which left NO
+    headroom once a bank consumed the column list — the failure mode fps-3jj.21 names, where
+    a run either hard-fails after hours of compute or keeps a column that FAILED the screen.
     """
-    primary = select_draws(baseline_columns, n_draws)
-    primary_columns = {c for c, _ in primary}
-    remaining = [c for c in baseline_columns if c not in primary_columns]
-    fallback = [
-        (c, PLACEBO_BLOCK_SEED_POOL[i % len(PLACEBO_BLOCK_SEED_POOL)])
-        for i, c in enumerate(remaining)
-    ]
-    return primary + fallback
+    if n_picks < 1:
+        raise ValueError(f"n_picks must be >= 1, got {n_picks}")
+    n_cols = len(baseline_columns)
+    primary = [c for c, _ in select_draws(baseline_columns, min(n_picks, n_cols))]
+    primary_columns = set(primary)
+    picks = primary + [c for c in baseline_columns if c not in primary_columns]
+    lap = 1
+    while len(picks) < n_picks + n_cols:
+        picks += [baseline_columns[(i + lap) % n_cols] for i in range(n_cols)]
+        lap += 1
+    return [(c, block_seed(i)) for i, c in enumerate(picks[: n_picks + n_cols])]
 
 
 def screen_draws(
@@ -400,15 +505,12 @@ def screen_draws(
     draws than asked for.
     """
     candidates = candidate_pool(baseline_columns, n_draws)
-    screened: list[tuple[str, int, float]] = []
-    for source_column, block_seed in candidates:
-        if len(screened) >= n_draws:
-            break
-        placebo_series = make_placebo_series(df, source_column, block_seed)
-        corr = placebo_series.corr(df[source_column])
-        if pd.isna(corr) or abs(corr) > max_self_correlation:
-            continue
-        screened.append((source_column, block_seed, float(corr)))
+    screened = list(
+        itertools.islice(
+            _screened_candidates(df, candidates, max_self_correlation=max_self_correlation),
+            n_draws,
+        )
+    )
     if len(screened) < n_draws:
         raise ValueError(
             f"only found {len(screened)}/{n_draws} placebo draws passing "
@@ -417,6 +519,27 @@ def screen_draws(
             "draws at this threshold."
         )
     return screened
+
+
+def _screened_candidates(
+    df: pd.DataFrame,
+    candidates: list[tuple[str, int]],
+    *,
+    max_self_correlation: float,
+) -> Iterator[tuple[str, int, float]]:
+    """Lazily yield the members of `candidates` that pass the self-correlation screen.
+
+    Lazy because both consumers stop early and a placebo series is not free to build: at
+    batch1's size each one is a permutation over ~2.1M rows. `screen_draws` takes the first
+    `n_draws`; `screen_draw_groups` takes more because it may skip a pick that would repeat a
+    column already in the group it is assembling.
+    """
+    for source_column, seed in candidates:
+        placebo_series = make_placebo_series(df, source_column, seed)
+        corr = placebo_series.corr(df[source_column])
+        if pd.isna(corr) or abs(corr) > max_self_correlation:
+            continue
+        yield (source_column, seed, float(corr))
 
 
 def placebo_column_names(arity: int) -> list[str]:
@@ -447,43 +570,86 @@ def screen_draw_groups(
     max_self_correlation: float,
 ) -> list[list[tuple[str, int, float]]]:
     """`n_draws` groups of `arity` screened (source_column, block_seed, self_correlation)
-    triples — one group per draw, every column distinct across the whole bank.
+    triples — one group per draw, columns distinct WITHIN a draw.
 
     **Arity 1 is exactly `screen_draws`**, one group per triple: same call, same screening
     order, same substitutions. That identity is deliberate and is what makes an existing
     arity-1 floor reproducible after this function landed.
 
-    For arity k it screens `n_draws * k` candidates in one pass and chunks them
-    consecutively. Two consequences worth stating rather than discovering:
+    For arity k it consumes screened candidates in `candidate_pool` order, assembling groups
+    of k and skipping a pick that would repeat a column already in the group being built.
+    Two consequences worth stating rather than discovering:
 
-    - **Each group's members are ADJACENT in `baseline_columns`.** `select_draws` spreads
+    - **A group's members are ADJACENT in `candidate_pool`'s order.** `select_draws` spreads
       its picks evenly across the column list by position, so a group of 3 tends to be
       three columns from the same feature GROUP (three `cycle_*` columns, or three
       `days_since_trough_entry_<lga>` columns). That is a feature, not an accident: a real
       multi-column candidate is one MECHANISM, and its members are usually related
       (docs/routines/generator.md, "A candidate is one MECHANISM"). A null built from
       three unrelated columns would be a weaker analogue of the thing being measured.
-    - **The pools bind `n_draws * arity`, not `n_draws`.** `select_draws` raises above
-      either the baseline column count or `PLACEBO_BLOCK_SEED_POOL`'s size (30), so the
-      maximum draw count at arity k is `floor(30 / k)` — 10 at arity 3, which is exactly
-      what fps-3jj.14 asks for and leaves no headroom above it. Raised as a plain
-      ValueError from `select_draws` with the product in the message.
+    - **`n_draws` no longer trades off against `arity`** (fps-3jj.21). It used to: both pools
+      bound `n_draws * arity`, capping a bank at `min(floor(n_cols / k), floor(30 / k))`
+      draws, which meant a wider candidate was graded against a THINNER band — and since
+      `family_wise_z_threshold` puts `df = n_draws - 1` into its t-critical, the bar exploded
+      with arity for a reason that had nothing to do with arity. Two thirds of the k=1 -> k=3
+      bar move measured in `experiments/2026-08-23_placebo_arity/` was draw count, not the
+      arity effect it was attributed to. Both pools are unbounded now, so the draw count is a
+      free parameter again — pick it for the certainty wanted and pay the compute. What binds
+      instead is `MAX_RULER_ARITY`, and it binds on ARITY alone.
 
-    What is guaranteed across the bank is DISTINCT SOURCE COLUMNS, not distinct seeds.
-    `candidate_pool`'s fallback tail cycles the seed pool from index 0, so once a primary
-    is substituted away a later draw can reuse an earlier draw's seed on a different
-    column — visible in batch1's own committed arity-1 floor, where seeds 97 and 101 each
-    appear twice after two all-NaN LGA primaries were substituted. Pre-existing, unchanged
-    by arity, and worth knowing when reading a floor: two draws whose sources are strongly
-    correlated AND which share a block order are less independent than the draw count
-    suggests.
+    What is guaranteed is DISTINCT SOURCE COLUMNS WITHIN A DRAW, and a distinct block seed
+    for every column in the whole bank. Distinctness ACROSS draws is deliberately not
+    guaranteed — see `candidate_pool` for the measurement behind that, and `MAX_RULER_ARITY`
+    for where the cost of the resulting reuse stops being affordable.
+
+    Raises ValueError above `MAX_RULER_ARITY`. That refusal is not a pool running out — every
+    pool here is unbounded now — it is the point past which draws are forced to overlap so
+    heavily that their deltas can no longer be treated as independent samples of the null, so
+    the band's std would understate the true spread and the bar would come out too easy. A
+    band is still COMPUTABLE above it; it would just not mean anything, which is worse than
+    refusing.
     """
     if arity < 1:
         raise ValueError(f"arity must be >= 1, got {arity}")
-    flat = screen_draws(
-        df, baseline_columns, n_draws * arity, max_self_correlation=max_self_correlation
+    if arity > MAX_RULER_ARITY:
+        raise ValueError(
+            f"arity {arity} exceeds MAX_RULER_ARITY ({MAX_RULER_ARITY}) — a bank this wide "
+            f"cannot be built from {len(baseline_columns)} source columns without draws "
+            "overlapping so heavily that they stop being independent samples of the null "
+            "(two 35-column draws out of 49 columns must share at least 21 of them, by "
+            "pigeonhole). The band would still compute and would be too NARROW, i.e. the bar "
+            "too easy — the bias fps-3jj.14 exists to remove. Grading a candidate this wide "
+            "needs placebo sources from outside the lock: bd fps-3jj.22. Full working: "
+            "experiments/2026-08-26_placebo_draw_independence/."
+        )
+    if arity > len(baseline_columns):
+        raise ValueError(
+            f"arity ({arity}) exceeds the baseline column count ({len(baseline_columns)}) — "
+            "one draw needs that many DISTINCT source columns."
+        )
+
+    candidates = candidate_pool(baseline_columns, n_draws * arity)
+    groups: list[list[tuple[str, int, float]]] = []
+    current: list[tuple[str, int, float]] = []
+    used: set[str] = set()
+    for triple in _screened_candidates(
+        df, candidates, max_self_correlation=max_self_correlation
+    ):
+        if triple[0] in used:
+            continue  # would repeat a column already in the group being assembled
+        current.append(triple)
+        used.add(triple[0])
+        if len(current) == arity:
+            groups.append(current)
+            current, used = [], set()
+            if len(groups) == n_draws:
+                return groups
+    raise ValueError(
+        f"only assembled {len(groups)}/{n_draws} placebo draws at arity {arity} passing "
+        f"abs(self_correlation) <= {max_self_correlation} after trying all "
+        f"{len(candidates)} candidates — this batch's data may not support this many draws "
+        "at this arity and threshold."
     )
-    return [flat[i * arity:(i + 1) * arity] for i in range(n_draws)]
 
 
 def make_placebo_frame(

@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from experiments.pipeline.placebo import (
+    MAX_RULER_ARITY,
     MIN_BLOCKS,
     PLACEBO_BLOCK_DAYS,
     PLACEBO_BLOCK_SEED_POOL,
@@ -14,6 +15,7 @@ from experiments.pipeline.placebo import (
     _block_derangement,
     _effective_block_days,
     axis_is_market_wide,
+    block_seed,
     candidate_pool,
     make_placebo_frame,
     make_placebo_series,
@@ -183,24 +185,90 @@ def test_candidate_pool_starts_with_select_draws_own_output():
     assert pool[:6] == select_draws(baseline_columns, 6)
 
 
-def test_candidate_pool_fallback_covers_every_remaining_column_exactly_once():
+def test_candidate_pool_lap_zero_is_a_permutation_of_every_column():
+    """Lap 0 — select_draws's primaries then every remaining column as the fallback tail —
+    is what this function used to return in full, and it must still cover the column list
+    exactly once before any repetition starts."""
     baseline_columns = [f"col{i}" for i in range(10)]
     pool = candidate_pool(baseline_columns, 6)
+    lap_zero = [c for c, _ in pool[: len(baseline_columns)]]
     primary_columns = {c for c, _ in pool[:6]}
-    fallback_columns = [c for c, _ in pool[6:]]
+    fallback_columns = lap_zero[6:]
     assert set(fallback_columns) == set(baseline_columns) - primary_columns
-    assert len(fallback_columns) == len(set(fallback_columns))  # no repeats
-    assert len(pool) == len(baseline_columns)
+    assert sorted(lap_zero) == sorted(baseline_columns)
 
 
-def test_candidate_pool_fallback_cycles_the_seed_pool_when_it_runs_short():
-    """More remaining columns than PLACEBO_BLOCK_SEED_POOL entries — the fallback tail
-    must still produce one candidate per remaining column (seed reuse is fine; only the
-    PRIMARY set needs distinct seeds for diversity)."""
+def test_candidate_pool_returns_the_picks_asked_for_plus_a_lap_of_headroom():
+    """The old contract returned exactly len(baseline_columns) entries, so a bank that
+    consumed the column list had NO substitution headroom left — fps-3jj.21's failure mode,
+    where a screen failure either hard-fails the run after hours of compute or forces keeping
+    a column that FAILED the screen (a placebo still correlated with its source, which
+    NARROWS the band and makes the bar easier)."""
+    baseline_columns = [f"col{i}" for i in range(10)]
+    for n_picks in (3, 10, 25):
+        pool = candidate_pool(baseline_columns, n_picks)
+        assert len(pool) == n_picks + len(baseline_columns)
+
+
+def test_candidate_pool_extends_past_the_column_list_by_repeating_it_uniformly():
+    """The change that removes the draw ceiling: more picks than columns is no longer an
+    error, it lays further laps. Reuse is spread as evenly as possible — over m picks from n
+    columns every column is used floor(m/n) or ceil(m/n) times — so no column carries more of
+    the bank than it has to."""
+    import collections
+
+    baseline_columns = [f"col{i}" for i in range(10)]
+    n_picks = 25
+    picks = [c for c, _ in candidate_pool(baseline_columns, n_picks)][:n_picks]
+    counts = collections.Counter(picks)
+    assert set(counts) == set(baseline_columns)
+    assert max(counts.values()) - min(counts.values()) <= 1
+
+
+def test_candidate_pool_never_repeats_a_block_seed():
+    """fps-3jj.20, and the single most load-bearing assertion in this file.
+
+    The fallback tail used to restart the seed cycle at index 0, so a substituted draw picked
+    up an EARLIER draw's seed. A block seed selects a rearrangement of the date blocks, so two
+    placebos sharing a seed get the identical rearrangement — which destroys each column's
+    alignment to the target while leaving the two columns' alignment TO EACH OTHER intact.
+    Applied to two source columns that were already near-duplicates the pair survives the
+    shuffle: batch1's committed grading ruler has draw 10 reusing draw 1's seeds 97/101/103
+    and landing at placebo correlations 0.965/0.778/0.765 against it — one of ten draws is a
+    near-copy of another, deterministically, on every recompute.
+
+    A flat counter that never restarts closes that by construction rather than making it less
+    likely, which is why this is asserted over the WHOLE returned sequence, headroom included.
+    """
     baseline_columns = [f"col{i}" for i in range(len(PLACEBO_BLOCK_SEED_POOL) + 10)]
-    pool = candidate_pool(baseline_columns, 5)
-    assert len(pool) == len(baseline_columns)
-    assert sorted(c for c, _ in pool) == sorted(baseline_columns)
+    for n_picks in (5, 40, 120):
+        seeds = [seed for _c, seed in candidate_pool(baseline_columns, n_picks)]
+        assert len(set(seeds)) == len(seeds)
+
+
+def test_block_seed_extends_the_historical_pool_without_disturbing_it():
+    """Every bank of 30 picks or fewer must be byte-identical to what this module produced
+    before block_seed existed — committed floors stay reproducible, and fps-3jj.14's
+    deliberate arity-1 byte-identity survives for any bank that fits inside the old pool."""
+    assert [block_seed(i) for i in range(len(PLACEBO_BLOCK_SEED_POOL))] == list(
+        PLACEBO_BLOCK_SEED_POOL
+    )
+    extension = [block_seed(i) for i in range(len(PLACEBO_BLOCK_SEED_POOL), 200)]
+    assert len(set(extension)) == len(extension)
+    assert not set(extension) & set(PLACEBO_BLOCK_SEED_POOL)
+    with pytest.raises(ValueError, match="must be >= 0"):
+        block_seed(-1)
+
+
+def test_block_seed_extension_gives_well_separated_permutations():
+    """Consecutive integers are only a legitimate seed extension because default_rng routes
+    them through SeedSequence, which mixes thoroughly. Asserted rather than derived: adjacent
+    extension seeds must not produce near-identical placebos."""
+    df = _level_like_df()
+    base = len(PLACEBO_BLOCK_SEED_POOL)
+    a = make_placebo_series(df, "level_col", block_seed(base))
+    b = make_placebo_series(df, "level_col", block_seed(base + 1))
+    assert abs(a.corr(b)) < 0.4
 
 
 # ── screen_draws ────────────────────────────────────────────────────────────
@@ -223,9 +291,9 @@ def test_screen_draws_happy_path_returns_exactly_n_draws_with_correlations():
     screened = screen_draws(df, baseline_columns, n_draws=5, max_self_correlation=0.9)
 
     assert len(screened) == 5
-    for source_column, block_seed, corr in screened:
+    for source_column, seed, corr in screened:
         assert source_column in baseline_columns
-        assert block_seed in PLACEBO_BLOCK_SEED_POOL
+        assert seed in PLACEBO_BLOCK_SEED_POOL
         assert pd.notna(corr) and corr <= 0.9
 
 
@@ -314,10 +382,15 @@ def test_select_draws_raises_when_n_draws_exceeds_column_count():
         select_draws(baseline_columns, 10)
 
 
-def test_select_draws_raises_when_n_draws_exceeds_seed_pool():
+def test_select_draws_has_no_seed_ceiling():
+    """The seed pool was a fossil of the superseded circular-shift construction, where the
+    number was a SHIFT OFFSET and had to be coprime to the series length. As RNG seeds the
+    values only need to be distinct and deterministic, so a fixed list of 30 was capping bank
+    size for no reason — and its wraparound was actively harmful (fps-3jj.20)."""
     baseline_columns = [f"col{i}" for i in range(100)]
-    with pytest.raises(ValueError, match="exceeds the block-seed pool size"):
-        select_draws(baseline_columns, len(PLACEBO_BLOCK_SEED_POOL) + 1)
+    draws = select_draws(baseline_columns, len(PLACEBO_BLOCK_SEED_POOL) + 20)
+    seeds = [s for _c, s in draws]
+    assert len(set(seeds)) == len(seeds)
 
 
 def test_select_draws_raises_on_non_positive_n_draws():
@@ -493,7 +566,7 @@ def test_screen_draw_groups_at_arity_1_is_exactly_screen_draws():
     assert grouped == [[triple] for triple in flat]
 
 
-def test_screen_draw_groups_chunks_n_draws_times_arity_distinct_columns():
+def test_screen_draw_groups_keeps_columns_distinct_within_a_draw():
     df = _diverse_fixture_df(n_dates=200, n_cols=20)
     baseline_columns = [f"col{i}" for i in range(20)]
 
@@ -503,32 +576,77 @@ def test_screen_draw_groups_chunks_n_draws_times_arity_distinct_columns():
 
     assert len(groups) == 4
     assert all(len(g) == 3 for g in groups)
-    # DISTINCT SOURCE COLUMNS is the invariant that actually holds across the whole bank;
-    # distinct seeds is not, and never was. `candidate_pool`'s fallback tail cycles
-    # PLACEBO_BLOCK_SEED_POOL from index 0, so once a primary is substituted away (batch1's
-    # committed arity-1 floor already has seeds 97 and 101 used twice for that reason) a
-    # later draw can reuse an earlier draw's seed on a DIFFERENT column. That is harmless
-    # for the column pair itself but does mean two draws built from correlated sources under
-    # a shared block order are less independent than the draw count suggests — a property of
-    # the pre-existing substitution path, not of arity.
-    sources = [col for g in groups for col, _seed, _corr in g]
-    assert len(set(sources)) == 12
+    for group in groups:
+        sources = [col for col, _seed, _corr in group]
+        assert len(set(sources)) == len(sources), "a draw repeated one of its own columns"
+    # Every column in the whole bank gets its own block seed, always — that one IS bank-wide
+    # (fps-3jj.20). Source-column distinctness is deliberately NOT: see the next test.
     seeds = [seed for g in groups for _col, seed, _corr in g]
-    assert len(set(seeds)) == 12  # no substitution fires on this fixture
+    assert len(set(seeds)) == len(seeds)
 
 
-def test_screen_draw_groups_binds_the_pools_on_n_draws_times_arity():
-    """The failure mode a caller will actually hit: 10 draws at arity 3 needs 30 screened
-    columns, so a batch with 20 usable columns fails at arity 3 even though it is fine at
-    arity 1. The message must name the product, not n_draws."""
+def test_screen_draw_groups_reuses_source_columns_across_draws_when_it_must():
+    """The change that removes the draw ceiling (fps-3jj.21). Requiring a distinct source
+    column per draw capped a bank at floor(n_columns / arity) draws, and because
+    family_wise_z_threshold carries df = n_draws - 1, a thinner band means a much harder bar
+    — for a reason unrelated to arity. Reuse costs little: two placebos from the same column
+    under DIFFERENT seeds are about as uncorrelated as two from different columns (batch1
+    median 0.038 vs 0.015, both far under the 0.6 the screen already tolerates)."""
+    import collections
+
+    df = _diverse_fixture_df(n_dates=200, n_cols=10)
+    baseline_columns = [f"col{i}" for i in range(10)]
+
+    groups = screen_draw_groups(
+        df, baseline_columns, n_draws=8, arity=3, max_self_correlation=0.9
+    )
+
+    assert len(groups) == 8  # 24 picks from 10 columns — impossible under the old contract
+    sources = [col for g in groups for col, _seed, _corr in g]
+    counts = collections.Counter(sources)
+    assert max(counts.values()) > 1, "fixture must actually force reuse"
+    assert max(counts.values()) - min(counts.values()) <= 1, "reuse must be spread evenly"
+
+
+def test_screen_draw_groups_draw_count_no_longer_trades_off_against_arity():
+    """The defect fps-3jj.21 was filed on, stated as the thing a caller sees: the SAME draw
+    count must be reachable at every gradeable arity. It was not — the pools bound
+    n_draws * arity, so a batch got 30 draws at arity 1 and 7 at arity 4, and the bar exploded
+    on the collapsing draw count rather than on arity."""
+    df = _diverse_fixture_df(n_dates=200, n_cols=12)
+    baseline_columns = [f"col{i}" for i in range(12)]
+
+    for arity in range(1, MAX_RULER_ARITY + 1):
+        groups = screen_draw_groups(
+            df, baseline_columns, n_draws=20, arity=arity, max_self_correlation=0.9
+        )
+        assert len(groups) == 20
+        assert all(len(g) == arity for g in groups)
+
+
+def test_screen_draw_groups_refuses_above_the_measured_arity_cap():
+    """Above MAX_RULER_ARITY a band is still COMPUTABLE and that is precisely the hazard: a
+    draw needs `arity` distinct columns, so wide draws are forced to overlap, their deltas
+    stop being independent samples of the null, the sample std understates the true spread and
+    the bar comes out too EASY — the bias direction fps-3jj.14 exists to remove. Refusing
+    beats returning a number that is not a ruler."""
     df = _diverse_fixture_df(n_dates=200, n_cols=20)
     baseline_columns = [f"col{i}" for i in range(20)]
 
-    assert len(screen_draw_groups(
-        df, baseline_columns, n_draws=10, arity=1, max_self_correlation=0.9
-    )) == 10
-    with pytest.raises(ValueError, match=r"30.*exceeds the baseline column count \(20\)"):
-        screen_draw_groups(df, baseline_columns, n_draws=10, arity=3, max_self_correlation=0.9)
+    with pytest.raises(ValueError, match=r"exceeds MAX_RULER_ARITY"):
+        screen_draw_groups(
+            df, baseline_columns, n_draws=5, arity=MAX_RULER_ARITY + 1,
+            max_self_correlation=0.9,
+        )
+
+
+def test_screen_draw_groups_refuses_an_arity_wider_than_the_column_list():
+    df = _diverse_fixture_df(n_dates=200, n_cols=3)
+    baseline_columns = [f"col{i}" for i in range(3)]
+    with pytest.raises(ValueError, match=r"exceeds the baseline column count"):
+        screen_draw_groups(
+            df, baseline_columns, n_draws=2, arity=4, max_self_correlation=0.9
+        )
 
 
 def test_make_placebo_frame_builds_one_column_per_member_named_by_arity():
@@ -542,8 +660,8 @@ def test_make_placebo_frame_builds_one_column_per_member_named_by_arity():
 
     assert list(frame.columns) == ["__placebo_1__", "__placebo_2__", "__placebo_3__"]
     assert frame.index.equals(df.index)
-    for name, (source_column, block_seed, _corr) in zip(frame.columns, draw, strict=True):
-        expected = make_placebo_series(df, source_column, block_seed)
+    for name, (source_column, seed, _corr) in zip(frame.columns, draw, strict=True):
+        expected = make_placebo_series(df, source_column, seed)
         pd.testing.assert_series_equal(
             frame[name], expected.rename(name), check_names=True
         )
