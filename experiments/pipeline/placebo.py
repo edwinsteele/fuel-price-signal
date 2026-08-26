@@ -397,7 +397,9 @@ def select_draws(baseline_columns: list[str], n_draws: int) -> list[tuple[str, i
     """`n_draws` deterministic (source_column, block_seed) pairs, spread evenly across
     `baseline_columns` so the bank samples both market-wide and station-varying axes rather
     than clustering in whichever group happens to sort first, and each paired with a distinct
-    seed from `PLACEBO_BLOCK_SEED_POOL`.
+    seed from `block_seed` at its own position. Those are `PLACEBO_BLOCK_SEED_POOL`'s values
+    for the first 30 positions and the unbounded extension past that — so a request larger
+    than the historical pool is served rather than refused (fps-3jj.21).
 
     One EVEN SPREAD is by definition at most one pick per column, so this still raises above
     `len(baseline_columns)`. That is no longer a ceiling on a bank, though — `candidate_pool`
@@ -429,18 +431,23 @@ def select_draws(baseline_columns: list[str], n_draws: int) -> list[tuple[str, i
     ]
 
 
-def candidate_pool(baseline_columns: list[str], n_picks: int) -> list[tuple[str, int]]:
-    """An ordered candidate sequence for `screen_draws`, of any requested length.
+def candidate_sequence(
+    baseline_columns: list[str], n_primary: int
+) -> Iterator[tuple[str, int]]:
+    """The candidate ordering `screen_draws` and `screen_draw_groups` consume, UNBOUNDED.
 
-    **Lap 0 is exactly what this function used to return in full**: `select_draws`'s even
-    spread (the primaries) followed by every remaining baseline column in natural order (the
-    fallback tail, used when a primary fails the `self_correlation` screen). Those two pieces
-    together are a permutation of the whole column list — one complete lap.
+    **Lap 0 is exactly what `candidate_pool` used to return in full**: `select_draws`'s even
+    spread over `n_primary` picks (the primaries) followed by every remaining baseline column
+    in natural order (the fallback tail, used when a primary fails the `self_correlation`
+    screen). Those two pieces together are a permutation of the whole column list — one
+    complete lap.
 
     Past the end of lap 0 it lays further laps, each the column list rotated one position
     further so a lap boundary does not reproduce the previous lap's adjacency. Columns
-    therefore REPEAT across a long sequence, as uniformly as possible: over `m` picks from
-    `n` columns every column is used `floor(m/n)` or `ceil(m/n)` times.
+    therefore REPEAT down a long sequence, as uniformly as possible: over `m` picks from `n`
+    columns every column is used `floor(m/n)` or `ceil(m/n)` times. Every pick, in every lap,
+    gets its own seed off a flat counter — `block_seed(i)` at position `i` — which never
+    restarts.
 
     Two things changed here and both are deliberate (fps-3jj.21):
 
@@ -451,29 +458,52 @@ def candidate_pool(baseline_columns: list[str], n_picks: int) -> list[tuple[str,
       columns (measured on batch1: median 0.038 against 0.015, both far under the 0.6 the
       screen already tolerates on a placebo's correlation to its own source). The residual
       cost is real but bounded, and `MAX_RULER_ARITY` is where it stops being affordable.
-    - **Seeds come off a flat counter that never restarts** (`block_seed(i)` at position `i`),
-      where the fallback tail used to restart the cycle at index 0. That restart is what put
-      batch1's substituted draw 10 on draw 1's own seeds — see `block_seed` for why a shared
-      seed is the one thing that genuinely destroys a bank's independence. Fixing it also
-      resolves bd `fps-3jj.20`.
+    - **Seeds come off a flat counter that never restarts**, where the fallback tail used to
+      restart the cycle at index 0. That restart is what put batch1's substituted draw 10 on
+      draw 1's own seeds — see `block_seed` for why a shared seed is the one thing that
+      genuinely destroys a bank's independence. Fixing it also resolves bd `fps-3jj.20`.
 
-    Returns `n_picks + len(baseline_columns)` entries: the picks themselves plus one further
-    lap of substitution headroom, so a screen failure late in the sequence still has somewhere
-    to go. The old contract returned exactly `len(baseline_columns)` entries, which left NO
-    headroom once a bank consumed the column list — the failure mode fps-3jj.21 names, where
-    a run either hard-fails after hours of compute or keeps a column that FAILED the screen.
+    **Unbounded rather than "n_picks plus a lap of headroom"** (review finding, PR #335). A
+    fixed headroom is not a substitution guarantee: a batch where a large minority of columns
+    fail the screen can exhaust it while `arity` perfectly good columns are still passing, and
+    the caller then sees "this batch cannot support this many draws" when it plainly can. That
+    is the same class of defect as the empty fallback tail fps-3jj.21 exists to remove.
+    Laps are also not merely repetition here — a column that failed the screen at its lap-0
+    seed gets a DIFFERENT rearrangement next lap and may pass, which is the per-column retry
+    the old position-assigned construction never had. Callers are responsible for their own
+    stopping rule; `_assemble_draws` uses "a full lap with nothing passing".
     """
-    if n_picks < 1:
-        raise ValueError(f"n_picks must be >= 1, got {n_picks}")
     n_cols = len(baseline_columns)
-    primary = [c for c, _ in select_draws(baseline_columns, min(n_picks, n_cols))]
+    if n_cols == 0:
+        raise ValueError("baseline_columns is empty — nothing to draw placebos from.")
+    if n_primary < 1:
+        raise ValueError(f"n_primary must be >= 1, got {n_primary}")
+
+    primary = [c for c, _ in select_draws(baseline_columns, min(n_primary, n_cols))]
     primary_columns = set(primary)
-    picks = primary + [c for c in baseline_columns if c not in primary_columns]
+    lap_zero = primary + [c for c in baseline_columns if c not in primary_columns]
+
+    index = 0
+    for column in lap_zero:
+        yield (column, block_seed(index))
+        index += 1
     lap = 1
-    while len(picks) < n_picks + n_cols:
-        picks += [baseline_columns[(i + lap) % n_cols] for i in range(n_cols)]
+    while True:
+        for i in range(n_cols):
+            yield (baseline_columns[(i + lap) % n_cols], block_seed(index))
+            index += 1
         lap += 1
-    return [(c, block_seed(i)) for i, c in enumerate(picks[: n_picks + n_cols])]
+
+
+def candidate_pool(baseline_columns: list[str], n_picks: int) -> list[tuple[str, int]]:
+    """The first `n_picks + len(baseline_columns)` entries of `candidate_sequence` as a list —
+    the picks themselves plus one lap of substitution headroom.
+
+    Retained as the readable, finite view of the sequence (and what the tests assert the lap
+    structure against). The screening path consumes `candidate_sequence` directly, so it is
+    NOT limited to this much headroom — see that function.
+    """
+    return list(itertools.islice(candidate_sequence(baseline_columns, n_picks), n_picks + len(baseline_columns)))
 
 
 def screen_draws(
@@ -504,42 +534,75 @@ def screen_draws(
     case, rare but real, and worth surfacing clearly rather than silently returning fewer
     draws than asked for.
     """
-    candidates = candidate_pool(baseline_columns, n_draws)
-    screened = list(
-        itertools.islice(
-            _screened_candidates(df, candidates, max_self_correlation=max_self_correlation),
-            n_draws,
-        )
+    groups = _assemble_draws(
+        df, baseline_columns, n_draws, arity=1, max_self_correlation=max_self_correlation
     )
-    if len(screened) < n_draws:
-        raise ValueError(
-            f"only found {len(screened)}/{n_draws} placebo draws passing "
-            f"abs(self_correlation) <= {max_self_correlation} after trying all "
-            f"{len(candidates)} candidates — this batch's data may not support this many "
-            "draws at this threshold."
-        )
-    return screened
+    return [triple for group in groups for triple in group]
 
 
-def _screened_candidates(
+def _assemble_draws(
     df: pd.DataFrame,
-    candidates: list[tuple[str, int]],
+    baseline_columns: list[str],
+    n_draws: int,
     *,
+    arity: int,
     max_self_correlation: float,
-) -> Iterator[tuple[str, int, float]]:
-    """Lazily yield the members of `candidates` that pass the self-correlation screen.
+) -> list[list[tuple[str, int, float]]]:
+    """`n_draws` groups of `arity` screened triples, consumed off `candidate_sequence`.
 
-    Lazy because both consumers stop early and a placebo series is not free to build: at
-    batch1's size each one is a permutation over ~2.1M rows. `screen_draws` takes the first
-    `n_draws`; `screen_draw_groups` takes more because it may skip a pick that would repeat a
-    column already in the group it is assembling.
+    Shared by `screen_draws` (arity 1) and `screen_draw_groups`, so the two cannot drift —
+    the arity-1 identity between them is structural rather than something the tests have to
+    keep true.
+
+    Candidates are screened LAZILY: a placebo series is not free to build (at batch1's size
+    each is a permutation over ~2.1M rows), and both callers stop early.
+
+    **Stopping rule: a full lap with nothing passing.** `candidate_sequence` is unbounded, so
+    something has to decide when a batch genuinely cannot supply the draws asked for. A whole
+    lap is exactly one presentation of every column, each at a fresh seed; if not one of them
+    clears the screen, the next lap is offering the same columns again and the batch's data is
+    the problem, not the sequence's length. Counting CONSECUTIVE failures rather than total
+    ones is what keeps a batch with a few permanently-unusable columns (batch1 has five
+    all-NaN `days_since_trough_entry_<lga>` columns, skipped as unverifiable on every lap)
+    from being refused a bank it can perfectly well supply.
     """
-    for source_column, seed in candidates:
+    sequence = candidate_sequence(baseline_columns, n_draws * arity)
+    groups: list[list[tuple[str, int, float]]] = []
+    current: list[tuple[str, int, float]] = []
+    used: set[str] = set()
+    tried = 0
+    consecutive_failures = 0
+
+    for source_column, seed in sequence:
+        if consecutive_failures >= len(baseline_columns):
+            break
+        tried += 1
+        if source_column in used:
+            # Would repeat a column already in the group being assembled. Not a screen
+            # failure — it says nothing about the batch's data — so it must not count toward
+            # the stopping rule.
+            continue
         placebo_series = make_placebo_series(df, source_column, seed)
         corr = placebo_series.corr(df[source_column])
         if pd.isna(corr) or abs(corr) > max_self_correlation:
+            consecutive_failures += 1
             continue
-        yield (source_column, seed, float(corr))
+        consecutive_failures = 0
+        current.append((source_column, seed, float(corr)))
+        used.add(source_column)
+        if len(current) == arity:
+            groups.append(current)
+            current, used = [], set()
+            if len(groups) == n_draws:
+                return groups
+
+    raise ValueError(
+        f"only assembled {len(groups)}/{n_draws} placebo draws at arity {arity} passing "
+        f"abs(self_correlation) <= {max_self_correlation} after trying {tried} candidates "
+        f"and {consecutive_failures} consecutive failures (a full pass over all "
+        f"{len(baseline_columns)} baseline columns with none passing) — this batch's data "
+        "does not support this many draws at this arity and threshold."
+    )
 
 
 def placebo_column_names(arity: int) -> list[str]:
@@ -628,27 +691,9 @@ def screen_draw_groups(
             "one draw needs that many DISTINCT source columns."
         )
 
-    candidates = candidate_pool(baseline_columns, n_draws * arity)
-    groups: list[list[tuple[str, int, float]]] = []
-    current: list[tuple[str, int, float]] = []
-    used: set[str] = set()
-    for triple in _screened_candidates(
-        df, candidates, max_self_correlation=max_self_correlation
-    ):
-        if triple[0] in used:
-            continue  # would repeat a column already in the group being assembled
-        current.append(triple)
-        used.add(triple[0])
-        if len(current) == arity:
-            groups.append(current)
-            current, used = [], set()
-            if len(groups) == n_draws:
-                return groups
-    raise ValueError(
-        f"only assembled {len(groups)}/{n_draws} placebo draws at arity {arity} passing "
-        f"abs(self_correlation) <= {max_self_correlation} after trying all "
-        f"{len(candidates)} candidates — this batch's data may not support this many draws "
-        "at this arity and threshold."
+    return _assemble_draws(
+        df, baseline_columns, n_draws, arity=arity,
+        max_self_correlation=max_self_correlation,
     )
 
 

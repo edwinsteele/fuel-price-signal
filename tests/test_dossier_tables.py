@@ -884,6 +884,24 @@ def test_noise_band_refuses_a_candidate_wider_than_the_arity_cap(tmp_path):
     assert "--arity" not in band["reason"]
 
 
+def test_noise_band_arity_cap_is_not_bypassed_by_an_equally_wide_floor(tmp_path):
+    """Review finding (PR #335). The cap check sat INSIDE the `run_arity > floor_arity`
+    branch, so a floor whose own arity already met or exceeded the run's — a pre-fps-3jj.21
+    wide floor, or a hand-built one — slipped a 5+ column candidate straight through to a
+    graded band the change declares meaningless. Precisely the case where a bad band already
+    exists on disk and looks gradeable, so the guard must not depend on the floor at all."""
+    wide = [f"c{i}" for i in range(dt.MAX_RULER_ARITY + 2)]
+    run_dir, _ = _write_run(
+        tmp_path, columns=wide, batch_extras=_floor_with(arity=len(wide))
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+    assert f"above MAX_RULER_ARITY ({dt.MAX_RULER_ARITY})" in band["reason"]
+
+
 def test_noise_band_reports_the_bar_in_cents_per_litre(tmp_path):
     """fps-3jj.21's rendering half: `candidate_z_vs_band` against a z threshold is a
     comparison in band-standard-deviation units, which says nothing about whether one

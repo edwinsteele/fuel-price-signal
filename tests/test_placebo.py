@@ -17,6 +17,7 @@ from experiments.pipeline.placebo import (
     axis_is_market_wide,
     block_seed,
     candidate_pool,
+    candidate_sequence,
     make_placebo_frame,
     make_placebo_series,
     placebo_column_names,
@@ -372,7 +373,7 @@ def test_screen_draws_raises_when_the_whole_pool_cannot_meet_n_draws(monkeypatch
 
     monkeypatch.setattr(placebo_module, "make_placebo_series", _always_no_op)
 
-    with pytest.raises(ValueError, match=r"only found 0/2"):
+    with pytest.raises(ValueError, match=r"only assembled 0/2"):
         screen_draws(df, baseline_columns, n_draws=2, max_self_correlation=0.9)
 
 
@@ -476,7 +477,7 @@ def test_screen_rejects_strong_anti_correlation():
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(placebo_module, "make_placebo_series", _negated)
-        with pytest.raises(ValueError, match=r"only found 0/1"):
+        with pytest.raises(ValueError, match=r"only assembled 0/1"):
             screen_draws(df, ["level_col"], n_draws=1, max_self_correlation=0.6)
 
 
@@ -638,6 +639,72 @@ def test_screen_draw_groups_refuses_above_the_measured_arity_cap():
             df, baseline_columns, n_draws=5, arity=MAX_RULER_ARITY + 1,
             max_self_correlation=0.9,
         )
+
+
+def test_assembly_survives_more_failures_than_one_lap_of_headroom(monkeypatch):
+    """Review finding (PR #335): `candidate_pool` returns `n_picks + n_columns` entries, so a
+    screener bounded by that list gives up after enough failures even when `arity` perfectly
+    good columns are still passing — "this batch cannot support this many draws" when it
+    plainly can. Same class of defect as the empty fallback tail fps-3jj.21 exists to remove.
+    The screening path therefore consumes the UNBOUNDED `candidate_sequence`, not the list.
+
+    Here 8 of 10 columns fail permanently and 20 draws are requested — far more failures than
+    one lap of headroom absorbs.
+    """
+    import experiments.pipeline.placebo as placebo_module
+
+    df = _diverse_fixture_df(n_dates=200, n_cols=10)
+    baseline_columns = [f"col{i}" for i in range(10)]
+    passing = {"col0", "col1"}
+    real = placebo_module.make_placebo_series
+
+    def _fake(frame, source_column, seed):
+        if source_column not in passing:
+            return frame[source_column].rename(placebo_module.PLACEBO_COLUMN_NAME)
+        return real(frame, source_column, seed)
+
+    monkeypatch.setattr(placebo_module, "make_placebo_series", _fake)
+
+    screened = screen_draws(df, baseline_columns, n_draws=20, max_self_correlation=0.9)
+
+    assert len(screened) == 20
+    assert {c for c, _s, _r in screened} == passing
+    # Still one seed per pick, even across all that substitution.
+    seeds = [s for _c, s, _r in screened]
+    assert len(set(seeds)) == len(seeds)
+
+
+def test_assembly_stops_after_a_full_lap_with_nothing_passing(monkeypatch):
+    """The other half of an unbounded sequence: it has to terminate. A whole lap is one
+    presentation of every column, each at a fresh seed — if not one clears the screen, the
+    next lap offers the same columns again and the DATA is the problem. Counting CONSECUTIVE
+    failures rather than total ones is what stops a batch with a few permanently-unusable
+    columns (batch1 has five all-NaN LGA columns, skipped on every lap) from being refused a
+    bank it can supply — which the previous test covers."""
+    import experiments.pipeline.placebo as placebo_module
+
+    df = _diverse_fixture_df(n_dates=200, n_cols=4)
+    baseline_columns = [f"col{i}" for i in range(4)]
+
+    def _always_no_op(frame, source_column, seed):
+        return frame[source_column].rename(placebo_module.PLACEBO_COLUMN_NAME)
+
+    monkeypatch.setattr(placebo_module, "make_placebo_series", _always_no_op)
+
+    with pytest.raises(ValueError, match=r"a full pass over all 4 baseline columns"):
+        screen_draws(df, baseline_columns, n_draws=2, max_self_correlation=0.9)
+
+
+def test_candidate_sequence_is_unbounded():
+    """`candidate_pool` is the finite, readable VIEW of the sequence; the screener consumes
+    the sequence itself, so it must not terminate on its own."""
+    import itertools
+
+    baseline_columns = [f"col{i}" for i in range(4)]
+    picks = list(itertools.islice(candidate_sequence(baseline_columns, 2), 500))
+    assert len(picks) == 500
+    seeds = [s for _c, s in picks]
+    assert len(set(seeds)) == 500, "a seed repeated deep into the sequence"
 
 
 def test_screen_draw_groups_refuses_an_arity_wider_than_the_column_list():

@@ -500,6 +500,32 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     floor_arity = int(noise_floor.get("n_placebo_columns", 1))
     run_columns = results.get("candidate", {}).get("columns") or []
     run_arity = len(run_columns)
+    # Checked BEFORE the floor-vs-run comparison below, and deliberately not gated on
+    # `check_fingerprint`: the cap is a property of the RUN's own width, not of whether this
+    # floor matches this run. Nested inside `run_arity > floor_arity` it would be bypassed by
+    # any floor whose own arity is already >= the run's — a pre-fps-3jj.21 wide floor, or one
+    # hand-built — which is exactly the case where a meaningless band already exists on disk
+    # and looks gradeable. `_batch_noise_summary`'s dummy results carry no candidate columns,
+    # so run_arity is 0 there and this is inert.
+    if run_arity > MAX_RULER_ARITY:
+        # No ruler can be built this wide, so there is no remediation to spell out — see
+        # placebo.MAX_RULER_ARITY. Still NOT a rejection: the run itself completed and
+        # graded fine, and it becomes a real measurement once fps-3jj.22 gives the
+        # construction placebo sources from outside the lock.
+        return {
+            "available": False,
+            "reason_code": NOISE_BAND_REFUSAL_ARITY,
+            "reason": f"this candidate adds {run_arity} columns "
+            f"({', '.join(map(str, run_columns))}), above MAX_RULER_ARITY "
+            f"({MAX_RULER_ARITY}) — no meaningful noise band exists at that width. A draw "
+            f"needs {run_arity} distinct source columns, so at this arity every pair of "
+            "draws is forced to overlap heavily, their deltas stop being independent "
+            "samples of the null, and the band's std understates the true spread — a bar "
+            "that is too EASY. Computing one anyway would produce a number, not a ruler. "
+            "This needs placebo sources from outside the lock: bd fps-3jj.22. This run is "
+            "NOT rejected and must not be written up as such — it completed and graded "
+            "fine. Leave it in the dossier queue (write no README.md, no ledger entry).",
+        }
     if check_fingerprint and run_arity > floor_arity:
         # The remediation below is spelled out as TWO steps on purpose. This function reads
         # only NOISE_FLOOR_FILENAME, and nothing anywhere reads an arity-suffixed side-file,
@@ -507,25 +533,6 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # this message said "then point this batch's ruler at it", which named no mechanism
         # because there is no selector to name. Promotion is a rename, and the rename has to
         # be in the message: it is the whole remediation, not a detail of it.
-        if run_arity > MAX_RULER_ARITY:
-            # No ruler can be built this wide, so there is no remediation to spell out — see
-            # placebo.MAX_RULER_ARITY. Still NOT a rejection: the run itself completed and
-            # graded fine, and it becomes a real measurement once fps-3jj.22 gives the
-            # construction placebo sources from outside the lock.
-            return {
-                "available": False,
-                "reason_code": NOISE_BAND_REFUSAL_ARITY,
-                "reason": f"this candidate adds {run_arity} columns "
-                f"({', '.join(map(str, run_columns))}), above MAX_RULER_ARITY "
-                f"({MAX_RULER_ARITY}) — no meaningful noise band exists at that width. A draw "
-                f"needs {run_arity} distinct source columns, so at this arity every pair of "
-                "draws is forced to overlap heavily, their deltas stop being independent "
-                "samples of the null, and the band's std understates the true spread — a bar "
-                "that is too EASY. Computing one anyway would produce a number, not a ruler. "
-                "This needs placebo sources from outside the lock: bd fps-3jj.22. This run is "
-                "NOT rejected and must not be written up as such — it completed and graded "
-                "fine. Leave it in the dossier queue (write no README.md, no ledger entry).",
-            }
         # The draw count is no longer forced by arity (fps-3jj.21), so the wider floor is
         # computed at the SAME n_draws as the ruler it replaces — which is also what keeps the
         # two comparable, the thing fps-3jj.14's arity comparison needed and could not have.
