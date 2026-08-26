@@ -197,7 +197,8 @@ write-up rests on is quoted above. (`texture_channel.py` reads `reuse_channel.cs
 
 `measure_independence.py` prototypes the proposed construction as `deck_picks`/`deck_draws`
 rather than importing it, so the measurement that justified the change stays runnable against
-the pre-change code.
+the code it was arguing about. `placebo` ships that shape as `candidate_sequence`; the
+prototype is deliberately not refactored to call it.
 
 ## Followups
 

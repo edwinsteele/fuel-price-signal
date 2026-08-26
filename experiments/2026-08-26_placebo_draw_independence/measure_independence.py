@@ -69,14 +69,19 @@ def texture_family(column: str) -> str:
 
 
 def deck_picks(columns: list[str], n_picks: int) -> list[str]:
-    """`n_picks` source columns from an UNBOUNDED extension of `placebo.candidate_pool`.
+    """`n_picks` source columns from an UNBOUNDED extension of the OLD `candidate_pool`.
 
-    `candidate_pool` today returns exactly `len(columns)` entries: `select_draws`'s even
+    Written against the pre-fps-3jj.21 code, and deliberately kept that way: this is the
+    prototype whose measurement justified the change, so it must stay runnable against what
+    it was arguing about rather than importing the thing it proposed. `placebo` now ships
+    this shape as `candidate_sequence`.
+
+    The old `candidate_pool` returned exactly `len(columns)` entries: `select_draws`'s even
     spread (the primaries) followed by every remaining column in natural order (the fallback
     tail). Together that is one LAP — a permutation of the whole column list. This extends it
     by appending further laps, each the natural order rotated one position further, so a lap
     boundary does not reproduce the previous lap's adjacency. For `n_picks <= len(columns)`
-    it is `candidate_pool` byte for byte.
+    it is that old `candidate_pool` byte for byte.
     """
     n_cols = len(columns)
     # `select_draws`'s own even spread, inlined so the prototype is not blocked by that
