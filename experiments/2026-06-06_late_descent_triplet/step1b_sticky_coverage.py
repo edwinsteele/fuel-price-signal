@@ -81,7 +81,7 @@ print(f"LGAs with 5+ sticky stations at >{T}c: "
       f"{(per_lga['n_sticky'] >= 5).sum()} of {len(per_lga)}")
 
 # --- 5. Per-LGA at relaxed thresholds (would more sticky stations be available?) ---
-print(f"\n=== Per-LGA coverage at relaxed thresholds ===")
+print("\n=== Per-LGA coverage at relaxed thresholds ===")
 print(f"{'LGA':<25}  {'>10c':>5}  {'>7c':>5}  {'>5c':>5}  {'>2c':>5}  {'total':>6}")
 for lga, row in per_lga.iterrows():
     lga_stations = mapped[mapped["lga"] == lga]

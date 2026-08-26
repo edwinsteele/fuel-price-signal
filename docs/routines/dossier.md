@@ -129,17 +129,26 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      **Also print the bar in c/L, not only the percentile and z** (`fps-3jj.21`). A z against a
      z-threshold says whether this candidate cleared; it says nothing about how strict the
      ruler that judged it was, so two runs graded by different-shaped floors read identically.
-     Three fields make that legible and all three belong in the write-up:
+     Four fields make that legible and all four belong in the write-up:
      - `single_candidate_bar_cpl_held` — the threshold in the units the rest of the project
        quotes, comparable against `experiments/results.csv`'s 0.03–0.26 c/L history and against
        a batch-mate. It is the **favourable side only**; a candidate can also be surprisingly
        BAD, so judge the two-sided question on `abs(candidate_z_vs_band)` against
        `single_candidate_z_threshold`, never on this number alone.
      - `bar_draw_count_shift_cpl_held` — how much of that bar is band THINNESS rather than band
-       WIDTH (the `df = n_draws - 1` t-penalty), quoted against the large-sample limit. Signed
-       on the same scale as the bar, so a larger penalty is a more negative number. Print it
-       whenever it is a material fraction of the bar: two thirds of batch1's k=1 → k=3 bar move
-       was this, not the arity effect it was being read as.
+       WIDTH (the `df = n_draws - 1` t-penalty), quoted against the large-sample limit and
+       computed on the NOMINAL draw count. Signed on the same scale as the bar, so a larger
+       penalty is a more negative number. Print it whenever it is a material fraction of the
+       bar: two thirds of batch1's k=1 → k=3 bar move was this, not the arity effect it was
+       being read as.
+     - `bar_reuse_shift_cpl_held` — the REST of the bar's hardening: how much comes from the
+       bank's draws reusing source columns and so being worth less than their count. **Print it
+       alongside the thinness shift, never instead of it, and never omit it** — on a wide
+       candidate it is the larger of the two by an order of magnitude. On batch1's band a
+       35-column candidate splits −0.0127 thinness against **−0.1345** reuse, so quoting only
+       the thinness figure would explain 9% of why the bar moved from −0.152 to −0.287 and
+       silently attribute the other 91% to nothing. The two sum to the whole distance between
+       the large-sample bar and the one applied; a reuse-free bank reads 0.0.
      - `floor_arity_excess` — how many columns wider the ruler is than the run, the magnitude
        behind the `floor_arity_exceeds_run` flag above. If `facts["decision_flips"]["computed"]` is `true` (arity 2+
      and the noise-band call isn't a clean reject — `experiments/pipeline/dossier_tables.py`'s
@@ -187,36 +196,26 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      - `status == "graded"` — the pipeline's own name for "ran to completion and reached the
        scoring stages" (`runner.py`'s outcome taxonomy comment; it says nothing yet about the
        claim's merit) — apply the **rejected-vs-inconclusive split**:
-       - `facts["noise_band"]["reason_code"]` is **either** `"floor_arity_below_run"` **or**
-         `"run_arity_above_cap"` → **STOP. Do not write a README.md, do not write a ledger
-         entry, do not pick an outcome for this run at all.** Both are unavailabilities that are
-         NOT about the candidate: the run completed and graded fine (`fps-3jj.14`,
-         `fps-3jj.21`). Falling through to the `rejected` rule below would stamp DEAD GROUND —
-         what the next generator reads as "don't re-propose this" — onto a claim nothing has
-         measured, which is precisely the harm `fps-3jj.17` exists to prevent. Writing no
-         README.md is deliberate and load-bearing: `find_pending_runs` keys the queue on
-         "results.json present, README.md absent", so staying silent leaves the run to be picked
-         up on a later night. Check this BEFORE the `available` test below — both set
-         `available: false` too, so ordering is what keeps them out of the `rejected` branch.
+       - `facts["noise_band"]["reason_code"] == "floor_arity_below_run"` → **STOP. Do not write
+         a README.md, do not write a ledger entry, do not pick an outcome for this run at all.**
+         Report that this batch needs a wider-arity ruler (quote the `reason`, which carries the
+         exact two commands) and move on to the next pending run. This is the one unavailability
+         that is NOT about the candidate: the run completed and graded fine, and it becomes a real
+         measurement the moment a floor with enough columns exists (`fps-3jj.14`). Falling through
+         to the `rejected` rule below would stamp DEAD GROUND — what the next generator reads as
+         "don't re-propose this" — onto a claim nothing has measured, which is precisely the harm
+         `fps-3jj.17` exists to prevent. Writing no README.md is deliberate and load-bearing:
+         `find_pending_runs` keys the queue on "results.json present, README.md absent", so
+         staying silent leaves the run to be picked up correctly on a later night. Check this
+         BEFORE the `available` test below — the arity case sets `available: false` too, so
+         ordering is what keeps it out of the `rejected` branch.
 
-         **The two need DIFFERENT reports, which is why they carry different codes** (added
-         `fps-3jj.21`; before that they shared one, and the shared branch told the routine to do
-         something the second case makes impossible):
+         (There was briefly a second arity code, `run_arity_above_cap`, for a candidate wider
+         than the ruler could grade. **Retired in `fps-3jj.25`** — reuse is priced into the
+         threshold now rather than capped, so a wide candidate gets a wider bar instead of no
+         verdict and an unbounded nightly re-pick. If you ever see that code, the run predates
+         the change; treat it exactly like the case above.)
 
-         - `"floor_arity_below_run"` — **fixable tonight.** The batch needs a wider-arity ruler
-           and one can be built. Quote the `reason`; it carries the exact two commands (compute
-           beside, then promote by rename). Expect the run to grade on a later night once
-           someone runs them.
-         - `"run_arity_above_cap"` — **not fixable, by anyone, yet.** The candidate is wider
-           than `placebo.MAX_RULER_ARITY`, so no meaningful band exists at that width and the
-           `reason` deliberately carries **no commands**. Do not invent a remediation and do not
-           suggest computing a wider floor — `screen_draw_groups` refuses to build one. Report
-           that the candidate's arity is above what this instrument can grade, name bd
-           `fps-3jj.22` (placebo sources from outside the lock) and bd `fps-3jj.23` (the cap is
-           provisional on it), and move on. **Say plainly in your report that this run will be
-           re-picked every night until one of those lands** — unlike the case above, silence
-           here is an unbounded loop rather than a wait for a known fix, and the owner should
-           hear about it the first time rather than the tenth.
        - `facts["noise_band"]["available"]` is `false` (any other reason) → `outcome: rejected`. No
          noise floor means no ruler to grade "below the instrument's resolution" against, so there
          is nothing to call inconclusive — same as before this rule existed. Note the unavailability
@@ -239,6 +238,14 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          gate, which needs the whole batch dossiered and exists to answer a different question —
          "is any candidate surprising after correcting for picking the best of N", the retrospective
          routine's job, not this one's):
+
+         **`single_candidate_z_threshold` is the authoritative `t`.** A
+         `single_candidate_z_threshold_nominal` sits beside it in the same object and exists only
+         so the bar's thinness and reuse components can be reported separately (see the
+         noise-floor fields above). **Never grade against the nominal one** — it ignores the
+         reuse correction and is therefore too easy, which is the whole bias this machinery
+         removes.
+
          - `z >= t` → `outcome: rejected`. `delta_cpl_held` is clearly the WRONG SIGN by more than
            this batch's own noise band — measurably worse than a placebo column, not merely
            unresolved.

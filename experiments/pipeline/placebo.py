@@ -218,62 +218,71 @@ PLACEBO_BLOCK_SEED_POOL: tuple[int, ...] = (
 # unambiguously which half of the supply it came from.
 PLACEBO_SEED_EXTENSION_BASE = 1_000_000
 
-# The largest candidate arity this construction can build a MEANINGFUL band for (fps-3jj.21).
+# Texture's share of a placebo draw's delta variance — the correlation two draws inherit purely
+# from being built on the SAME source column (they share that column's values, NaN pattern and
+# autocorrelation exactly; only the dates move). This is what makes a bank of reused columns
+# worth fewer draws than it has, and `effective_n_draws` below turns it into a number.
 #
-# Not a pool limit — since `block_seed` and `candidate_sequence` are both unbounded, a bank of
-# any arity is now computable. It is a MEASURED limit, and it binds for a reason no sampling
-# rule can remove: a draw needs `arity` distinct columns out of the ~49 usable ones, so as
-# arity rises, draws are forced to overlap, and two draws sharing a source column share that
-# column's TEXTURE exactly (same values, same NaN pattern, only re-dated). Shared texture
-# correlates their deltas, which shrinks the band's sample std and makes the bar too EASY —
-# the bias direction fps-3jj.14 exists to remove.
+# **A BOUND, not a measurement, and deliberately the pessimistic end of it.** Measured on
+# batch1 (`experiments/2026-08-26_placebo_draw_independence/`) by one-way ANOVA of the committed
+# 20-draw floor's deltas grouped by texture family: F(3,16) = 0.411, p = 0.75, point estimate
+# ~0 — but the design could not resolve anything below 0.359, so "we saw nothing" only rules out
+# values above ~0.36. Using the 95% upper bound rather than the point estimate makes every bar
+# slightly HARDER than it probably needs to be, which is the safe direction: the failure this
+# whole mechanism exists to prevent is a band too NARROW and a bar too easy.
 #
-# Measured on batch1 (`experiments/2026-08-26_placebo_draw_independence/`): texture's share of
-# delta variance (the intraclass correlation of the committed 20-draw floor's deltas grouped
-# by texture family) could not be resolved below 0.359 and is bounded at <= 0.391. Carrying
-# that pessimistic bound through the reuse exposure of a 20-draw bank:
-#
-#     arity   picks   draw pairs sharing a column   effective draws @ ICC 0.391
-#       1        20               0%                        20.00
-#       2        40               0%                        20.00
-#       3        60             5.8%                        13.99      <- the cap
-#       4        80            16.3%                         9.04
-#       5       100            27.9%                         6.51
-#       6       120            48.9%                         4.31
-#
-# **3, not 4 — and the first answer here was 4, on a comparison that does not survive being
-# symmetrised (review of PR #335).** The cap was originally set by asking which arity still
-# beats "today's ruler", scored at 8.33 effective draws by charging its one seed-collision
-# pair rho = 1.0. But that 1.0 is a DELTA correlation guessed from a placebo-COLUMN correlation
-# of 0.965, while the 0.391 on the other side of the same inequality is a measured delta-space
-# bound. Two different quantities across one comparison, and the cap turned entirely on the
-# 0.7-effective-draw gap between them. Score both sides alike, or against the ruler that
-# actually exists after this change, and 4 stops clearing:
-#
-#     baseline for "the ruler we already accept"                 n_eff   arity 4 clears?
-#     collision pair charged rho = 1.0   (the original framing)   8.33   yes
-#     collision pair charged rho = 0.391 (symmetrised)            9.27   NO
-#     post-fix 10x3 bank (no reuse, no collision possible)       10.00   NO
-#
-# Arity 3 (13.99) clears all three; arity 4 clears only the most flattering one, and that one
-# scores a construction this change deletes. So 3.
-#
-# **This is a PROVISIONAL setting and the cost of being wrong is asymmetric.** Too low costs a
-# gradeable candidate shape and is reversible by editing this one constant; too high silently
-# biases a verdict INTO `experiments/ledger.yaml` as a finding. This module's own rule is that
-# a band which does not mean anything is worse than a refusal, so the conservative side wins
-# while the input is a bound rather than a number. It also means the ruler is now NARROWER than
-# `docs/routines/generator.md`'s historical "2-4 columns" invitation, which has been corrected
-# to 1-3 rather than left to disagree with the instrument.
-#
-# The bound is the thing to attack, not this constant: bd `fps-3jj.23` (P1, ~2.3h) measures the
-# texture ICC directly with a same-column floor. At the point estimate (ICC ~ 0) every arity in
-# the table sits at 20.00 and the cap could rise; near the bound it is right where it is.
-#
-# Above the cap the answer is not a better sampler — two 35-column draws out of 49 columns must
-# overlap in at least 21 of them, by pigeonhole. It needs placebo sources from OUTSIDE the
-# lock, which is bd `fps-3jj.22`, not this constant.
-MAX_RULER_ARITY = 3
+# bd `fps-3jj.23` (P1, ~2.3h) measures it directly with a same-column floor. When that lands,
+# replace this constant with the measured value and every bar tightens accordingly.
+TEXTURE_ICC_BOUND = 0.391
+
+
+def effective_n_draws(
+    draws: list[list[tuple[str, int, float]]], icc: float = TEXTURE_ICC_BOUND
+) -> float:
+    """How many INDEPENDENT draws a bank is worth, given that draws may share source columns.
+
+    A band's standard deviation is only as good as the independence of the draws behind it, and
+    `candidate_sequence` reuses source columns once a bank needs more picks than there are
+    columns (fps-3jj.21). Two draws sharing a column share that column's TEXTURE exactly, so
+    their deltas are correlated and the bank carries less information than its draw count
+    suggests. This converts that into the number the threshold actually needs.
+
+    **This is what replaced the arity CAP (fps-3jj.25).** The cap refused to build a band above
+    a fixed arity, which meant the instrument dictated what shape of candidate the generator was
+    allowed to propose — a constraint the owner has rejected twice, and rightly: constraining
+    candidate shape to suit the ruler distorts the thing being measured. A correction is
+    strictly better than a refusal here, because the degradation is gradual and can simply be
+    priced in. `family_wise_z_threshold` takes this in place of the nominal draw count, so a
+    wider candidate automatically gets a wider, harder bar instead of being turned away.
+
+    Two draws sharing `s` of `arity` columns are charged `icc * s / arity`, not the full `icc`.
+    The fraction matters and the binary version is badly wrong: charging any overlap the full
+    ICC put a 20-draw arity-10 bank at 2.4 effective draws, which is what made a cap look
+    necessary. Scaled by share it is 9.04, and the bar degrades gently enough that no cap is
+    needed at all — arity 35 lands at 3.23 effective draws and a -0.287 c/L single-candidate bar
+    against arity 1's -0.152, where the pre-fps-3jj.21 construction could not produce a band
+    above arity 17 at any price.
+
+    Computed from the ACTUAL bank rather than from a model of it: `screen_draw_groups` may
+    substitute a column that fails the self-correlation screen, so which draws really overlap is
+    a property of the bank that got built, not of `n_draws` and `arity`.
+
+    Returns the nominal count exactly when no two draws share a column, so a bank small enough
+    to need no reuse (any arity where `n_draws * arity <= n_columns`) is unaffected — arity 1
+    and 2 at 20 draws included.
+    """
+    if not draws:
+        raise ValueError("cannot compute effective draws for an empty bank")
+    n = len(draws)
+    if n < 2:
+        return float(n)
+    columns = [{col for col, _seed, _corr in draw} for draw in draws]
+    pair_rhos = [
+        icc * len(a & b) / max(len(a), 1)
+        for a, b in itertools.combinations(columns, 2)
+    ]
+    rho_bar = sum(pair_rhos) / len(pair_rhos)
+    return n / (1.0 + (n - 1) * rho_bar)
 
 
 def block_seed(index: int) -> int:
@@ -480,7 +489,8 @@ def candidate_sequence(
       column under DIFFERENT seeds are about as uncorrelated as two built from different
       columns (measured on batch1: median 0.038 against 0.015, both far under the 0.6 the
       screen already tolerates on a placebo's correlation to its own source). The residual
-      cost is real but bounded, and `MAX_RULER_ARITY` is where it stops being affordable.
+      cost is real, bounded, and PRICED IN rather than capped: `effective_n_draws` turns
+      the resulting overlap into the draw count the threshold actually uses.
     - **Seeds come off a flat counter that never restarts**, where the fallback tail used to
       restart the cycle at index 0. That restart is what put batch1's substituted draw 10 on
       draw 1's own seeds — see `block_seed` for why a shared seed is the one thing that
@@ -682,34 +692,25 @@ def screen_draw_groups(
       with arity for a reason that had nothing to do with arity. Two thirds of the k=1 -> k=3
       bar move measured in `experiments/2026-08-23_placebo_arity/` was draw count, not the
       arity effect it was attributed to. Both pools are unbounded now, so the draw count is a
-      free parameter again — pick it for the certainty wanted and pay the compute. What binds
-      instead is `MAX_RULER_ARITY`, and it binds on ARITY alone.
+      free parameter again — pick it for the certainty wanted and pay the compute. Arity is
+      not capped either: reuse is priced by `effective_n_draws`, so a wider candidate gets a
+      wider, harder bar rather than being turned away (fps-3jj.25).
 
     What is guaranteed is DISTINCT SOURCE COLUMNS WITHIN A DRAW, and a distinct block seed
     for every column in the whole bank. Distinctness ACROSS draws is deliberately not
-    guaranteed — see `candidate_pool` for the measurement behind that, and `MAX_RULER_ARITY`
-    for where the cost of the resulting reuse stops being affordable.
+    guaranteed — see `candidate_sequence` for the measurement behind that, and
+    `effective_n_draws` for how the resulting overlap is priced into the bar.
 
-    Raises ValueError above `MAX_RULER_ARITY`. That refusal is not a pool running out — every
-    pool here is unbounded now — it is the point past which draws are forced to overlap so
-    heavily that their deltas can no longer be treated as independent samples of the null, so
-    the band's std would understate the true spread and the bar would come out too easy. A
-    band is still COMPUTABLE above it; it would just not mean anything, which is worse than
-    refusing.
+    **No arity cap** (fps-3jj.25). An earlier revision refused above a `MAX_RULER_ARITY`
+    constant, which made the instrument dictate what shape of candidate the generator was
+    allowed to propose — a constraint the owner has rejected twice, and rightly: constraining
+    candidate shape to suit the ruler distorts the thing being measured. Reuse degrades a bank
+    GRADUALLY, so it can be priced rather than forbidden, and pricing it is strictly more
+    informative than a refusal. The only arity limit left is physical: a draw needs `arity`
+    DISTINCT source columns, so it cannot exceed the baseline column count.
     """
     if arity < 1:
         raise ValueError(f"arity must be >= 1, got {arity}")
-    if arity > MAX_RULER_ARITY:
-        raise ValueError(
-            f"arity {arity} exceeds MAX_RULER_ARITY ({MAX_RULER_ARITY}) — a bank this wide "
-            f"cannot be built from {len(baseline_columns)} source columns without draws "
-            "overlapping so heavily that they stop being independent samples of the null "
-            "(two 35-column draws out of 49 columns must share at least 21 of them, by "
-            "pigeonhole). The band would still compute and would be too NARROW, i.e. the bar "
-            "too easy — the bias fps-3jj.14 exists to remove. Grading a candidate this wide "
-            "needs placebo sources from outside the lock: bd fps-3jj.22. Full working: "
-            "experiments/2026-08-26_placebo_draw_independence/."
-        )
     if arity > len(baseline_columns):
         raise ValueError(
             f"arity ({arity}) exceeds the baseline column count ({len(baseline_columns)}) — "

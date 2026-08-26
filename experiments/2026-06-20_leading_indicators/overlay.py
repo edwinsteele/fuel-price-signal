@@ -1,8 +1,11 @@
 import sqlite3
-import pandas as pd
+
 import matplotlib
+import pandas as pd
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 from fuel_signal.config import SYDNEY_METRO_COUNCILS
 
 HERE = "experiments/2026-06-20_leading_indicators"

@@ -68,7 +68,7 @@ from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
 from experiments.lib.flips import summarise_flips
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
-from experiments.pipeline.placebo import MAX_RULER_ARITY
+from experiments.pipeline.placebo import TEXTURE_ICC_BOUND, effective_n_draws
 from experiments.pipeline.runner import (
     BASELINE_ARM,
     CANDIDATE_ARM,
@@ -108,15 +108,14 @@ NULL_METHOD_PLACEBO_COLUMN = "placebo_column"
 #: harm fps-3jj.17 exists to prevent. See dossier.md Step 1.4's arity carve-out.
 NOISE_BAND_REFUSAL_ARITY = "floor_arity_below_run"
 
-#: The OTHER arity refusal, and it needs its own code (review of PR #335). It shares
-#: `NOISE_BAND_REFUSAL_ARITY`'s "not the candidate's fault, leave it in the queue" handling but
-#: nothing else: `floor_arity_below_run` is literally false here — the floor's arity is
-#: irrelevant, and this fires even against a floor WIDER than the run. The two also want
-#: opposite instructions. `floor_arity_below_run` carries two commands and is fixed by running
-#: them; this one carries none, because no ruler can be built this wide at all
-#: (`placebo.MAX_RULER_ARITY`), so a routine told to "build a wider ruler" would be following an
-#: instruction it cannot satisfy. `docs/routines/dossier.md` Step 1.4 branches on both.
-NOISE_BAND_REFUSAL_ARITY_CAP = "run_arity_above_cap"
+#: RETIRED (fps-3jj.25). There was briefly a second arity refusal, `run_arity_above_cap`, for a
+#: candidate wider than a `placebo.MAX_RULER_ARITY` constant. Both are gone: the cap made the
+#: instrument dictate what shape of candidate the generator could propose, and reuse turned out
+#: to degrade a bank gradually enough to PRICE (`placebo.effective_n_draws` feeding
+#: `family_wise_z_threshold`) rather than forbid. A wide candidate now gets a wider, harder bar
+#: instead of no verdict and an unbounded nightly re-pick. Named here so a stale `facts.json`
+#: carrying the code is still recognisable, and so the removal is not rediscovered as a gap.
+RETIRED_NOISE_BAND_REFUSAL_ARITY_CAP = "run_arity_above_cap"
 FROZEN_FEATURES_FILENAME = "features.parquet"
 
 SEED_STD_FLAG_RATIO = 5.0
@@ -136,7 +135,7 @@ FAMILY_WISE_ALPHA = 0.05
 _LARGE_SAMPLE_Z = float(_norm_dist.ppf(1.0 - FAMILY_WISE_ALPHA))
 
 
-def family_wise_z_threshold(n_candidates: int, n_draws: int, alpha: float = FAMILY_WISE_ALPHA) -> float:
+def family_wise_z_threshold(n_candidates: int, n_draws: float, alpha: float = FAMILY_WISE_ALPHA) -> float:
     """A Bonferroni-corrected, ONE-TAILED t-critical value, in band-standard-deviation units, that
     `_noise_band`'s `candidate_z_vs_band` must clear (in magnitude) to count as distinguishable
     from the noise band rather than a draw from it.
@@ -148,6 +147,16 @@ def family_wise_z_threshold(n_candidates: int, n_draws: int, alpha: float = FAMI
     `family_wise_z_gate` (n_candidates = the whole batch) is a separate, larger call to this same
     function, for a different question (did any candidate clear the bar at the BATCH level,
     correcting for picking the best of N) — see its docstring there.
+
+    **`n_draws` is the EFFECTIVE draw count, which may be fractional** (`fps-3jj.25`). A bank
+    whose draws reuse source columns carries less information than its nominal count, because two
+    draws built on one column share that column's texture exactly; `placebo.effective_n_draws`
+    prices that. Passing the nominal count would make the threshold act as though the band were
+    better estimated than it is — a bar too EASY, the bias this whole mechanism exists to remove.
+    Feeding the effective count instead is what lets a candidate of ANY arity be graded rather
+    than refused: a wider candidate reuses more, so its band is worth fewer draws, so its bar is
+    automatically wider. `scipy.stats.t.ppf` accepts a non-integer `df`, so no rounding is needed
+    and none should be added — rounding down would be a silent extra penalty.
 
     Uses the t distribution, not the normal, because `band_std_delta_cpl_held` is ESTIMATED from
     `n_draws` placebo draws, not known — `df = n_draws - 1`. The `sqrt(1 + 1/n_draws)` factor is a
@@ -415,6 +424,59 @@ def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
     return {"pit_test": pit_test, "inputs_check": inputs_check, "candidate_column_nan_rate": nan_rates}
 
 
+def _resolve_effective_n_draws(noise_floor: dict, *, nominal: int) -> float:
+    """The band's EFFECTIVE draw count — stamped if present, RECONSTRUCTED if not.
+
+    `compute_noise_floor` stamps `effective_n_draws` from `fps-3jj.25` onward. Older floors do
+    not carry it, and the first version of this fallback simply used the nominal count on the
+    reasoning that such floors "predate column reuse entirely, so nominal IS effective".
+
+    **That reasoning was wrong for a real window** (review of PR #336). `fps-3jj.21` landed the
+    unbounded, reuse-capable `candidate_sequence` one PR BEFORE the stamp existed, so any floor
+    built from main in between can contain genuine reuse and no stamp — e.g. 20 draws at arity 3
+    is 60 picks from ~49 usable columns, worth ~17.5 effective draws, and would have been graded
+    at 20. Silent, and in the too-easy direction: exactly the bias this machinery exists to
+    remove.
+
+    So reconstruct rather than assume. A floor records `placebo_draws` (one entry per placebo
+    COLUMN, with its `source_column`) and `n_placebo_columns`, which is enough to rebuild the
+    bank's overlap structure exactly and re-price it. Only a floor missing `placebo_draws`
+    altogether falls back to nominal, and that is genuinely safe: no such floor could have been
+    written by any construction that reuses columns.
+    """
+    stamped = noise_floor.get("effective_n_draws")
+    if stamped:
+        return float(stamped)
+
+    members = noise_floor.get("placebo_draws") or []
+    arity = int(noise_floor.get("n_placebo_columns", 1) or 1)
+    if not members or arity < 1 or len(members) % arity:
+        return float(nominal)
+    # Group by the `draw` key when every member carries one (noise_floor.py has stamped it
+    # since fps-3jj.14), falling back to positional chunking otherwise — pre-fps-3jj.14 floors
+    # have no such key and are arity 1, where the two agree. Positional chunking alone is
+    # correct under every writer that exists, so this is belt-and-braces against a future one
+    # that emits members out of order rather than a fix for an observed defect.
+    if all("draw" in m for m in members):
+        grouped: dict[int, list[tuple[str, int, float]]] = {}
+        for m in members:
+            grouped.setdefault(int(m["draw"]), []).append(
+                (str(m.get("source_column")), int(m.get("block_seed", 0)), 0.0)
+            )
+        draws = [grouped[k] for k in sorted(grouped)]
+    else:
+        draws = [
+            [
+                (str(m.get("source_column")), int(m.get("block_seed", 0)), 0.0)
+                for m in members[i:i + arity]
+            ]
+            for i in range(0, len(members), arity)
+        ]
+    if not draws:
+        return float(nominal)
+    return effective_n_draws(draws)
+
+
 def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerprint: bool = True) -> dict:
     """`check_fingerprint=False` is for retrospective.py's `_batch_noise_summary`,
     which reuses this function's math to summarise a batch's floor on its own
@@ -510,41 +572,7 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     floor_arity = int(noise_floor.get("n_placebo_columns", 1))
     run_columns = results.get("candidate", {}).get("columns") or []
     run_arity = len(run_columns)
-    # Checked BEFORE the floor-vs-run comparison below, and deliberately not gated on
-    # `check_fingerprint`: the cap is a property of the RUN's own width, not of whether this
-    # floor matches this run. Nested inside `run_arity > floor_arity` it would be bypassed by
-    # any floor whose own arity is already >= the run's — a pre-fps-3jj.21 wide floor, or one
-    # hand-built — which is exactly the case where a meaningless band already exists on disk
-    # and looks gradeable. `_batch_noise_summary`'s dummy results carry no candidate columns,
-    # so run_arity is 0 there and this is inert.
-    if run_arity > MAX_RULER_ARITY:
-        # No ruler can be built this wide, so there is no remediation to spell out — see
-        # placebo.MAX_RULER_ARITY. Still NOT a rejection: the run itself completed and
-        # graded fine, and it becomes a real measurement once fps-3jj.22 gives the
-        # construction placebo sources from outside the lock.
-        return {
-            "available": False,
-            "reason_code": NOISE_BAND_REFUSAL_ARITY_CAP,
-            "reason": f"this candidate adds {run_arity} columns "
-            f"({', '.join(map(str, run_columns))}), above MAX_RULER_ARITY "
-            f"({MAX_RULER_ARITY}) — no meaningful noise band exists at that width. A draw "
-            f"needs {run_arity} distinct source columns, so at this arity every pair of "
-            "draws is forced to overlap heavily, their deltas stop being independent "
-            "samples of the null, and the band's std understates the true spread — a bar "
-            "that is too EASY. Computing one anyway would produce a number, not a ruler. "
-            "This needs placebo sources from outside the lock: bd fps-3jj.22, and the cap "
-            "itself is PROVISIONAL on bd fps-3jj.23 measuring the texture ICC directly. This "
-            "run is NOT rejected and must not be written up as such — it completed and "
-            "graded fine. Leave it in the dossier queue (write no README.md, no ledger "
-            "entry).",
-        }
     if check_fingerprint and run_arity > floor_arity:
-        # The remediation below is spelled out as TWO steps on purpose. This function reads
-        # only NOISE_FLOOR_FILENAME, and nothing anywhere reads an arity-suffixed side-file,
-        # so "compute a wider floor" alone does not unblock grading — the earlier revision of
-        # this message said "then point this batch's ruler at it", which named no mechanism
-        # because there is no selector to name. Promotion is a rename, and the rename has to
-        # be in the message: it is the whole remediation, not a detail of it.
         # The draw count is no longer forced by arity (fps-3jj.21), so the wider floor is
         # computed at the SAME n_draws as the ruler it replaces — which is also what keeps the
         # two comparable, the thing fps-3jj.14's arity comparison needed and could not have.
@@ -588,15 +616,32 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         return {"available": False, "reason": "empty noise-floor sample or unresolved effect_delta_cpl_held"}
     band_mean = float(np.mean(deltas))
     band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
-    band_estimable = bool(np.isfinite(band_std) and band_std > 0)
+    # fps-3jj.25: grade against the band's EFFECTIVE draw count, not its nominal one.
+    n_eff = _resolve_effective_n_draws(noise_floor, nominal=int(deltas.size))
+    band_std_usable = bool(np.isfinite(band_std) and band_std > 0)
+    band_estimable = bool(band_std_usable and n_eff >= 2)
     single_z = (
+        family_wise_z_threshold(n_candidates=1, n_draws=n_eff) if band_estimable else None
+    )
+    # Gated on the NOMINAL count, deliberately NOT on `band_estimable` (review of PR #336).
+    # `bar_draw_count_shift_cpl_held` below is a function of the nominal draw count alone and is
+    # documented as "a property of this floor alone" — routing it through `band_estimable` would
+    # let a REUSE condition (`n_eff >= 2`) null it out, re-coupling the two quantities this
+    # commit just separated. Latent rather than live today (rho_bar caps at TEXTURE_ICC_BOUND,
+    # so n_eff cannot fall under 2 at 20 draws), but a 5-draw fully-overlapping bank reaches
+    # n_eff 1.95 and would lose a thinness value its nominal 5 supports perfectly well.
+    single_z_nominal = (
         family_wise_z_threshold(n_candidates=1, n_draws=int(deltas.size))
-        if band_estimable
+        if band_std_usable and deltas.size >= 2
         else None
     )
     return {
         "available": True,
         "n_draws": int(deltas.size),
+        # What the bank is WORTH once source-column reuse is priced in — the number the
+        # thresholds above actually use. Equal to n_draws when no two draws share a column.
+        "effective_n_draws": n_eff,
+        "texture_icc_assumed": TEXTURE_ICC_BOUND,
         "n_placebo_columns": floor_arity,
         "candidate_n_columns": run_arity,
         # True when the ruler is WIDER-armed than the run it grades — allowed (it can only
@@ -618,6 +663,9 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # (docs/routines/dossier.md § Step 1.4, fps-3jj.17); None when band_std isn't estimable
         # (deltas.size < 2), same guard as candidate_z_vs_band itself.
         "single_candidate_z_threshold": single_z,
+        # The same threshold computed on the NOMINAL draw count — i.e. before the reuse
+        # correction. Emitted so the two components of the bar can be told apart below.
+        "single_candidate_z_threshold_nominal": single_z_nominal,
         # fps-3jj.21: the same bar in c/L rather than in band-std units — the form a reader can
         # actually compare against `experiments/results.csv`'s 0.03-0.26 c/L history and against
         # another candidate's. `delta_cpl_held` is a COST, so clearing the bar means coming in
@@ -637,14 +685,35 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # any finite-n threshold, so a LARGER penalty reads as a MORE NEGATIVE number. Named
         # "shift" rather than "penalty" for exactly that reason (review of PR #335): it is the
         # signed move of a cost, on the same scale and in the same direction as the bar itself,
-        # not a magnitude. The t-critical carries
+        # not a magnitude.
+        #
+        # Computed against the NOMINAL draw count on purpose (review of PR #336). Once
+        # `family_wise_z_threshold` took the EFFECTIVE count, deriving this from the effective
+        # threshold silently folded an arity-driven reuse effect into a number whose entire
+        # job is to separate draw thinness from everything else —
+        # `experiments/2026-08-23_placebo_arity/` used exactly this quantity to attribute two
+        # thirds of batch1's k=1 -> k=3 bar move to thinness rather than arity, and the
+        # conflated version would have credited reuse to "draw count". The reuse charge is
+        # emitted separately as `bar_reuse_shift_cpl_held`; the two sum to the full distance
+        # between the large-sample bar and the one actually applied. The t-critical carries
         # `df = n_draws - 1`, so a floor estimated from few draws sets a harder bar than the
         # same band estimated from many — and `experiments/2026-08-23_placebo_arity/` measured
         # two thirds of batch1's k=1 -> k=3 bar move as exactly this, not as the arity effect it
         # was being read as. Quoted against the large-sample limit (the band known rather than
         # estimated), so it is a property of this floor alone and comparable across floors.
         "bar_draw_count_shift_cpl_held": (
-            (_LARGE_SAMPLE_Z - single_z) * band_std if single_z is not None else None
+            (_LARGE_SAMPLE_Z - single_z_nominal) * band_std
+            if single_z_nominal is not None
+            else None
+        ),
+        # The rest of the distance: how much harder the bar is because the bank's draws REUSE
+        # source columns and so are worth less than their count (fps-3jj.25). Zero for a
+        # reuse-free bank. Kept separate from the thinness shift above so neither can absorb
+        # the other; together they span large-sample bar -> applied bar.
+        "bar_reuse_shift_cpl_held": (
+            (single_z_nominal - single_z) * band_std
+            if single_z is not None and single_z_nominal is not None
+            else None
         ),
         # Columns by which the ruler is WIDER-armed than the run it grades. Allowed (a wider
         # ruler can only raise the bar) but it means a candidate failing here has not been shown

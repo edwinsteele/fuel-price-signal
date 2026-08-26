@@ -303,7 +303,7 @@ def main() -> None:
     if shap_rows:
         pd.DataFrame(shap_rows).to_csv(OUT / "step2_shap_mean_abs.csv", index=False)
         pd.DataFrame(shap_corr_rows).to_csv(OUT / "step2_shap_corr.csv", index=False)
-        print(f"SHAP outputs: step2_shap_mean_abs.csv, step2_shap_corr.csv")
+        print("SHAP outputs: step2_shap_mean_abs.csv, step2_shap_corr.csv")
 
     # --- Aggregate: mean across seeds per (fold, run), then deltas vs baseline ---
     seed_mean = df_rows.groupby(["fold", "regime", "run"], as_index=False).agg(

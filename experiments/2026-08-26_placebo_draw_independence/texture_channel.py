@@ -22,19 +22,44 @@ harm regardless of what the ANOVA says.
 """
 from __future__ import annotations
 
+import itertools
 import json
+import math
 import pathlib
 
-import numpy as np
 import pandas as pd
 from scipy import stats
 
-from experiments.pipeline.placebo import MAX_RULER_ARITY
+from experiments.pipeline.placebo import TEXTURE_ICC_BOUND
 
 # Repo-relative, like every sibling experiment (`2026-08-22_placebo_block_sizing`,
 # `2026-08-23_placebo_arity`) — run from the repo root, as the README's commands do.
 # Its only input, `noise_floor_k1.json`, is tracked in git.
 BATCH = pathlib.Path("experiments/batches/batch1")
+
+
+def _shared_fraction_n_eff(n_draws: int, arity: int, icc: float, n_cols: int = 49) -> float:
+    """Effective draws charging each pair `icc * shared / arity`, mirroring
+    `placebo.effective_n_draws` — reproduced here rather than imported so this script keeps
+    measuring the model independently of the code that ships it."""
+    picks, lap = list(range(n_cols)), 1
+    while len(picks) < n_draws * arity + n_cols:
+        picks += [(i + lap) % n_cols for i in range(n_cols)]
+        lap += 1
+    bank, cur, used = [], [], set()
+    for c in picks:
+        if c in used:
+            continue
+        cur.append(c)
+        used.add(c)
+        if len(cur) == arity:
+            bank.append(set(cur))
+            cur, used = [], set()
+            if len(bank) == n_draws:
+                break
+    pairs = [icc * len(a & b) / arity for a, b in itertools.combinations(bank, 2)]
+    rho_bar = sum(pairs) / len(pairs) if pairs else 0.0
+    return n_draws / (1 + (n_draws - 1) * rho_bar)
 
 
 def texture_family(column: str) -> str:
@@ -118,28 +143,36 @@ def main() -> None:
         rows[arity] = n_eff(20, frac, rho_hi)
         print(f"  {arity:>5} {20*arity:>6} {frac:>13.1%} {20.0:>9.1f} {rows[arity]:>9.2f}")
 
-    # The cap is a COMPARISON, so what it compares against decides it. Print every defensible
-    # scoring of "the ruler we already accept" rather than the one that flatters the answer —
-    # the first version of this analysis charged the seed-collision pair rho = 1.0 (a DELTA
-    # correlation guessed from a placebo-COLUMN correlation of 0.965) while charging reuse the
-    # measured delta-space bound, and the cap turned entirely on that asymmetry.
-    print("\n=== what is the cap compared AGAINST? ===")
-    baselines = {
-        "collision pair charged rho=1.0 (flattering)": n_eff(10, 1 / 45, 1.0),
-        "collision pair charged rho=upper (symmetrised)": n_eff(10, 1 / 45, rho_hi),
-        "post-fix 10x3 bank (no reuse, no collision)": n_eff(10, exposure(10, 3), rho_hi),
-    }
-    for label, value in baselines.items():
-        clears = [a for a in sorted(rows) if rows[a] >= value]
-        print(f"  {label:<48} n_eff {value:5.2f}  -> arities clearing it: "
-              f"{max(clears) if clears else 'none'}")
-    cap = min(
-        max((a for a in sorted(rows) if rows[a] >= v), default=0) for v in baselines.values()
-    )
-    print(f"\n  Cap that clears EVERY baseline: {cap}")
-    print(f"  placebo.MAX_RULER_ARITY = {MAX_RULER_ARITY}")
-    if cap != MAX_RULER_ARITY:
-        print("  !! MISMATCH — re-derive MAX_RULER_ARITY or record why it differs.")
+    # fps-3jj.25 removed the arity CAP this section used to derive. Reuse is priced into the
+    # threshold instead, so what matters is no longer "which arity is still allowed" but "what
+    # does a bank at this width cost in effective draws, and therefore in c/L". Both charges are
+    # printed because the difference between them is why a cap ever looked necessary: charging
+    # any overlap the FULL icc put a 20-draw arity-10 bank at 2.4 effective draws, while
+    # charging the shared FRACTION — what `placebo.effective_n_draws` does — puts it at 9.04.
+    # Bars are a GRADING quantity, so they are quoted on the batch's live ruler
+    # (`noise_floor.json`), not on the k1 floor the ANOVA above needs for its 20 distinct-column
+    # draws. Quoting them on different bands would make two different numbers look like one.
+    grading = json.loads((BATCH / "noise_floor.json").read_text())
+    grade_deltas = pd.Series(grading["deltas_cpl_held"], dtype=float)
+    grade_mean, grade_std = float(grade_deltas.mean()), float(grade_deltas.std(ddof=1))
+    print("\n=== binary charge vs FRACTION charge (why the cap was an artefact) ===")
+    print(f"  bars quoted on the LIVE ruler: {grading.get('n_placebo_columns', 1)}-column band, "
+          f"mean {grade_mean:+.4f}, std {grade_std:.4f} c/L over {len(grade_deltas)} draws")
+    print(f"  {'arity':>5} {'n_eff binary':>13} {'n_eff fraction':>15} {'bar(1 cand)':>12}")
+    for arity in (1, 2, 3, 4, 5, 6, 10, 20, 35):
+        frac = exposure(20, arity)
+        binary = n_eff(20, frac, rho_hi)
+        shared = _shared_fraction_n_eff(20, arity, rho_hi)
+        bar = (
+            grade_mean - stats.t.ppf(0.95, df=shared - 1)
+            * math.sqrt(1 + 1 / shared) * grade_std
+            if shared >= 2 else float("nan")
+        )
+        print(f"  {arity:>5} {binary:>13.2f} {shared:>15.2f} {bar:>12.3f}")
+    print(f"\n  placebo.TEXTURE_ICC_BOUND = {TEXTURE_ICC_BOUND} (the value shipped)")
+    if abs(rho_hi - TEXTURE_ICC_BOUND) > 5e-4:
+        print(f"  !! MISMATCH — this run measures {rho_hi:.3f}; update TEXTURE_ICC_BOUND "
+              "or record why it differs.")
 
 
 if __name__ == "__main__":

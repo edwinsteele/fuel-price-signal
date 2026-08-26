@@ -574,6 +574,79 @@ def test_compute_retrospective_z_gate_end_to_end(tmp_path):
     assert payload["leaderboard"][0]["clears_family_wise_threshold"] is True
 
 
+def test_batch_gate_is_never_looser_than_the_single_candidate_bar():
+    """The invariant the nominal/effective mismatch actually violated, and a sharper statement
+    of it than the scenario tests below. A family-wise correction over N candidates exists to
+    make the bar STRICTER — it can never be easier than the uncorrected single-candidate bar.
+    Before PR #336's fix the batch gate was computed on NOMINAL draws while every per-run bar
+    used EFFECTIVE draws, so on a heavily-reusing bank the best-of-5 gate (2.602 at 20 nominal)
+    came out LOOSER than the no-correction bar (3.118 at 3.23 effective). Structurally
+    impossible, and only reachable by feeding the two different draw counts.
+
+    Asserted as an invariant rather than at one operating point, so any future change that
+    reintroduces a mismatch fails here regardless of which n it picks.
+    """
+    for n_draws in (2.5, 3.23, 5, 9.04, 17.49, 20, 50):
+        single = family_wise_z_threshold(1, n_draws)
+        for n_candidates in (2, 5, 10, 15):
+            assert family_wise_z_threshold(n_candidates, n_draws) > single
+
+
+def test_compute_retrospective_gate_uses_effective_draws_not_nominal(tmp_path):
+    """Review of PR #336, and the most consequential of its findings. `fps-3jj.25` redefined
+    `family_wise_z_threshold` to take the EFFECTIVE draw count, but `_batch_noise_summary`
+    forwarded only the nominal one — so every per-run bar in a batch used the effective count
+    while the BATCH-level gate used the nominal, and the two artifacts contradicted each other.
+    The one left too easy was the batch gate: the one that corrects for taking the best of N,
+    i.e. exactly the multiple-comparisons step this machinery exists for."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    band = {
+        "available": True,
+        "candidate_percentile_better_than_noise": 100.0,
+        "candidate_z_vs_band": -3.0,
+    }
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1", noise_band=band))
+    batch_dir = batches_dir / "batch1"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "noise_floor.json").write_text(
+        json.dumps({
+            "deltas_cpl_held": [0.0, 0.01, -0.01, 0.02, -0.02, 0.03, -0.03, 0.015],
+            "partial": False, "null_method": "placebo_column", "tank_params": TANK_1D,
+            "n_draws": 8,
+            # A heavily-reusing bank: worth far fewer draws than it has.
+            "effective_n_draws": 3.2,
+        })
+    )
+
+    payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+    assert payload["noise_floor"]["effective_n_draws"] == pytest.approx(3.2)
+    # Priced against 3.2 effective draws, NOT the 8 nominal ones.
+    assert payload["family_wise_z_threshold"] == pytest.approx(family_wise_z_threshold(1, 3.2))
+    assert payload["family_wise_z_threshold"] > family_wise_z_threshold(1, 8)
+
+
+def test_compute_retrospective_gate_falls_back_to_nominal_on_an_older_summary(tmp_path):
+    """A floor with no effective count still has to grade — falling back to nominal is the
+    same behaviour as before fps-3jj.25, not a new failure mode."""
+    candidates_root = tmp_path / "candidates"
+    batches_dir = tmp_path / "batches"
+    _write_dossier(candidates_root, "batch1", "cand", _facts("cand", batch="batch1"))
+    batch_dir = batches_dir / "batch1"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "noise_floor.json").write_text(
+        json.dumps({
+            "deltas_cpl_held": [0.0, 0.01, -0.01, 0.02, -0.02], "partial": False,
+            "null_method": "placebo_column", "tank_params": TANK_1D,
+        })
+    )
+
+    payload = compute_retrospective("batch1", batches_dir=batches_dir, candidates_root=candidates_root)
+
+    assert payload["family_wise_z_threshold"] == pytest.approx(family_wise_z_threshold(1, 5))
+
+
 def test_compute_retrospective_force_overwrites(tmp_path):
     candidates_root = tmp_path / "candidates"
     batches_dir = tmp_path / "batches"

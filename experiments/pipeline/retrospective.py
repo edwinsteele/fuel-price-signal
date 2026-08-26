@@ -183,6 +183,13 @@ def _batch_noise_summary(batch_dir: pathlib.Path) -> dict:
     return {
         "available": True,
         "n_draws": band["n_draws"],
+        # fps-3jj.25, forwarded because the BATCH gate below needs it. What the bank is worth
+        # once source-column reuse is priced in — `family_wise_z_threshold` takes the effective
+        # count, not the nominal one, and dropping it here left the batch-level bar computed at
+        # df = nominal - 1 while every per-run bar in the same batch used the effective count.
+        # The two artifacts then contradict each other, and the one left too easy is the
+        # BATCH-level gate: the one that corrects for taking the best of N.
+        "effective_n_draws": band["effective_n_draws"],
         # The arity this band measures (fps-3jj.14). Surfaced at batch level because the
         # leaderboard ranks candidates of DIFFERENT arities against this one band, and
         # whether that comparison is like-for-like is a fact about the ruler, not about any
@@ -456,7 +463,25 @@ def compute_retrospective(
     n_candidates = max(n_dossiered, 1)
     threshold = family_wise_percentile_threshold(n_candidates)
     noise_floor_summary = _batch_noise_summary(batch_dir)
-    n_draws = noise_floor_summary.get("n_draws") if noise_floor_summary.get("available") else None
+    # The EFFECTIVE draw count, not the nominal one (fps-3jj.25, fixed in review of PR #336).
+    # `family_wise_z_threshold`'s contract is that it takes effective draws; passing nominal
+    # here made the batch-level gate act as though the band were better estimated than it is —
+    # a bar too EASY, at precisely the step that corrects for taking the best of N.
+    #
+    # The invariant it violated, which is the cleanest statement of the defect: a family-wise
+    # correction over N candidates exists to make the bar STRICTER, so it can never come out
+    # easier than the uncorrected single-candidate bar. On a 20-draw arity-35 floor (n_eff
+    # 3.23) with 5 candidates the batch gate was 2.602 while the SINGLE-candidate bar was
+    # 3.118 — the corrected gate looser than the uncorrected one, which is only reachable by
+    # feeding the two paths different draw counts. Pinned as an invariant in
+    # tests/test_retrospective.py rather than at one operating point. (The window in which a
+    # candidate was actually mis-stamped is -3.118 < z <= -2.602; an earlier draft of this
+    # comment used z = -4.0, which clears both bars and demonstrates nothing.)
+    #
+    # Falls back to the nominal count only when the summary predates the field.
+    n_draws = None
+    if noise_floor_summary.get("available"):
+        n_draws = noise_floor_summary.get("effective_n_draws") or noise_floor_summary.get("n_draws")
     # family_wise_z_threshold needs n_draws >= 2 (a t-critical value needs >= 1 degree of
     # freedom) — the same condition dossier_tables._noise_band() already gates
     # candidate_z_vs_band on, so z_gate is None in exactly the cases where no row could have

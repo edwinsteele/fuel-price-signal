@@ -30,7 +30,6 @@ import json
 import pathlib
 import time
 
-import joblib
 import numpy as np
 import pandas as pd
 import shap
@@ -185,7 +184,7 @@ def main() -> None:
     parents = ["station_price_cents", "cycle_pct_through",
                "cycle_last_min_cents", "cycle_last_max_cents",
                "station_minus_last_min_cents", "station_minus_last_max_cents"]
-    print(f"\nEngineered feature + parents (mean|SHAP|):")
+    print("\nEngineered feature + parents (mean|SHAP|):")
     focus = merged[merged.feature.isin([NEW_COL] + parents)].sort_values(
         "mean_abs_shap_engineered", ascending=False
     )
