@@ -98,7 +98,11 @@ from experiments.pipeline.batch_freeze import (
     FROZEN_DB_FILENAME,
     check_baseline_contract,
 )
-from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME, NULL_METHOD_PLACEBO_COLUMN
+from experiments.pipeline.dossier_tables import (
+    NOISE_FLOOR_FILENAME,
+    NULL_METHOD_PLACEBO_COLUMN,
+    NULL_METHOD_PLACEBO_PINNED_COLUMN,
+)
 from experiments.pipeline.placebo import (
     DEFAULT_PLACEBO_ARITY,
     TEXTURE_ICC_BOUND,
@@ -106,6 +110,7 @@ from experiments.pipeline.placebo import (
     make_placebo_frame,
     placebo_column_names,
     screen_draw_groups,
+    screen_pinned_column_draws,
 )
 from experiments.pipeline.runner import (
     DEFAULT_INNER_FOLD_PARAMS,
@@ -218,6 +223,7 @@ def compute_noise_floor(
     station_codes: list[int] | None = None,
     tank: TankParams | None = None,
     out_name: str = NOISE_FLOOR_FILENAME,
+    same_source_columns: list[str] | None = None,
     force: bool = False,
     verbose: bool = True,
 ) -> dict:
@@ -259,6 +265,17 @@ def compute_noise_floor(
     1-day cadence (docs/CONVENTIONS.md, re-locked from 7d 2026-08-22, fps-oqz) — same
     default every other call in this pipeline resolves to when not overridden.
 
+    same_source_columns (fps-3jj.23): pin every draw's source column to this small list,
+    cycled round-robin, instead of spreading picks across the whole baseline. This is a
+    MEASUREMENT of the ruler, not a ruler — it deliberately builds a bank whose draws repeat
+    source columns so that grouping the deltas BY COLUMN isolates the texture component
+    `placebo.TEXTURE_ICC_BOUND` stands for (between-column variance is texture, within-column
+    is alignment). Because those repeats make the band narrower than a real one, the payload
+    is stamped `null_method: placebo_column_pinned_source`, which `dossier_tables._noise_band`
+    refuses outright — the diagnostic cannot be mistaken for a grading floor even if it is
+    written to `noise_floor.json`. Arity must be 1 (a draw needs `arity` DISTINCT columns), and
+    the pinned columns are stamped into the payload as `same_source_columns`.
+
     Reads the frozen batch's own features + baseline column contract (declared, never
     discovered — same `baseline_columns.json` every candidate run reads, fps-sa1) and its
     cloned DB, so this reproduces the exact fit + realised-backtest path a candidate run
@@ -284,6 +301,12 @@ def compute_noise_floor(
     batch_dir = pathlib.Path(batch_dir)
     if arity < 1:
         raise ValueError(f"arity must be >= 1, got {arity}")
+    if same_source_columns and arity != 1:
+        raise ValueError(
+            f"same_source_columns is incompatible with arity {arity} — a draw needs `arity` "
+            "DISTINCT source columns, so 'arity k, all from one column' does not exist. The "
+            "texture ICC is a property of ONE column's shape; measure it at arity 1."
+        )
     out_path = batch_dir / out_name
     if out_path.exists() and not force:
         raise FileExistsError(
@@ -306,10 +329,37 @@ def compute_noise_floor(
     # every offset); under block permutation all 49 usable batch0 columns pass, so that reason
     # never fires here. The tail is still used twice per batch0 run for the unrelated all-NaN
     # skip (two primaries land on all-NaN LGA columns) — see placebo.py's module docstring.
-    draws = screen_draw_groups(
-        frame, baseline_columns, n_draws, arity=arity, max_self_correlation=MAX_SELF_CORRELATION
-    )
+    if same_source_columns:
+        # A pinned bank NEVER substitutes a different column on a screen failure (unlike the
+        # path below, which must). Substitution here would quietly convert a same-column pair
+        # into a different-column pair and bias the measured ICC toward zero — the direction
+        # that reads "no problem" — so `screen_pinned_column_draws` retries at fresh seeds and
+        # then raises. See its docstring.
+        unknown = [c for c in same_source_columns if c not in baseline_columns]
+        if unknown:
+            raise ValueError(
+                f"same_source_columns not in this batch's baseline contract: {unknown}. The "
+                "ICC being measured is the one `effective_n_draws` charges for reuse of a "
+                "BASELINE column, so the pinned columns must come from that same declared list "
+                f"({BASELINE_COLUMNS_FILENAME}), not from the frame at large."
+            )
+        draws = screen_pinned_column_draws(
+            frame, same_source_columns, n_draws, max_self_correlation=MAX_SELF_CORRELATION
+        )
+    else:
+        draws = screen_draw_groups(
+            frame, baseline_columns, n_draws, arity=arity,
+            max_self_correlation=MAX_SELF_CORRELATION,
+        )
     placebo_columns = placebo_column_names(arity)
+    # Which declared columns are entirely NaN in THIS frozen frame (fps-3jj.23). Stamped as
+    # provenance because the overlap structure `effective_n_draws` prices — and therefore every
+    # published bar-vs-arity table — depends on HOW MANY columns the screen can actually
+    # deliver, not on which ones: at 20 draws and arity 20, n_eff is 5.35 / 5.25 / 5.16 for 50 /
+    # 49 / 48 usable columns. That count was previously an environmental fact asserted in a
+    # docstring and unverifiable from the repo, since the frozen frame is gitignored. The frame
+    # is right here, so the floor records it and any future reader can check rather than trust.
+    all_nan_columns = sorted(c for c in baseline_columns if not frame[c].notna().any())
 
     t0 = time.perf_counter()
     deltas: list[float] = []
@@ -421,7 +471,18 @@ def compute_noise_floor(
         # whose null_method isn't this — a pre-fps-awz batch's already-committed
         # seed-swap floor (e.g. batch0's) has no such key and is refused, not silently
         # graded, until it's recomputed under this construction.
-        "null_method": NULL_METHOD_PLACEBO_COLUMN,
+        # fps-3jj.23: a pinned bank gets its OWN method string, so `_noise_band` refuses it
+        # by the check it already runs. The property that lets it measure the texture ICC —
+        # draws sharing a source column, hence sharing texture exactly — is the same property
+        # that makes its band too narrow to grade against, so "cannot be used as a ruler" is
+        # made structural here rather than left to whoever chooses --out-name.
+        "null_method": (
+            NULL_METHOD_PLACEBO_PINNED_COLUMN if same_source_columns
+            else NULL_METHOD_PLACEBO_COLUMN
+        ),
+        # The pinned columns, in the order they were cycled. None for an ordinary floor, so an
+        # existing reader sees the key absent-or-null exactly where it used to be absent.
+        "same_source_columns": list(same_source_columns) if same_source_columns else None,
         "n_draws": len(draws),
         # fps-3jj.25: what this bank is WORTH once source-column reuse is priced in.
         # `dossier_tables._noise_band` feeds this to `family_wise_z_threshold` in place of the
@@ -437,6 +498,11 @@ def compute_noise_floor(
         # it in fact was, so an existing committed floor keeps grading 1-column candidates
         # and only stops grading multi-column ones.
         "n_placebo_columns": arity,
+        # Declared columns that are entirely NaN in the frozen frame, so the screen can never
+        # accept them. NOT the full set of screen failures (a column can also fail on
+        # correlation); this is the structural subset, which is what bounds the draw pool.
+        "all_nan_baseline_columns": all_nan_columns,
+        "n_baseline_columns_available": len(baseline_columns) - len(all_nan_columns),
         "seed": seed,
         "placebo_draws": placebo_draws,
         "fold_subset": list(fold_subset) if fold_subset is not None else None,
@@ -674,6 +740,17 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     "over the floor every dossier so far was graded against.",
 )
 @click.option(
+    "--same-source-column", "same_source_column", multiple=True,
+    help="Pin every draw's source column to this baseline column, instead of spreading picks "
+    "across the whole baseline. Repeat the flag to cycle several columns round-robin. This "
+    "computes the texture-ICC DIAGNOSTIC (fps-3jj.23), not a grading ruler: draws deliberately "
+    "repeat source columns so that grouping deltas BY COLUMN separates texture (between-column) "
+    "from alignment (within-column). The result is stamped with its own null_method and the "
+    "dossier refuses to grade against it. Requires --arity 1. Pass 4-6 columns with enough "
+    "draws each for the ANOVA to resolve anything — see "
+    "experiments/2026-08-27_texture_icc/README.md for the power table before choosing.",
+)
+@click.option(
     "--fit-stability", is_flag=True, default=False,
     help="Compute the retained seed-swap diagnostic (fit_stability.json) instead of the "
     "noise-floor gate (noise_floor.json). Not part of the automatic batch-freeze path.",
@@ -692,20 +769,34 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
 )
 def main(
     batch_name: str, batches_dir: str, n_draws: int, arity: int, out_name: str,
-    fit_stability: bool, fold_subset: str | None, force: bool,
+    same_source_column: tuple[str, ...], fit_stability: bool, fold_subset: str | None,
+    force: bool,
 ) -> None:
     """Compute and persist the noise-floor calibration for an already-frozen batch."""
     batch_dir = pathlib.Path(batches_dir) / batch_name
     subset = _parse_fold_subset(fold_subset)
+    if fit_stability and same_source_column:
+        # The seed-swap diagnostic has no placebo columns at all, so it cannot honour a pinned
+        # source. Returning early (as this used to) accepted the flag and silently ignored it,
+        # which would look like a texture-ICC run and produce a fit_stability.json.
+        raise click.BadParameter(
+            "--same-source-column has no meaning with --fit-stability: that diagnostic swaps "
+            "SEEDS on the unchanged baseline and adds no placebo column to pin. Drop one."
+        )
     if fit_stability:
         compute_fit_stability_diagnostic(batch_dir, fold_subset=subset, force=force)
         click.echo(f"Wrote fit-stability diagnostic for batch '{batch_name}' -> {batch_dir / FIT_STABILITY_FILENAME}")
         return
     compute_noise_floor(
         batch_dir, n_draws=n_draws, arity=arity, out_name=out_name,
+        same_source_columns=list(same_source_column) or None,
         fold_subset=subset, force=force,
     )
-    click.echo(f"Wrote noise floor (arity {arity}) for batch '{batch_name}' -> {batch_dir / out_name}")
+    what = (
+        f"texture-ICC diagnostic (pinned to {', '.join(same_source_column)}; NOT a grading ruler)"
+        if same_source_column else f"noise floor (arity {arity})"
+    )
+    click.echo(f"Wrote {what} for batch '{batch_name}' -> {batch_dir / out_name}")
 
 
 if __name__ == "__main__":

@@ -186,11 +186,19 @@ an improvement now, where it used to be a precondition.
 
 ## What is still a bound, not a number
 
-`ICC ≤ 0.391` (`placebo.TEXTURE_ICC_BOUND`) is now the load-bearing input to EVERY bar, not just
-to a constant, and it comes from an underpowered ANOVA. bd **`fps-3jj.23`** measures it directly:
-a noise floor where every draw uses the *same* source column with a different seed varies
-**alignment alone**, so the difference between its variance and the existing multi-column
-floor's **is** the texture component. ~2.3h.
+`ICC ≤ 0.391` (`placebo.TEXTURE_ICC_BOUND`) is the load-bearing input to every bar, and it comes
+from an underpowered ANOVA. bd **`fps-3jj.23`** measures it directly, and is in flight —
+`experiments/2026-08-27_texture_icc/` holds the instrument, the power analysis and the result.
+
+**Two corrections to this section, from that work.** First, "load-bearing input to EVERY bar" is
+true but overstated: at arity 1–2 the constant is irrelevant by construction, and at arity 3–4 —
+every candidate this batch ran — its *whole range* moves the bar by ≤ 0.011 c/L. It is
+load-bearing for wide groups only. Second, the construction sketched in the next sentence (one
+same-source column, variance compared against the multi-column floor) **cannot discharge the
+bead at the ~2.3h budgeted here**: it is an unpaired variance ratio on `F(9,19)`, resolvable only
+above 0.661, and its best possible outcome is a 0.587 upper bound — looser than the 0.391 it
+would replace (both at the one-sided 5% tail, the tail `texture_channel.py` used for 0.391). The design that works groups several pinned columns and runs the ANOVA **by
+column**, at 32 draws (~6.1h).
 
 **It is not established as conservative, despite being an upper bound.** The bound is on the ICC
 by texture *family*; the quantity actually used is the ICC by *column*, and family is coarser —

@@ -238,8 +238,31 @@ PLACEBO_SEED_EXTENSION_BASE = 1_000_000
 # which is the failure this whole mechanism exists to prevent. Weak evidence against a very
 # large one: it should have produced some family clustering, and the ANOVA found none.
 #
-# bd `fps-3jj.23` (P1, ~2.3h) measures it directly with a same-column floor. When that lands,
-# replace this constant with the measured value and every bar tightens accordingly.
+# **It sets every bar, but it only MOVES the wide ones.** Swept across its entire possible
+# range on batch1's live ruler with `effective_n_draws` itself (20-draw bank,
+# `experiments/2026-08-27_texture_icc/power.py`), the single-candidate bar in c/L:
+#
+#   arity     ICC 0    0.391      1.0    most it can move
+#       1-2  -0.152   -0.152   -0.152    0.000   <- no two draws share a column AT ALL
+#       3    -0.152   -0.154   -0.157    0.005
+#       4    -0.152   -0.156   -0.163    0.011
+#      10    -0.152   -0.171   -0.211    0.059
+#      20    -0.152   -0.203   -0.431    0.280
+#      35    -0.152   -0.287  no band    0.383
+#
+# So at every width batch1 has actually run (1 and 3 columns) this constant cannot move a
+# verdict — its whole range is worth 0.005 c/L there, an order of magnitude under the realised
+# arbiter's decision quantum. It is load-bearing for the WIDE groups docs/routines/generator.md
+# invites, and nowhere else. Say that, rather than the bare "it sets every bar".
+#
+# bd `fps-3jj.23` measures it directly with a pinned-source bank
+# (`screen_pinned_column_draws`, `noise_floor --same-source-column`). Note when reading that
+# bead: the cheap version it proposes cannot discharge it. One pinned column x 10 seeds against
+# the committed 20-draw floor is an unpaired variance ratio on F(9,19), resolvable only above
+# 0.661, whose BEST case is a 0.587 upper bound — looser than this value (both at the one-sided
+# 5% tail, the tail this constant itself was derived at). The design that works
+# is a one-way ANOVA by COLUMN over several pinned columns, at 32 draws (~6.1h). When it lands,
+# replace this constant with the measured value.
 TEXTURE_ICC_BOUND = 0.391
 
 
@@ -645,6 +668,99 @@ def _assemble_draws(
         f"{len(baseline_columns)} baseline columns with none passing) — this batch's data "
         "does not support this many draws at this arity and threshold."
     )
+
+
+#: How many CONSECUTIVE fresh block seeds a pinned source column may fail the self-correlation
+#: screen at before `screen_pinned_column_draws` gives up on it. The multi-column path's
+#: stopping rule is "one full presentation of every column, each at a fresh seed"
+#: (`_assemble_draws`); a pinned bank has only one column, so the analogue is one full
+#: presentation of the historical seed supply. A column that cannot be decorrelated at 30
+#: different rearrangements is the NAMED LIMITATION in this module's docstring (a mostly
+#: cross-sectional column keeps an irreducible correlation no time-axis reorder removes), not
+#: bad luck — and there is nothing else to try, because substituting a different column is the
+#: one thing a pinned bank must never do.
+PINNED_COLUMN_SEED_ATTEMPTS = len(PLACEBO_BLOCK_SEED_POOL)
+
+
+def screen_pinned_column_draws(
+    df: pd.DataFrame,
+    source_columns: list[str],
+    n_draws: int,
+    *,
+    max_self_correlation: float,
+) -> list[list[tuple[str, int, float]]]:
+    """`n_draws` arity-1 draws built from `source_columns` ONLY, cycling them round-robin so
+    every column gets `n_draws // k` or `n_draws // k + 1` draws, each at its own fresh seed.
+
+    This is the ICC MEASUREMENT bank (bd `fps-3jj.23`), not a grading ruler, and the two must
+    not be confused — `noise_floor.compute_noise_floor` stamps it with a different
+    `null_method` so `dossier_tables._noise_band` refuses to grade anything against it. Its
+    whole point is the thing that disqualifies it as a ruler: draws deliberately REPEAT a
+    source column, so their deltas share texture exactly and the band is narrower than a real
+    one by however much texture contributes.
+
+    Why that measures the ICC. A placebo's delta moves through two channels — ALIGNMENT (did
+    this particular rearrangement happen to line up with the target?) which varies with the
+    block seed, and TEXTURE (how much does a column OF THIS SHAPE perturb the fit at all?)
+    which is fixed by the source column. Two draws from the same column share texture
+    identically, so the correlation they inherit from sharing a column IS the quantity
+    `effective_n_draws` prices. Grouping these draws BY COLUMN and running a one-way ANOVA
+    gives it directly: between-column variance is texture, within-column is alignment.
+
+    **Substitution is refused, not silent.** `_assemble_draws` answers a screen failure by
+    moving to the next candidate column, which is right for a ruler (one unusable column must
+    not abort a calibration) and catastrophic here — a substituted column would quietly turn a
+    same-column pair into a different-column pair and bias the measured ICC toward zero, in
+    the direction that says "no problem". A pinned column that fails is retried at fresh seeds
+    (a different rearrangement may well pass) up to `PINNED_COLUMN_SEED_ATTEMPTS`, and then the
+    whole call raises.
+
+    Arity is 1 by construction and cannot be raised: a draw needs `arity` DISTINCT source
+    columns (`screen_draw_groups`), so "arity k, all from one column" does not exist. That is
+    not a limitation of this function — the ICC is a property of one column's texture, and one
+    column is what a draw here is made of.
+    """
+    if not source_columns:
+        raise ValueError("source_columns is empty — a pinned bank needs at least one column.")
+    duplicates = {c for c in source_columns if source_columns.count(c) > 1}
+    if duplicates:
+        raise ValueError(
+            f"source_columns repeats {sorted(duplicates)} — the round-robin already gives every "
+            "column multiple draws; listing one twice would silently double its weight in the "
+            "by-column ANOVA."
+        )
+    missing = [c for c in source_columns if c not in df.columns]
+    if missing:
+        raise ValueError(f"source_columns not present in the batch frame: {missing}")
+    if n_draws < 1:
+        raise ValueError(f"n_draws must be >= 1, got {n_draws}")
+
+    groups: list[list[tuple[str, int, float]]] = []
+    # One flat seed counter across the WHOLE bank, exactly as `candidate_sequence` does, so no
+    # two draws anywhere in it can share a rearrangement — the defect `block_seed` exists to
+    # close. Round-robin rather than column-by-column so a bank truncated early (or one whose
+    # n_draws is not a multiple of k) stays as close to balanced as it can be, which is what
+    # the ANOVA's power depends on.
+    index = 0
+    for i in range(n_draws):
+        source_column = source_columns[i % len(source_columns)]
+        for _attempt in range(PINNED_COLUMN_SEED_ATTEMPTS):
+            seed = block_seed(index)
+            index += 1
+            corr = make_placebo_series(df, source_column, seed).corr(df[source_column])
+            if not pd.isna(corr) and abs(corr) <= max_self_correlation:
+                groups.append([(source_column, seed, float(corr))])
+                break
+        else:
+            raise ValueError(
+                f"pinned source column {source_column!r} failed abs(self_correlation) <= "
+                f"{max_self_correlation} at all {PINNED_COLUMN_SEED_ATTEMPTS} consecutive seeds "
+                f"tried for draw {i + 1}/{n_draws} (an all-NaN column correlates to NaN and "
+                "fails the same way). A pinned bank must NOT substitute another column — that "
+                "would turn a same-column pair into a different-column pair and bias the "
+                "measured ICC toward zero. Pick a different source column and re-run."
+            )
+    return groups
 
 
 def placebo_column_names(arity: int) -> list[str]:

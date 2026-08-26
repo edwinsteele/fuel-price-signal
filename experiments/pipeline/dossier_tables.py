@@ -95,6 +95,16 @@ FREEZE_MANIFEST_FILENAME = "freeze.json"
 # name rather than the two modules each defining their own copy of the string.
 NULL_METHOD_PLACEBO_COLUMN = "placebo_column"
 
+# The same construction, but with every draw's source column PINNED to a small deliberate set
+# so draws repeat columns on purpose (bd `fps-3jj.23`, `placebo.screen_pinned_column_draws`).
+# A DIFFERENT string from the one above, deliberately: this bank exists to measure the texture
+# ICC, and the property that makes it able to do so — draws sharing a source column, hence
+# sharing texture exactly — is precisely what makes its band too NARROW to grade anything
+# against. `_noise_band`'s null_method check already refuses anything that is not
+# NULL_METHOD_PLACEBO_COLUMN, so naming it separately makes the diagnostic structurally
+# ungradeable rather than relying on nobody ever pointing --out-name at noise_floor.json.
+NULL_METHOD_PLACEBO_PINNED_COLUMN = "placebo_column_pinned_source"
+
 #: `_noise_band` refusal codes, machine-readable so the dossier routine can branch on the
 #: KIND of unavailability instead of pattern-matching the prose `reason` (fps-3jj.17's rule:
 #: the ledger outcome is mechanical, never a 05:06 judgement call).
