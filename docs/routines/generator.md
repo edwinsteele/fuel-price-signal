@@ -281,8 +281,10 @@ band at all** above 17 columns.
 
 **So propose the honest shape and let the bar adjust.** The one number still resting on an
 estimate is the texture ICC behind the pricing — bounded at ≤ 0.391 by an underpowered ANOVA and
-measured directly in bd `fps-3jj.23`. It is deliberately set at the pessimistic end, so every
-bar is currently a little harder than it probably needs to be.
+measured directly in bd `fps-3jj.23`. It is an upper bound on a *coarser* quantity (grouped by
+texture family, not by column), so it is **not** established as erring on the safe side — if the
+true value is higher, bars on wide candidates are currently too easy. Either way every bar moves
+when `fps-3jj.23` lands.
 
 ### The one hard limit, and how to check it
 

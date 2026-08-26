@@ -192,11 +192,18 @@ a noise floor where every draw uses the *same* source column with a different se
 **alignment alone**, so the difference between its variance and the existing multi-column
 floor's **is** the texture component. ~2.3h.
 
-It is deliberately set at the pessimistic end, so every bar is currently a little harder than it
-probably needs to be — the safe direction, since the failure this mechanism exists to prevent is
-a band too narrow and a bar too easy. Note also that grouping by texture *family* is coarser than
-by *column*, so the bound likely **overstates** the correction. At the point estimate (ICC ≈ 0)
-every width sits at 20.00 effective draws and every bar collapses to arity 1's −0.152.
+**It is not established as conservative, despite being an upper bound.** The bound is on the ICC
+by texture *family*; the quantity actually used is the ICC by *column*, and family is coarser —
+two different `days_since_trough_entry_<lga>` columns are same-family but different-column, while
+two placebos from the *same* column are more alike than that. The column ICC is plausibly
+**larger**, so 0.391 is not demonstrably an upper bound on it, and if the true value exceeds it
+then bars on wide candidates are too **easy** — the failure this mechanism exists to prevent.
+Weak evidence against a very large one: it should have produced *some* family clustering, and the
+ANOVA found none. Weak is why `fps-3jj.23` exists.
+
+At the point estimate (ICC ≈ 0) every width sits at 20.00 effective draws and every bar collapses
+to arity 1's −0.152 — at which point `fps-3jj.22` buys nothing and should be closed. `fps-3jj.23`
+is recorded in bd as **blocking** `fps-3jj.22` for exactly that reason.
 
 ## Verification against real data
 

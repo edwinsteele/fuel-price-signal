@@ -223,13 +223,20 @@ PLACEBO_SEED_EXTENSION_BASE = 1_000_000
 # autocorrelation exactly; only the dates move). This is what makes a bank of reused columns
 # worth fewer draws than it has, and `effective_n_draws` below turns it into a number.
 #
-# **A BOUND, not a measurement, and deliberately the pessimistic end of it.** Measured on
+# **A BOUND, not a measurement — and its error direction is NOT established.** Measured on
 # batch1 (`experiments/2026-08-26_placebo_draw_independence/`) by one-way ANOVA of the committed
-# 20-draw floor's deltas grouped by texture family: F(3,16) = 0.411, p = 0.75, point estimate
+# 20-draw floor's deltas grouped by texture FAMILY: F(3,16) = 0.411, p = 0.75, point estimate
 # ~0 — but the design could not resolve anything below 0.359, so "we saw nothing" only rules out
-# values above ~0.36. Using the 95% upper bound rather than the point estimate makes every bar
-# slightly HARDER than it probably needs to be, which is the safe direction: the failure this
-# whole mechanism exists to prevent is a band too NARROW and a bar too easy.
+# values above ~0.36.
+#
+# The 95% upper bound is used rather than the point estimate, which sounds conservative and is
+# not demonstrably so. That bound is on the ICC by FAMILY; the quantity this constant stands for
+# is the ICC by COLUMN, and family is coarser — two different `days_since_trough_entry_<lga>`
+# columns are same-family but different-column, while two placebos from the SAME column are more
+# alike than that. So the column ICC is plausibly LARGER, and 0.391 is not established as an
+# upper bound on it. If the true value exceeds 0.391, bars on wide candidates are too EASY,
+# which is the failure this whole mechanism exists to prevent. Weak evidence against a very
+# large one: it should have produced some family clustering, and the ANOVA found none.
 #
 # bd `fps-3jj.23` (P1, ~2.3h) measures it directly with a same-column floor. When that lands,
 # replace this constant with the measured value and every bar tightens accordingly.
