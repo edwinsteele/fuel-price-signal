@@ -36,6 +36,19 @@ BATCH1_UNSCREENABLE = (
 )
 
 
+def unscreenable_from_floor(payload: dict) -> tuple[str, ...] | None:
+    """The all-NaN column set a computed floor recorded, or None if it predates the stamp.
+
+    Prefer this over `BATCH1_UNSCREENABLE` wherever a floor is at hand. The hardcoded tuple is
+    an environmental fact measured once off a gitignored frame; a stamped one was measured by
+    the run that produced the floor being read, so it cannot drift away from the batch it
+    describes. Every floor computed from fps-3jj.23 onward carries it; batch1's two committed
+    floors predate it, which is exactly why the fallback still exists.
+    """
+    columns = payload.get("all_nan_baseline_columns")
+    return tuple(columns) if columns is not None else None
+
+
 def model_bank(
     baseline_columns: list[str],
     n_draws: int,
@@ -55,6 +68,10 @@ def model_bank(
     loop simply never returned (its trailing `AssertionError` was unreachable).
     """
     usable = [c for c in baseline_columns if c not in set(unscreenable)]
+    # The COUNT is what the overlap structure depends on; the identity of the dead columns is
+    # not (verified across eight different 5-subsets — every one gives identical n_eff). So a
+    # caller passing the wrong SIZE of dead set silently shifts every bar: 50/49/48 usable
+    # columns give n_eff 5.35/5.25/5.16 at 20 draws, arity 20.
     if arity > len(usable):
         raise ValueError(
             f"arity {arity} exceeds the {len(usable)} usable columns "

@@ -192,3 +192,56 @@ def test_model_bank_reproduces_the_published_bar_table():
     for arity, n_eff in expected_n_eff.items():
         bank = bank_model.model_bank(columns, 20, arity, unscreenable=unscreenable)
         assert effective_n_draws(bank) == pytest.approx(n_eff, abs=0.01), f"arity {arity}"
+
+
+def test_overlap_is_invariant_to_WHICH_columns_are_dead():
+    """`effective_n_draws` reads the pattern of sharing, not which names share — so the model
+    must not depend on the identity of the unscreenable set, only its size. This is what makes
+    the earlier `[:49]` truncation accidentally right, and it is worth pinning rather than
+    relying on."""
+    from experiments.pipeline.placebo import effective_n_draws
+
+    columns = [f"col_{i}" for i in range(54)]
+    candidates = [tuple(columns[i:i + 5]) for i in (0, 7, 20, 33, 49)]
+
+    results = {
+        tuple(
+            round(effective_n_draws(bank_model.model_bank(columns, 20, arity, unscreenable=dead)), 6)
+            for arity in (3, 10, 20)
+        )
+        for dead in candidates
+    }
+
+    assert len(results) == 1, f"overlap changed with the identity of the dead set: {results}"
+
+
+def test_overlap_DOES_move_with_the_usable_count():
+    """The counterpart, and the reason the published table is not self-evident: one more or one
+    fewer dead column shifts every wide-arity bar. Pinned so that a future change to the assumed
+    count is loud rather than a silent re-description of the batch (PR #337 review, second
+    round)."""
+    from experiments.pipeline.placebo import effective_n_draws
+
+    columns = [f"col_{i}" for i in range(54)]
+    n_eff = {
+        n_dead: round(
+            effective_n_draws(
+                bank_model.model_bank(columns, 20, 20, unscreenable=tuple(columns[:n_dead]))
+            ), 2
+        )
+        for n_dead in (4, 5, 6)
+    }
+
+    assert n_eff == {4: 5.35, 5: 5.25, 6: 5.16}
+    assert len(set(n_eff.values())) == 3, "the count must matter, or the pin above is vacuous"
+
+
+def test_unscreenable_is_read_from_a_floors_own_stamp_when_present():
+    """A floor computed from fps-3jj.23 onward records the all-NaN set it actually observed, so
+    the model can stop trusting a hardcoded environmental fact. Batch1's two committed floors
+    predate the stamp, which is why the fallback survives."""
+    stamped = {"all_nan_baseline_columns": ["a", "b"]}
+
+    assert bank_model.unscreenable_from_floor(stamped) == ("a", "b")
+    assert bank_model.unscreenable_from_floor({"all_nan_baseline_columns": []}) == ()
+    assert bank_model.unscreenable_from_floor({}) is None, "pre-stamp floors must be detectable"

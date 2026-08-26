@@ -352,6 +352,14 @@ def compute_noise_floor(
             max_self_correlation=MAX_SELF_CORRELATION,
         )
     placebo_columns = placebo_column_names(arity)
+    # Which declared columns are entirely NaN in THIS frozen frame (fps-3jj.23). Stamped as
+    # provenance because the overlap structure `effective_n_draws` prices — and therefore every
+    # published bar-vs-arity table — depends on HOW MANY columns the screen can actually
+    # deliver, not on which ones: at 20 draws and arity 20, n_eff is 5.35 / 5.25 / 5.16 for 50 /
+    # 49 / 48 usable columns. That count was previously an environmental fact asserted in a
+    # docstring and unverifiable from the repo, since the frozen frame is gitignored. The frame
+    # is right here, so the floor records it and any future reader can check rather than trust.
+    all_nan_columns = sorted(c for c in baseline_columns if not frame[c].notna().any())
 
     t0 = time.perf_counter()
     deltas: list[float] = []
@@ -490,6 +498,11 @@ def compute_noise_floor(
         # it in fact was, so an existing committed floor keeps grading 1-column candidates
         # and only stops grading multi-column ones.
         "n_placebo_columns": arity,
+        # Declared columns that are entirely NaN in the frozen frame, so the screen can never
+        # accept them. NOT the full set of screen failures (a column can also fail on
+        # correlation); this is the structural subset, which is what bounds the draw pool.
+        "all_nan_baseline_columns": all_nan_columns,
+        "n_baseline_columns_available": len(baseline_columns) - len(all_nan_columns),
         "seed": seed,
         "placebo_draws": placebo_draws,
         "fold_subset": list(fold_subset) if fold_subset is not None else None,

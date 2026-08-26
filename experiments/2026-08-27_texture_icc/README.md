@@ -134,6 +134,17 @@ includes `station_price_cents`, the level-like column the bead names as the deli
 pick and the hardest case for any time-axis reordering. `measure_icc.py` prints the per-column
 breakdown, so any family structure inside the estimate stays visible rather than pooled away.
 
+**The table above rests on one environmental fact: exactly 5 of batch1's 54 declared columns
+are all-NaN.** The overlap is invariant to *which* columns die (verified across eight different
+5-subsets — identical `n_eff` every time) but not to *how many*: 50 / 49 / 48 usable columns
+give `n_eff` 5.35 / 5.25 / 5.16 at 20 draws, arity 20, so one more dead column shifts every
+wide-arity bar. That count was measured off the frozen frame, which is gitignored — so it could
+not be re-checked from the repo. `compute_noise_floor` now stamps `all_nan_baseline_columns`
+and `n_baseline_columns_available` into every floor it writes, and `bank_model` reads the stamp
+in preference to its hardcoded default. **The queued 32-draw run is therefore its own
+verification of the figure this table depends on.** Raised in the second round of PR #337
+review.
+
 **Pre-flight (real batch1 frame, 2,084,203 rows):** all 32 draws pass the `MAX_SELF_CORRELATION
 = 0.6` screen, `|self_corr|` between 0.001 and 0.097, four draws per column, 32 distinct seeds
 (30 from the historical pool, 2 from the unbounded extension). Screening cost 6s — so the 6.1h

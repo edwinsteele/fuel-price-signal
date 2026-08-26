@@ -44,7 +44,10 @@ import pathlib
 
 import numpy as np
 import pandas as pd
-from bank_model import model_bank  # sibling module; this dir is sys.path[0] when run as a script
+from bank_model import (  # sibling module; this dir is sys.path[0] when run as a script
+    model_bank,
+    unscreenable_from_floor,
+)
 from scipy.stats import f as f_dist
 
 from experiments.pipeline.dossier_tables import (
@@ -188,13 +191,21 @@ def _ratio_icc(var_within: float, df_within: int, multi: dict) -> dict:
     }
 
 
+#: Set from the pinned bank's own stamp in main() when it has one, so the bar table is built
+#: against the column availability the run itself observed rather than a hardcoded default.
+_UNSCREENABLE: tuple[str, ...] | None = None
+
+
 def _bars(icc: float, mean: float, std: float, arities=(1, 3, 4, 10, 35)) -> dict[int, float]:
     """Single-candidate bar at each arity for a 20-draw bank, using the shipped
     `effective_n_draws` over `bank_model.model_bank`'s reconstruction of the overlap."""
     columns = json.loads((BATCH / "baseline_columns.json").read_text())
     out: dict[int, float] = {}
     for arity in arities:
-        n_eff = effective_n_draws(model_bank(columns, 20, arity), icc=icc)
+        n_eff = effective_n_draws(
+            model_bank(columns, 20, arity, **({"unscreenable": _UNSCREENABLE} if _UNSCREENABLE else {})),
+            icc=icc,
+        )
         out[arity] = (
             mean - family_wise_z_threshold(n_candidates=1, n_draws=n_eff) * std
             if n_eff >= 2 else float("nan")
@@ -243,6 +254,9 @@ def main() -> None:
     pinned_arity = pinned.get("n_placebo_columns") or 1
     if pinned_arity != 1:
         raise SystemExit(f"the pinned bank declares arity {pinned_arity}; it must be 1.")
+
+    global _UNSCREENABLE
+    _UNSCREENABLE = unscreenable_from_floor(pinned)
 
     frame = pd.DataFrame(pinned["placebo_draws"])
     # One record per draw MEMBER, so this positional join is only correct at arity 1 (checked
