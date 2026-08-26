@@ -876,7 +876,10 @@ def test_noise_band_refuses_a_candidate_wider_than_the_arity_cap(tmp_path):
     band = dt.build_facts(run_dir)["noise_band"]
 
     assert band["available"] is False
-    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+    # Its own code, NOT floor_arity_below_run: that string is literally false here (this
+    # very test grades against a floor of arity 1, and the sibling test uses a WIDER one), and
+    # the two refusals want opposite instructions — see NOISE_BAND_REFUSAL_ARITY_CAP.
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY_CAP
     assert f"above MAX_RULER_ARITY ({dt.MAX_RULER_ARITY})" in band["reason"]
     assert "fps-3jj.22" in band["reason"]
     assert "NOT rejected" in band["reason"]
@@ -898,7 +901,7 @@ def test_noise_band_arity_cap_is_not_bypassed_by_an_equally_wide_floor(tmp_path)
     band = dt.build_facts(run_dir)["noise_band"]
 
     assert band["available"] is False
-    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY_CAP
     assert f"above MAX_RULER_ARITY ({dt.MAX_RULER_ARITY})" in band["reason"]
 
 
@@ -933,8 +936,8 @@ def test_noise_band_separates_band_thinness_from_band_width(tmp_path):
     thick_band = dt.build_facts(thick)["noise_band"]
 
     # Reported as a signed move on a cost, so "harder" is MORE NEGATIVE.
-    assert thin_band["bar_draw_count_penalty_cpl_held"] < 0
-    assert thin_band["bar_draw_count_penalty_cpl_held"] < thick_band["bar_draw_count_penalty_cpl_held"]
+    assert thin_band["bar_draw_count_shift_cpl_held"] < 0
+    assert thin_band["bar_draw_count_shift_cpl_held"] < thick_band["bar_draw_count_shift_cpl_held"]
 
 
 def test_noise_band_discloses_how_much_wider_the_ruler_is(tmp_path):

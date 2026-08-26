@@ -22,7 +22,6 @@ harm regardless of what the ANOVA says.
 """
 from __future__ import annotations
 
-import itertools
 import json
 import pathlib
 
@@ -30,7 +29,12 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-BATCH = pathlib.Path("/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1")
+from experiments.pipeline.placebo import MAX_RULER_ARITY
+
+# Repo-relative, like every sibling experiment (`2026-08-22_placebo_block_sizing`,
+# `2026-08-23_placebo_arity`) — run from the repo root, as the README's commands do.
+# Its only input, `noise_floor_k1.json`, is tracked in git.
+BATCH = pathlib.Path("experiments/batches/batch1")
 
 
 def texture_family(column: str) -> str:
@@ -84,32 +88,58 @@ def main() -> None:
 
     print("\n=== how much reuse does the proposal actually do? ===")
     n_cols = 49  # usable (non-all-NaN) batch1 lock columns
-    for n_draws, arity in ((20, 3), (20, 4), (20, 10), (20, 35)):
-        picks = n_draws * arity
-        # Deck scheme: every column used floor(picks/n_cols) or ceil(...) times.
-        base, extra = divmod(picks, n_cols)
-        counts = np.array([base + 1] * extra + [base] * (n_cols - extra))
-        # Draw PAIRS that share at least one source column, upper-bounded by counting
-        # co-occurrences: a column used c times contributes C(c,2) sharing pairs.
-        sharing = int(sum(c * (c - 1) // 2 for c in counts))
-        total_pairs = n_draws * (n_draws - 1) // 2
-        frac = min(1.0, sharing / total_pairs)
-        for label, rho in (("measured ICC", max(icc, 0.0)), ("95% upper ICC", max(icc_upper, 0.0))):
-            rho_bar = frac * rho
-            n_eff = n_draws / (1.0 + (n_draws - 1) * rho_bar)
-            if label == "measured ICC":
-                print(f"  {n_draws} draws x arity {arity}: {picks} picks from {n_cols} columns, "
-                      f"<={sharing}/{total_pairs} draw pairs share a column ({frac:.0%})")
-            print(f"      {label:>14} {rho:.3f} -> mean pairwise rho {rho_bar:.4f}, "
-                  f"effective draws {n_eff:.1f}")
 
-    print("\n=== today's construction, for comparison ===")
-    print("  10 draws x arity 3, all columns distinct, but a SEED COLLISION puts one draw pair "
-          "at 0.965\n  placebo-column correlation (fps-3jj.20). Treating that one pair as fully "
-          "shared:")
-    rho_bar = (1 / 45) * 1.0
-    print(f"      1/45 pairs at rho 1.0 -> mean pairwise rho {rho_bar:.4f}, "
-          f"effective draws {10 / (1 + 9 * rho_bar):.1f}")
+    def exposure(n_draws: int, arity: int) -> float:
+        """Upper bound on the fraction of DRAW PAIRS sharing at least one source column.
+
+        Deck scheme: over m picks from n columns every column is used floor(m/n) or
+        ceil(m/n) times, so a column used c times contributes C(c,2) sharing pairs. That
+        counts column-sharings rather than pairs, so it over-counts when one pair shares
+        several columns — deliberately, since the conservative direction for a safety
+        argument is to overstate the exposure. At high arity it is exact anyway by
+        pigeonhole (two 35-column draws from 49 columns must share >= 21).
+        """
+        picks = n_draws * arity
+        base, extra = divmod(picks, n_cols)
+        counts = [base + 1] * extra + [base] * (n_cols - extra)
+        sharing = sum(c * (c - 1) // 2 for c in counts)
+        return min(1.0, sharing / (n_draws * (n_draws - 1) // 2))
+
+    def n_eff(n_draws: int, frac_pairs: float, rho: float) -> float:
+        rho_bar = frac_pairs * rho
+        return n_draws / (1.0 + (n_draws - 1) * rho_bar)
+
+    rho_hi = max(icc_upper, 0.0)
+    print(f"  20-draw bank, effective draws at ICC 0 and at the {rho_hi:.3f} upper bound:")
+    print(f"  {'arity':>5} {'picks':>6} {'pairs sharing':>14} {'n_eff@0':>9} {'n_eff@hi':>9}")
+    rows = {}
+    for arity in range(1, 7):
+        frac = exposure(20, arity)
+        rows[arity] = n_eff(20, frac, rho_hi)
+        print(f"  {arity:>5} {20*arity:>6} {frac:>13.1%} {20.0:>9.1f} {rows[arity]:>9.2f}")
+
+    # The cap is a COMPARISON, so what it compares against decides it. Print every defensible
+    # scoring of "the ruler we already accept" rather than the one that flatters the answer —
+    # the first version of this analysis charged the seed-collision pair rho = 1.0 (a DELTA
+    # correlation guessed from a placebo-COLUMN correlation of 0.965) while charging reuse the
+    # measured delta-space bound, and the cap turned entirely on that asymmetry.
+    print("\n=== what is the cap compared AGAINST? ===")
+    baselines = {
+        "collision pair charged rho=1.0 (flattering)": n_eff(10, 1 / 45, 1.0),
+        "collision pair charged rho=upper (symmetrised)": n_eff(10, 1 / 45, rho_hi),
+        "post-fix 10x3 bank (no reuse, no collision)": n_eff(10, exposure(10, 3), rho_hi),
+    }
+    for label, value in baselines.items():
+        clears = [a for a in sorted(rows) if rows[a] >= value]
+        print(f"  {label:<48} n_eff {value:5.2f}  -> arities clearing it: "
+              f"{max(clears) if clears else 'none'}")
+    cap = min(
+        max((a for a in sorted(rows) if rows[a] >= v), default=0) for v in baselines.values()
+    )
+    print(f"\n  Cap that clears EVERY baseline: {cap}")
+    print(f"  placebo.MAX_RULER_ARITY = {MAX_RULER_ARITY}")
+    if cap != MAX_RULER_ARITY:
+        print("  !! MISMATCH — re-derive MAX_RULER_ARITY or record why it differs.")
 
 
 if __name__ == "__main__":

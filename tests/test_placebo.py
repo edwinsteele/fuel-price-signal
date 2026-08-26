@@ -708,11 +708,16 @@ def test_candidate_sequence_is_unbounded():
 
 
 def test_screen_draw_groups_refuses_an_arity_wider_than_the_column_list():
-    df = _diverse_fixture_df(n_dates=200, n_cols=3)
-    baseline_columns = [f"col{i}" for i in range(3)]
+    """A separate refusal from the MAX_RULER_ARITY cap, and it has to stay reachable: a draw
+    needs `arity` DISTINCT columns, so a batch with fewer columns than that cannot build one
+    at any draw count. Exercised at exactly the cap so the cap check cannot mask it."""
+    n_cols = MAX_RULER_ARITY - 1
+    df = _diverse_fixture_df(n_dates=200, n_cols=n_cols)
+    baseline_columns = [f"col{i}" for i in range(n_cols)]
     with pytest.raises(ValueError, match=r"exceeds the baseline column count"):
         screen_draw_groups(
-            df, baseline_columns, n_draws=2, arity=4, max_self_correlation=0.9
+            df, baseline_columns, n_draws=2, arity=MAX_RULER_ARITY,
+            max_self_correlation=0.9,
         )
 
 

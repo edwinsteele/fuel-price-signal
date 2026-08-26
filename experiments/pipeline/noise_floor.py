@@ -648,8 +648,10 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     "--arity", default=DEFAULT_PLACEBO_ARITY, show_default=True,
     help="Placebo columns per draw (fps-3jj.14). 1 is the historical shape. Raise it to "
     "match a batch whose candidates are multi-column GROUPS — a k-column candidate graded "
-    "against a 1-column band is graded favourably by an unmeasured amount. Note the draw "
-    "pools bind on n_draws * arity.",
+    "against a 1-column band is graded favourably by an unmeasured amount. --n-draws is "
+    "INDEPENDENT of this (fps-3jj.21): pick the draw count for the certainty you want and "
+    "pay the compute. Capped at placebo.MAX_RULER_ARITY, which is a measured limit on how "
+    "independent the draws can stay, not a pool size.",
 )
 @click.option(
     "--out-name", default=NOISE_FLOOR_FILENAME, show_default=True,

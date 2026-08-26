@@ -59,8 +59,14 @@ floor reproduces it.
 
 | bank | pairs | median | p95 | max cross-draw \|ρ\| |
 |---|---|---|---|---|
-| A: current 10×3, all columns distinct | 405 | 0.015 | 0.111 | **0.965** |
+| A: the **committed** 10×3 ruler, all columns distinct | 405 | 0.015 | 0.111 | **0.965** |
 | B: proposed 20×3, columns reused | 1710 | 0.012 | 0.106 | **0.350** |
+
+Bank A is read from `batch1/noise_floor.json` rather than re-derived by calling
+`screen_draw_groups`. That call now returns the *post*-fix construction, so re-deriving would
+silently stop measuring the thing this write-up argues against and quietly turn the headline
+0.965 into ~0.26. The committed ruler is also the honest object of comparison: it is the bank
+batch1's dossiers were actually graded against.
 
 **Double the draws, strictly more independent on every statistic.** B's worst pair is
 `station_minus_lga_mean_cents` vs `stickiness_score` — the between-station correlation floor
@@ -95,16 +101,16 @@ the cap:
 
 | arity | picks from 49 columns | draw pairs sharing a column | effective draws @ ICC 0.391 |
 |---|---|---|---|
-| 1–2 | 20–40 | 0% | 20.0 |
-| 3 | 60 | 6% | 14.0 |
-| **4** | 80 | 16% | **9.0** ← the cap |
-| 5 | 100 | 28% | 6.5 |
-| 6 | 120 | 49% | 4.3 |
+| 1–2 | 20–40 | 0% | 20.00 |
+| **3** | 60 | 5.8% | **13.98** ← the cap |
+| 4 | 80 | 16.3% | 9.04 |
+| 5 | 100 | 27.9% | 6.51 |
+| 6 | 120 | 48.9% | 4.31 |
 | 10 | 200 | ~100% | 2.4 |
 | 35 | 700 | 100% | 2.4 |
 
-Today's live 10-draw ruler is worth ~**8.3** effective draws once its 0.965 pair is counted.
-Arity 4 is the last value whose worst case still beats that.
+Which arity that makes the cap depends on what it is compared against — see the next section,
+because the first answer here was 4 and it was wrong.
 
 ## The decision
 
@@ -121,7 +127,42 @@ outright.** Three parts:
    `n_picks + n_columns` entries instead of exactly `n_columns`, so a bank that consumes the
    column list still has substitution headroom (the bead's "hard-fail after hours of compute,
    or keep a column that FAILED the screen" hazard).
-3. **`placebo.MAX_RULER_ARITY = 4`** — a hard refusal above it, from the table above.
+3. **`placebo.MAX_RULER_ARITY = 3`** — a hard refusal above it, from the table above.
+
+### The cap was 4 first, and the comparison that set it does not survive symmetrising
+
+Worth recording, because a hard refusal should not rest on an artefact of scoring.
+
+The cap was originally chosen as "the last arity whose worst case still beats today's ruler",
+with today's ruler scored at **8.33** effective draws by charging its one seed-collision pair
+`ρ = 1.0`. But that 1.0 is a **delta** correlation guessed from a placebo-**column**
+correlation of 0.965, while the 0.391 on the other side of the same inequality is a *measured
+delta-space bound*. Two different quantities across one comparison — and the cap turned
+entirely on the 0.7-effective-draw gap between 9.04 and 8.33.
+
+| baseline for "the ruler we already accept" | n_eff | highest arity clearing it |
+|---|---|---|
+| collision pair charged `ρ = 1.0` (the original framing) | 8.33 | 4 |
+| collision pair charged `ρ = 0.391` (symmetrised) | 9.27 | **3** |
+| post-fix 10×3 bank (no reuse, no collision possible) | 10.00 | **3** |
+
+Arity 3 clears all three; arity 4 clears only the most flattering, and that one scores the
+construction this change deletes. `texture_channel.py` now prints all three and re-derives the
+cap, failing loudly if it stops matching `placebo.MAX_RULER_ARITY` — the constant is
+re-measurable rather than asserted.
+
+**The setting is PROVISIONAL, and the cost of being wrong is asymmetric.** Too low costs a
+gradeable candidate shape and is reversible by editing one constant; too high silently biases a
+verdict *into* `experiments/ledger.yaml` as a finding. A band that does not mean anything is
+worse than a refusal, so the conservative side wins while the input is a bound rather than a
+number.
+
+**Consequence, stated rather than hidden: the ruler is now narrower than the invitation.**
+`docs/routines/generator.md` said 2–4 columns; it now says 1–3, and says why. That is the
+bead's option 4 — an arity cap — which the owner rejected on `fps-3jj.14`. The rejection was of
+a cap arrived at *by the pool running out*; this one is measured, re-derivable, provisional, and
+carries a named path back (`fps-3jj.23`). That was the bead's own stated condition for
+accepting a cap.
 
 **Independence cost, stated as the bead asks:** reusing a source column costs a factor of ~2.5
 on the *median* placebo-pair correlation (0.038 vs 0.015) and **nothing on the tail** (p90 flat
@@ -139,21 +180,15 @@ This is a pigeonhole limit, not a sampler defect — **two 35-column draws taken
 must overlap in at least 21 of them**. No sampling rule fixes that; it needs placebo sources
 from outside the lock, bd `fps-3jj.22`.
 
-Note that the cap lands close to the bead's **option 4**, the arity cap the owner rejected on
-`fps-3jj.14`. The rejection was of a cap arrived at *by the pool running out*. This one is
-measured, is the last value that beats the incumbent ruler, and coincides exactly with the
-"2–4 columns" `docs/routines/generator.md` already invites — so the ruler and the invitation
-now agree instead of the ruler quietly being narrower. That was the bead's own stated condition
-for accepting a cap.
-
 ## What is still a bound, not a number
 
 `ICC ≤ 0.391` is the load-bearing input to `MAX_RULER_ARITY` and it comes from an underpowered
-ANOVA. bd **`fps-3jj.23`** measures it directly: a noise floor where every draw uses the *same*
+ANOVA — and the constant it sets is a hard refusal, so this is the single weakest load-bearing
+number in the change. bd **`fps-3jj.23`** measures it directly: a noise floor where every draw uses the *same*
 source column with a different seed varies **alignment alone**, so the difference between its
-variance and the existing multi-column floor's **is** the texture component. ~2.3h. ICC near 0
-lets the cap rise (and may make `fps-3jj.22` unnecessary); ICC near the bound means the cap is
-right or should come down.
+variance and the existing multi-column floor's **is** the texture component. ~2.3h. At the point estimate (ICC ≈ 0) every arity in the exposure
+table sits at 20.00 effective draws and the cap could rise well past 4, possibly making
+`fps-3jj.22` unnecessary; near the bound the cap is right where it is.
 
 ## Verification against real data
 
@@ -161,13 +196,19 @@ Shipped code, batch1 frozen frame, banks the old contract could not build:
 
 ```
 arity 1: 20 draws x 1   seeds distinct 20/20   columns used 20 (max reuse 1)
+arity 2: 20 draws x 2   seeds distinct 40/40   columns used 40 (max reuse 1)
 arity 3: 20 draws x 3   seeds distinct 60/60   columns used 49 (max reuse 2)
-arity 4: 20 draws x 4   seeds distinct 80/80   columns used 49 (max reuse 2)
+arity 4: refused -> arity 4 exceeds MAX_RULER_ARITY (3) — a bank this wide cannot be built...
 
 20x3 shipped bank, worst cross-draw placebo correlation: 0.350
   draw 3 station_minus_lga_mean_cents  <->  draw 4 stickiness_score
   (batch1's committed 10x3 ruler: 0.965 — draw 1 vs draw 10, shared seed 97)
 ```
+
+Every arity up to the cap reaches the full 20 draws, which is the defect fps-3jj.21 was filed
+on: under the old contract arity 3 could reach only 10. `max reuse 2` at arity 3 matches
+`divmod(60, 49)` exactly, so the exposure model in the table above describes what the shipped
+sampler actually produces, not an idealisation of it.
 
 Arity 1 at 20 draws uses 20 columns with zero reuse — unchanged from today.
 
@@ -188,6 +229,11 @@ PYTHONPATH=. uv run python experiments/2026-08-26_placebo_draw_independence/meas
 PYTHONPATH=. uv run python experiments/2026-08-26_placebo_draw_independence/texture_channel.py
 ```
 
+Run from the **repo root** (paths are repo-relative, like every sibling experiment). The frozen
+frame `measure_independence.py` needs is gitignored, so it exists only in the clone that ran the
+freeze — from a worktree, point `FUEL_BATCH_DIR` at that clone's batch dir. `texture_channel.py`
+needs nothing untracked.
+
 Both read the batch1 frozen frame from the primary worktree read-only and need no fits;
 `measure_independence.py` is ~60s, `texture_channel.py` is instant. `measure_independence.py`
 writes `source_column_correlations.csv`, `reuse_channel.csv` and `bank_cross_draw.csv` into
@@ -203,5 +249,5 @@ prototype is deliberately not refactored to call it.
 ## Followups
 
 - bd `fps-3jj.23` — measure the texture ICC directly (replaces the ≤ 0.391 bound)
-- bd `fps-3jj.22` — placebo sources from outside the lock (the only route above arity 4)
+- bd `fps-3jj.22` — placebo sources from outside the lock (the only route to high arity)
 - bd `fps-3jj.20` — closed, fixed here

@@ -106,17 +106,25 @@ For a **column-lock** graduation, recompute an existing batch's floor in place w
 
 Both pools are unbounded now. `placebo.block_seed(i)` supplies a seed at any flat position (the historical 30 primes are its first 30 values, so any bank of ≤30 picks stays byte-identical), and `placebo.candidate_pool` lays repeated laps over the column list instead of stopping at one. **Pick `n_draws` for the certainty you want and pay the compute.**
 
-What binds instead is `placebo.MAX_RULER_ARITY = 4`, and it binds on **arity alone**. It is a measured limit, not a pool size. A draw needs `arity` distinct columns from ~49 usable ones, so as arity rises draws are forced to overlap — and two draws sharing a source column share that column's TEXTURE exactly (same values, same NaN pattern, only re-dated), which correlates their deltas, shrinks the band's sample std, and makes the bar too **easy**. Same bias direction `fps-3jj.14` exists to remove, different door. Carrying the measured upper bound on texture correlation (ICC ≤ 0.391) through a 20-draw bank's reuse exposure:
+What binds instead is `placebo.MAX_RULER_ARITY = 3`, and it binds on **arity alone**. It is a measured limit, not a pool size. A draw needs `arity` distinct columns from ~49 usable ones, so as arity rises draws are forced to overlap — and two draws sharing a source column share that column's TEXTURE exactly (same values, same NaN pattern, only re-dated), which correlates their deltas, shrinks the band's sample std, and makes the bar too **easy**. Same bias direction `fps-3jj.14` exists to remove, different door. Carrying the measured upper bound on texture correlation (ICC ≤ 0.391) through a 20-draw bank's reuse exposure:
 
 | arity | picks from 49 columns | draw pairs sharing a column | effective draws |
 |---|---|---|---|
 | 1–2 | 20–40 | 0% | 20.0 |
-| 3 | 60 | 6% | 14.0 |
-| **4** | 80 | 16% | **9.0** ← the cap |
-| 5 | 100 | 28% | 6.5 |
-| 6 | 120 | 49% | 4.3 |
+| **3** | 60 | 5.8% | **13.99** ← the cap |
+| 4 | 80 | 16.3% | 9.04 |
+| 5 | 100 | 27.9% | 6.51 |
+| 6 | 120 | 48.9% | 4.31 |
 
-Today's live 10-draw ruler is worth ~8.3 effective draws (one draw pair sits at placebo correlation 0.965 — see the seed-collision entry below). Arity 4 is the last value whose **worst case** still beats that, and it coincides exactly with the "2–4 columns" `docs/routines/generator.md` already invites, so the ruler and the invitation now agree instead of the ruler quietly being narrower. Above the cap `screen_draw_groups` **raises** and `_noise_band` refuses with `reason_code: floor_arity_below_run` — a band that wide is still computable and that is precisely the hazard, since it would be a number rather than a ruler. No sampling rule fixes it: two 35-column draws out of 49 columns must share at least 21 of them, by pigeonhole. That needs placebo sources from outside the lock, bd `fps-3jj.22`. The ICC bound itself is from an underpowered ANOVA (could not resolve below 0.359) and is being measured directly in bd `fps-3jj.23`; the cap moves when that number lands. Full working: `experiments/2026-08-26_placebo_draw_independence/`.
+**The cap is 3, and the first answer was 4 — on a comparison that does not survive being symmetrised.** It was set by asking which arity still beats "today's ruler", scored at 8.33 effective draws by charging its one seed-collision pair `ρ = 1.0`. But that 1.0 is a *delta* correlation guessed from a placebo-*column* correlation of 0.965, while the 0.391 on the other side of the same inequality is a measured delta-space bound. Two different quantities across one comparison, and the cap turned entirely on the 0.7-effective-draw gap between them:
+
+| baseline for "the ruler we already accept" | n_eff | arity 4 clears? |
+|---|---|---|
+| collision pair charged `ρ = 1.0` (the original framing) | 8.33 | yes |
+| collision pair charged `ρ = 0.391` (symmetrised) | 9.27 | **no** |
+| post-fix 10×3 bank (no reuse, no collision possible) | 10.00 | **no** |
+
+Arity 3 clears all three; arity 4 clears only the most flattering one, and that one scores a construction this change deletes. **The setting is PROVISIONAL and the cost of being wrong is asymmetric** — too low costs a gradeable candidate shape and is reversible by editing one constant, too high silently biases a verdict *into* `experiments/ledger.yaml` as a finding. A band that does not mean anything is worse than a refusal, so the conservative side wins while the input is a bound rather than a number. Consequence: the ruler is now **narrower** than `docs/routines/generator.md`'s historical "2–4 columns", which has been corrected to 1–3 rather than left to disagree with the instrument. The bound is the thing to attack, not the constant — bd `fps-3jj.23` (P1, ~2.3h) measures the ICC directly, and at its point estimate (≈0) every arity in the table sits at 20.00. Above the cap `screen_draw_groups` **raises** and `_noise_band` refuses with `reason_code: run_arity_above_cap` — its OWN code, not the `floor_arity_below_run` used when a *narrower* floor needs replacing, because that one is fixable by two commands and this one is not fixable by anyone yet (`docs/routines/dossier.md` Step 1.4 branches on both) — a band that wide is still computable and that is precisely the hazard, since it would be a number rather than a ruler. No sampling rule fixes it: two 35-column draws out of 49 columns must share at least 21 of them, by pigeonhole. That needs placebo sources from outside the lock, bd `fps-3jj.22`. The ICC bound itself is from an underpowered ANOVA (could not resolve below 0.359) and is being measured directly in bd `fps-3jj.23`; the cap moves when that number lands. Full working: `experiments/2026-08-26_placebo_draw_independence/`.
 
 **A shared block SEED is what actually destroys a bank's independence — not a shared column (`fps-3jj.20`, fixed by `fps-3jj.21`).** A block seed selects a *rearrangement* of the date blocks. Two placebos built with the same seed get the identical rearrangement, which destroys each column's alignment to the target while leaving the two columns' alignment **to each other** intact — so a pair of near-duplicate source columns comes out of the shuffle as correlated as it went in. This is live in batch1's committed grading ruler: `candidate_pool`'s fallback tail used to restart the seed cycle at index 0, so draw 10 (built entirely of substitutes, after three primaries landed on all-NaN LGA columns) reuses draw 1's seeds 97/101/103 and sits at placebo correlations 0.965 / 0.778 / 0.765 against it. One of ten draws is a near-copy of another, deterministically, on every recompute. Measured on batch1, placebo-pair |ρ| by what the pair shares:
 
@@ -133,9 +141,11 @@ Reusing a column is cheap; reusing a seed is not. `block_seed`'s never-restartin
 **Promoting a wider floor is a RENAME, and there is no selector.** `_noise_band` reads one hardcoded filename, `noise_floor.json`; nothing reads an arity-suffixed side-file. So "compute a wider floor" does not by itself unblock grading — the promotion is the other half, and both halves belong in any instruction that sends someone to build one:
 
 ```
-# 1. compute it beside the current ruler (n_draws max is floor(30/k))
+# 1. compute it beside the current ruler, at the SAME n_draws as the floor it replaces —
+#    there is no longer an arity-dependent ceiling (fps-3jj.21), and matching the draw
+#    count is what keeps the new ruler comparable to the old one.
 PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> \
-    --arity 3 --n-draws 10 --out-name noise_floor_k3.json
+    --arity 3 --n-draws 20 --out-name noise_floor_k3.json
 # 2. promote it, keeping the old ruler under its own arity's name
 mv <batch>/noise_floor.json    <batch>/noise_floor_k1.json
 mv <batch>/noise_floor_k3.json <batch>/noise_floor.json

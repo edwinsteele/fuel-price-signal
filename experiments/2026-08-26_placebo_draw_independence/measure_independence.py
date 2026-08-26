@@ -26,21 +26,25 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import pathlib
 import time
 
 import numpy as np
 import pandas as pd
 
-from fuel_signal.features import load_features
 from experiments.pipeline.placebo import (
     PLACEBO_BLOCK_SEED_POOL,
     make_placebo_series,
-    screen_draw_groups,
 )
-from experiments.pipeline.noise_floor import MAX_SELF_CORRELATION
+from fuel_signal.features import load_features
 
-BATCH = pathlib.Path("/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1")
+# Repo-relative, like every sibling experiment (`2026-08-22_placebo_block_sizing`,
+# `2026-08-23_placebo_arity`) — run from the repo root, as the README's commands do.
+# The frozen frame it needs is GITIGNORED, so it exists only in the clone that ran the
+# freeze — a git worktree will not have it. FUEL_BATCH_DIR overrides for that case rather
+# than baking one machine's absolute path into the script.
+BATCH = pathlib.Path(os.environ.get("FUEL_BATCH_DIR", "experiments/batches/batch1"))
 OUT = pathlib.Path(__file__).parent
 
 # Seeds beyond PLACEBO_BLOCK_SEED_POOL's 30, for the proposed construction. Kept as an
@@ -131,6 +135,13 @@ def deck_draws(columns: list[str], n_draws: int, arity: int) -> list[list[tuple[
 
 def main() -> None:
     t0 = time.time()
+    if not (BATCH / "baseline_columns.json").exists():
+        raise SystemExit(
+            f"{BATCH} has no baseline_columns.json. Run this from the repo root, and note "
+            "that the frozen frame (features.parquet) is gitignored — it lives only in the "
+            "clone that ran the freeze, not in a worktree. Point FUEL_BATCH_DIR at that "
+            "clone's batch dir if you are running from elsewhere."
+        )
     frame = load_features(BATCH / "features.csv")
     baseline = json.loads((BATCH / "baseline_columns.json").read_text())
     print(f"[{time.time()-t0:6.1f}s] frame {frame.shape}, {len(baseline)} baseline columns")
@@ -221,10 +232,22 @@ def main() -> None:
         return pd.DataFrame(out, columns=[
             "bank", "draw_a", "draw_b", "col_a", "col_b", "seed_a", "seed_b", "abs_rho"])
 
-    current = screen_draw_groups(
-        frame, baseline, 10, arity=3, max_self_correlation=MAX_SELF_CORRELATION
+    # Bank A is read from the COMMITTED ruler, not re-derived by calling
+    # `screen_draw_groups`. That call would now return the POST-fix construction, so the
+    # script would silently stop measuring the thing it is arguing against — and the headline
+    # 0.965 would quietly become ~0.26, unreproducible from its own write-up. The committed
+    # `noise_floor.json` is the bank batch1's dossiers were actually graded against, which is
+    # the honest object of comparison anyway.
+    floor = json.loads((BATCH / "noise_floor.json").read_text())
+    k = int(floor["n_placebo_columns"])
+    members = [
+        (m["source_column"], m["block_seed"], float(m["self_correlation"]))
+        for m in floor["placebo_draws"]
+    ]
+    current = [members[i:i + k] for i in range(0, len(members), k)]
+    cur = bank_cross_draw(
+        current, f"A: committed {len(current)}x{k} ruler (distinct columns, seed pool)"
     )
-    cur = bank_cross_draw(current, "A: current 10x3 (distinct columns)")
     print(f"[{time.time()-t0:6.1f}s] bank A done")
 
     # Proposed: a DECK. Each lap is `select_draws`'s own even spread over the whole column

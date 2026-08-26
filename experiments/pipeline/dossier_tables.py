@@ -107,6 +107,16 @@ NULL_METHOD_PLACEBO_COLUMN = "placebo_column"
 #: `rejected` there would stamp dead ground onto a candidate nothing has measured — the exact
 #: harm fps-3jj.17 exists to prevent. See dossier.md Step 1.4's arity carve-out.
 NOISE_BAND_REFUSAL_ARITY = "floor_arity_below_run"
+
+#: The OTHER arity refusal, and it needs its own code (review of PR #335). It shares
+#: `NOISE_BAND_REFUSAL_ARITY`'s "not the candidate's fault, leave it in the queue" handling but
+#: nothing else: `floor_arity_below_run` is literally false here — the floor's arity is
+#: irrelevant, and this fires even against a floor WIDER than the run. The two also want
+#: opposite instructions. `floor_arity_below_run` carries two commands and is fixed by running
+#: them; this one carries none, because no ruler can be built this wide at all
+#: (`placebo.MAX_RULER_ARITY`), so a routine told to "build a wider ruler" would be following an
+#: instruction it cannot satisfy. `docs/routines/dossier.md` Step 1.4 branches on both.
+NOISE_BAND_REFUSAL_ARITY_CAP = "run_arity_above_cap"
 FROZEN_FEATURES_FILENAME = "features.parquet"
 
 SEED_STD_FLAG_RATIO = 5.0
@@ -121,7 +131,7 @@ FAMILY_WISE_ALPHA = 0.05
 
 # `family_wise_z_threshold` in the limit where the band is KNOWN rather than estimated from a
 # finite number of draws (t -> normal, and the prediction interval's sqrt(1 + 1/n) -> 1). Used
-# only as the fixed reference that `bar_draw_count_penalty_cpl_held` measures against, so that
+# only as the fixed reference that `bar_draw_count_shift_cpl_held` measures against, so that
 # penalty is a property of one floor rather than of a pair of floors being compared.
 _LARGE_SAMPLE_Z = float(_norm_dist.ppf(1.0 - FAMILY_WISE_ALPHA))
 
@@ -514,7 +524,7 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # construction placebo sources from outside the lock.
         return {
             "available": False,
-            "reason_code": NOISE_BAND_REFUSAL_ARITY,
+            "reason_code": NOISE_BAND_REFUSAL_ARITY_CAP,
             "reason": f"this candidate adds {run_arity} columns "
             f"({', '.join(map(str, run_columns))}), above MAX_RULER_ARITY "
             f"({MAX_RULER_ARITY}) — no meaningful noise band exists at that width. A draw "
@@ -522,9 +532,11 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             "draws is forced to overlap heavily, their deltas stop being independent "
             "samples of the null, and the band's std understates the true spread — a bar "
             "that is too EASY. Computing one anyway would produce a number, not a ruler. "
-            "This needs placebo sources from outside the lock: bd fps-3jj.22. This run is "
-            "NOT rejected and must not be written up as such — it completed and graded "
-            "fine. Leave it in the dossier queue (write no README.md, no ledger entry).",
+            "This needs placebo sources from outside the lock: bd fps-3jj.22, and the cap "
+            "itself is PROVISIONAL on bd fps-3jj.23 measuring the texture ICC directly. This "
+            "run is NOT rejected and must not be written up as such — it completed and "
+            "graded fine. Leave it in the dossier queue (write no README.md, no ledger "
+            "entry).",
         }
     if check_fingerprint and run_arity > floor_arity:
         # The remediation below is spelled out as TWO steps on purpose. This function reads
@@ -610,16 +622,28 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # actually compare against `experiments/results.csv`'s 0.03-0.26 c/L history and against
         # another candidate's. `delta_cpl_held` is a COST, so clearing the bar means coming in
         # AT OR BELOW this number.
+        #
+        # This is the FAVOURABLE side only. `single_candidate_z_threshold` is two-sided ("in
+        # EITHER direction", and dossier.md's three-region rule is `-t < z < t`), so a candidate
+        # landing ABOVE `band_mean + z * band_std` is also distinguishable from noise — just
+        # surprisingly BAD — and this single number cannot express that. Judge two-sidedness on
+        # `abs(candidate_z_vs_band)` against the z threshold; use this one to read how hard the
+        # favourable bar is in units the rest of the project quotes.
         "single_candidate_bar_cpl_held": (
             band_mean - single_z * band_std if single_z is not None else None
         ),
-        # How much of that bar is band THINNESS rather than band WIDTH. The t-critical carries
+        # How much of that bar is band THINNESS rather than band WIDTH. SIGNED, and negative
+        # whenever the band is estimated from finite draws — `_LARGE_SAMPLE_Z` is strictly below
+        # any finite-n threshold, so a LARGER penalty reads as a MORE NEGATIVE number. Named
+        # "shift" rather than "penalty" for exactly that reason (review of PR #335): it is the
+        # signed move of a cost, on the same scale and in the same direction as the bar itself,
+        # not a magnitude. The t-critical carries
         # `df = n_draws - 1`, so a floor estimated from few draws sets a harder bar than the
         # same band estimated from many — and `experiments/2026-08-23_placebo_arity/` measured
         # two thirds of batch1's k=1 -> k=3 bar move as exactly this, not as the arity effect it
         # was being read as. Quoted against the large-sample limit (the band known rather than
         # estimated), so it is a property of this floor alone and comparable across floors.
-        "bar_draw_count_penalty_cpl_held": (
+        "bar_draw_count_shift_cpl_held": (
             (_LARGE_SAMPLE_Z - single_z) * band_std if single_z is not None else None
         ),
         # Columns by which the ruler is WIDER-armed than the run it grades. Allowed (a wider

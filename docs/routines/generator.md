@@ -256,23 +256,29 @@ related columns is as legitimate a proposal as a single column, and should be fi
 one candidate with one `HYPOTHESIS`, one `TARGET` and one pair of `CONFIDENCE` fields —
 because it is one idea.
 
-**2–4 is also the range the noise band can actually grade, and the two now agree
-(`fps-3jj.21`, 2026-08-26).** They did not before: the placebo bank needed `arity`
+**But the noise band can currently only grade up to THREE, so propose 1–3 columns
+(`fps-3jj.21`, 2026-08-26).** The instrument is narrower than this section's historical
+"2–4", and that gap is stated rather than hidden. They did not before: the placebo bank needed `arity`
 distinct source columns *per draw* out of 54, so a wider candidate got a thinner band,
 and a thinner band means a much harder bar (`family_wise_z_threshold` carries
 `df = n_draws − 1`). A 4-column candidate's bar was **0.04 c/L harder** than a 3-column
 batch-mate's purely from band thinness, and nothing said so. That is fixed — draw count
 no longer depends on arity at all — and the residual limit is a hard cap at
-`placebo.MAX_RULER_ARITY = 4`, set by measurement rather than by a pool running out.
+`placebo.MAX_RULER_ARITY = 3`, set by measurement rather than by a pool running out. The cap
+is **provisional**: bd `fps-3jj.23` measures the quantity it rests on directly, and at that
+measurement's point estimate the cap could rise back to 4 or beyond. Until then the
+conservative setting holds, because a band that is too narrow makes the bar too EASY and
+writes noise into the ledger as a finding.
 
-**So: propose 1–4 columns. Do not propose 5 or more.** Above 4 the run still completes,
+**So: propose 1–3 columns. Do not propose 4 or more.** Above the cap the run still completes,
 but no meaningful band exists to grade it against, so `_noise_band` refuses and the
 dossier cannot be written — the candidate becomes a night of compute with no verdict.
 This is a real cost, not a formality: the 35 LGA event features that motivate this whole
 section could not be graded as one candidate today. Lifting it needs placebo sources
-from outside the lock (bd `fps-3jj.22`); until then, a mechanism that genuinely needs
-more than 4 columns should be **proposed as a narrower version** with a note in
-`PRIOR_ART` saying what was left out and why, not padded down silently.
+from outside the lock (bd `fps-3jj.22`) or the ICC measurement (bd `fps-3jj.23`); until
+then, a mechanism that genuinely needs more columns should be **proposed as a narrower
+version** with a note in `PRIOR_ART` saying what was left out and why, not padded down
+silently.
 
 **Why this is stated so plainly:** every feature win in this project's history arrived as
 a *group*, not a lone column. The 35 LGA event features went in together; the 4
