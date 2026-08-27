@@ -158,8 +158,9 @@ one is invisible to everyone but this machine.
   SOURCE COLUMNS, and the two draws share none (30 picks, 30 distinct columns), so
   `_resolve_effective_n_draws` returns the nominal 10.0 exactly. Against
   `docs/CONVENTIONS.md`'s own measured table the machinery charges the cheap channel (same
-  column, different seed — median |ρ| 0.038) at `icc = 0.391` and the expensive one (different
-  column, same seed — max |ρ| 0.971) at zero. Closed by construction for every FUTURE floor
+  column, different seed — median |ρ| 0.038) at `icc = placebo.TEXTURE_ICC_BOUND` (0.391 when
+  this was written; 0.274 since `fps-3jj.23` measured it by column) and the expensive one
+  (different column, same seed — max |ρ| 0.971) at zero. Closed by construction for every FUTURE floor
   (`placebo.block_seed` never restarts), so this is a defect of two committed artifacts, not of
   the code — do not "fix" `effective_n_draws` to chase it.
 

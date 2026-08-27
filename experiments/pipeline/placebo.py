@@ -223,47 +223,67 @@ PLACEBO_SEED_EXTENSION_BASE = 1_000_000
 # autocorrelation exactly; only the dates move). This is what makes a bank of reused columns
 # worth fewer draws than it has, and `effective_n_draws` below turns it into a number.
 #
-# **A BOUND, not a measurement — and its error direction is NOT established.** Measured on
-# batch1 (`experiments/2026-08-26_placebo_draw_independence/`) by one-way ANOVA of the committed
-# 20-draw floor's deltas grouped by texture FAMILY: F(3,16) = 0.411, p = 0.75, point estimate
-# ~0 — but the design could not resolve anything below 0.359, so "we saw nothing" only rules out
-# values above ~0.36.
+# **MEASURED, by column, on 2026-08-27 (bd `fps-3jj.23`).** 32 pinned-source draws on batch1 —
+# 8 source columns x 4 block seeds, `noise_floor --same-source-column` — grouped BY SOURCE
+# COLUMN in a one-way ANOVA, which is the by-column quantity this constant stands for rather
+# than a proxy for it: F(7,24) = 0.735, p = 0.65, point estimate -0.071 (i.e. 0), 95% upper
+# bound at the one-sided 5% tail **0.274**. Working:
+# `experiments/2026-08-27_texture_icc/`.
 #
-# The 95% upper bound is used rather than the point estimate, which sounds conservative and is
-# not demonstrably so. That bound is on the ICC by FAMILY; the quantity this constant stands for
-# is the ICC by COLUMN, and family is coarser — two different `days_since_trough_entry_<lga>`
-# columns are same-family but different-column, while two placebos from the SAME column are more
-# alike than that. So the column ICC is plausibly LARGER, and 0.391 is not established as an
-# upper bound on it. If the true value exceeds 0.391, bars on wide candidates are too EASY,
-# which is the failure this whole mechanism exists to prevent. Weak evidence against a very
-# large one: it should have produced some family clustering, and the ANOVA found none.
+# The value shipped is the UPPER BOUND, not the point estimate. The design resolves down to
+# 0.262, so a point estimate of ~0 reads "could not see it", never "it is not there" — an ICC
+# of, say, 0.05 is entirely consistent with what was measured, and so is one of 0.25. Use the
+# pessimistic end; that is what makes the bar safe rather than merely small.
+#
+# **What this replaced, and why the replacement is tighter in both directions.** Until now this
+# was 0.391: a 95% upper bound on the ICC by texture FAMILY, standing in for the ICC by COLUMN.
+# Family is coarser — two different `days_since_trough_entry_<lga>` columns are same-family but
+# different-column, while two placebos from the SAME column are more alike than that — so 0.391
+# was never established as an upper bound on the quantity actually used, and the direction of
+# its error was unknown. The by-column measurement closes that gap: it is the right quantity,
+# and it is smaller. Independently, `fps-8o0` was checked against the old artifact at the same
+# time: batch1's `network` texture family is a SINGLETON, and `texture_channel.py` dropped it
+# from the sums of squares while keeping n=20 and k=5 in the degrees of freedom and in `k_bar`.
+# Recomputed correctly the by-family bound is **0.226**, not 0.391 — so the old constant was
+# also overstated on its own terms. Two estimators of two different quantities, both under
+# 0.391, agreeing on direction.
+#
+# **What is still assumed.** The 8 pinned columns were chosen by `select_draws`' own even spread
+# over the 49 usable columns — sampled the way the bank samples, not curated — so the estimate
+# is for the population the bank actually draws from. But their WITHIN-column (alignment)
+# variance ran 2.2x the committed 20-draw multi-column floor's TOTAL variance, which under an
+# equal-alignment-variance model is impossible. The difference is not resolvable (95% CI on the
+# ratio [0.90, 5.18], p = 0.08, and the design cannot call a ratio significant below 0.574), so
+# there is no established evidence the pinned set is unrepresentative — but if that lean is
+# real, the ANOVA's ICC is biased LOW and 0.274 is optimistic. That is the residual, and it is
+# the reason this stays a bound rather than becoming a point estimate.
 #
 # **It sets every bar, but it only MOVES the wide ones.** Swept across its entire possible
 # range on batch1's live ruler with `effective_n_draws` itself (20-draw bank,
 # `experiments/2026-08-27_texture_icc/power.py`), the single-candidate bar in c/L:
 #
-#   arity     ICC 0    0.391      1.0    most it can move
+#   arity     ICC 0    0.274      1.0    most it can move
 #       1-2  -0.152   -0.152   -0.152    0.000   <- no two draws share a column AT ALL
-#       3    -0.152   -0.154   -0.157    0.005
-#       4    -0.152   -0.156   -0.163    0.011
-#      10    -0.152   -0.171   -0.211    0.059
-#      20    -0.152   -0.203   -0.431    0.280
-#      35    -0.152   -0.287  no band    0.383
+#       3    -0.152   -0.153   -0.157    0.005
+#       4    -0.152   -0.155   -0.163    0.011
+#      10    -0.152   -0.165   -0.211    0.059
+#      20    -0.152   -0.185   -0.431    0.280
+#      35    -0.152   -0.226  no band    0.383
 #
 # So at every width batch1 has actually run (1 and 3 columns) this constant cannot move a
 # verdict — its whole range is worth 0.005 c/L there, an order of magnitude under the realised
-# arbiter's decision quantum. It is load-bearing for the WIDE groups docs/routines/generator.md
-# invites, and nowhere else. Say that, rather than the bare "it sets every bar".
+# arbiter's decision quantum, and the 0.391 -> 0.274 move itself is worth 0.001. It is
+# load-bearing for the WIDE groups docs/routines/generator.md invites, and nowhere else. Say
+# that, rather than the bare "it sets every bar".
 #
-# bd `fps-3jj.23` measures it directly with a pinned-source bank
-# (`screen_pinned_column_draws`, `noise_floor --same-source-column`). Note when reading that
-# bead: the cheap version it proposes cannot discharge it. One pinned column x 10 seeds against
-# the committed 20-draw floor is an unpaired variance ratio on F(9,19), resolvable only above
-# 0.661, whose BEST case is a 0.587 upper bound — looser than this value (both at the one-sided
-# 5% tail, the tail this constant itself was derived at). The design that works
-# is a one-way ANOVA by COLUMN over several pinned columns, at 32 draws (~6.1h). When it lands,
-# replace this constant with the measured value.
-TEXTURE_ICC_BOUND = 0.391
+# **Lowering it LOOSENS wide bars, so do not lower it again without a measurement.** Less
+# correlation means more effective draws means a narrower band means an easier bar: arity 35
+# went from -0.287 to -0.226 c/L with this change. That is the direction that admits false
+# positives, which is why the number moved only on a direct measurement of the right quantity
+# and why the bound, not the estimate, is what ships. To tighten it further, take more draws:
+# the bound is limited by the design's resolution, and 12 columns x 5 seeds (60 draws, ~11.4h)
+# would land near 0.23 even if the point estimate came out at 0. `power.py` prices it.
+TEXTURE_ICC_BOUND = 0.274
 
 
 def effective_n_draws(
@@ -287,11 +307,13 @@ def effective_n_draws(
 
     Two draws sharing `s` of `arity` columns are charged `icc * s / arity`, not the full `icc`.
     The fraction matters and the binary version is badly wrong: charging any overlap the full
-    ICC put a 20-draw arity-10 bank at 2.4 effective draws, which is what made a cap look
-    necessary. Scaled by share it is 9.04, and the bar degrades gently enough that no cap is
-    needed at all — arity 35 lands at 3.23 effective draws and a -0.287 c/L single-candidate bar
+    ICC put a 20-draw arity-10 bank at 3.2 effective draws, which is what made a cap look
+    necessary. Scaled by share it is 10.81, and the bar degrades gently enough that no cap is
+    needed at all — arity 35 lands at 4.31 effective draws and a -0.226 c/L single-candidate bar
     against arity 1's -0.152, where the pre-fps-3jj.21 construction could not produce a band
-    above arity 17 at any price.
+    above arity 17 at any price. (Every figure in this paragraph is quoted at the live
+    `TEXTURE_ICC_BOUND`. At the 0.391 shipped before `fps-3jj.23` measured it they read 2.4 /
+    9.04 / 3.23 / -0.287 — the argument is unchanged, the numbers all moved.)
 
     Computed from the ACTUAL bank rather than from a model of it: `screen_draw_groups` may
     substitute a column that fails the self-correlation screen, so which draws really overlap is

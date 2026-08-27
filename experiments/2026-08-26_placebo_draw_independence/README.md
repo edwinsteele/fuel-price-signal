@@ -184,34 +184,47 @@ and genuinely does get a harder bar. That is now priced rather than refused. Dra
 sources from outside the lock (bd `fps-3jj.22`) would reduce the overlap and tighten the bar —
 an improvement now, where it used to be a precondition.
 
-## What is still a bound, not a number
+## What was still a bound, and is now MEASURED (`fps-3jj.23`, 2026-08-27)
 
-`ICC ≤ 0.391` (`placebo.TEXTURE_ICC_BOUND`) is the load-bearing input to every bar, and it comes
-from an underpowered ANOVA. bd **`fps-3jj.23`** measures it directly, and is in flight —
-`experiments/2026-08-27_texture_icc/` holds the instrument, the power analysis and the result.
+**Superseded. `placebo.TEXTURE_ICC_BOUND` is 0.274, not 0.391, and it is now a bound on the
+right quantity.** The full working is `experiments/2026-08-27_texture_icc/`; the live tables are
+`docs/CONVENTIONS.md` § the ICC. Three things this section got wrong or could not settle:
 
-**Two corrections to this section, from that work.** First, "load-bearing input to EVERY bar" is
-true but overstated: at arity 1–2 the constant is irrelevant by construction, and at arity 3–4 —
-every candidate this batch ran — its *whole range* moves the bar by ≤ 0.011 c/L. It is
-load-bearing for wide groups only. Second, the construction sketched in the next sentence (one
-same-source column, variance compared against the multi-column floor) **cannot discharge the
-bead at the ~2.3h budgeted here**: it is an unpaired variance ratio on `F(9,19)`, resolvable only
-above 0.661, and its best possible outcome is a 0.587 upper bound — looser than the 0.391 it
-would replace (both at the one-sided 5% tail, the tail `texture_channel.py` used for 0.391). The design that works groups several pinned columns and runs the ANOVA **by
-column**, at 32 draws (~6.1h).
+**1. The gap between family and column is closed — in the direction this section could not
+call.** This analysis measured the ICC of delta grouped by texture *family* and used it as a
+stand-in for the ICC by *column*, correctly flagging that family is coarser and the column
+quantity is plausibly larger, so 0.391 was **not** established as an upper bound on what
+`effective_n_draws` actually charges. A 32-draw pinned-source bank (8 columns × 4 seeds) settled
+it directly: `F(7,24) = 0.735`, `p = 0.65`, point estimate −0.071 (i.e. 0), one-sided 95% upper
+bound **0.274**, design resolvable to 0.262. The column ICC is *smaller* than the family bound,
+not larger.
 
-**It is not established as conservative, despite being an upper bound.** The bound is on the ICC
-by texture *family*; the quantity actually used is the ICC by *column*, and family is coarser —
-two different `days_since_trough_entry_<lga>` columns are same-family but different-column, while
-two placebos from the *same* column are more alike than that. The column ICC is plausibly
-**larger**, so 0.391 is not demonstrably an upper bound on it, and if the true value exceeds it
-then bars on wide candidates are too **easy** — the failure this mechanism exists to prevent.
-Weak evidence against a very large one: it should have produced *some* family clustering, and the
-ANOVA found none. Weak is why `fps-3jj.23` exists.
+**2. This analysis's own arithmetic was wrong, and `fps-8o0` is the reason.** Batch1's `network`
+texture family is a **singleton**, and `texture_channel.py` drops any group with one member from
+the sums of squares while keeping `n = 20` and `k = 5` in the degrees of freedom and in `k_bar`.
+So the published `F(3,16) = 0.411 → 0.391` mixes a 19-draw/4-group F with a 20-draw/5-group df
+and `k_bar`. Recomputed consistently over all five families the by-family bound is **0.226**
+(`F(4,15) = 0.330`, `p = 0.85`, point estimate −0.265, resolvable 0.391). The headline number
+this experiment produced was overstated on its own terms as well as being about the wrong
+grouping. `fps-8o0` fixes the script; the constant no longer depends on it.
 
-At the point estimate (ICC ≈ 0) every width sits at 20.00 effective draws and every bar collapses
-to arity 1's −0.152 — at which point `fps-3jj.22` buys nothing and should be closed. `fps-3jj.23`
-is recorded in bd as **blocking** `fps-3jj.22` for exactly that reason.
+**3. "Load-bearing input to EVERY bar" is true but overstated.** At arity 1–2 the constant is
+irrelevant by construction (no two draws share a column at all), and at arity 3–4 — every
+candidate this batch ran — its *whole possible range* moves the bar by ≤ 0.011 c/L. It is
+load-bearing for wide groups only.
+
+**And the cheap version of the follow-up measurement was worthless, which is worth keeping.**
+The construction sketched in the original of this section — one same-source column, variance
+compared against the multi-column floor — cannot discharge `fps-3jj.23` at the ~2.3h budgeted:
+it is an unpaired variance ratio on `F(9,19)`, resolvable only above 0.661, best possible
+outcome a 0.587 upper bound, *looser than the 0.391 it would replace* (both at the one-sided 5%
+tail, the tail `texture_channel.py` used). Priced in 6 seconds of arithmetic before any fit was
+spent. The design that worked groups several pinned columns and runs the ANOVA **by column**.
+
+**`fps-3jj.22` was not closed.** This section predicted that at ICC ≈ 0 every width collapses to
+arity 1's −0.152 and `fps-3jj.22` buys nothing. The point estimate did land at 0 — but the
+design resolves only to 0.262, so the shipping value is the 0.274 bound, and at that value an
+arity-35 candidate still pays 0.074 c/L for overlap. Demoted rather than closed; see the bead.
 
 ## Verification against real data
 
@@ -222,7 +235,7 @@ arity 1: 20 draws x 1   seeds distinct 20/20   columns used 20 (max reuse 1)
 arity 2: 20 draws x 2   seeds distinct 40/40   columns used 40 (max reuse 1)
 arity 3: 20 draws x 3   seeds distinct 60/60   columns used 49 (max reuse 2)
 
-arity  draws   n_eff   bar(1)          <- fps-3jj.25, same frame, shipped code
+arity  draws   n_eff   bar(1)          <- fps-3jj.25, same frame, at the then-shipped icc 0.391
     1     20   20.00   -0.152
     2     20   20.00   -0.152
     3     20   17.49   -0.154
@@ -233,6 +246,11 @@ arity  draws   n_eff   bar(1)          <- fps-3jj.25, same frame, shipped code
   draw 3 station_minus_lga_mean_cents  <->  draw 4 stickiness_score
   (batch1's committed 10x3 ruler: 0.965 — draw 1 vs draw 10, shared seed 97)
 ```
+
+(The `n_eff`/`bar` rows above are a transcript of that run, taken at the then-shipped
+`icc = 0.391`. At the measured 0.274 the same banks read 18.17 / 10.81 / 4.31 effective draws
+and −0.153 / −0.165 / −0.226 c/L at arity 3 / 10 / 35; `docs/CONVENTIONS.md` carries the live
+table.)
 
 Every arity reaches the full 20 draws, which is the defect fps-3jj.21 was filed on: under the
 old contract arity 3 could reach only 10, and arity 18+ could produce no band at all. `max reuse 2` at arity 3 matches
