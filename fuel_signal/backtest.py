@@ -1064,7 +1064,12 @@ def _print_results_table(results: list[BacktestResult]) -> None:
 )
 @click.option("--tank-size", "tank_size", type=float, default=50.0, show_default=True, help="Tank capacity in litres.")
 @click.option(
-    "--daily-use", "daily_use", type=float, default=round(50.0 / 14, 3), show_default=True,
+    # Sourced from TankParams rather than a rounded literal: the rounded copy
+    # (3.571) stamp-collided with the dataclass's unrounded default while
+    # consuming marginally differently (fps-q3p) — the same defect class as
+    # --eval-interval's hard-coded 7, fixed the same way (fps-oqz).
+    "--daily-use", "daily_use", type=float,
+    default=TankParams().daily_consumption_litres, show_default=True,
     help="Daily fuel consumption in litres.",
 )
 @click.option(
