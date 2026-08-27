@@ -66,6 +66,8 @@ Default decision rule: if any single fold regresses by more than the median impr
 
 Override is allowed when the regressing fold is known to be anomalous (a price-shock period, a labelling artefact, a regime explicitly out of scope). State the override reason in the PR body — a considered exception is fine; silently ignoring the rule is not.
 
+**Pre-registered instance:** the fold whose val window is `2022-02-03 to 2022-05-03` spans the unrecoverable NSW source-data hole of 2022-03-12 to 2022-03-21 (`fps-tpy`; see [AGENTS.md § Known source data limitations](../AGENTS.md#known-source-data-limitations)). Decided 2026-08-27: flag it if it regresses, don't exclude it from the harness — the effect is small, partial, and confined to one fold, and this window already overlaps the Ukraine-invasion shock most regime-segmented runs treat as elevated-variance.
+
 **Why:** on 2026-06-03, `station_minus_last_max_cents` looked like a clean drop on one val window (5-seed Δ −0.0112 ± 0.0043), but a 14-fold paired walk-forward CV showed 7/14 fold-wins, mean Δ +0.0104, with fold 9 (2023-10→2024-01) regressing by +0.103. See `experiments/2026-06-03_drop_redundant_pair/`.
 
 ### The baseline feature set is declared, never discovered
