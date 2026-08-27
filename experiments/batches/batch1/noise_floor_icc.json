@@ -1,0 +1,268 @@
+{
+  "deltas_cpl_held": [
+    -0.059449613113116584,
+    -0.06870202033161377,
+    -0.058157537639800694,
+    0.05286446204007689,
+    -0.059504696999454154,
+    0.15290596924185706,
+    0.14642177551689883,
+    0.15764129244766423,
+    0.011892852248251984,
+    0.14090348163045974,
+    -0.043636455063420954,
+    0.03283159527458679,
+    0.0721388220229926,
+    0.1264399937897167,
+    -0.18000310510794293,
+    0.03791130399892495,
+    0.14841674661860793,
+    -0.05012250733852852,
+    0.05050390971140928,
+    -0.1568944175386946,
+    -0.24626966448099097,
+    0.22198517883197155,
+    -0.07889008528235308,
+    0.18160691024138487,
+    -0.04597546051491008,
+    0.003180672900668924,
+    -0.0016256153136851026,
+    0.10706890312462747,
+    0.15233151822502577,
+    -0.07304798275313829,
+    0.15583463665387853,
+    0.05843448836972698
+  ],
+  "null_method": "placebo_column_pinned_source",
+  "same_source_columns": [
+    "cycle_pct_through",
+    "station_price_cents",
+    "brand_mean_cents",
+    "days_since_trough_entry_camden",
+    "days_since_trough_entry_georges_river",
+    "days_since_trough_entry_north_sydney",
+    "days_since_trough_entry_ryde",
+    "days_since_trough_entry_wollondilly"
+  ],
+  "n_draws": 32,
+  "effective_n_draws": 14.726184997699033,
+  "texture_icc_assumed": 0.391,
+  "n_placebo_columns": 1,
+  "all_nan_baseline_columns": [
+    "days_since_trough_entry_bayside",
+    "days_since_trough_entry_botany_bay",
+    "days_since_trough_entry_hunters_hill",
+    "days_since_trough_entry_lane_cove",
+    "days_since_trough_entry_waverley"
+  ],
+  "n_baseline_columns_available": 49,
+  "seed": 42,
+  "placebo_draws": [
+    {
+      "draw": 1,
+      "source_column": "cycle_pct_through",
+      "block_seed": 97,
+      "self_correlation": -0.023092669468697237
+    },
+    {
+      "draw": 2,
+      "source_column": "station_price_cents",
+      "block_seed": 101,
+      "self_correlation": 0.05027966557855844
+    },
+    {
+      "draw": 3,
+      "source_column": "brand_mean_cents",
+      "block_seed": 103,
+      "self_correlation": 0.03721564745679093
+    },
+    {
+      "draw": 4,
+      "source_column": "days_since_trough_entry_camden",
+      "block_seed": 107,
+      "self_correlation": -0.003320672829530714
+    },
+    {
+      "draw": 5,
+      "source_column": "days_since_trough_entry_georges_river",
+      "block_seed": 109,
+      "self_correlation": 0.006997749665596683
+    },
+    {
+      "draw": 6,
+      "source_column": "days_since_trough_entry_north_sydney",
+      "block_seed": 113,
+      "self_correlation": 0.02783491154807349
+    },
+    {
+      "draw": 7,
+      "source_column": "days_since_trough_entry_ryde",
+      "block_seed": 127,
+      "self_correlation": -0.02464656339617801
+    },
+    {
+      "draw": 8,
+      "source_column": "days_since_trough_entry_wollondilly",
+      "block_seed": 131,
+      "self_correlation": 0.0025440773090644815
+    },
+    {
+      "draw": 9,
+      "source_column": "cycle_pct_through",
+      "block_seed": 137,
+      "self_correlation": -0.012344066713138636
+    },
+    {
+      "draw": 10,
+      "source_column": "station_price_cents",
+      "block_seed": 139,
+      "self_correlation": 0.040961416048999826
+    },
+    {
+      "draw": 11,
+      "source_column": "brand_mean_cents",
+      "block_seed": 149,
+      "self_correlation": 0.0314473562402031
+    },
+    {
+      "draw": 12,
+      "source_column": "days_since_trough_entry_camden",
+      "block_seed": 151,
+      "self_correlation": 0.008700151645966351
+    },
+    {
+      "draw": 13,
+      "source_column": "days_since_trough_entry_georges_river",
+      "block_seed": 157,
+      "self_correlation": -0.0014493858410781044
+    },
+    {
+      "draw": 14,
+      "source_column": "days_since_trough_entry_north_sydney",
+      "block_seed": 163,
+      "self_correlation": 0.020397221880014513
+    },
+    {
+      "draw": 15,
+      "source_column": "days_since_trough_entry_ryde",
+      "block_seed": 167,
+      "self_correlation": 0.06998837097757239
+    },
+    {
+      "draw": 16,
+      "source_column": "days_since_trough_entry_wollondilly",
+      "block_seed": 173,
+      "self_correlation": -0.036159393333798626
+    },
+    {
+      "draw": 17,
+      "source_column": "cycle_pct_through",
+      "block_seed": 179,
+      "self_correlation": -0.011419788859762284
+    },
+    {
+      "draw": 18,
+      "source_column": "station_price_cents",
+      "block_seed": 181,
+      "self_correlation": 0.04809525124879979
+    },
+    {
+      "draw": 19,
+      "source_column": "brand_mean_cents",
+      "block_seed": 191,
+      "self_correlation": 0.04451694939572272
+    },
+    {
+      "draw": 20,
+      "source_column": "days_since_trough_entry_camden",
+      "block_seed": 193,
+      "self_correlation": -0.03055599147095963
+    },
+    {
+      "draw": 21,
+      "source_column": "days_since_trough_entry_georges_river",
+      "block_seed": 197,
+      "self_correlation": 0.008713473369995568
+    },
+    {
+      "draw": 22,
+      "source_column": "days_since_trough_entry_north_sydney",
+      "block_seed": 199,
+      "self_correlation": -0.03729125548130476
+    },
+    {
+      "draw": 23,
+      "source_column": "days_since_trough_entry_ryde",
+      "block_seed": 211,
+      "self_correlation": -0.0896926021622046
+    },
+    {
+      "draw": 24,
+      "source_column": "days_since_trough_entry_wollondilly",
+      "block_seed": 223,
+      "self_correlation": -0.0967772591633934
+    },
+    {
+      "draw": 25,
+      "source_column": "cycle_pct_through",
+      "block_seed": 227,
+      "self_correlation": -0.0040383479304594485
+    },
+    {
+      "draw": 26,
+      "source_column": "station_price_cents",
+      "block_seed": 229,
+      "self_correlation": 0.045327113488827606
+    },
+    {
+      "draw": 27,
+      "source_column": "brand_mean_cents",
+      "block_seed": 233,
+      "self_correlation": 0.03930699785446238
+    },
+    {
+      "draw": 28,
+      "source_column": "days_since_trough_entry_camden",
+      "block_seed": 239,
+      "self_correlation": 0.03678127611779943
+    },
+    {
+      "draw": 29,
+      "source_column": "days_since_trough_entry_georges_river",
+      "block_seed": 241,
+      "self_correlation": -0.07438104401766928
+    },
+    {
+      "draw": 30,
+      "source_column": "days_since_trough_entry_north_sydney",
+      "block_seed": 251,
+      "self_correlation": 0.03677105865213903
+    },
+    {
+      "draw": 31,
+      "source_column": "days_since_trough_entry_ryde",
+      "block_seed": 1000030,
+      "self_correlation": -0.06336793100521314
+    },
+    {
+      "draw": 32,
+      "source_column": "days_since_trough_entry_wollondilly",
+      "block_seed": 1000031,
+      "self_correlation": 0.006240720177020296
+    }
+  ],
+  "fold_subset": null,
+  "partial": false,
+  "computed_at": "2026-08-27T02:01:41.509252+00:00",
+  "git_sha": "9faf161fc6608f098511ce43c6ef2fdbd6906cde",
+  "baseline_fingerprint": "54:1a6ec2d84a69",
+  "tank_params": "50/3.571/1d/10%",
+  "n_windows": 14,
+  "outer_fold_params": {},
+  "inner_fold_params": {
+    "train_min_days": 1095,
+    "val_days": 90,
+    "step_days": 90
+  },
+  "wall_seconds": 20391.74530483305
+}
