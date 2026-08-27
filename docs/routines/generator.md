@@ -275,16 +275,17 @@ The instrument was changed instead. Two defects, both now fixed:
   verdict (`fps-3jj.25`).
 
 Concretely, on batch1's band, the single-candidate bar by candidate width: 1 column **−0.152**
-c/L, 10 columns **−0.171**, 35 columns **−0.287**. Harder as it widens, which is correct, and
+c/L, 10 columns **−0.165**, 35 columns **−0.226**. Harder as it widens, which is correct, and
 *usable* at every width. Before `fps-3jj.21` the same progression was −0.22, −0.78, and **no
 band at all** above 17 columns.
 
-**So propose the honest shape and let the bar adjust.** The one number still resting on an
-estimate is the texture ICC behind the pricing — bounded at ≤ 0.391 by an underpowered ANOVA and
-measured directly in bd `fps-3jj.23`. It is an upper bound on a *coarser* quantity (grouped by
-texture family, not by column), so it is **not** established as erring on the safe side — if the
-true value is higher, bars on wide candidates are currently too easy. Either way every bar moves
-when `fps-3jj.23` lands.
+**So propose the honest shape and let the bar adjust.** The texture ICC behind the pricing was
+measured directly in bd `fps-3jj.23` (2026-08-27) and is now `0.274` — a one-sided 95% upper
+bound on the by-COLUMN quantity from 32 pinned-source draws, replacing a 0.391 bound on the
+coarser by-family quantity. The bar quotes above moved with it. The bound, not the point
+estimate (~0), is what ships, so wide bars stay on the pessimistic side; and at the 2–4 column
+shapes this document actually invites, the constant's *entire* possible range moves the bar by
+≤ 0.011 c/L. See `docs/CONVENTIONS.md` § the ICC for what is still assumed.
 
 ### The one hard limit, and how to check it
 

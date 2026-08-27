@@ -3,7 +3,7 @@
 - **Date:** 2026-08-27
 - **Branch:** `claude/3jj-23-ecb614`
 - **SHA:** see the PR that lands `--same-source-column`
-- **Status:** open — instrument + power analysis landed, 32-draw bank queued
+- **Status:** closed — 32 draws run 2026-08-27 (5.7h); `TEXTURE_ICC_BOUND` 0.391 → **0.274**
 - **Bead:** `fps-3jj.23` (P1), which **blocks** `fps-3jj.22`
 
 ## Hypothesis
@@ -29,7 +29,7 @@ Two draws from the same column share texture exactly, so grouping deltas by colu
 a one-way ANOVA gives the ICC directly: between-column variance is texture, within-column is
 alignment.
 
-## Result so far: the design in the bead cannot discharge the bead
+## Finding 1 (before any fit): the design in the bead cannot discharge the bead
 
 `power.py` prices each candidate design before any fit is spent. This is the repo's own rule
 about null results ("a quiet result reads *could not see it*, never *it is not there*") applied
@@ -85,16 +85,20 @@ Second half of `power.py`. Single-candidate bar in c/L, 20-draw bank, batch1's l
 (`noise_floor.json`: arity 3, 10 draws, mean +0.0251, std 0.0999), shipped `effective_n_draws`
 over the real overlap structure — the ICC swept across its **entire** possible range:
 
-| arity | ICC 0 | 0.2 | 0.391 | 0.6 | 0.8 | 1.0 | spread |
+| arity | ICC 0 | 0.2 | **0.274** (live) | 0.6 | 0.8 | 1.0 | spread |
 |---|---|---|---|---|---|---|---|
 | 1 | −0.152 | −0.152 | −0.152 | −0.152 | −0.152 | −0.152 | **0.000** |
 | 2 | −0.152 | −0.152 | −0.152 | −0.152 | −0.152 | −0.152 | **0.000** |
-| 3 | −0.152 | −0.153 | −0.154 | −0.155 | −0.156 | −0.157 | 0.005 |
-| 4 | −0.152 | −0.154 | −0.156 | −0.159 | −0.161 | −0.163 | 0.011 |
-| 6 | −0.152 | −0.156 | −0.161 | −0.166 | −0.171 | −0.177 | 0.025 |
-| 10 | −0.152 | −0.161 | −0.171 | −0.183 | −0.196 | −0.211 | 0.059 |
-| 20 | −0.152 | −0.175 | −0.203 | −0.249 | −0.316 | −0.431 | 0.280 |
-| 35 | −0.152 | −0.200 | −0.287 | −0.535 | no band | no band | 0.383 |
+| 3 | −0.152 | −0.153 | −0.153 | −0.155 | −0.156 | −0.157 | 0.005 |
+| 4 | −0.152 | −0.154 | −0.155 | −0.159 | −0.161 | −0.163 | 0.011 |
+| 6 | −0.152 | −0.156 | −0.158 | −0.166 | −0.171 | −0.177 | 0.025 |
+| 10 | −0.152 | −0.161 | −0.165 | −0.183 | −0.196 | −0.211 | 0.059 |
+| 20 | −0.152 | −0.175 | −0.185 | −0.249 | −0.316 | −0.431 | 0.280 |
+| 35 | −0.152 | −0.200 | −0.226 | −0.535 | no band | no band | 0.383 |
+
+(The highlighted column tracks `placebo.TEXTURE_ICC_BOUND`; it read 0.391 — bars −0.154 /
+−0.156 / −0.171 / −0.203 / −0.287 — before this run. The *spread* column is a property of the
+0→1 range and did not move.)
 
 **"`TEXTURE_ICC_BOUND` sets EVERY bar" is true but misleading, and the correction matters.** At
 arity 1–2 the constant's value is irrelevant *by construction* (no two draws share a column at
@@ -187,28 +191,172 @@ into a different-column pair and bias the measured ICC toward **zero** — the d
 
 ## Results
 
-Pending the 32-draw run.
+The 32-draw bank ran on 2026-08-27: **5.7h** wall (`wall_seconds` 20,392), 32/32 deltas, no
+partial folds, `baseline_fingerprint 54:1a6ec2d84a69`, `tank_params 50/3.571/1d/10%`, seed 42,
+14 windows — every field identical to the committed `noise_floor_k1.json` it is compared
+against. Artifact: `experiments/batches/batch1/noise_floor_icc.json` (primary clone; the batch
+dir is gitignored).
+
+**The environmental fact the whole bar table rests on holds.** `all_nan_baseline_columns` came
+back with **exactly 5** entries — `days_since_trough_entry_` for bayside, botany_bay,
+hunters_hill, lane_cove, waverley — so `n_baseline_columns_available = 49`, the count the
+overlap model assumed. This run is the first artifact to verify it rather than trust a
+measurement taken off a gitignored frame; nothing above needed recomputing.
+
+### Delta by source column
+
+```
+                                       n      mean       std
+brand_mean_cents                       4 -0.013229  0.048784
+cycle_pct_through                      4  0.013721  0.094981
+days_since_trough_entry_camden         4  0.008968  0.114935
+days_since_trough_entry_georges_river  4 -0.020326  0.174113
+days_since_trough_entry_north_sydney   4  0.107071  0.126655
+days_since_trough_entry_ryde           4  0.010841  0.167211
+days_since_trough_entry_wollondilly    4  0.108898  0.071293
+station_price_cents                    4  0.006315  0.094757
+```
+
+Whole bank: 32 draws, mean +0.0278, std 0.1152 c/L.
+
+### The ICC by column — one-way ANOVA (primary)
+
+| quantity | value |
+|---|---|
+| `F(7,24)` | 0.735 (`p` = 0.645) |
+| ICC point estimate | **−0.071** — i.e. 0 |
+| 95% CI, two-sided | [−0.229, +0.359] |
+| **95% upper bound, one-sided 5% tail** | **+0.274** |
+| smallest ICC this design could resolve | 0.262 |
+
+`F < 1` means the between-column mean square came in *below* the within-column one: no texture
+clustering visible at all. The point estimate is negative, which for ICC(1) means zero.
+
+**It reads "could not see it", never "it is not there".** The design resolves to 0.262, so an
+ICC of 0.05 and an ICC of 0.25 are both entirely consistent with this result. What it does rule
+out, at the same 5% tail `0.391` itself was derived at, is anything above **0.274**.
+
+### The bead's own construction, reported for continuity
+
+| quantity | value |
+|---|---|
+| within-column variance (pinned bank) | 0.014124 |
+| total variance (`noise_floor_k1.json`) | 0.006397 |
+| ratio | 2.208 (`F(24,19)`, two-sided `p` = 0.082) |
+| implied ICC | −1.208, CI [−4.178, +0.100] |
+| smallest ICC resolvable | 0.574 |
+
+As `power.py` predicted, this estimator sees nothing — it cannot call anything under 0.574. But
+the *direction* is worth recording: the pinned bank's **alignment-only** variance came out 2.2×
+the multi-column floor's **alignment + texture** variance, which the estimator's stated
+assumption (a common `Var(alignment)` across banks) forbids. The difference is not resolvable
+(the ratio's 95% CI, [0.90, 5.18], contains 1), so this is not evidence that the pinned set is
+unrepresentative — but it is a second, independent reason the bead's original design could not
+have discharged the bead: its load-bearing assumption is the one the data leans against. The
+ANOVA needs no such assumption, which is why it is primary.
+
+**The residual, stated rather than buried.** If that lean is real — the 8 pinned columns having
+genuinely higher alignment variance than the average column — then the ANOVA's ICC is biased
+**low** and 0.274 is optimistic. The pinned set was chosen by `select_draws`' own even spread
+rather than curated, precisely so the estimate would be for the population the bank draws from,
+so there is no mechanism proposed for such a bias; it is recorded as the open edge, and it is
+the reason the constant ships as a bound rather than as the point estimate.
+
+### A by-product: the 0.391 being replaced was not what it claimed (`fps-8o0`)
+
+Checked in the same pass, because `fps-8o0` flagged that the defect fixed in `measure_icc.py`
+still lives in `texture_channel.py`, which is what produced 0.391. It bites: batch1's `network`
+texture family is a **singleton** (11 LGA counters, 3 cycle_magnitude, 3 price_level_other, 2
+cycle_phase, 1 network). `texture_channel.py` filters groups with `if len(g) > 1` — dropping
+that draw from the sums of squares — while computing `n = len(draws) = 20`, `k_bar = n / 5` and
+`df2 = n - len(groups) = 16`. So the published `F(3,16) = 0.411 → 0.391` is a 19-draw/4-group F
+carried on a 20-draw/5-group `df` and `k_bar`.
+
+Recomputed consistently over all five families with the corrected estimator:
+
+| | n | k | k_bar | F | p | ICC | 95% upper | resolvable |
+|---|---|---|---|---|---|---|---|---|
+| all 5 families, consistent (**correct**) | 20 | 5 | 3.20 | `F(4,15)` = 0.330 | 0.854 | −0.265 | **0.226** | 0.391 |
+| singleton dropped, consistent | 19 | 4 | 3.82 | `F(3,15)` = 0.411 | 0.748 | −0.182 | 0.402 | 0.374 |
+| *as `texture_channel.py` actually computes it* | 19/20 | 4/5 | 4.00 | `F(3,16)` = 0.411 | 0.748 | −0.173 | **0.391** | 0.359 |
+
+The third row reproduces the shipped 0.391 and its published "could not resolve below 0.359"
+exactly, which is what identifies the defect: the F comes from 19 draws over 4 groups, the `df2`
+and `k_bar` from 20 over 5. Fixing only the filter (row 2) would have *raised* the constant to
+0.402; fixing the whole computation (row 1) lowers it to 0.226. Both fixes had to land together
+or the correction would have pointed the wrong way — which is why `fps-8o0` says check the
+number before changing the script.
+
+So the superseded constant was overstated on its own terms too. Two estimators, of two different
+quantities, on two different artifacts, both landing under 0.391 and both with point estimates
+at 0.
 
 ## Conclusion
 
-Pending. The three outcomes and what each decides:
+**`placebo.TEXTURE_ICC_BOUND` = 0.274.** Replaced, not held: 0.274 is a one-sided 95% upper
+bound derived exactly the way 0.391 was, on the quantity `effective_n_draws` actually charges
+rather than on a coarser stand-in for it. The family-vs-column gap is closed rather than
+re-stated — and it closed in the direction the bead could not call in advance, with the column
+ICC *smaller* than the family bound, not larger. The pessimistic end still ships; the point
+estimate (0) does not.
 
-- **ICC ≈ 0** (upper bound comfortably under ~0.2) — every width collapses to the arity-1 bar of
-  −0.152, overlap costs nothing, and `fps-3jj.22` buys literally nothing. Close it.
-- **ICC ≈ 0.391** — the shipped value survives as a measurement of the right quantity rather
-  than a bound on a coarser one. `fps-3jj.22` is worth doing as an optimisation: it would
-  recover most of the 0.135 c/L an arity-35 candidate currently pays purely for overlap.
-- **ICC > 0.391** — current bars on wide candidates are too **easy**. Raise the constant in the
-  same change, and `fps-3jj.22` becomes the fix rather than an optimisation.
+The three outcomes this experiment was set up to distinguish, against what happened:
 
-Whatever lands, `power.py`'s second table stands on its own: at arity ≤ 4 this constant cannot
-move a verdict, and any future write-up claiming it "sets every bar" without that qualifier is
-overstating it.
+- **ICC ≈ 0** (upper bound comfortably under ~0.2) → close `fps-3jj.22`. **Not met.** The point
+  estimate is 0, but the bound is 0.274 and the design floors at 0.262. Reading a quiet F as
+  "zero" is the exact move this repo refuses.
+- **ICC ≈ 0.391** → the shipped value survives. **Not met**, and it did not survive.
+- **ICC > 0.391** → bars on wide candidates are too easy; raise it. **Not met.**
+
+The result landed between the first two, which is why the decision is "replace with the measured
+bound" rather than any of the three pre-written verdicts.
+
+### What moved
+
+| candidate columns | effective draws | bar (1 candidate) | was, at 0.391 |
+|---|---|---|---|
+| 1–2 | 20.00 | −0.152 | −0.152 |
+| 3 | 18.17 | −0.153 | −0.154 |
+| 4 | 16.50 | −0.155 | −0.156 |
+| 10 | 10.81 | −0.165 | −0.171 |
+| 20 | 6.74 | −0.185 | −0.203 |
+| 35 | 4.31 | −0.226 | −0.287 |
+
+**Lowering the constant LOOSENS the bar** — less correlation, more effective draws, narrower
+band, easier bar. That is the direction that admits false positives, which is why it moved only
+on a direct measurement of the right quantity and why the bound rather than the estimate is what
+ships. Every candidate batch1 has actually run (arity 1 and 3) moved by **0.001 c/L**, so no
+already-written dossier's verdict is affected; a re-render of one would differ in the fourth
+decimal place. `power.py`'s second table stands as written: at arity ≤ 4 this constant cannot
+move a verdict, and any future write-up calling it "the input to every bar" without that
+qualifier is overstating it.
+
+### `fps-3jj.22`: demoted, not closed
+
+The bead's rule was "close it if the ICC is near zero, because then overlap costs nothing". The
+point estimate says exactly that; the bound does not, and the bound is what grades. At 0.274 an
+arity-35 candidate still pays **0.074 c/L** purely for source-column overlap (down from 0.135),
+an arity-20 one 0.033, an arity-10 one 0.013, and an arity-3 one 0.001. So `fps-3jj.22`'s
+ceiling roughly halved and remains real only for candidates far wider than anything yet run.
+
+It is also no longer the cheapest way to buy that 0.074 back. Drawing placebo sources from
+outside the lock is a change to the null's construction; **taking more draws is not**, and the
+bound is limited by the design's resolution rather than by anything about the data — 12 columns
+× 5 seeds (60 draws, ~11.4h) lands near 0.23 even if the point estimate again comes out at 0,
+and closer to 0.15 if `F` comes in below 1 again as it did here. If a wide candidate ever needs
+the bar tightened, re-measure first.
 
 ## Followups
 
-- `fps-3jj.22` — blocked on this, re-triaged on the result.
-- `docs/CONVENTIONS.md` § the ICC bound and `placebo.TEXTURE_ICC_BOUND`'s docstring both carry
-  the measured value once the run lands.
-- `experiments/2026-08-26_placebo_draw_independence/README.md` § "What is still a bound" points
-  here.
+- `fps-3jj.22` — re-triaged: **demoted, not closed**. Ceiling roughly halved (0.135 → 0.074 c/L,
+  and only at arity ~35); more draws is now the cheaper route to the same tightening.
+- `fps-8o0` — the singleton defect is confirmed live and its effect quantified above. Fixing it
+  no longer moves a shipped constant, since `TEXTURE_ICC_BOUND` is now the by-column number; the
+  bead is a script correction plus a note that its published 0.391/0.359 were wrong.
+- Done in the same change: `placebo.TEXTURE_ICC_BOUND` = 0.274 with its comment block rewritten,
+  `docs/CONVENTIONS.md` § the ICC and both bar tables, `docs/routines/generator.md`'s bar quotes,
+  `docs/routines/retrospective.md`'s `icc =` reference, and
+  `experiments/2026-08-26_placebo_draw_independence/README.md` § what was still a bound.
+- `tests/test_texture_icc_estimator.py` now pins the published tables at an explicit
+  `PUBLISHED_ICC`, so the next move of the constant fails loudly with the list of documents to
+  re-transcribe rather than leaving them silently stale.

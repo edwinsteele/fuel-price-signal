@@ -107,9 +107,10 @@ def test_the_two_sided_ci_is_symmetric_in_its_tails():
 
 
 def test_the_one_sided_upper_bound_matches_how_0391_was_derived():
-    """`texture_channel.py` produced TEXTURE_ICC_BOUND as `f_stat / f.ppf(0.05, df1, df2)`
+    """`texture_channel.py` produced the superseded 0.391 as `f_stat / f.ppf(0.05, df1, df2)`
     pushed through the ICC formula. The bound this script reports has to be the same
-    construction, or the comparison against 0.391 is between two different alphas."""
+    construction, or the comparison against the value being replaced is between two different
+    alphas — which is exactly the defect an earlier revision of `power.py` shipped."""
     result = measure_icc._anova_icc(_balanced_frame(0.4, k=6, m=5, seed=12))
     f_upper = result["f_stat"] / f_dist.ppf(0.05, result["df1"], result["df2"])
     expected = (f_upper - 1.0) / (f_upper + result["k_bar"] - 1.0)
@@ -178,6 +179,26 @@ def test_model_bank_raises_instead_of_hanging_above_the_usable_count():
         bank_model.model_bank(columns, 2, 50, unscreenable=tuple(columns[:5]))
 
 
+#: The ICC the published tables were transcribed at. Held as a literal rather than imported so
+#: that moving `placebo.TEXTURE_ICC_BOUND` fails the two tests below LOUDLY — every one of those
+#: numbers is quoted in docs/CONVENTIONS.md, docs/routines/generator.md and this experiment's
+#: README, and they have to be re-transcribed in the same change. Was 0.391 (a bound on the
+#: by-FAMILY ICC) until `fps-3jj.23` measured the by-COLUMN quantity on 2026-08-27.
+PUBLISHED_ICC = 0.274
+
+
+def test_the_published_icc_is_the_one_that_ships():
+    """The pins below are only meaningful while this matches — otherwise they would quietly
+    describe a ruler nothing grades against."""
+    from experiments.pipeline.placebo import TEXTURE_ICC_BOUND
+
+    assert TEXTURE_ICC_BOUND == PUBLISHED_ICC, (
+        "TEXTURE_ICC_BOUND moved. Re-transcribe the effective-draw and bar tables in "
+        "docs/CONVENTIONS.md, docs/routines/generator.md, placebo.py's own comment block and "
+        "experiments/2026-08-27_texture_icc/README.md, then update PUBLISHED_ICC here."
+    )
+
+
 def test_model_bank_reproduces_the_published_bar_table():
     """The arity/ICC table in docs/CONVENTIONS.md, the PR body and this experiment's README is
     transcribed from `power.py`. It was produced under a `[:49]` truncation that dropped the
@@ -187,11 +208,13 @@ def test_model_bank_reproduces_the_published_bar_table():
 
     columns = [f"col_{i}" for i in range(54)]
     unscreenable = tuple(columns[10:15])
-    expected_n_eff = {1: 20.0, 2: 20.0, 3: 17.49, 10: 9.04}
+    expected_n_eff = {1: 20.0, 2: 20.0, 3: 18.17, 10: 10.81}
 
     for arity, n_eff in expected_n_eff.items():
         bank = bank_model.model_bank(columns, 20, arity, unscreenable=unscreenable)
-        assert effective_n_draws(bank) == pytest.approx(n_eff, abs=0.01), f"arity {arity}"
+        assert effective_n_draws(bank, icc=PUBLISHED_ICC) == pytest.approx(n_eff, abs=0.01), (
+            f"arity {arity}"
+        )
 
 
 def test_overlap_is_invariant_to_WHICH_columns_are_dead():
@@ -226,13 +249,14 @@ def test_overlap_DOES_move_with_the_usable_count():
     n_eff = {
         n_dead: round(
             effective_n_draws(
-                bank_model.model_bank(columns, 20, 20, unscreenable=tuple(columns[:n_dead]))
+                bank_model.model_bank(columns, 20, 20, unscreenable=tuple(columns[:n_dead])),
+                icc=PUBLISHED_ICC,
             ), 2
         )
         for n_dead in (4, 5, 6)
     }
 
-    assert n_eff == {4: 5.35, 5: 5.25, 6: 5.16}
+    assert n_eff == {4: 6.85, 5: 6.74, 6: 6.63}
     assert len(set(n_eff.values())) == 3, "the count must matter, or the pin above is vacuous"
 
 
