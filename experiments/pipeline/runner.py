@@ -590,7 +590,10 @@ def run_candidate(
         # reasoning as the ValueError split above (finding #3): aborted_candidate
         # ("repeatable, don't retry"), not aborted_environment ("retry once",
         # which would just fail identically on this same batch).
-        return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=provider_health_error, bead_id=bead_id)
+        return _finish(
+            STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=provider_health_error,
+            bead_id=bead_id, provider_stats=provider.stats,
+        )
 
     # Write the expensive artifacts BEFORE grading: a bug in the grading step
     # (which is comparatively cheap — DataFrame groupbys over already-computed
@@ -1002,6 +1005,7 @@ def _resolve_zone(
 def _finish(
     status: str, name: str, t0: float, out_dir: pathlib.Path, *, error: str,
     bead_id: str | None = None, abort_reason: str | None = None,
+    provider_stats: dict | None = None,
 ) -> RunResult:
     """Write a status-only results.json, self-report to the bead, and return early.
 
@@ -1016,11 +1020,22 @@ def _finish(
     structured code (e.g. ABORT_REASON_LEAK_BY_DECLARATION) — present-but-null
     rather than an absent key, so a reader doesn't need `.get()` defensiveness
     to tell "no reason recorded" from "field predates this convention".
+
+    provider_stats (fps-b5p): only the _check_provider_health abort site has
+    live provider.stats to hand — every other abort happens before or without
+    a provider, so those calls correctly leave the keys absent (dossier_tables
+    reads absent the same as None: "not recorded", not "0/0"). Stamping a
+    fabricated {"hits": 0, "misses": 0} on an unrelated abort would be worse
+    than the None it replaces, so this is opt-in per call site, not a default.
     """
     wall_seconds = time.perf_counter() - t0
+    meta = {"wall_seconds": wall_seconds}
+    if provider_stats is not None:
+        meta["extra_feature_provider_hits"] = provider_stats["hits"]
+        meta["extra_feature_provider_misses"] = provider_stats["misses"]
     results = {
         "status": status, "candidate": {"name": name}, "error": error,
-        "abort_reason": abort_reason, "meta": {"wall_seconds": wall_seconds},
+        "abort_reason": abort_reason, "meta": meta,
     }
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -25,6 +25,7 @@ from experiments.pipeline.batch_freeze import resolve_baseline_columns
 from experiments.pipeline.runner import (
     ABORT_REASON_LEAK_BY_DECLARATION,
     BASELINE_CACHE_FILENAME,
+    CANDIDATE_ARM,
     DEFAULT_INNER_FOLD_PARAMS,
     RETRYABLE_STATUSES,
     STATUS_ABORTED_CANDIDATE,
@@ -747,6 +748,31 @@ def test_finish_without_bead_id_posts_nothing(tmp_path, monkeypatch):
     assert posted == []
 
 
+def test_finish_stamps_provider_stats_when_given(tmp_path):
+    """fps-b5p: the _check_provider_health abort site has live provider.stats;
+    _finish must persist them so a 100%-miss abort is distinguishable from a
+    run that never recorded provider stats at all.
+    """
+    _finish(
+        STATUS_ABORTED_CANDIDATE, "cand", 0.0, tmp_path, error="all lookups missed",
+        provider_stats={"hits": 0, "misses": 42},
+    )
+    written = json.loads((tmp_path / "results.json").read_text())
+    assert written["meta"]["extra_feature_provider_hits"] == 0
+    assert written["meta"]["extra_feature_provider_misses"] == 42
+
+
+def test_finish_omits_provider_stats_when_not_given(tmp_path):
+    """Every other abort site has no provider stats to hand — the keys must
+    stay absent (not a fabricated 0/0), so dossier_tables' `.get()` correctly
+    reads them as "not recorded" rather than "0% miss rate".
+    """
+    _finish(STATUS_ABORTED_PIPELINE, "cand", 0.0, tmp_path, error="bad config")
+    written = json.loads((tmp_path / "results.json").read_text())
+    assert "extra_feature_provider_hits" not in written["meta"]
+    assert "extra_feature_provider_misses" not in written["meta"]
+
+
 # ── read_run_status (fps-g31) ─────────────────────────────────────────────────
 
 @pytest.mark.parametrize(
@@ -1099,6 +1125,43 @@ def test_run_candidate_persists_baseline_cache_after_successful_run(tmp_path, mo
     persisted = _load_baseline_cache(batch_dir, verbose=False)
     assert persisted.fingerprint == new_cache.fingerprint
     assert persisted.per_fold == new_cache.per_fold
+
+
+def test_run_candidate_provider_health_abort_survives_into_facts_json(tmp_path, monkeypatch):
+    """fps-b5p end-to-end: a run aborted by _check_provider_health must persist
+    its 100%-miss provider stats, and build_facts must report them as a real
+    miss_rate of 1.0 — not None, which would be indistinguishable from "not
+    recorded" (a legacy run, or a candidate with no provider at all)."""
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+
+    def fake_run(*args, **kwargs):
+        arms = args[0]
+        candidate_arm = next(a for a in arms if a.name == CANDIDATE_ARM)
+        for _ in range(5):
+            # A date guaranteed absent from the candidate frame -> every call misses.
+            candidate_arm.extra_feature_provider("2099-01-01", 999, 100.0)
+        return _FakeRealisedFull(baseline_cache=None)
+
+    monkeypatch.setattr(runner_module, "run_paired_realised_backtest", fake_run)
+
+    out_dir = tmp_path / "out"
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=out_dir, seeds=(1, 2), verbose=False,
+    )
+
+    assert result.status == STATUS_ABORTED_CANDIDATE
+    written = json.loads(result.results_path.read_text())
+    assert written["meta"]["extra_feature_provider_hits"] == 0
+    assert written["meta"]["extra_feature_provider_misses"] == 5
+
+    from experiments.pipeline.dossier_tables import build_facts
+
+    facts = build_facts(out_dir)
+    assert facts["validation"]["extra_feature_provider_hits"] == 0
+    assert facts["validation"]["extra_feature_provider_misses"] == 5
+    assert facts["validation"]["extra_feature_provider_miss_rate"] == 1.0
 
 
 def test_run_candidate_records_the_baseline_fingerprint_it_was_graded_against(
