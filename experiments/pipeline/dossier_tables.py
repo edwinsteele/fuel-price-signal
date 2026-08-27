@@ -280,7 +280,16 @@ def build_facts(run_dir: pathlib.Path) -> dict:
             "pending": True,
         },
         "noise_band": _noise_band(results, batch_dir),
-        "redundancy": _redundancy(batch_dir, candidate.get("name")),
+        # NOT `batch_dir` (fps-1l1 review of fps-qbv): `batch.json` is a
+        # `experiments/candidates/<batch>/` artifact, written by
+        # `redundancy.write_batch_record` against `batch_dir_for(module_paths)` — the
+        # candidate MODULES' parent directory. `batch_dir` above is `meta["batch_dir"]`,
+        # the runner's frozen-artifact dir `experiments/batches/<batch>/` (freeze.json,
+        # noise_floor.json) — a different directory that never holds a batch.json. Per
+        # this module's own fps-icv fix (see module docstring), `run_dir` is keyed
+        # per-candidate directly under the candidates dir, so `run_dir.parent` is
+        # exactly what `batch_dir_for` resolves to.
+        "redundancy": _redundancy(run_dir.parent, candidate.get("name")),
     }
 
     if status != STATUS_GRADED:
@@ -460,7 +469,7 @@ def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
     }
 
 
-def _redundancy(batch_dir: pathlib.Path | None, candidate_name: str | None) -> dict:
+def _redundancy(candidates_batch_dir: pathlib.Path | None, candidate_name: str | None) -> dict:
     """Per-column R^2 against the lock, from `batch.json` (`redundancy.write_batch_record`,
     fps-qbv).
 
@@ -473,15 +482,23 @@ def _redundancy(batch_dir: pathlib.Path | None, candidate_name: str | None) -> d
     falsification test several candidates declare — this just carries them into
     facts.json rather than leaving them stranded in a batch-level file no dossier
     session reads.
+
+    `candidates_batch_dir` (fps-1l1 review) is deliberately NOT `meta["batch_dir"]` —
+    that is the runner's frozen-artifact dir (`experiments/batches/<batch>/`), and
+    `batch.json` never lives there. It is `redundancy.batch_dir_for(module_paths)`,
+    the candidate MODULES' parent directory (`experiments/candidates/<batch>/`), which
+    the caller derives from `run_dir.parent`. Passing `meta["batch_dir"]` here would
+    always miss the file and always claim "the record was never written" — true for
+    no batch that has actually been screened.
     """
-    if batch_dir is None:
+    if candidates_batch_dir is None:
         return {"available": False, "reason": "no batch_dir recorded in results.json meta"}
-    path = batch_dir / BATCH_RECORD_JSON
+    path = candidates_batch_dir / BATCH_RECORD_JSON
     if not path.exists():
         return {
             "available": False,
-            "reason": f"no {BATCH_RECORD_JSON} in {batch_dir} — this batch predates the "
-            "redundancy screen, or the record was never written.",
+            "reason": f"no {BATCH_RECORD_JSON} in {candidates_batch_dir} — this batch predates "
+            "the redundancy screen, or the record was never written.",
         }
     batch_record = json.loads(path.read_text())
     members = {row["candidate"]: row for row in batch_record.get("block_r2", [])}

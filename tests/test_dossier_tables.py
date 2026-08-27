@@ -322,26 +322,34 @@ def test_build_facts_provenance_and_validation_degrade_gracefully_on_legacy_meta
     assert facts["validation"]["extra_feature_provider_miss_rate"] is None
 
 
-def test_build_facts_redundancy_available_when_batch_json_has_matching_candidate(tmp_path):
-    def add_batch_record(batch_dir):
-        (batch_dir / "batch.json").write_text(json.dumps({
-            "block_r2": [
-                {
-                    "candidate": "cand", "mechanism_family": "test-family", "n_columns": 1,
-                    "n_predictors_used": 49, "predictors_dropped": ["bayside"],
-                    "block_r2": 0.42, "max_column_r2": 0.855,
-                    "per_column_r2": {"cand_col": 0.855},
-                },
-                {
-                    "candidate": "other_cand", "mechanism_family": "test-family", "n_columns": 1,
-                    "n_predictors_used": 49, "predictors_dropped": [],
-                    "block_r2": 0.10, "max_column_r2": 0.10,
-                    "per_column_r2": {"other_col": 0.10},
-                },
-            ],
-        }))
+def _batch_record_payload(rows: list[dict]) -> str:
+    return json.dumps({"block_r2": rows})
 
-    run_dir, _ = _write_run(tmp_path, batch_extras=add_batch_record)
+
+def test_build_facts_redundancy_available_when_batch_json_has_matching_candidate(tmp_path):
+    """batch.json lives in the candidate MODULES' parent dir — `run_dir.parent` — not in
+    `meta["batch_dir"]` (the runner's frozen-artifact dir, written to a sibling `batch1/`
+    by `_write_run` for freeze.json/baseline_columns.json/noise_floor.json). fps-1l1's
+    review of this PR caught exactly this confusion live: passing `meta["batch_dir"]`
+    always misses the real file. Written directly at `run_dir.parent`, deliberately not
+    via the `batch_extras` hook (which targets `meta["batch_dir"]`), so this test cannot
+    pass by accident the way it did before the fix.
+    """
+    run_dir, _ = _write_run(tmp_path)
+    (run_dir.parent / "batch.json").write_text(_batch_record_payload([
+        {
+            "candidate": "cand", "mechanism_family": "test-family", "n_columns": 1,
+            "n_predictors_used": 49, "predictors_dropped": ["bayside"],
+            "block_r2": 0.42, "max_column_r2": 0.855,
+            "per_column_r2": {"cand_col": 0.855},
+        },
+        {
+            "candidate": "other_cand", "mechanism_family": "test-family", "n_columns": 1,
+            "n_predictors_used": 49, "predictors_dropped": [],
+            "block_r2": 0.10, "max_column_r2": 0.10,
+            "per_column_r2": {"other_col": 0.10},
+        },
+    ]))
 
     facts = dt.build_facts(run_dir)
 
@@ -353,23 +361,43 @@ def test_build_facts_redundancy_available_when_batch_json_has_matching_candidate
     assert facts["redundancy"]["predictors_dropped"] == ["bayside"]
 
 
-def test_build_facts_redundancy_unavailable_when_candidate_missing_from_batch_record(tmp_path):
-    """A candidate filed after the batch record was written (or renamed since) has no
-    row to find — refuse rather than silently return another candidate's numbers."""
-    def add_batch_record(batch_dir):
-        (batch_dir / "batch.json").write_text(json.dumps({
-            "block_r2": [
-                {"candidate": "some_other_cand", "block_r2": 0.1, "max_column_r2": 0.1,
-                 "per_column_r2": {}, "n_predictors_used": 49, "predictors_dropped": []},
-            ],
-        }))
+def test_build_facts_redundancy_unavailable_when_batch_json_only_in_meta_batch_dir(tmp_path):
+    """Regression for the fps-1l1 finding: a batch.json placed in `meta["batch_dir"]`
+    (where the runner writes freeze.json etc.) must NOT be found — that is never where
+    `redundancy.write_batch_record` puts it in production. Proves the fix reads from
+    `run_dir.parent`, not `meta["batch_dir"]`."""
+    def add_batch_record_in_wrong_place(batch_dir):
+        (batch_dir / "batch.json").write_text(_batch_record_payload([
+            {"candidate": "cand", "block_r2": 0.42, "max_column_r2": 0.855,
+             "per_column_r2": {"cand_col": 0.855}, "n_predictors_used": 49,
+             "predictors_dropped": []},
+        ]))
 
-    run_dir, _ = _write_run(tmp_path, batch_extras=add_batch_record)
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_batch_record_in_wrong_place)
 
     facts = dt.build_facts(run_dir)
 
     assert facts["redundancy"]["available"] is False
-    assert "cand" in facts["redundancy"]["reason"]
+    assert str(run_dir.parent) in facts["redundancy"]["reason"]  # looked in the right dir...
+    assert "batch1" not in facts["redundancy"]["reason"]  # ...not meta["batch_dir"]
+
+
+def test_build_facts_redundancy_unavailable_when_candidate_missing_from_batch_record(tmp_path):
+    """A candidate filed after the batch record was written (or renamed since) has no
+    row to find — refuse rather than silently return another candidate's numbers."""
+    run_dir, _ = _write_run(tmp_path)
+    (run_dir.parent / "batch.json").write_text(_batch_record_payload([
+        {"candidate": "some_other_cand", "block_r2": 0.1, "max_column_r2": 0.1,
+         "per_column_r2": {}, "n_predictors_used": 49, "predictors_dropped": []},
+    ]))
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["redundancy"]["available"] is False
+    # repr(), not a bare substring check: "cand" is a substring of the reason template's
+    # own word "candidates" and would pass unconditionally (fps-1l1 review).
+    assert repr("cand") in facts["redundancy"]["reason"]
+    assert "block_r2" not in facts["redundancy"]
 
 
 def test_build_facts_raises_when_graded_run_has_no_tank_params(tmp_path):
