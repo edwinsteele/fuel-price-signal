@@ -198,6 +198,29 @@ Read all of the following before proposing anything:
    uses the drift-clock). A candidate whose `PREDICTED_SIGNATURE` is phrased in
    accuracy terms ("more precisely estimates X") without a decision-timing story is
    weaker than one phrased in terms of *when the model should act differently*.
+8. **`PREDICTED_SIGNATURE` cannot make a claim about SHAP structure — `facts.json`
+   carries no SHAP field, and the dossier session grades that field alone (`facts.json`
+   is "the only source of numbers you are allowed to use", `docs/routines/dossier.md`
+   Step 1).** Decided `fps-1l1`: capturing per-column SHAP importance/sign routinely
+   was rejected, not deferred. Two distinct fit paths run per candidate, and neither
+   persists a model to disk: the **WFCV screen** (`runner.py`'s `_run_wfcv_screen`)
+   fits raw LGBM only, 5 seeds × ~15 outer folds × 2 arms, purely for log-loss; the
+   **realised arbiter** (`experiments/lib/realised.py`'s `_train_calibrate_select_tau`)
+   runs on a single seed but fits a full calibrated pipeline per (fold, arm) — a raw
+   fit plus an inner walk-forward OOF sweep (`fuel_signal/calibrate.py`'s
+   `pool_oof_predictions`) to fit the isotonic calibrator and pick τ, so each
+   (fold, arm) cell is itself several fits. Every one of those fitted pipelines is
+   discarded once its predictions are pooled into `rowpreds.parquet`/`fills.parquet`;
+   nothing survives for a post-hoc SHAP pass to run against. Adding it for real would
+   mean either a second fit pass purely to explain the first, or teaching
+   `realised.py`/`runner.py` to persist a fitted pipeline per (fold, arm, seed) — a
+   change to the fit path itself, not to `dossier_tables.py`'s post-hoc "read
+   committed artifacts, no judgement" boundary. A `stickiness_phase_saddle`
+   (`fps-6yi`, batch1) prediction phrased as "the SIGNED and ABSOLUTE columns disagree
+   in orientation somewhere in the SHAP surface" could only be graded `inconclusive`
+   for exactly this reason. Phrase a mechanism prediction in terms of `decision_flips`,
+   `per_fold`, or `per_axis` data instead — all of which `facts.json` already carries
+   and the dossier session can actually check.
 
 ## Rules for candidates
 
