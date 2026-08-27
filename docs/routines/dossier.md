@@ -90,9 +90,9 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    - **Facts** (traceable to `facts.json`, verbatim or lightly tabulated — no new numbers):
      provenance (candidate, batch, snapshot date, git SHA, seeds, bead) — and state plainly
      that those seeds are the **WFCV screen only**, while the realised arbiter ran on the
-     single `results.json` `meta.realised_seed`, so every `delta_cpl_own` is one draw with no
-     error bar (`facts.json` does not carry this field — read it from `results.json`; `fps-qbv`
-     will surface it) — the
+     single seed at `facts["provenance"]["realised_seed"]` (fps-qbv — distinct from the
+     `seeds` list beside it), so every `delta_cpl_own` is one draw with no
+     error bar — the
      headline realised-CPL
      delta and its `effect_resolved` verdict, the WFCV log-loss delta labelled as descriptive
      colour, the per-fold / per-regime / per-axis breakdown tables (mark suppressed cells plainly —
@@ -120,7 +120,14 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      comparison (a jump there means the added columns destabilised an otherwise-ordinary fit,
      a redundancy tell), and prose destroys it. R0-only flags are a property of the window,
      not the candidate; one line is enough for those,
-     validation (NaN rate, PIT test result, INPUTS check result), and the noise-floor delta
+     validation (NaN rate, PIT test result, INPUTS check result) — including
+     `facts["validation"]["extra_feature_provider_miss_rate"]` (fps-qbv): this is the REPLAY's
+     own coverage, distinct from `candidate_column_nan_rate` beside it, which describes the
+     offline features frame and says nothing about how much of the realised backtest actually
+     ran with the candidate's extra-feature columns present — a candidate can pass the
+     provider-health check (which only errors at 100% misses) while running most of the
+     replay without its own columns, and that must be stated plainly rather than left implicit
+     in a clean-looking NaN rate — and the noise-floor delta
      (`facts["noise_band"]`) — if `floor_arity_exceeds_run` is `true`, say so: this run was
      graded against a ruler built from MORE columns than the candidate has, which is allowed
      (a wider ruler only raises the bar, never lowers it — `docs/CONVENTIONS.md` § The band's
@@ -171,6 +178,15 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      the aggregate test, and it isn't. If `computed` is `false`, state the `reason` verbatim rather
      than omitting the field — a candidate with only 1 column, or a clean reject, not having this
      breakdown is expected, not a gap in this run.
+     If `facts["redundancy"]["available"]` is `true` (fps-qbv), and a candidate declares a
+     falsification test naming which of its own columns is the suspect, **quote
+     `per_column_r2` for that specific column, not just `block_r2`** — the block figure is the
+     MEAN across the candidate's members and dilutes a single lock-redundant column out of
+     view (a member at 0.855 alongside others near 0.10 gives a block figure near 0.3, which
+     reads as "not redundant" while the named column is 85% reconstructible from the lock).
+     `max_column_r2` is the same worst-case figure at a glance. If `available` is `false`,
+     state the `reason` verbatim (no batch record for this batch, or this candidate is absent
+     from it) rather than silently skipping the redundancy question.
    - **Judgement** (your reasoning, visibly separated — a `## Judgement` heading is enough):
      - The `PREDICTED_SIGNATURE` grading verdict + explanation you just wrote.
      - **`not_tested`** — adjacent ground this run does *not* rule out. This is the highest-value

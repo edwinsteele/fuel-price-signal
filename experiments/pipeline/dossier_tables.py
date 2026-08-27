@@ -69,6 +69,7 @@ from experiments.lib.flips import summarise_flips
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
 from experiments.pipeline.placebo import TEXTURE_ICC_BOUND, effective_n_draws
+from experiments.pipeline.redundancy import BATCH_RECORD_JSON
 from experiments.pipeline.runner import (
     BASELINE_ARM,
     CANDIDATE_ARM,
@@ -279,6 +280,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
             "pending": True,
         },
         "noise_band": _noise_band(results, batch_dir),
+        "redundancy": _redundancy(batch_dir, candidate.get("name")),
     }
 
     if status != STATUS_GRADED:
@@ -385,6 +387,11 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         "git_sha": git_sha,
         "git_sha_is_run_time": git_sha_is_run_time,
         "seeds": meta.get("seeds"),
+        # The realised arbiter's OWN seed — a single draw, distinct from the WFCV
+        # screen's `seeds` list above (fps-qbv). A dossier reader who only sees `seeds`
+        # can misread the headline realised CPL as averaged over five seeds when it is
+        # one; None for results.json predating this field (pre fps-3jj.4).
+        "realised_seed": meta.get("realised_seed"),
         "wall_seconds": meta.get("wall_seconds"),
         "status": results.get("status"),
         # Structured reason a status=="aborted_candidate" run aborted (fps-3jj.13) — null
@@ -408,6 +415,7 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
 
 def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
     status = results["status"]
+    meta = results.get("meta", {})
     if status == STATUS_GRADED:
         pit_test = "passed — reached the WFCV/realised stages, so the differential PIT truncation test found no leak"
         inputs_check = "passed — INPUTS declaration matched every column add_columns/add_axis actually read"
@@ -431,7 +439,68 @@ def _validation(results: dict, rowpreds: pd.DataFrame | None) -> dict:
         if candidate_cols:
             nan_rates = {c: float(rowpreds[c].isna().mean()) for c in candidate_cols}
 
-    return {"pit_test": pit_test, "inputs_check": inputs_check, "candidate_column_nan_rate": nan_rates}
+    # The REPLAY's own coverage, not the offline frame's (fps-qbv). `candidate_column_nan_rate`
+    # above describes the OFFLINE features frame and says nothing about how much of the
+    # realised backtest actually ran with the candidate's extra-feature columns present —
+    # `_check_provider_health` only errors at 100% misses, so batch1's 607/6300 (9.6%) partial
+    # miss rate passed silently and no dossier could report it. None for results.json that
+    # predate the provider-stats stamp (pre fps-3jj / candidates with no EXTRA_FEATURE_PROVIDER).
+    provider_hits = meta.get("extra_feature_provider_hits")
+    provider_misses = meta.get("extra_feature_provider_misses")
+    provider_miss_rate = None
+    if provider_hits is not None and provider_misses is not None and (provider_hits + provider_misses) > 0:
+        provider_miss_rate = float(provider_misses / (provider_hits + provider_misses))
+    return {
+        "pit_test": pit_test,
+        "inputs_check": inputs_check,
+        "candidate_column_nan_rate": nan_rates,
+        "extra_feature_provider_hits": provider_hits,
+        "extra_feature_provider_misses": provider_misses,
+        "extra_feature_provider_miss_rate": provider_miss_rate,
+    }
+
+
+def _redundancy(batch_dir: pathlib.Path | None, candidate_name: str | None) -> dict:
+    """Per-column R^2 against the lock, from `batch.json` (`redundancy.write_batch_record`,
+    fps-qbv).
+
+    The block figure already in `results.json`/facts elsewhere is the MEAN of a
+    candidate's member columns' individual R^2 against the lock — by construction it
+    dilutes a single lock-redundant column out of view (generator.md's own "a member
+    that is individually reconstructible is not disqualifying if the group as a whole
+    is not" rule). The per-column numbers already exist in `batch.json`, written at
+    screen time before filing, and answer the "is this just <X> in different clothes?"
+    falsification test several candidates declare — this just carries them into
+    facts.json rather than leaving them stranded in a batch-level file no dossier
+    session reads.
+    """
+    if batch_dir is None:
+        return {"available": False, "reason": "no batch_dir recorded in results.json meta"}
+    path = batch_dir / BATCH_RECORD_JSON
+    if not path.exists():
+        return {
+            "available": False,
+            "reason": f"no {BATCH_RECORD_JSON} in {batch_dir} — this batch predates the "
+            "redundancy screen, or the record was never written.",
+        }
+    batch_record = json.loads(path.read_text())
+    members = {row["candidate"]: row for row in batch_record.get("block_r2", [])}
+    row = members.get(candidate_name)
+    if row is None:
+        return {
+            "available": False,
+            "reason": f"{candidate_name!r} not found among {BATCH_RECORD_JSON}'s block_r2 "
+            f"candidates ({sorted(members)}) — filed after the batch record was written, or "
+            "the candidate name changed since.",
+        }
+    return {
+        "available": True,
+        "block_r2": row.get("block_r2"),
+        "max_column_r2": row.get("max_column_r2"),
+        "per_column_r2": row.get("per_column_r2"),
+        "n_predictors_used": row.get("n_predictors_used"),
+        "predictors_dropped": row.get("predictors_dropped"),
+    }
 
 
 def _resolve_effective_n_draws(noise_floor: dict, *, nominal: int) -> float:

@@ -245,6 +245,7 @@ def test_build_facts_graded_run_has_all_blocks_and_suppresses_thin_cells(tmp_pat
     assert facts["provenance"]["n_baseline_columns"] == 54
     assert facts["provenance"]["baseline_fingerprint"] == "54:deadbeef1234"
     assert facts["provenance"]["tank_params"] == "50/3.571/7d/10%"
+    assert facts["provenance"]["realised_seed"] == 42
 
     assert facts["headline"]["realised"]["delta_cpl_held"] == -0.05
     assert "NOT the arbiter" in facts["headline"]["wfcv_log_loss"]["label"]
@@ -271,12 +272,104 @@ def test_build_facts_graded_run_has_all_blocks_and_suppresses_thin_cells(tmp_pat
 
     assert facts["validation"]["pit_test"].startswith("passed")
     assert facts["validation"]["candidate_column_nan_rate"]["cand_col"] > 0
+    assert facts["validation"]["extra_feature_provider_hits"] == 100
+    assert facts["validation"]["extra_feature_provider_misses"] == 0
+    assert facts["validation"]["extra_feature_provider_miss_rate"] == 0.0
 
     assert facts["grading"]["pending"] is True
     assert facts["grading"]["predicted_signature"] == "helps normal folds, not shock"
 
     assert facts["noise_band"]["available"] is False
     assert "fps-3jj.9" in facts["noise_band"]["reason"]
+
+    # No batch.json in this batch dir — degrades gracefully rather than raising.
+    assert facts["redundancy"]["available"] is False
+
+
+def test_build_facts_validation_provider_miss_rate_partial(tmp_path):
+    """fps-qbv: batch1's live incident — 607/6300 (9.6%) misses passed
+    `_check_provider_health` silently (it only errors at 100%), so the partial
+    coverage never reached a dossier. Assert the rate is carried, not just the
+    raw counts."""
+    run_dir, _ = _write_run(tmp_path)
+    results = json.loads((run_dir / dt.RESULTS_FILENAME).read_text())
+    results["meta"]["extra_feature_provider_hits"] = 5693
+    results["meta"]["extra_feature_provider_misses"] = 607
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["validation"]["extra_feature_provider_hits"] == 5693
+    assert facts["validation"]["extra_feature_provider_misses"] == 607
+    assert facts["validation"]["extra_feature_provider_miss_rate"] == pytest.approx(607 / 6300)
+
+
+def test_build_facts_provenance_and_validation_degrade_gracefully_on_legacy_meta(tmp_path):
+    """Older results.json predate realised_seed and the provider stats — must read
+    as None, not KeyError."""
+    run_dir, _ = _write_run(tmp_path)
+    results = json.loads((run_dir / dt.RESULTS_FILENAME).read_text())
+    del results["meta"]["realised_seed"]
+    del results["meta"]["extra_feature_provider_hits"]
+    del results["meta"]["extra_feature_provider_misses"]
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["provenance"]["realised_seed"] is None
+    assert facts["validation"]["extra_feature_provider_hits"] is None
+    assert facts["validation"]["extra_feature_provider_misses"] is None
+    assert facts["validation"]["extra_feature_provider_miss_rate"] is None
+
+
+def test_build_facts_redundancy_available_when_batch_json_has_matching_candidate(tmp_path):
+    def add_batch_record(batch_dir):
+        (batch_dir / "batch.json").write_text(json.dumps({
+            "block_r2": [
+                {
+                    "candidate": "cand", "mechanism_family": "test-family", "n_columns": 1,
+                    "n_predictors_used": 49, "predictors_dropped": ["bayside"],
+                    "block_r2": 0.42, "max_column_r2": 0.855,
+                    "per_column_r2": {"cand_col": 0.855},
+                },
+                {
+                    "candidate": "other_cand", "mechanism_family": "test-family", "n_columns": 1,
+                    "n_predictors_used": 49, "predictors_dropped": [],
+                    "block_r2": 0.10, "max_column_r2": 0.10,
+                    "per_column_r2": {"other_col": 0.10},
+                },
+            ],
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_batch_record)
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["redundancy"]["available"] is True
+    assert facts["redundancy"]["block_r2"] == 0.42
+    assert facts["redundancy"]["max_column_r2"] == 0.855
+    assert facts["redundancy"]["per_column_r2"] == {"cand_col": 0.855}
+    assert facts["redundancy"]["n_predictors_used"] == 49
+    assert facts["redundancy"]["predictors_dropped"] == ["bayside"]
+
+
+def test_build_facts_redundancy_unavailable_when_candidate_missing_from_batch_record(tmp_path):
+    """A candidate filed after the batch record was written (or renamed since) has no
+    row to find — refuse rather than silently return another candidate's numbers."""
+    def add_batch_record(batch_dir):
+        (batch_dir / "batch.json").write_text(json.dumps({
+            "block_r2": [
+                {"candidate": "some_other_cand", "block_r2": 0.1, "max_column_r2": 0.1,
+                 "per_column_r2": {}, "n_predictors_used": 49, "predictors_dropped": []},
+            ],
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_batch_record)
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["redundancy"]["available"] is False
+    assert "cand" in facts["redundancy"]["reason"]
 
 
 def test_build_facts_raises_when_graded_run_has_no_tank_params(tmp_path):
