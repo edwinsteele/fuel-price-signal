@@ -271,6 +271,18 @@ experiment scripts already call) also accepts an optional `tank=` and stamps it 
 same way, so a *new* mechanism inherits the discipline by using the existing shared
 helper instead of reinventing it.
 
+**A CLI default must be sourced from `TankParams()`, never a hand-copied literal
+(`fps-q3p`).** `backtest.py`'s `--daily-use` option defaulted to
+`round(50.0 / 14, 3)` while `TankParams.daily_consumption_litres` defaults to the
+unrounded `50.0 / 14` — different values that `format_tank_params`'s `f"{daily:.3f}"`
+rendered identically, so a CLI-default run and a bare-`TankParams()` run stamped the
+same while consuming marginally differently. The stamp contract above only compares
+rendered strings; it cannot catch two sources of the same lock parameter drifting
+under the hood. Fixed by sourcing the default from `TankParams().daily_consumption_litres`
+directly (`--eval-interval` already did this after `fps-oqz`), pinned by
+`test_cli_daily_use_default_tracks_tankparams`. Before adding a new CLI option that
+shadows a `TankParams` field, source its default from the dataclass, not a literal.
+
 Tests enforce this generically rather than one assertion per site
 (`tests/test_exp_lib_io.py`): `experiments.lib.io.artifact_has_unstamped_cpl(obj)`
 walks a JSON-shaped dict/list looking for any key containing `cpl` (case-
