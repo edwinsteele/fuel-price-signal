@@ -198,6 +198,24 @@ Read all of the following before proposing anything:
    uses the drift-clock). A candidate whose `PREDICTED_SIGNATURE` is phrased in
    accuracy terms ("more precisely estimates X") without a decision-timing story is
    weaker than one phrased in terms of *when the model should act differently*.
+8. **`PREDICTED_SIGNATURE` cannot make a claim about SHAP structure — `facts.json`
+   carries no SHAP field, and the dossier session grades that field alone (`facts.json`
+   is "the only source of numbers you are allowed to use", `docs/routines/dossier.md`
+   Step 1).** Decided `fps-1l1`: capturing per-column SHAP importance/sign routinely
+   was rejected, not deferred — the pipeline's runner (`experiments/lib/realised.py`'s
+   `_train_calibrate_select_tau`) fits up to 5 seeds × ~15 outer folds × 2 arms per
+   candidate and discards every fitted pipeline once its predictions are pooled into
+   `rowpreds.parquet`/`fills.parquet`; nothing is persisted to disk for a post-hoc
+   SHAP pass to run against. Adding it for real would mean either doubling the run's
+   ~1000s cost with a second fit pass purely to explain the first, or teaching
+   `realised.py`/`runner.py` to persist ~150 fitted pipelines per candidate run — a
+   change to the fit path itself, not to `dossier_tables.py`'s post-hoc "read
+   committed artifacts, no judgement" boundary. A `stickiness_phase_saddle`
+   (`fps-6yi`, batch1) prediction phrased as "the SIGNED and ABSOLUTE columns disagree
+   in orientation somewhere in the SHAP surface" could only be graded `inconclusive`
+   for exactly this reason. Phrase a mechanism prediction in terms of `decision_flips`,
+   `per_fold`, or `per_axis` data instead — all of which `facts.json` already carries
+   and the dossier session can actually check.
 
 ## Rules for candidates
 

@@ -77,6 +77,13 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    as `dossier_tables.py` wrote it, so the file stays traceable to its deterministic source plus
    this one recorded judgement.
 
+   **A `PREDICTED_SIGNATURE` making a claim about SHAP importance/sign/orientation grades
+   `"inconclusive"`, always** (decided `fps-1l1` — no SHAP field will exist in `facts.json`,
+   see `docs/routines/generator.md` item 8 in "What this session must be handed"). Don't
+   reach for a proxy (a column's raw value trend, a per-fold delta) and call it a SHAP
+   read — say plainly that the pipeline cannot test this part of the claim, same as an
+   untestable per-axis CPL claim is written up as untestable rather than guessed at.
+
 3. **Write `README.md`** in the run directory, in the house style (`experiments/TEMPLATE.md`), with
    an explicit **Facts / Judgement split**:
 
