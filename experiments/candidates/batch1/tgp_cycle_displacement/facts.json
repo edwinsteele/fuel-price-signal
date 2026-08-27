@@ -1,0 +1,4258 @@
+{
+  "candidate": {
+    "name": "tgp_cycle_displacement",
+    "hypothesis": "The retail trough is bounded below by the wholesale floor, so how far the floor has MOVED since this cycle's retail peak sets how deep this particular trough can go. A cycle that began when the floor was 6 c/L higher than it is now has room for a deeper trough than a cycle of identical length and phase whose floor never moved. Neither of the two TGP expressions tested so far asks this. station_minus_tgp_cents reads today's floor LEVEL (accurate when the floor is stable, misleading when it is moving \u2014 which is precisely how it failed). tgp_delta_7d reads the floor's velocity over a FIXED 7-day window that has no relationship to where the retail cycle is. Anchoring the displacement to the cycle's own peak makes it a depth-remaining statistic instead of a level or a momentum term.",
+    "predicted_signature": "Decision-timing: on rows where the floor has fallen a long way since the peak, the model should WAIT past the point the lock would buy, because the trough it is approaching is deeper than the network clock implies; where the floor has been flat or has risen since the peak, it should buy earlier. Expect the effect to concentrate on NON-SHOCK folds \u2014 the mechanism is about the floor setting trough depth in an ordinary cycle, and the shock folds are exactly where the previous TGP gap candidate was measured to HURT (+0.011 log-loss). A shock-concentrated win here would therefore be evidence against the stated mechanism rather than for it, and should be read as such. Magnitude expectation is small: results.csv history puts single-column features at 0.03-0.26 c/L and both prior TGP expressions landed inside the noise band.",
+    "confidence_effect": 0.3,
+    "confidence_zone": 0.55,
+    "columns": [
+      "tgp_cycle_displacement_cents",
+      "tgp_cycle_displacement_frac_amp"
+    ],
+    "inputs": [
+      "price_date",
+      "tgp_delta_7d",
+      "cycle_days_since_peak",
+      "cycle_last_max_cents",
+      "cycle_last_min_cents"
+    ],
+    "prior_art": "Adjacent to two ledger entries on the same upstream series. (1) station_minus_tgp_cents \u2014 REJECTED: helps calm (-0.012) but hurts shock (+0.011), because today's TGP is accurate when the floor is stable and misleading when it is moving; its ledger not_tested says outright 'AND THE OPEN ONE: whether the gap helps on LATE-DESCENT rows specifically. It was rejected on the SHOCK axis, which is not the axis its mechanism targets \u2014 the same oracle diagnostic that fed this rejection also measured gap -> depth-remaining at r2=0.63.' (2) tgp_delta_7d \u2014 INCONCLUSIVE (+0.0059 c/L on the corrected 54-column baseline; the June 2026 graduation retracted 2026-08-19); its not_tested names 'horizons between 7 and 14 days' and 'whether ANY TGP expression helps on the LATE-DESCENT axis specifically'. What differs mechanically: this is neither a level nor a fixed-window velocity. It is a DISPLACEMENT between two dates chosen by the retail cycle itself, so it is immune to the level's stability problem (it is a difference, so the unknown reconstruction constant cancels) and its horizon is the cycle's age rather than an arbitrary 7 days. It is also NOT the gap: it never compares a retail price to a wholesale price, so it cannot reproduce the floor-proximity brake that cancelled velocity's pre-spike buy in gap_x_vel7 (also rejected). Explicit reparameterisation check: correlation against tgp_delta_7d itself is reported in the batch record; note the screen's predictor set is the LOCK ONLY, which excludes tgp_delta_7d (NON_MODEL_COLUMNS, evaluated-inconclusive) \u2014 see PR #331 for why that is the right set and what the old superset did to exactly this ground.",
+    "mechanism_family": "wholesale-lead",
+    "target": {
+      "axis": "regime",
+      "expect_concentration_in": [
+        "normal"
+      ],
+      "folds": []
+    }
+  },
+  "provenance": {
+    "candidate": "tgp_cycle_displacement",
+    "batch": "batch1",
+    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1",
+    "snapshot_date": "2026-08-15",
+    "git_sha": "4a2016dc8b5cad4dab661801bc789336e10b5e65",
+    "git_sha_is_run_time": true,
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "realised_seed": 42,
+    "wall_seconds": 1027.129114082898,
+    "status": "graded",
+    "abort_reason": null,
+    "bead_id": "fps-2sf",
+    "n_baseline_columns": 54,
+    "baseline_fingerprint": "54:1a6ec2d84a69",
+    "tank_params": "50/3.571/1d/10%"
+  },
+  "headline": {
+    "realised": {
+      "arbiter": "realised CPL (cost per litre), held tau \u2014 clean attribution, isolated from the operating point",
+      "r0_cpl_held": 187.8211302592766,
+      "candidate_cpl_held": 187.61961514587222,
+      "delta_cpl_held": -0.20151511340438333,
+      "effect_resolved": true,
+      "r0_cpl_own": 187.8211302592766,
+      "candidate_cpl_own": 187.61961514587222
+    },
+    "wfcv_log_loss": {
+      "label": "descriptive colour, NOT the arbiter (docs/CONVENTIONS.md \u2014 #250/#254 both showed flat WFCV log-loss with opposite realised outcomes)",
+      "delta_ll_all_mean_across_folds": -0.0091290005580665,
+      "delta_ll_hard25_mean_across_folds": -0.04111937613529913
+    },
+    "zone": {
+      "resolved": false,
+      "target_delta_cpl_own": -0.13920416650745437,
+      "other_delta_cpl_own": -0.34046086902691286,
+      "n_target_candidate_fills": 1514,
+      "n_other_candidate_fills": 663
+    },
+    "pass_criterion": null
+  },
+  "breakdowns": {
+    "per_fold": [
+      {
+        "fold": 1,
+        "regime": "shock",
+        "n_fills": 190,
+        "suppressed": false,
+        "delta_cpl_own": 0.9883990719256985,
+        "delta_ll_all_median": -0.017767143256363305,
+        "delta_ll_hard25_median": -0.10345797349079433
+      },
+      {
+        "fold": 2,
+        "regime": "normal",
+        "n_fills": 186,
+        "suppressed": false,
+        "delta_cpl_own": 0.6306929718941205,
+        "delta_ll_all_median": -0.009034712581125648,
+        "delta_ll_hard25_median": -0.05422550583471042
+      },
+      {
+        "fold": 3,
+        "regime": "normal",
+        "n_fills": 106,
+        "suppressed": false,
+        "delta_cpl_own": -1.0891666666666993,
+        "delta_ll_all_median": -0.0171052913184504,
+        "delta_ll_hard25_median": -0.1080137486947863
+      },
+      {
+        "fold": 4,
+        "regime": "shock",
+        "n_fills": 217,
+        "suppressed": false,
+        "delta_cpl_own": -0.9511573806429112,
+        "delta_ll_all_median": -0.04020136993548212,
+        "delta_ll_hard25_median": -0.08323620114791819
+      },
+      {
+        "fold": 5,
+        "regime": "normal",
+        "n_fills": 167,
+        "suppressed": false,
+        "delta_cpl_own": -0.3970023830427749,
+        "delta_ll_all_median": -0.00016368380209275113,
+        "delta_ll_hard25_median": -0.04265549362980492
+      },
+      {
+        "fold": 6,
+        "regime": "normal",
+        "n_fills": 135,
+        "suppressed": false,
+        "delta_cpl_own": 0.13432771499714136,
+        "delta_ll_all_median": -0.00637280246179861,
+        "delta_ll_hard25_median": -0.033400656891224734
+      },
+      {
+        "fold": 7,
+        "regime": "normal",
+        "n_fills": 219,
+        "suppressed": false,
+        "delta_cpl_own": -0.11520737327191455,
+        "delta_ll_all_median": 0.010548738505674227,
+        "delta_ll_hard25_median": 0.04485298861492304
+      },
+      {
+        "fold": 8,
+        "regime": "normal",
+        "n_fills": 88,
+        "suppressed": false,
+        "delta_cpl_own": 0.9725158562367824,
+        "delta_ll_all_median": -0.03799660753024228,
+        "delta_ll_hard25_median": -0.14908746278820284
+      },
+      {
+        "fold": 9,
+        "regime": "shock",
+        "n_fills": 112,
+        "suppressed": false,
+        "delta_cpl_own": 0.3878914405010221,
+        "delta_ll_all_median": -0.01583717636689891,
+        "delta_ll_hard25_median": -0.06414972543301034
+      },
+      {
+        "fold": 10,
+        "regime": "normal",
+        "n_fills": 96,
+        "suppressed": false,
+        "delta_cpl_own": -0.6290909090909622,
+        "delta_ll_all_median": -0.010377740460849133,
+        "delta_ll_hard25_median": -0.05941656424362218
+      },
+      {
+        "fold": 11,
+        "regime": "normal",
+        "n_fills": 160,
+        "suppressed": false,
+        "delta_cpl_own": -0.5000000000000284,
+        "delta_ll_all_median": 0.005574405216359213,
+        "delta_ll_hard25_median": 0.02900881026532809
+      },
+      {
+        "fold": 12,
+        "regime": "normal",
+        "n_fills": 175,
+        "suppressed": false,
+        "delta_cpl_own": -0.5324675324675354,
+        "delta_ll_all_median": 0.002526999967047139,
+        "delta_ll_hard25_median": 0.02271798280095938
+      },
+      {
+        "fold": 13,
+        "regime": "shock",
+        "n_fills": 140,
+        "suppressed": false,
+        "delta_cpl_own": -1.6020833333333542,
+        "delta_ll_all_median": -0.002670432414359103,
+        "delta_ll_hard25_median": -0.008463934224631209
+      },
+      {
+        "fold": 14,
+        "regime": "normal",
+        "n_fills": 169,
+        "suppressed": false,
+        "delta_cpl_own": 0.07714884696014224,
+        "delta_ll_all_median": 0.011070808625650685,
+        "delta_ll_hard25_median": 0.033856218803307137
+      }
+    ],
+    "per_regime": [
+      {
+        "regime": "shock",
+        "n_fills": 663,
+        "suppressed": false,
+        "delta_cpl_own": -0.34046086902691286
+      },
+      {
+        "regime": "normal",
+        "n_fills": 1514,
+        "suppressed": false,
+        "delta_cpl_own": -0.13920416650745437
+      }
+    ],
+    "per_axis": null,
+    "per_axis_coverage_note": null,
+    "per_axis_identification_note": null,
+    "min_row_cell_n": 30
+  },
+  "decision_flips": {
+    "n_flips": 423,
+    "per_fold": [
+      {
+        "fold": 1,
+        "regime": "shock",
+        "n_baseline_only": 3,
+        "n_candidate_only": 5,
+        "flip_cpl_baseline": 176.56666666666666,
+        "flip_cpl_candidate": 175.978431372549,
+        "flip_cpl_delta": -0.5882352941176521
+      },
+      {
+        "fold": 2,
+        "regime": "normal",
+        "n_baseline_only": 40,
+        "n_candidate_only": 26,
+        "flip_cpl_baseline": 181.82594936708858,
+        "flip_cpl_candidate": 186.45462962962966,
+        "flip_cpl_delta": 4.6286802625410814
+      },
+      {
+        "fold": 3,
+        "regime": "normal",
+        "n_baseline_only": 99,
+        "n_candidate_only": 14,
+        "flip_cpl_baseline": 198.8851162790698,
+        "flip_cpl_candidate": 210.79999999999995,
+        "flip_cpl_delta": 11.914883720930163
+      },
+      {
+        "fold": 4,
+        "regime": "shock",
+        "n_baseline_only": 38,
+        "n_candidate_only": 16,
+        "flip_cpl_baseline": 177.61527777777778,
+        "flip_cpl_candidate": 183.8240506329114,
+        "flip_cpl_delta": 6.208772855133617
+      },
+      {
+        "fold": 5,
+        "regime": "normal",
+        "n_baseline_only": 33,
+        "n_candidate_only": 15,
+        "flip_cpl_baseline": 188.27752808988765,
+        "flip_cpl_candidate": 189.05999999999997,
+        "flip_cpl_delta": 0.7824719101123208
+      },
+      {
+        "fold": 6,
+        "regime": "normal",
+        "n_baseline_only": 5,
+        "n_candidate_only": 5,
+        "flip_cpl_baseline": 179.71666666666667,
+        "flip_cpl_candidate": 182.33076923076922,
+        "flip_cpl_delta": 2.614102564102552
+      },
+      {
+        "fold": 7,
+        "regime": "normal",
+        "n_baseline_only": 17,
+        "n_candidate_only": 1,
+        "flip_cpl_baseline": 177.4714285714286,
+        "flip_cpl_candidate": 165.9,
+        "flip_cpl_delta": -11.571428571428584
+      },
+      {
+        "fold": 8,
+        "regime": "normal",
+        "n_baseline_only": 10,
+        "n_candidate_only": 11,
+        "flip_cpl_baseline": 189.00869565217394,
+        "flip_cpl_candidate": 200.9,
+        "flip_cpl_delta": 11.891304347826065
+      },
+      {
+        "fold": 9,
+        "regime": "shock",
+        "n_baseline_only": 3,
+        "n_candidate_only": 5,
+        "flip_cpl_baseline": 197.5666666666667,
+        "flip_cpl_candidate": 185.50000000000006,
+        "flip_cpl_delta": -12.066666666666634
+      },
+      {
+        "fold": 10,
+        "regime": "normal",
+        "n_baseline_only": 12,
+        "n_candidate_only": 24,
+        "flip_cpl_baseline": 206.553164556962,
+        "flip_cpl_candidate": 198.6578947368421,
+        "flip_cpl_delta": -7.895269820119893
+      },
+      {
+        "fold": 11,
+        "regime": "normal",
+        "n_baseline_only": 3,
+        "n_candidate_only": 2,
+        "flip_cpl_baseline": 212.44545454545457,
+        "flip_cpl_candidate": 203.61428571428573,
+        "flip_cpl_delta": -8.831168831168839
+      },
+      {
+        "fold": 12,
+        "regime": "normal",
+        "n_baseline_only": 11,
+        "n_candidate_only": 1,
+        "flip_cpl_baseline": 185.7327868852459,
+        "flip_cpl_candidate": 194.9,
+        "flip_cpl_delta": 9.167213114754105
+      },
+      {
+        "fold": 13,
+        "regime": "shock",
+        "n_baseline_only": 12,
+        "n_candidate_only": 6,
+        "flip_cpl_baseline": 198.60833333333335,
+        "flip_cpl_candidate": 180.48367346938772,
+        "flip_cpl_delta": -18.124659863945624
+      },
+      {
+        "fold": 14,
+        "regime": "normal",
+        "n_baseline_only": 3,
+        "n_candidate_only": 3,
+        "flip_cpl_baseline": 178.84736842105264,
+        "flip_cpl_candidate": 185.4714285714286,
+        "flip_cpl_delta": 6.6240601503759535
+      }
+    ],
+    "rows": [
+      {
+        "fold": 1,
+        "station_code": 414,
+        "date": "2021-11-17",
+        "price": 177.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3812.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 1,
+        "station_code": 414,
+        "date": "2021-12-24",
+        "price": 183.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3940.7142857142862,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 1,
+        "station_code": 429,
+        "date": "2021-12-24",
+        "price": 167.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3597.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-04-01",
+        "price": 182.9,
+        "litres": 39.28571428571428,
+        "spend_cents": 7185.357142857141,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-04-02",
+        "price": 182.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 653.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-04-22",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-04-24",
+        "price": 187.9,
+        "litres": 7.142857142857139,
+        "spend_cents": 1342.1428571428564,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-04-30",
+        "price": 185.9,
+        "litres": 10.714285714285708,
+        "spend_cents": 1991.7857142857133,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-05-03",
+        "price": 181.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 649.6428571428568,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-02-04",
+        "price": 169.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 4854.285714285715,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-02-05",
+        "price": 169.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 606.785714285714,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-11",
+        "price": 184.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 7263.9285714285725,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-12",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-14",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-15",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-16",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-17",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-18",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-20",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-21",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-04-03",
+        "price": 189.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4069.2857142857133,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-04-06",
+        "price": 169.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6067.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-04-07",
+        "price": 169.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 606.785714285714,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-04-28",
+        "price": 187.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 670.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-04-30",
+        "price": 185.9,
+        "litres": 7.142857142857139,
+        "spend_cents": 1327.8571428571422,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-05-01",
+        "price": 183.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 656.7857142857139,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-05-03",
+        "price": 181.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 649.6428571428568,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-02-05",
+        "price": 167.7,
+        "litres": 32.142857142857146,
+        "spend_cents": 5390.357142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-12",
+        "price": 189.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4069.2857142857147,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-18",
+        "price": 189.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4069.2857142857147,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-24",
+        "price": 189.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4069.2857142857147,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-06",
+        "price": 174.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 4997.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-07",
+        "price": 174.4,
+        "litres": 3.5714285714285694,
+        "spend_cents": 622.8571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-20",
+        "price": 190.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4090.714285714285,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-26",
+        "price": 195.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4197.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-04-01",
+        "price": 184.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3962.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-04-09",
+        "price": 163.4,
+        "litres": 17.857142857142847,
+        "spend_cents": 2917.8571428571413,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-02-26",
+        "price": 177.9,
+        "litres": 39.28571428571428,
+        "spend_cents": 6988.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-02-27",
+        "price": 177.4,
+        "litres": 3.5714285714285694,
+        "spend_cents": 633.5714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-05",
+        "price": 174.7,
+        "litres": 17.857142857142847,
+        "spend_cents": 3119.642857142855,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-07",
+        "price": 174.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 623.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-20",
+        "price": 191.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4112.142857142856,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-26",
+        "price": 195.4,
+        "litres": 21.42857142857143,
+        "spend_cents": 4187.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-06",
+        "price": 177.9,
+        "litres": 32.142857142857146,
+        "spend_cents": 5718.214285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-19",
+        "price": 209.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4497.857142857142,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-25",
+        "price": 206.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4433.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-31",
+        "price": 202.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4347.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-06-06",
+        "price": 199.9,
+        "litres": 46.42857142857143,
+        "spend_cents": 9281.07142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-06-07",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-06-08",
+        "price": 195.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 699.6428571428568,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-11",
+        "price": 205.9,
+        "litres": 32.142857142857146,
+        "spend_cents": 6618.214285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-12",
+        "price": 205.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 735.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-13",
+        "price": 203.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 728.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-14",
+        "price": 203.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 728.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-16",
+        "price": 203.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 728.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-17",
+        "price": 203.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 728.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-18",
+        "price": 203.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 728.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-19",
+        "price": 203.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 728.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-20",
+        "price": 196.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 703.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-22",
+        "price": 192.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 688.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-23",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-24",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-25",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-26",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-28",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-07-29",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-06",
+        "price": 199.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 7139.285714285715,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-07",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-08",
+        "price": 195.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 699.6428571428568,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-22",
+        "price": 217.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4669.285714285713,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-28",
+        "price": 217.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4669.285714285715,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-04",
+        "price": 217.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4669.285714285715,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-10",
+        "price": 209.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4497.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-11",
+        "price": 205.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5882.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-12",
+        "price": 205.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 735.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-13",
+        "price": 203.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 728.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-14",
+        "price": 203.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 727.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-16",
+        "price": 203.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 727.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-17",
+        "price": 203.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 727.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-18",
+        "price": 203.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 727.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-19",
+        "price": 203.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 727.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-20",
+        "price": 196.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 703.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-22",
+        "price": 192.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 688.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-23",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-24",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-25",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-26",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-28",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-29",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-05-14",
+        "price": 172.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 617.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-05-15",
+        "price": 172.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 617.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-06-08",
+        "price": 186.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 666.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-06-09",
+        "price": 184.3,
+        "litres": 3.5714285714285694,
+        "spend_cents": 658.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-06-10",
+        "price": 183.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 655.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-06-13",
+        "price": 183.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 655.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-06-26",
+        "price": 217.7,
+        "litres": 21.428571428571423,
+        "spend_cents": 4664.999999999999,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-02",
+        "price": 214.7,
+        "litres": 21.42857142857143,
+        "spend_cents": 4600.714285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-08",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-09",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-10",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-11",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-12",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-14",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-15",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-16",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-17",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-18",
+        "price": 199.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-20",
+        "price": 196.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 702.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-21",
+        "price": 196.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 702.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-22",
+        "price": 195.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 698.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-23",
+        "price": 189.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 677.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-24",
+        "price": 189.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 677.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-26",
+        "price": 189.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 677.4999999999995,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-27",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-28",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-29",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-05-12",
+        "price": 173.9,
+        "litres": 32.142857142857146,
+        "spend_cents": 5589.642857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-06-08",
+        "price": 186.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 666.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-06-09",
+        "price": 183.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 656.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-06-10",
+        "price": 183.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 656.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-12",
+        "price": 199.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 7853.214285714287,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-13",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-15",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-16",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-17",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-18",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-19",
+        "price": 199.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 713.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-21",
+        "price": 195.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 699.6428571428568,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-22",
+        "price": 191.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 685.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-23",
+        "price": 191.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 685.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-24",
+        "price": 191.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 685.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-25",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-27",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 585,
+        "date": "2022-07-28",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-07",
+        "price": 189.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6782.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-08",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-09",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-11",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-12",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-13",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-14",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 3,
+        "station_code": 261,
+        "date": "2022-07-15",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-08-02",
+        "price": 173.9,
+        "litres": 25.0,
+        "spend_cents": 4347.5,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-08-03",
+        "price": 171.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 613.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-08-04",
+        "price": 170.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 610.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-08-05",
+        "price": 168.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 603.2142857142854,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-02",
+        "price": 185.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6639.285714285715,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-12",
+        "price": 185.9,
+        "litres": 35.71428571428571,
+        "spend_cents": 6639.285714285714,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-13",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-14",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-15",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-16",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-18",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-01",
+        "price": 185.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 3983.5714285714275,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-07",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-13",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-19",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-25",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-08-02",
+        "price": 175.9,
+        "litres": 25.0,
+        "spend_cents": 4397.5,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-08-05",
+        "price": 168.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 603.2142857142854,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-09-02",
+        "price": 179.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6425.0,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-09-03",
+        "price": 175.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 628.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-09-04",
+        "price": 175.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 628.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-09-09",
+        "price": 159.9,
+        "litres": 17.857142857142847,
+        "spend_cents": 2855.3571428571413,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-09-11",
+        "price": 159.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 571.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 429,
+        "date": "2022-08-03",
+        "price": 171.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 4911.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 429,
+        "date": "2022-08-04",
+        "price": 168.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 603.2142857142854,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 429,
+        "date": "2022-08-05",
+        "price": 166.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 596.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 429,
+        "date": "2022-09-09",
+        "price": 159.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 4568.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 429,
+        "date": "2022-09-10",
+        "price": 159.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 571.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 429,
+        "date": "2022-09-11",
+        "price": 159.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 571.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 429,
+        "date": "2022-09-12",
+        "price": 159.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 571.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 585,
+        "date": "2022-08-02",
+        "price": 171.9,
+        "litres": 25.0,
+        "spend_cents": 4297.5,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 585,
+        "date": "2022-08-28",
+        "price": 189.9,
+        "litres": 35.71428571428571,
+        "spend_cents": 6782.142857142856,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 585,
+        "date": "2022-09-06",
+        "price": 165.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 592.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 585,
+        "date": "2022-09-07",
+        "price": 165.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 592.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 585,
+        "date": "2022-09-08",
+        "price": 165.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 592.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 585,
+        "date": "2022-09-09",
+        "price": 165.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 592.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 261,
+        "date": "2022-08-28",
+        "price": 171.9,
+        "litres": 35.71428571428571,
+        "spend_cents": 6139.285714285714,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 4,
+        "station_code": 261,
+        "date": "2022-09-07",
+        "price": 157.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 563.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-11-14",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-11-29",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-11-30",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-02",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-03",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-04",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-05",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-06",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-21",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-22",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-23",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-24",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-25",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-27",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-02",
+        "price": 185.9,
+        "litres": 21.42857142857142,
+        "spend_cents": 3983.571428571427,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-03",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-04",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-17",
+        "price": 185.9,
+        "litres": 46.42857142857142,
+        "spend_cents": 8631.071428571428,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-11-10",
+        "price": 205.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 735.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-11-11",
+        "price": 205.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 735.3571428571424,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-11-24",
+        "price": 195.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4197.857142857142,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-11-30",
+        "price": 189.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4069.2857142857147,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-12-02",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-12-03",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-12-04",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2023-01-17",
+        "price": 189.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6782.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 429,
+        "date": "2022-12-02",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 429,
+        "date": "2022-12-03",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 429,
+        "date": "2022-12-04",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 429,
+        "date": "2023-01-01",
+        "price": 202.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5797.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 429,
+        "date": "2023-01-14",
+        "price": 184.5,
+        "litres": 21.428571428571423,
+        "spend_cents": 3953.5714285714275,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 585,
+        "date": "2022-12-02",
+        "price": 177.9,
+        "litres": 32.142857142857146,
+        "spend_cents": 5718.214285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 5,
+        "station_code": 585,
+        "date": "2023-01-18",
+        "price": 177.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 635.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 6,
+        "station_code": 261,
+        "date": "2023-04-20",
+        "price": 179.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5140.0,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 6,
+        "station_code": 261,
+        "date": "2023-04-21",
+        "price": 179.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 642.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 6,
+        "station_code": 261,
+        "date": "2023-04-22",
+        "price": 179.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 642.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 6,
+        "station_code": 261,
+        "date": "2023-04-23",
+        "price": 179.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 641.7857142857139,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 6,
+        "station_code": 261,
+        "date": "2023-04-24",
+        "price": 177.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 635.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-05-06",
+        "price": 185.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5311.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-05-07",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-05-08",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-05-09",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-05-10",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-05-14",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-05-15",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-06-12",
+        "price": 165.9,
+        "litres": 24.999999999999993,
+        "spend_cents": 4147.499999999999,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-06-22",
+        "price": 165.9,
+        "litres": 35.71428571428571,
+        "spend_cents": 5924.999999999999,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-06-23",
+        "price": 165.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 592.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-07-05",
+        "price": 165.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 592.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 18517,
+        "date": "2023-04-29",
+        "price": 186.9,
+        "litres": 25.0,
+        "spend_cents": 4672.5,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 18517,
+        "date": "2023-04-30",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 18517,
+        "date": "2023-05-01",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 18517,
+        "date": "2023-05-02",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 18517,
+        "date": "2023-06-26",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 7,
+        "station_code": 585,
+        "date": "2023-06-23",
+        "price": 177.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 7624.285714285716,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 585,
+        "date": "2023-07-28",
+        "price": 177.9,
+        "litres": 25.0,
+        "spend_cents": 4447.5,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 585,
+        "date": "2023-07-29",
+        "price": 177.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 635.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 585,
+        "date": "2023-07-30",
+        "price": 177.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 635.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 585,
+        "date": "2023-07-31",
+        "price": 176.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 631.785714285714,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 585,
+        "date": "2023-08-01",
+        "price": 174.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 624.6428571428568,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-09-11",
+        "price": 183.7,
+        "litres": 39.28571428571429,
+        "spend_cents": 7216.785714285715,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-09-24",
+        "price": 213.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4583.5714285714275,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-09-30",
+        "price": 200.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4296.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-06",
+        "price": 189.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4060.7142857142862,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-12",
+        "price": 182.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3919.2857142857147,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 9,
+        "station_code": 585,
+        "date": "2023-11-19",
+        "price": 206.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4433.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 9,
+        "station_code": 585,
+        "date": "2023-11-25",
+        "price": 197.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4240.714285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 9,
+        "station_code": 585,
+        "date": "2023-12-01",
+        "price": 187.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4026.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 414,
+        "date": "2024-03-31",
+        "price": 199.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 7853.214285714287,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 18517,
+        "date": "2024-03-31",
+        "price": 199.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5711.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-03",
+        "price": 227.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4883.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-09",
+        "price": 223.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4797.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-15",
+        "price": 219.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4712.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-21",
+        "price": 207.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4455.000000000001,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-27",
+        "price": 197.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4240.714285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-02-21",
+        "price": 189.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4069.2857142857147,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-09",
+        "price": 217.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4669.285714285713,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-15",
+        "price": 202.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4347.857142857143,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-21",
+        "price": 200.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4296.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-27",
+        "price": 197.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4240.714285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 11,
+        "station_code": 414,
+        "date": "2024-05-10",
+        "price": 202.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 8695.714285714286,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 11,
+        "station_code": 18517,
+        "date": "2024-05-07",
+        "price": 223.9,
+        "litres": 32.142857142857146,
+        "spend_cents": 7196.785714285716,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 11,
+        "station_code": 18517,
+        "date": "2024-05-08",
+        "price": 223.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 799.6428571428567,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 414,
+        "date": "2024-08-06",
+        "price": 195.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6996.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 414,
+        "date": "2024-09-11",
+        "price": 182.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6532.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 414,
+        "date": "2024-09-12",
+        "price": 179.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 642.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 429,
+        "date": "2024-08-06",
+        "price": 195.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6996.428571428572,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 429,
+        "date": "2024-09-11",
+        "price": 179.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5140.0,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 429,
+        "date": "2024-09-12",
+        "price": 177.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 635.3571428571425,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 585,
+        "date": "2024-08-10",
+        "price": 187.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5368.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 585,
+        "date": "2024-09-12",
+        "price": 175.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6282.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 261,
+        "date": "2024-09-07",
+        "price": 174.3,
+        "litres": 3.5714285714285694,
+        "spend_cents": 622.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 261,
+        "date": "2024-09-09",
+        "price": 174.3,
+        "litres": 3.5714285714285694,
+        "spend_cents": 622.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 12,
+        "station_code": 261,
+        "date": "2024-09-10",
+        "price": 174.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 624.6428571428568,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 414,
+        "date": "2025-01-10",
+        "price": 187.9,
+        "litres": 7.142857142857139,
+        "spend_cents": 1342.1428571428564,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 414,
+        "date": "2025-01-11",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 414,
+        "date": "2025-01-12",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-10-26",
+        "price": 207.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4455.000000000001,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-11-01",
+        "price": 207.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4455.000000000001,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-11-07",
+        "price": 199.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4283.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-11-13",
+        "price": 184.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3962.142857142858,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-11-19",
+        "price": 179.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3855.0000000000005,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2025-01-15",
+        "price": 213.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 763.928571428571,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 429,
+        "date": "2025-01-09",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 585,
+        "date": "2024-11-21",
+        "price": 207.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4455.000000000001,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 13,
+        "station_code": 585,
+        "date": "2024-11-27",
+        "price": 207.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4455.000000000001,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 14,
+        "station_code": 585,
+        "date": "2025-02-18",
+        "price": 179.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5140.0,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 14,
+        "station_code": 585,
+        "date": "2025-02-19",
+        "price": 179.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 642.4999999999997,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 14,
+        "station_code": 261,
+        "date": "2025-02-21",
+        "price": 177.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6353.571428571429,
+        "bought_by": "baseline"
+      },
+      {
+        "fold": 1,
+        "station_code": 414,
+        "date": "2021-11-15",
+        "price": 177.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 6988.9285714285725,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 1,
+        "station_code": 414,
+        "date": "2021-12-23",
+        "price": 183.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 7881.4285714285725,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 1,
+        "station_code": 18517,
+        "date": "2021-11-15",
+        "price": 177.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 6988.9285714285725,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 1,
+        "station_code": 429,
+        "date": "2021-12-23",
+        "price": 167.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 7195.714285714286,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 1,
+        "station_code": 429,
+        "date": "2021-12-28",
+        "price": 167.9,
+        "litres": 17.857142857142847,
+        "spend_cents": 2998.214285714284,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-03-22",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-03-23",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-03-24",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-03-28",
+        "price": 184.9,
+        "litres": 14.285714285714278,
+        "spend_cents": 2641.42857142857,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-03-29",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 414,
+        "date": "2022-03-31",
+        "price": 189.9,
+        "litres": 7.142857142857139,
+        "spend_cents": 1356.4285714285706,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-25",
+        "price": 184.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3962.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-28",
+        "price": 184.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6603.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-29",
+        "price": 184.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 660.3571428571425,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 18517,
+        "date": "2022-03-31",
+        "price": 189.9,
+        "litres": 7.142857142857139,
+        "spend_cents": 1356.4285714285706,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-02-03",
+        "price": 167.7,
+        "litres": 25.0,
+        "spend_cents": 4192.5,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-07",
+        "price": 179.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 642.4999999999997,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-08",
+        "price": 178.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 638.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-21",
+        "price": 189.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4069.2857142857133,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-27",
+        "price": 197.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4240.714285714286,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 429,
+        "date": "2022-03-31",
+        "price": 187.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 671.0714285714282,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-11",
+        "price": 190.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4090.7142857142862,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-17",
+        "price": 190.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4090.7142857142862,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-23",
+        "price": 190.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4090.7142857142862,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-03-29",
+        "price": 193.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4155.000000000001,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 585,
+        "date": "2022-04-10",
+        "price": 163.4,
+        "litres": 21.42857142857143,
+        "spend_cents": 3501.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-12",
+        "price": 191.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4112.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-18",
+        "price": 191.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4112.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-24",
+        "price": 197.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4240.714285714286,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-03-30",
+        "price": 191.7,
+        "litres": 21.42857142857143,
+        "spend_cents": 4107.857142857143,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 2,
+        "station_code": 261,
+        "date": "2022-04-07",
+        "price": 162.4,
+        "litres": 10.714285714285708,
+        "spend_cents": 1739.999999999999,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-10",
+        "price": 179.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3855.0000000000005,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-16",
+        "price": 213.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4583.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-22",
+        "price": 206.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4433.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-05-28",
+        "price": 206.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4433.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-06-03",
+        "price": 199.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4283.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-06-09",
+        "price": 201.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4326.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 414,
+        "date": "2022-06-15",
+        "price": 222.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4776.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-15",
+        "price": 222.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4776.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-21",
+        "price": 217.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4669.285714285715,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-06-27",
+        "price": 217.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4669.285714285715,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-03",
+        "price": 217.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4669.285714285715,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 18517,
+        "date": "2022-07-09",
+        "price": 209.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4497.857142857143,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-06-25",
+        "price": 217.7,
+        "litres": 21.428571428571423,
+        "spend_cents": 4664.999999999999,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 3,
+        "station_code": 429,
+        "date": "2022-07-01",
+        "price": 214.7,
+        "litres": 21.42857142857143,
+        "spend_cents": 4600.714285714286,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-08-15",
+        "price": 193.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 692.4999999999997,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-08-16",
+        "price": 193.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 692.4999999999997,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-05",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-11",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-23",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-09-29",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-05",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-09",
+        "price": 185.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 7303.214285714287,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-10",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-23",
+        "price": 185.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 3983.5714285714275,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 414,
+        "date": "2022-10-29",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-08-15",
+        "price": 193.9,
+        "litres": 7.142857142857139,
+        "spend_cents": 1384.9999999999993,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-08-16",
+        "price": 193.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 692.4999999999997,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-09-05",
+        "price": 169.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3640.7142857142862,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 18517,
+        "date": "2022-10-09",
+        "price": 185.9,
+        "litres": 28.571428571428573,
+        "spend_cents": 5311.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 4,
+        "station_code": 261,
+        "date": "2022-08-31",
+        "price": 167.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 3597.857142857142,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2022-12-13",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-08",
+        "price": 185.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 3983.5714285714275,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-14",
+        "price": 185.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3983.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-18",
+        "price": 185.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 7303.214285714287,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-19",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-20",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-21",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-22",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-23",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 414,
+        "date": "2023-01-24",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-11-22",
+        "price": 199.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4283.5714285714275,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2022-11-28",
+        "price": 189.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4069.2857142857147,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 18517,
+        "date": "2023-01-20",
+        "price": 189.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4069.2857142857147,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 429,
+        "date": "2023-01-06",
+        "price": 194.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4176.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 5,
+        "station_code": 429,
+        "date": "2023-01-12",
+        "price": 186.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 3996.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 6,
+        "station_code": 414,
+        "date": "2023-03-10",
+        "price": 185.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 7303.214285714287,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 6,
+        "station_code": 414,
+        "date": "2023-03-19",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 6,
+        "station_code": 414,
+        "date": "2023-03-20",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 6,
+        "station_code": 18517,
+        "date": "2023-04-26",
+        "price": 193.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 692.4999999999997,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 6,
+        "station_code": 261,
+        "date": "2023-03-03",
+        "price": 177.5,
+        "litres": 42.85714285714286,
+        "spend_cents": 7607.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 7,
+        "station_code": 414,
+        "date": "2023-06-18",
+        "price": 165.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 3554.999999999999,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 18517,
+        "date": "2023-10-21",
+        "price": 195.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 8395.714285714286,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-09-13",
+        "price": 227.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4883.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-09-19",
+        "price": 219.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4712.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-09-25",
+        "price": 211.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4532.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-01",
+        "price": 199.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4275.0,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-07",
+        "price": 188.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4039.2857142857147,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-13",
+        "price": 182.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3919.2857142857147,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-19",
+        "price": 178.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 638.2142857142853,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-20",
+        "price": 178.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 638.2142857142853,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-21",
+        "price": 178.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 638.2142857142853,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 8,
+        "station_code": 261,
+        "date": "2023-10-22",
+        "price": 178.7,
+        "litres": 3.5714285714285694,
+        "spend_cents": 638.2142857142853,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 9,
+        "station_code": 18517,
+        "date": "2024-01-21",
+        "price": 183.9,
+        "litres": 39.28571428571429,
+        "spend_cents": 7224.642857142859,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 9,
+        "station_code": 585,
+        "date": "2023-11-26",
+        "price": 197.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4240.714285714284,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 9,
+        "station_code": 585,
+        "date": "2023-12-02",
+        "price": 187.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4026.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 9,
+        "station_code": 261,
+        "date": "2024-01-13",
+        "price": 178.5,
+        "litres": 28.571428571428573,
+        "spend_cents": 5100.0,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 9,
+        "station_code": 261,
+        "date": "2024-01-17",
+        "price": 177.9,
+        "litres": 7.142857142857139,
+        "spend_cents": 1270.714285714285,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 414,
+        "date": "2024-02-20",
+        "price": 191.9,
+        "litres": 32.142857142857146,
+        "spend_cents": 6168.214285714286,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 414,
+        "date": "2024-02-21",
+        "price": 191.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 685.3571428571424,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 414,
+        "date": "2024-02-22",
+        "price": 191.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 685.3571428571424,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-02-23",
+        "price": 187.5,
+        "litres": 10.714285714285708,
+        "spend_cents": 2008.9285714285702,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-02-24",
+        "price": 187.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 669.6428571428568,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-02-25",
+        "price": 187.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 669.6428571428568,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-02-27",
+        "price": 187.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 669.6428571428568,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-11",
+        "price": 223.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4797.857142857142,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-17",
+        "price": 219.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4712.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-23",
+        "price": 199.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4283.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 429,
+        "date": "2024-03-29",
+        "price": 197.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4240.714285714286,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 585,
+        "date": "2024-02-20",
+        "price": 189.9,
+        "litres": 35.714285714285715,
+        "spend_cents": 6782.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 585,
+        "date": "2024-02-21",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 585,
+        "date": "2024-02-22",
+        "price": 187.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 669.6428571428568,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-02-20",
+        "price": 189.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 8138.571428571429,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-02-22",
+        "price": 189.5,
+        "litres": 7.142857142857139,
+        "spend_cents": 1353.5714285714278,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-02-23",
+        "price": 189.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 676.7857142857139,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-02-24",
+        "price": 189.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 676.7857142857139,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-02-26",
+        "price": 189.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 676.7857142857139,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-02-27",
+        "price": 189.5,
+        "litres": 3.5714285714285694,
+        "spend_cents": 676.7857142857139,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-11",
+        "price": 217.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4669.285714285713,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-17",
+        "price": 202.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4347.857142857143,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-23",
+        "price": 200.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4296.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 10,
+        "station_code": 261,
+        "date": "2024-03-29",
+        "price": 194.5,
+        "litres": 21.42857142857143,
+        "spend_cents": 4167.857142857143,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 11,
+        "station_code": 414,
+        "date": "2024-07-02",
+        "price": 189.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 678.2142857142853,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 11,
+        "station_code": 18517,
+        "date": "2024-05-11",
+        "price": 205.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4412.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 12,
+        "station_code": 414,
+        "date": "2024-08-08",
+        "price": 194.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 696.0714285714282,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-10-20",
+        "price": 174.9,
+        "litres": 25.0,
+        "spend_cents": 4372.5,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-11-02",
+        "price": 207.9,
+        "litres": 21.428571428571423,
+        "spend_cents": 4454.999999999999,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-11-08",
+        "price": 187.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 4026.428571428572,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 13,
+        "station_code": 18517,
+        "date": "2024-11-14",
+        "price": 184.9,
+        "litres": 21.42857142857143,
+        "spend_cents": 3962.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 13,
+        "station_code": 429,
+        "date": "2024-11-20",
+        "price": 171.7,
+        "litres": 42.85714285714286,
+        "spend_cents": 7358.571428571428,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 13,
+        "station_code": 585,
+        "date": "2024-11-20",
+        "price": 172.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 7410.000000000001,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 14,
+        "station_code": 18517,
+        "date": "2025-04-04",
+        "price": 185.9,
+        "litres": 42.85714285714286,
+        "spend_cents": 7967.142857142858,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 14,
+        "station_code": 18517,
+        "date": "2025-04-06",
+        "price": 185.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 663.9285714285711,
+        "bought_by": "candidate"
+      },
+      {
+        "fold": 14,
+        "station_code": 429,
+        "date": "2025-02-20",
+        "price": 179.9,
+        "litres": 3.5714285714285694,
+        "spend_cents": 642.4999999999997,
+        "bought_by": "candidate"
+      }
+    ],
+    "computed": true
+  },
+  "seed_flags": [
+    {
+      "cohort": "all",
+      "fold": 2,
+      "run": "R0",
+      "seed_std": 0.04577158957845631,
+      "ratio_vs_cohort_median": 5.611570326779633
+    },
+    {
+      "cohort": "all",
+      "fold": 3,
+      "run": "R0",
+      "seed_std": 0.04510154120949116,
+      "ratio_vs_cohort_median": 5.529422785489922
+    },
+    {
+      "cohort": "hard25",
+      "fold": 2,
+      "run": "R0",
+      "seed_std": 0.13260218587337955,
+      "ratio_vs_cohort_median": 5.1711103728635655
+    },
+    {
+      "cohort": "hard25",
+      "fold": 3,
+      "run": "candidate",
+      "seed_std": 0.15640209281148537,
+      "ratio_vs_cohort_median": 6.099239459350471
+    }
+  ],
+  "validation": {
+    "pit_test": "passed \u2014 reached the WFCV/realised stages, so the differential PIT truncation test found no leak",
+    "inputs_check": "passed \u2014 INPUTS declaration matched every column add_columns/add_axis actually read",
+    "candidate_column_nan_rate": {
+      "tgp_cycle_displacement_cents": 0.0,
+      "tgp_cycle_displacement_frac_amp": 0.0
+    },
+    "extra_feature_provider_hits": 5693,
+    "extra_feature_provider_misses": 607,
+    "extra_feature_provider_miss_rate": 0.09634920634920635
+  },
+  "grading": {
+    "predicted_signature": "Decision-timing: on rows where the floor has fallen a long way since the peak, the model should WAIT past the point the lock would buy, because the trough it is approaching is deeper than the network clock implies; where the floor has been flat or has risen since the peak, it should buy earlier. Expect the effect to concentrate on NON-SHOCK folds \u2014 the mechanism is about the floor setting trough depth in an ordinary cycle, and the shock folds are exactly where the previous TGP gap candidate was measured to HURT (+0.011 log-loss). A shock-concentrated win here would therefore be evidence against the stated mechanism rather than for it, and should be read as such. Magnitude expectation is small: results.csv history puts single-column features at 0.03-0.26 c/L and both prior TGP expressions landed inside the noise band.",
+    "verdict": "contradicted",
+    "explanation": "The regime split runs opposite to the predicted mechanism: shock folds show a larger favourable delta (-0.34 c/L) than normal folds (-0.14 c/L), and the signature explicitly names a shock-concentrated win as evidence against the wholesale-lead displacement mechanism it proposes. The overall realised delta is favourable and clears batch1's single-candidate noise band (z=-2.27 vs t=1.92), but the location of the effect contradicts what was predicted.",
+    "pending": false
+  },
+  "noise_band": {
+    "available": true,
+    "n_draws": 10,
+    "effective_n_draws": 10.0,
+    "texture_icc_assumed": 0.274,
+    "n_placebo_columns": 3,
+    "candidate_n_columns": 2,
+    "floor_arity_exceeds_run": true,
+    "band_mean_delta_cpl_held": 0.025101995567317202,
+    "band_std_delta_cpl_held": 0.09993498251895033,
+    "candidate_delta_cpl_held": -0.20151511340438333,
+    "candidate_percentile_better_than_noise": 100.0,
+    "candidate_z_vs_band": -2.26764545567142,
+    "single_candidate_z_threshold": 1.9225850634649964,
+    "single_candidate_z_threshold_nominal": 1.9225850634649964,
+    "single_candidate_bar_cpl_held": -0.16703150914125223,
+    "bar_draw_count_shift_cpl_held": -0.027755086252942023,
+    "bar_reuse_shift_cpl_held": 0.0,
+    "floor_arity_excess": 1
+  },
+  "redundancy": {
+    "available": true,
+    "block_r2": 0.5741052304693022,
+    "max_column_r2": 0.5827425253501988,
+    "per_column_r2": {
+      "tgp_cycle_displacement_cents": 0.5827425253501988,
+      "tgp_cycle_displacement_frac_amp": 0.5654679355884056
+    },
+    "n_predictors_used": 49,
+    "predictors_dropped": [
+      "days_since_trough_entry_bayside",
+      "days_since_trough_entry_botany_bay",
+      "days_since_trough_entry_hunters_hill",
+      "days_since_trough_entry_lane_cove",
+      "days_since_trough_entry_waverley"
+    ]
+  },
+  "plots": [
+    "per_fold_delta_bars.png",
+    "seed_mean_vs_median.png",
+    "realised_cpl_by_fold.png",
+    "tau_sweep.png",
+    "candidate_over_time.png",
+    "cycle_phase_breakdown.png",
+    "external_series_overlay.png"
+  ]
+}

@@ -46,6 +46,55 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: tgp_cycle_displacement_cents, tgp_cycle_displacement_frac_amp (wholesale
+    floor displacement since the retail cycle's own peak)
+  inputs: [price_date, tgp_delta_7d, cycle_days_since_peak, cycle_last_max_cents,
+    cycle_last_min_cents]
+  claim: >-
+    The retail trough is bounded below by the wholesale floor, so how far the
+    floor has MOVED since this cycle's retail peak sets how deep this
+    particular trough can go. Neither prior TGP expression asks this:
+    station_minus_tgp_cents reads today's floor LEVEL (misleading when the
+    floor is moving); tgp_delta_7d reads the floor's velocity over a fixed
+    7-day window unrelated to where the retail cycle sits. Anchoring the
+    displacement to the cycle's own peak makes it a depth-remaining statistic
+    instead of a level or a fixed-window momentum term. Predicted signature:
+    concentration on NON-SHOCK (normal) folds; a shock-concentrated win was
+    explicitly pre-registered as evidence AGAINST this mechanism.
+  falsified: >-
+    Realised delta -0.2015 c/L held-tau, favourable, and clears batch1's
+    single-candidate noise band in the good direction (z=-2.2676 vs
+    t=1.9226, graded against a ruler one column wider than the candidate's
+    own arity, floor_arity_exceeds_run=true) -- a cleaner clearance than
+    either prior TGP expression, both of which sat inside their noise bands.
+    But the predicted concentration is inverted: shock folds show a larger
+    favourable delta (-0.3405 c/L) than normal folds (-0.1392 c/L), which
+    the candidate's own signature names as the specific pattern that would
+    refute its wholesale-lead mechanism. The shock aggregate is not even a
+    clean shock story on its own terms -- 2 of 4 shock folds (1, 9) hurt the
+    candidate, and fold 13 alone (-1.60 c/L) drives most of the favourable
+    shock number. Max per-column R^2 against the 49-column lock is 0.583,
+    concentrated entirely in the days_since_trough_entry_* LGA family, and
+    the one candidate-arm seed-instability flag (fold 3, hard25 cohort)
+    lands in exactly the fold with this candidate's best normal-fold
+    delta_cpl_own reading.
+  not_tested: >-
+    Whether the shock-fold gain is fold-13-specific rather than a genuine
+    shock mechanism -- 2 of 4 shock folds actually hurt the candidate.
+    Whether testing the actual claim -- decision timing keyed to the
+    MAGNITUDE of floor displacement since the peak, not the coarse
+    shock/normal regime label -- would recover the predicted normal-fold
+    concentration; no per-axis breakdown by displacement magnitude was built
+    for this run. Whether the ~58% max per-column R^2 against the lock
+    (concentrated entirely in days_since_trough_entry_*) means this is
+    substantially a proxy for existing trough-timing columns rather than new
+    information. Per fps-1l1: whether the model's own SHAP orientation would
+    corroborate or refute the wholesale-lead story -- facts.json has no
+    field for this, so the mechanism itself, as opposed to the
+    regime-location prediction, is untestable with this pipeline as built.
+  outcome: rejected
+  evidence: experiments/candidates/batch1/tgp_cycle_displacement/
+
 - candidate: sticky_x_phase, abs_sticky_x_phase (stickiness x cycle-phase product,
     signed and absolute)
   inputs: [stickiness_score, cycle_pct_through]
