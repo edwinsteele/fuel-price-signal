@@ -95,6 +95,11 @@ def main() -> None:
     # `2026-08-27_texture_icc/measure_icc.py::_anova_icc`, corrected the same way in PR #337).
     groups = [g["delta"].to_numpy() for _, g in draws.groupby("family")]
     n, k_groups = len(draws), len(groups)
+    if k_groups < 2:
+        raise SystemExit(
+            "the bank has fewer than two texture families — one-way ANOVA needs at least two "
+            "groups."
+        )
     if sum(len(g) for g in groups) <= len(groups):
         raise SystemExit(
             f"every one of the {k_groups} texture families has exactly one draw — there is no "
