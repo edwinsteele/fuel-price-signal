@@ -70,11 +70,13 @@ Code changes to `experiments/pipeline/**` or `fuel_signal/**` need a PR (branch 
   bar 0.000 c/L at arity 1–2, 0.005 at 3, 0.011 at 4 — every width batch1 has run — against 0.059
   at arity 10 and 0.383 at 35. So a large measured ICC is not an emergency for current candidates;
   it matters for the wide groups `docs/routines/generator.md` invites. Don't overstate it.
-- `fps-8o0` is open and **may move the number you are comparing against**: the singleton-group
-  defect fixed in `measure_icc.py` still exists in `texture_channel.py`, which is what *produced*
-  0.391. If any texture family is a singleton, the shipped constant was computed on 19 draws and
-  4 families, not 20 and 5. Worth resolving before writing "the measured value replaces 0.391",
-  since 0.391 itself may not be what it claims.
+- `fps-8o0` is **closed** (PR #340): the singleton-group defect fixed in `measure_icc.py` also
+  existed in `texture_channel.py`, which is what *produced* 0.391. It bit — `network` is a
+  singleton family — so the shipped constant it produced was computed on 19 draws and 4
+  families, not 20 and 5. Recomputed correctly, 0.391's true upper bound was 0.226 (see this
+  experiment's README, "the 0.391 being replaced was not what it claimed"). Doesn't change
+  anything here — `TEXTURE_ICC_BOUND` had already moved to the by-column 0.274 before this was
+  checked, so it was overstated on its own terms, not a live grading ruler.
 - The pinned bank is **not a grading ruler** and the code enforces it — `null_method:
   placebo_column_pinned_source`, which `_noise_band` refuses. Don't promote it to
   `noise_floor.json`.

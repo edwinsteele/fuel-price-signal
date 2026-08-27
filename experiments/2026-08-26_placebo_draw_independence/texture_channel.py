@@ -191,10 +191,15 @@ def main() -> None:
             if shared >= 2 else float("nan")
         )
         print(f"  {arity:>5} {binary:>13.2f} {shared:>15.2f} {bar:>12.3f}")
-    print(f"\n  placebo.TEXTURE_ICC_BOUND = {TEXTURE_ICC_BOUND} (the value shipped)")
-    if abs(rho_hi - TEXTURE_ICC_BOUND) > 5e-4:
-        print(f"  !! MISMATCH — this run measures {rho_hi:.3f}; update TEXTURE_ICC_BOUND "
-              "or record why it differs.")
+    # This script's ICC is grouped by FAMILY (a handful of texture categories); the shipped
+    # TEXTURE_ICC_BOUND is grouped by COLUMN, measured on a pinned 32-draw bank by
+    # `2026-08-27_texture_icc/measure_icc.py` (fps-3jj.23, PR #338). They answer different
+    # questions, so a raw distance between them is not a signal to chase either way — this
+    # script's number is a superseded historical bound (fps-8o0, PR #340), not a candidate
+    # replacement. See this experiment's README, "What was still a bound, and is now MEASURED".
+    print(f"\n  by-family ICC upper bound (this script, superseded): {rho_hi:.3f}")
+    print(f"  placebo.TEXTURE_ICC_BOUND (shipped, by-column, from a different script): "
+          f"{TEXTURE_ICC_BOUND}")
 
 
 if __name__ == "__main__":
