@@ -106,8 +106,8 @@ def _anova_icc(frame: pd.DataFrame) -> dict:
     # `n`/`k`, so nothing in the output revealed the loss: a 5-draw, 3-column bank printed
     # `n=4, k=2`. `icc_upper` is what the verdict at the bottom of this script turns on, so a
     # quietly dropped draw could flip the printed recommendation (PR #337 review). Inherited
-    # from `2026-08-26_placebo_draw_independence/texture_channel.py`, which still has it —
-    # tracked separately, that file is outside this change.
+    # from `2026-08-26_placebo_draw_independence/texture_channel.py`, which had the same defect
+    # until fps-8o0 (PR #340) fixed it there too.
     groups = [g["delta"].to_numpy() for _, g in frame.groupby("source_column")]
     if len(groups) < 2:
         raise SystemExit(

@@ -265,12 +265,12 @@ the reason the constant ships as a bound rather than as the point estimate.
 ### A by-product: the 0.391 being replaced was not what it claimed (`fps-8o0`)
 
 Checked in the same pass, because `fps-8o0` flagged that the defect fixed in `measure_icc.py`
-still lives in `texture_channel.py`, which is what produced 0.391. It bites: batch1's `network`
-texture family is a **singleton** (11 LGA counters, 3 cycle_magnitude, 3 price_level_other, 2
-cycle_phase, 1 network). `texture_channel.py` filters groups with `if len(g) > 1` — dropping
-that draw from the sums of squares — while computing `n = len(draws) = 20`, `k_bar = n / 5` and
-`df2 = n - len(groups) = 16`. So the published `F(3,16) = 0.411 → 0.391` is a 19-draw/4-group F
-carried on a 20-draw/5-group `df` and `k_bar`.
+also lived in `texture_channel.py`, which is what produced 0.391 (fixed there too, PR #340). It
+bit: batch1's `network` texture family is a **singleton** (11 LGA counters, 3 cycle_magnitude, 3
+price_level_other, 2 cycle_phase, 1 network). `texture_channel.py` used to filter groups with
+`if len(g) > 1` — dropping that draw from the sums of squares — while computing
+`n = len(draws) = 20`, `k_bar = n / 5` and `df2 = n - len(groups) = 16`. So the published
+`F(3,16) = 0.411 → 0.391` was a 19-draw/4-group F carried on a 20-draw/5-group `df` and `k_bar`.
 
 Recomputed consistently over all five families with the corrected estimator:
 
