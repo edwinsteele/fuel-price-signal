@@ -457,6 +457,10 @@ Immediately after `gh pr create` returns a PR number, call `ScheduleWakeup(delay
 
 **The opposite timing failure also happens, and its findings can still be valid.** Observed on PR #313 (fps-3jj.8): a manually-pasted external review was addressed and pushed as a fix commit, then CodeRabbit's own review posted ~20 minutes later — but its own metadata showed it had been comparing against the *original* pre-fix commit, not current HEAD. Its 6 findings didn't overlap with the fix already pushed, and 2 of them were real (confirmed against current code) and worth fixing anyway. The commit range a review cites is not a reliable signal of whether its findings are live or stale in either direction — verify every finding against current code regardless of what the review says it diffed against, the same discipline as the stale-repost case above, not a reason to auto-dismiss a review that looks behind.
 
+**CodeRabbit's "Docstring Coverage" pre-merge check is a bot metric, not a finding — treat it like a style nit, not an actionable comment.** Observed on PR #344 (bd-fps-b5p): CodeRabbit's own review said "No actionable comments were generated," but its pre-merge-checks table separately flagged "Docstring Coverage 66.67% (threshold 80%)" on the touched functions. This repo's convention is WHY-comments over formal docstrings (see top of this doc) — writing docstrings purely to clear the bot's threshold would fight that convention for no reader benefit. Left unaddressed; the PR merged clean anyway (the check is advisory, not a merge gate).
+
+**Sourcery can rate-limit ("used your own review budget") the same as CodeRabbit can be absent — treat it identically: skip and move on, don't reschedule to wait for it.** Observed on PR #344.
+
 ## Code review caution
 
 Before filing an issue from an agent-driven logic review:
