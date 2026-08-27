@@ -320,6 +320,18 @@ def test_cli_eval_interval_default_tracks_tankparams():
     assert param.default == TankParams().evaluation_interval_days
 
 
+def test_cli_daily_use_default_tracks_tankparams():
+    """The CLI must not carry its own copy of daily consumption. It did (a
+    rounded literal round(50.0 / 14, 3) = 3.571), which stamp-collided with
+    TankParams.daily_consumption_litres (3.5714285714285716) under
+    format_tank_params's :.3f rendering while consuming marginally
+    differently (fps-q3p) — the same two-defaults-disagree failure the
+    tank_params stamp exists to make visible. Pinned to the dataclass so the
+    next re-lock cannot repeat it."""
+    param = next(p for p in main.params if p.name == "daily_use")
+    assert param.default == TankParams().daily_consumption_litres
+
+
 # ---------------------------------------------------------------------------
 # validate_never_dry (fps-5mn)
 # ---------------------------------------------------------------------------
