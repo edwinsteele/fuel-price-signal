@@ -86,10 +86,27 @@ def main() -> None:
     print(draws.groupby("family")["delta"].agg(
         n="size", mean="mean", std=lambda s: s.std(ddof=1)).to_string())
 
-    groups = [g["delta"].to_numpy() for _, g in draws.groupby("family") if len(g) > 1]
-    n, k_groups = len(draws), len(draws.family.unique())
+    # EVERY group, including one with a single draw. A singleton contributes nothing to the
+    # WITHIN-group sum of squares (correctly — it has no within-group variation) but it does
+    # contribute to the BETWEEN-group sum of squares, and dropping it discards that. The old
+    # `if len(g) > 1` filter silently deleted such groups while `n`/`k_groups` below stayed
+    # computed on the unfiltered `draws`, so a dropped family desynced the F stat from its own
+    # df/k_bar and nothing in the output revealed it (bd fps-8o0; see
+    # `2026-08-27_texture_icc/measure_icc.py::_anova_icc`, corrected the same way in PR #337).
+    groups = [g["delta"].to_numpy() for _, g in draws.groupby("family")]
+    n, k_groups = len(draws), len(groups)
+    if sum(len(g) for g in groups) <= len(groups):
+        raise SystemExit(
+            f"every one of the {k_groups} texture families has exactly one draw — there is no "
+            "WITHIN-family variation to separate alignment from texture."
+        )
     f_stat, p = stats.f_oneway(*groups)
-    k_bar = n / k_groups
+    # Standard ANOVA k_bar for unbalanced designs (reduces to the common group size when
+    # balanced) — the naive n/k_groups this used to be is only correct when every family has
+    # the same count, which batch1's families do not (bd fps-8o0; same formula as
+    # `2026-08-27_texture_icc/measure_icc.py::_anova_icc`).
+    sizes = [len(g) for g in groups]
+    k_bar = (n - sum(s * s for s in sizes) / n) / (k_groups - 1)
 
     # ICC(1) from the ANOVA F: the share of delta variance attributable to texture, i.e. the
     # correlation two draws would inherit purely from sharing a source column.
