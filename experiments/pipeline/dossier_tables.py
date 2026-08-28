@@ -613,15 +613,24 @@ def _comparable_noise_banks(
         if path.resolve() == canonical.resolve():
             continue
         entry: dict = {"name": path.name}
+        # One try around the whole per-bank read, INCLUDING the field coercions (review of
+        # PR #345). A sibling that parses as JSON but carries a non-numeric
+        # `n_placebo_columns` or `deltas_cpl_held` — a stray or half-written file matching the
+        # glob — would otherwise raise out of here and stop `build_facts` producing a
+        # facts.json at all, letting one junk side-file block a run whose canonical floor is
+        # perfectly good. A bank this function cannot read is a SKIPPED bank, never a fatal.
         try:
             bank = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError) as exc:
+            entry["null_method"] = bank.get("null_method")
+            entry["n_placebo_columns"] = int(bank.get("n_placebo_columns", 1))
+            deltas = np.asarray(bank.get("deltas_cpl_held", []), dtype=float)
+            entry["n_draws"] = int(deltas.size)
+            band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
+            band_mean = float(np.mean(deltas)) if deltas.size else float("nan")
+            n_eff = _resolve_effective_n_draws(bank, nominal=int(deltas.size))
+        except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
             banks.append({**entry, "comparable": False, "reason": f"unreadable: {exc}"})
             continue
-        entry["null_method"] = bank.get("null_method")
-        entry["n_placebo_columns"] = int(bank.get("n_placebo_columns", 1))
-        deltas = np.asarray(bank.get("deltas_cpl_held", []), dtype=float)
-        entry["n_draws"] = int(deltas.size)
         for label, got, want in (
             ("baseline_fingerprint", bank.get("baseline_fingerprint"), run_meta.get("baseline_fingerprint")),
             ("tank_params", bank.get("tank_params"), run_meta.get("tank_params")),
@@ -630,25 +639,45 @@ def _comparable_noise_banks(
                 entry.update(comparable=False, reason=f"{label} {got!r} does not match this run's {want!r}")
                 break
         else:
+            # A bank whose band cannot be ESTIMATED is not comparable, even when its identity
+            # matches (review of PR #345). The canonical path already treats this state as
+            # ungradeable — `docs/routines/dossier.md`'s "present-but-null z/t" rule — so a
+            # sibling in it corroborates nothing, and, worse, the arity refusal below filters
+            # on `comparable` alone: marking it True would let the refusal advise promoting a
+            # ruler that still cannot grade anything once promoted.
             if bank.get("partial"):
                 entry.update(comparable=False, reason="computed with --fold-subset (partial fold coverage)")
             elif deltas.size < 2:
                 entry.update(comparable=False, reason=f"only {deltas.size} draw(s) — no band to estimate")
+            elif not (np.isfinite(band_std) and band_std > 0 and float(np.ptp(deltas)) > 0):
+                # `band_std > 0` alone is NOT enough to catch "every draw landed on the same
+                # value" — the case noise_floor.py's docstring names. np.std of twenty
+                # identical 0.01s is 1.78e-18, not 0.0, because 0.01 has no exact binary
+                # representation; that sails past a `> 0` test and yields a z of order 1e18.
+                # np.ptp is exact and zero iff the draws really are identical, so the two
+                # together cover both the degenerate and the non-finite case.
+                entry.update(
+                    comparable=False,
+                    reason=f"band_std {band_std!r} is not estimable — every draw landed on the "
+                    "same value, so there is no band to compare against",
+                )
+            elif n_eff < 2:
+                entry.update(
+                    comparable=False,
+                    reason=f"effective_n_draws {n_eff:.2f} < 2 once source-column reuse is "
+                    f"priced in (nominal {deltas.size}) — not enough independent draws to grade",
+                )
             else:
-                band_std = float(np.std(deltas, ddof=1))
-                n_eff = _resolve_effective_n_draws(bank, nominal=int(deltas.size))
-                estimable = bool(np.isfinite(band_std) and band_std > 0 and n_eff >= 2)
-                band_mean = float(np.mean(deltas))
                 entry.update(
                     comparable=True,
                     effective_n_draws=n_eff,
                     band_mean_delta_cpl_held=band_mean,
                     band_std_delta_cpl_held=band_std,
                     candidate_z_vs_band=(
-                        (delta - band_mean) / band_std if estimable and delta is not None else None
+                        (delta - band_mean) / band_std if delta is not None else None
                     ),
-                    single_candidate_z_threshold=(
-                        family_wise_z_threshold(n_candidates=1, n_draws=n_eff) if estimable else None
+                    single_candidate_z_threshold=family_wise_z_threshold(
+                        n_candidates=1, n_draws=n_eff
                     ),
                 )
         banks.append(entry)

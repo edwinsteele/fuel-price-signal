@@ -1390,3 +1390,64 @@ def test_noise_band_arity_refusal_stays_quiet_when_no_sibling_is_wide_enough(tmp
 
     assert band["available"] is False
     assert "may already exist" not in band["reason"]
+
+
+# ── sibling-bank robustness (review of PR #345) ───────────────────────────────
+
+@pytest.mark.parametrize("overrides,expected", [
+    ({"deltas_cpl_held": [0.01] * 20}, "same value"),
+    ({"deltas_cpl_held": [0.0] * 20}, "same value"),
+])
+def test_noise_band_sibling_with_no_estimable_band_is_not_comparable(tmp_path, overrides, expected):
+    """A bank whose identity matches but whose band cannot be estimated corroborates nothing.
+    The canonical path already treats present-but-null z/t as ungradeable
+    (docs/routines/dossier.md), so a sibling in that state must not read as comparable."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
+        _bank(arity=2, n=10, seed=1), flat=_bank(**overrides),
+    ))
+
+    banks = dt.build_facts(run_dir)["noise_band"]["comparable_banks"]
+
+    assert [b["name"] for b in banks] == ["noise_floor_flat.json"]
+    assert banks[0]["comparable"] is False
+    assert expected in banks[0]["reason"]
+    assert "candidate_z_vs_band" not in banks[0]
+
+
+def test_noise_band_arity_refusal_ignores_a_wide_but_ungradeable_sibling(tmp_path):
+    """The refusal must not advise promoting a ruler that still cannot grade once promoted —
+    the arity filter keys on `comparable`, so an unestimable wide bank has to fail that gate."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b", "c"], batch_extras=_banks(
+        _bank(arity=1, n=20, seed=1),
+        k3=_bank(arity=3, deltas_cpl_held=[0.02] * 20),   # wide enough, but zero-variance
+    ))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+    assert "may already exist" not in band["reason"]
+    assert "--arity 3" in band["reason"]
+
+
+@pytest.mark.parametrize("overrides", [
+    {"n_placebo_columns": "three"},
+    {"deltas_cpl_held": ["not", "numbers"]},
+    {"deltas_cpl_held": {"nested": "object"}},
+])
+def test_noise_band_malformed_sibling_is_skipped_not_fatal(tmp_path, overrides):
+    """A stray or half-written side-file matching noise_floor*.json must not stop build_facts
+    producing a facts.json at all — the canonical floor here is perfectly good."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
+        _bank(arity=2, n=10, seed=1), junk=_bank(**overrides),
+    ))
+
+    facts = dt.build_facts(run_dir)  # must not raise
+    band = facts["noise_band"]
+
+    assert band["available"] is True
+    assert band["candidate_z_vs_band"] is not None  # canonical grading unaffected
+    junk = [b for b in band["comparable_banks"] if b["name"] == "noise_floor_junk.json"]
+    assert len(junk) == 1
+    assert junk[0]["comparable"] is False
+    assert "unreadable" in junk[0]["reason"]
