@@ -84,6 +84,17 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    read — say plainly that the pipeline cannot test this part of the claim, same as an
    untestable per-axis CPL claim is written up as untestable rather than guessed at.
 
+   **This rule is a backstop, and it is the expensive place to catch the problem.** By the
+   time a run reaches this step the compute is already spent and the verdict is already
+   forfeit: an ungradeable signature does not grade "untested pending an improvement", it
+   grades `inconclusive` permanently, which reads like a measurement and is not one. The
+   authoring-side rule lives in `experiments/candidates/TEMPLATE.py`'s `PREDICTED_SIGNATURE`
+   comment (`fps-i2o` — the positive constraint, the list of gradeable `facts.json` families,
+   and a worked BAD/GOOD pair from `stickiness_phase_saddle`) and in
+   `docs/routines/generator.md` item 8. If you find yourself applying this rule to a real
+   run, the signature should have been caught upstream — note it in the README's
+   `not_tested` with the feasibility category (`fps-1p1`), not as an open question.
+
 3. **Write `README.md`** in the run directory, in the house style (`experiments/TEMPLATE.md`), with
    an explicit **Facts / Judgement split**:
 

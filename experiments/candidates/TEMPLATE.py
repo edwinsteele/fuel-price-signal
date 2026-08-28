@@ -32,10 +32,54 @@ HYPOTHESIS = (
 )
 
 # What the numbers should look like if the mechanism is real.
+#
+# HARD CONSTRAINT: the prediction must be GRADEABLE from what facts.json actually
+# persists. The dossier routine (docs/routines/dossier.md step 2) grades this string
+# against the run, and it can only read what the pipeline wrote. A signature phrased in
+# terms of something never persisted is not "untested pending a pipeline improvement" —
+# it is untestable by construction, and it grades `inconclusive` FOREVER, which is worse
+# than no prediction because it looks like a measurement.
+#
+# What you can predict against (facts.json keys, all written by dossier_tables.py):
+#   headline.realised     — delta_cpl_held / effect_resolved: sign and size of the effect
+#   breakdowns.per_fold   — delta_cpl_own, n_fills per fold: where it concentrates in TIME
+#   breakdowns.per_regime — the same, split shock vs normal (SHOCK_FOLDS)
+#   breakdowns.per_axis   — your own add_axis(), if you define one. CPL cells here are
+#                           path-coupled and NOT identified — usable as colour, never as
+#                           the load-bearing half of a claim (see dossier.md).
+#   decision_flips        — per-fold flip counts, plus `rows`: every fill the two arms
+#                           disagreed on, with fold/station_code/date/price/litres/
+#                           spend_cents. This is the richest surface for a mechanism
+#                           claim, and the most under-used: it supports "the edge shows
+#                           up under CONDITION X" for any X you can derive from a date,
+#                           a station and a price.
+#
+# THE KNOWN-BAD CASE — do not predict about SHAP. `fps-1l1` decided (2026-08-27) that no
+# SHAP importance/orientation field will ever exist in facts.json, and dossier.md now
+# grades any SHAP-shaped signature `inconclusive` on sight, without looking at the run.
+#
+# Worked example, from `stickiness_phase_saddle` (fps-6yi, batch1) — a real candidate
+# that lost its own mechanism test to this exact mistake:
+#
+#   BAD:  "the SIGNED and ABSOLUTE columns are both used and DISAGREE in orientation
+#          somewhere in the SHAP surface"
+#         Ungradeable. The run scored inconclusive on a claim nothing measured.
+#
+#   GOOD: "the edge concentrates on fills near a cycle turn and is absent otherwise —
+#          flips within a few days of a sharp rise should show markedly lower regret
+#          for the candidate arm, with ordinary-condition flips unchanged"
+#         Gradeable today from decision_flips.rows plus the batch DB. A post-hoc review
+#         ran exactly this and resolved it: turn-adjacent regret 0.33 c/L vs 21.62 for
+#         the baseline across 5 folds, but only ~5% of flipped litres, and 0.88 c/L
+#         worse across the rest — real mechanism, too rare to pay. That is a CONCLUSIVE
+#         result, and the original phrasing forfeited it.
+#
+# Ask before writing: which facts.json field would a reader open to check this? If you
+# cannot name one, rewrite the claim, don't file it and hope.
 PREDICTED_SIGNATURE = (
     "This is the module-format worked example, not a proposed feature — no "
-    "real prediction. A genuine candidate would describe expected sign/"
-    "magnitude and where it concentrates."
+    "real prediction. A genuine candidate would name the expected sign and "
+    "magnitude, and the fact-family that would show where it concentrates."
 )
 
 # Your own prior: P(pooled realised CPL delta < 0). Scored in the retrospective.
