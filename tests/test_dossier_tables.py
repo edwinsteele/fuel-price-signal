@@ -1451,3 +1451,55 @@ def test_noise_band_malformed_sibling_is_skipped_not_fatal(tmp_path, overrides):
     assert len(junk) == 1
     assert junk[0]["comparable"] is False
     assert "unreadable" in junk[0]["reason"]
+
+
+# ── promote-hint correctness + arity disclosure (peer review of PR #345) ──────
+
+def test_arity_refusal_hint_omits_a_bank_the_canonical_check_would_refuse(tmp_path):
+    """The hint recommends a `mv`. _comparable_noise_banks deliberately RELAXES null_method
+    so a pinned-source bank's z can still be reported as corroboration — that relaxation
+    must not leak into a promote recommendation, because _noise_band's own null_method check
+    is unconditional and would refuse the promoted file on the very next run."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b", "c"], batch_extras=_banks(
+        _bank(arity=1, n=20, seed=1),
+        k3=_bank(arity=3, n=20, seed=2),
+        icc=_bank(arity=3, n=20, seed=3, null_method="placebo_column_pinned_source"),
+    ))
+
+    reason = dt.build_facts(run_dir)["noise_band"]["reason"]
+
+    assert "noise_floor_k3.json" in reason
+    assert "noise_floor_icc.json" not in reason
+
+
+def test_arity_refusal_hint_does_not_run_into_the_following_sentence(tmp_path):
+    """Reproduced by review: the hint was concatenated with no separator, rendering as
+    '...step (2) alone.noise_floor.json is a 1-column null...'. The message is read by an
+    unattended dossier session and pasted into a README, so it has to be legible."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b", "c"], batch_extras=_banks(
+        _bank(arity=1, n=20, seed=1), k3=_bank(arity=3, n=20, seed=2),
+    ))
+
+    reason = dt.build_facts(run_dir)["noise_band"]["reason"]
+
+    assert "alone.noise_floor.json" not in reason
+    assert "alone. noise_floor.json" in reason
+
+
+@pytest.mark.parametrize("sibling_arity,expected", [(1, True), (2, False), (4, False)])
+def test_comparable_bank_discloses_when_it_is_narrower_than_the_run(
+    tmp_path, sibling_arity, expected
+):
+    """Siblings are not REFUSED on arity — a narrower bank is exactly what answers "would a
+    different arity move this call" (fps-6yi was resolved by an arity-1 bank against a
+    2-column run), so excluding it would delete the use case. Disclose instead, mirroring
+    `floor_arity_exceeds_run` on the canonical side: a narrower bank's z is biased in the
+    candidate's favour and is a lower bound on the bar, never a verdict."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
+        _bank(arity=2, n=10, seed=1), sib=_bank(arity=sibling_arity, n=20, seed=2),
+    ))
+
+    banks = dt.build_facts(run_dir)["noise_band"]["comparable_banks"]
+
+    assert banks[0]["comparable"] is True
+    assert banks[0]["narrower_than_run"] is expected

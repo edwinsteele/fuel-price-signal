@@ -608,6 +608,9 @@ def _comparable_noise_banks(
     sibling was looked at" cannot be confused.
     """
     run_meta = results.get("meta", {})
+    # Local, not borrowed from _noise_band's scope — this helper is also called from the
+    # arity-refusal path before that function has finished computing its own.
+    run_arity = len(results.get("candidate", {}).get("columns") or [])
     banks: list[dict] = []
     for path in sorted(batch_dir.glob(NOISE_FLOOR_GLOB)):
         if path.resolve() == canonical.resolve():
@@ -670,6 +673,17 @@ def _comparable_noise_banks(
             else:
                 entry.update(
                     comparable=True,
+                    # docs/CONVENTIONS.md groups arity with fingerprint/tank_params as the
+                    # same failure class, and the canonical path REFUSES a floor narrower
+                    # than the run (biased in the candidate's favour). Siblings are not
+                    # refused on it — a narrower bank is exactly what answers "would a
+                    # different arity move this call", and excluding it would delete the use
+                    # case this whole helper exists for (fps-6yi was resolved by an arity-1
+                    # bank against a 2-column run). So disclose rather than drop, the mirror
+                    # of `floor_arity_exceeds_run` on the canonical side: a True here means
+                    # this bank's z is biased in the CANDIDATE's favour and is a lower bound
+                    # on the bar, not a verdict. Never read it as one.
+                    narrower_than_run=bool(run_arity and entry["n_placebo_columns"] < run_arity),
                     effective_n_draws=n_eff,
                     band_mean_delta_cpl_held=band_mean,
                     band_std_delta_cpl_held=band_std,
@@ -788,17 +802,25 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # These banks accumulate precisely because the promote step below says `mv`, not
         # `--force` — so the ruler this run needs may already be sitting beside the canonical
         # one, unread. Only comparable banks count (same fingerprint and cadence).
+        # Every condition `_noise_band` itself would apply to the promoted file, not just
+        # arity — this hint recommends a `mv`, so a bank that would fail the very next run's
+        # checks is worse than no hint at all (review of PR #345). `_comparable_noise_banks`
+        # deliberately RELAXES null_method so a pinned-source bank's z can still be reported
+        # as corroboration; that relaxation must not leak into a promote recommendation,
+        # because the canonical null_method check above is unconditional.
         adequate = [
             b for b in _comparable_noise_banks(results, batch_dir, canonical=path, delta=None)
-            if b.get("comparable") and b.get("n_placebo_columns", 1) >= run_arity
+            if b.get("comparable")
+            and b.get("n_placebo_columns", 1) >= run_arity
+            and b.get("null_method") == NULL_METHOD_PLACEBO_COLUMN
         ]
         already = (
-            " NOTE: a wide-enough ruler may already exist in this batch dir — "
+            "NOTE: a wide-enough ruler may already exist in this batch dir — "
             + ", ".join(
                 f"{b['name']} ({b['n_placebo_columns']} columns, {b['n_draws']} draws)"
                 for b in adequate
             )
-            + ". Check it before recomputing; promoting an existing bank is step (2) alone."
+            + ". Check it before recomputing; promoting an existing bank is step (2) alone. "
             if adequate
             else ""
         )

@@ -156,7 +156,11 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      It carries every OTHER bank in the batch dir with the same `baseline_fingerprint` and
      `tank_params`, each scored against this same delta, plus any non-comparable bank with the
      reason it was skipped. Render them as a small table (name, arity, draws, `null_method`,
-     z, threshold) whenever any bank is comparable. Two rules: they are **corroboration only**
+     z, threshold) whenever any bank is comparable — and carry `narrower_than_run` into that
+     table, because a bank NARROWER than the run is biased in the candidate's favour (the
+     canonical path refuses that case outright; siblings only disclose it, since a narrower
+     bank is often exactly what answers the arity question). A narrower sibling's z is a
+     LOWER BOUND on the bar, never a verdict. Two rules: they are **corroboration only**
      — `candidate_z_vs_band` off the canonical bank is what the Step 3 outcome keys on, and a
      sibling that disagrees is a fact to report, never a grade to substitute — and a differing
      `null_method` must be quoted beside the z, since a pinned-source bank measures a
