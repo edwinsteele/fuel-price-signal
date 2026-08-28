@@ -477,6 +477,33 @@ def test_build_facts_noise_band_available_when_batch_has_calibration(tmp_path):
     assert band["single_candidate_z_threshold"] > 0
 
 
+@pytest.mark.parametrize("noise_deltas", [
+    [0.01] * 20,
+    [0.0] * 20,
+])
+def test_build_facts_noise_band_degenerate_canonical_floor_is_not_estimable(tmp_path, noise_deltas):
+    """fps-tnz: `band_std > 0` alone does not catch "every draw landed on the same value" —
+    np.std of twenty identical 0.01s is 1.78e-18, not 0.0, because 0.01 has no exact binary
+    representation. Left unguarded, that sails past a `> 0` check and turns
+    candidate_z_vs_band into a ~1e18 z, which docs/routines/dossier.md step 3's mechanical
+    `-t < z < t` split reads as a confident REJECT on a bank that carries no information at
+    all. The exact-0.0 case must stay green too — it was already caught before this fix."""
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": noise_deltas, "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
+
+    facts = dt.build_facts(run_dir)
+
+    band = facts["noise_band"]
+    assert band["available"] is True
+    assert band["candidate_z_vs_band"] is None
+    assert band["single_candidate_z_threshold"] is None
+
+
 def test_build_facts_noise_band_refuses_a_stale_pre_awz_seed_swap_floor(tmp_path):
     """fps-awz: this PR changed what noise_floor.json's deltas MEASURE (placebo-column null,
     not seed-swap) without changing baseline_fingerprint — batch0's already-committed

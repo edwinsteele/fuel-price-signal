@@ -865,7 +865,13 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
     # fps-3jj.25: grade against the band's EFFECTIVE draw count, not its nominal one.
     n_eff = _resolve_effective_n_draws(noise_floor, nominal=int(deltas.size))
-    band_std_usable = bool(np.isfinite(band_std) and band_std > 0)
+    # `band_std > 0` alone is NOT enough to catch "every draw landed on the same value"
+    # (fps-tnz) — np.std of twenty identical 0.01s is 1.78e-18, not 0.0, because 0.01 has
+    # no exact binary representation; that sails past a `> 0` test and yields a z of order
+    # 1e18. np.ptp is exact and zero iff the draws really are identical, so the two together
+    # cover both the degenerate and the non-finite case. Same pairing as
+    # `_comparable_noise_banks` uses for the sibling-bank path (fps-30p, PR #345).
+    band_std_usable = bool(np.isfinite(band_std) and band_std > 0 and float(np.ptp(deltas)) > 0)
     band_estimable = bool(band_std_usable and n_eff >= 2)
     single_z = (
         family_wise_z_threshold(n_candidates=1, n_draws=n_eff) if band_estimable else None
