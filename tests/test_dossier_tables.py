@@ -1264,3 +1264,129 @@ def test_other_refusals_carry_no_arity_code(tmp_path):
 
     assert band["available"] is False
     assert "reason_code" not in band
+
+
+# ── comparable sibling noise banks (fps-30p) ──────────────────────────────────
+
+def _banks(canonical: dict, **siblings: dict):
+    """Write a canonical noise_floor.json plus named sibling banks into the batch dir."""
+    def _write(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps(canonical))
+        for name, payload in siblings.items():
+            (batch_dir / f"noise_floor_{name}.json").write_text(json.dumps(payload))
+    return _write
+
+
+def _bank(*, n=20, arity=2, sd=0.02, seed=7, **overrides):
+    payload = {
+        "deltas_cpl_held": list(np.random.default_rng(seed).normal(0, sd, size=n)),
+        "baseline_fingerprint": "54:deadbeef1234",
+        "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
+        "tank_params": "50/3.571/7d/10%",
+        "n_placebo_columns": arity,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_noise_band_scores_the_candidate_against_every_comparable_sibling_bank(tmp_path):
+    """fps-30p: the motivating failure was a `not_tested` line saying a differently-shaped
+    floor "could resolve it either way" while a comparable bank sat unread in the same
+    directory. Siblings must be scored, not just noticed."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
+        _bank(arity=2, n=10, seed=1),
+        k1=_bank(arity=1, n=20, seed=2),
+        icc=_bank(arity=1, n=32, seed=3, null_method="placebo_column_pinned_source"),
+    ))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+    assert band["available"] is True
+    by_name = {b["name"]: b for b in band["comparable_banks"]}
+    assert set(by_name) == {"noise_floor_k1.json", "noise_floor_icc.json"}
+
+    for name, arity, n in (("noise_floor_k1.json", 1, 20), ("noise_floor_icc.json", 1, 32)):
+        b = by_name[name]
+        assert b["comparable"] is True
+        assert (b["n_placebo_columns"], b["n_draws"]) == (arity, n)
+        # Scored against the SAME delta the canonical bank graded.
+        expected = (band["candidate_delta_cpl_held"] - b["band_mean_delta_cpl_held"]) / b[
+            "band_std_delta_cpl_held"
+        ]
+        assert b["candidate_z_vs_band"] == pytest.approx(expected)
+        assert b["single_candidate_z_threshold"] > 0
+
+    # A differing null_method is REPORTED, never refused — a pinned-source bank measures a
+    # genuinely different null and its z is still worth seeing, provided the reader is told.
+    assert by_name["noise_floor_icc.json"]["null_method"] == "placebo_column_pinned_source"
+
+
+def test_noise_band_canonical_grade_is_untouched_by_siblings(tmp_path):
+    """Siblings are corroboration only. The ledger outcome keys on the canonical bank
+    (docs/routines/dossier.md step 3's mechanical `-t < z < t`), so a sibling that
+    disagrees must not move `candidate_z_vs_band` or the threshold beside it."""
+    canonical = _bank(arity=2, n=10, seed=1)
+    (tmp_path / "alone").mkdir()
+    (tmp_path / "sibs").mkdir()
+    alone, _ = _write_run(tmp_path / "alone", columns=["a", "b"], batch_extras=_banks(canonical))
+    withsibs, _ = _write_run(tmp_path / "sibs", columns=["a", "b"], batch_extras=_banks(
+        canonical, k1=_bank(arity=1, n=20, sd=0.5, seed=9),
+    ))
+
+    a = dt.build_facts(alone)["noise_band"]
+    b = dt.build_facts(withsibs)["noise_band"]
+
+    assert a["comparable_banks"] == []
+    assert len(b["comparable_banks"]) == 1
+    for key in ("candidate_z_vs_band", "single_candidate_z_threshold",
+                "band_mean_delta_cpl_held", "band_std_delta_cpl_held", "n_draws"):
+        assert a[key] == pytest.approx(b[key]), key
+
+
+@pytest.mark.parametrize("overrides,expected", [
+    ({"baseline_fingerprint": "54:other"}, "baseline_fingerprint"),
+    ({"tank_params": "50/3.571/1d/10%"}, "tank_params"),
+    ({"partial": True}, "--fold-subset"),
+    ({"deltas_cpl_held": [0.01]}, "only 1 draw"),
+])
+def test_noise_band_lists_non_comparable_siblings_with_a_reason(tmp_path, overrides, expected):
+    """Listed-with-a-reason, not dropped: "no sibling answered this" and "no sibling was
+    looked at" must not be confusable by a reader of the committed facts.json."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
+        _bank(arity=2, n=10, seed=1), bad=_bank(**overrides),
+    ))
+
+    banks = dt.build_facts(run_dir)["noise_band"]["comparable_banks"]
+
+    assert [b["name"] for b in banks] == ["noise_floor_bad.json"]
+    assert banks[0]["comparable"] is False
+    assert expected in banks[0]["reason"]
+    assert "candidate_z_vs_band" not in banks[0]
+
+
+def test_noise_band_arity_refusal_names_an_existing_wide_enough_bank(tmp_path):
+    """The refusal tells an operator to spend ~2h computing a wider ruler. If one already
+    exists beside the canonical bank — which is exactly what the `mv`-don't-`--force`
+    promote step causes to accumulate — say so first."""
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b", "c"], batch_extras=_banks(
+        _bank(arity=1, n=20, seed=1), k3=_bank(arity=3, n=20, seed=2),
+    ))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+    assert "may already exist" in band["reason"]
+    assert "noise_floor_k3.json (3 columns, 20 draws)" in band["reason"]
+    # The recompute instructions must survive — the existing bank is a hint, not a promise.
+    assert "--arity 3" in band["reason"]
+
+
+def test_noise_band_arity_refusal_stays_quiet_when_no_sibling_is_wide_enough(tmp_path):
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b", "c"], batch_extras=_banks(
+        _bank(arity=1, n=20, seed=1), k2=_bank(arity=2, n=20, seed=2),
+    ))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert "may already exist" not in band["reason"]
