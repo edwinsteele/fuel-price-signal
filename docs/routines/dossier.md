@@ -91,8 +91,16 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      provenance (candidate, batch, snapshot date, git SHA, seeds, bead) — and state plainly
      that those seeds are the **WFCV screen only**, while the realised arbiter ran on the
      single seed at `facts["provenance"]["realised_seed"]` (fps-qbv — distinct from the
-     `seeds` list beside it), so every `delta_cpl_own` is one draw with no
-     error bar — the
+     `seeds` list beside it). Do **not** gloss that as "one draw with no error bar": the
+     realised delta is a PAIRED difference — both arms share the seed, the data, the folds and
+     every baseline column, differing only by the added one, so the fit's seed idiosyncrasy is
+     common-mode and cancels (see `experiments/pipeline/noise_floor.py`'s docstring; on batch0
+     the two arms agreed on 741/752 fills). Its error bar is the batch noise floor, built the
+     same paired way at the same fixed seed (`PLACEBO_SEED_DEFAULT = SEEDS[0]`, matching the
+     runner's `realised_seed`) — that matching is what makes the two comparable at all.
+     Multi-seeding the arbiter alone would narrow the candidate against an unchanged ruler and
+     manufacture significance; fps-awz retired exactly that unpaired seed-swap null. Report the
+     single realised seed as provenance, not as a limitation — the
      headline realised-CPL
      delta and its `effect_resolved` verdict, the WFCV log-loss delta labelled as descriptive
      colour, the per-fold / per-regime / per-axis breakdown tables (mark suppressed cells plainly —

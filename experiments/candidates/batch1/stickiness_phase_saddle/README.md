@@ -54,8 +54,14 @@ Transcribed from `facts.json` — no new arithmetic.
 
 `effect_resolved`: **true**. Note the seeds above are the WFCV screen
 only — the realised arbiter ran on a single seed
-(`results.json` `meta.realised_seed` = 42), so this `delta_cpl_held` is
-one draw with no error bar.
+(`results.json` `meta.realised_seed` = 42). That is provenance, not a
+missing error bar: the realised delta is a PAIRED difference in which
+both arms share the seed, the data, the folds and the 54 baseline
+columns, differing only by this candidate's 2 added columns, so the
+fit's seed idiosyncrasy is common-mode and cancels. Its error bar is the
+noise floor reported below, built the same paired way at the same fixed
+seed (`PLACEBO_SEED_DEFAULT = SEEDS[0]` = 42) — that matching is what
+makes the two comparable.
 
 **WFCV log-loss** (descriptive colour, NOT the arbiter): Δll_all mean
 +0.00355, Δll_hard25 mean -0.00651. Mixed — nominally slightly worse on

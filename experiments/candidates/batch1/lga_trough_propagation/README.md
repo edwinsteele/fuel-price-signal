@@ -46,9 +46,12 @@ Transcribed from `facts.json` — no new arithmetic.
 **Provenance:** batch `batch1`, snapshot 2026-08-15, seeds [42, 43, 44, 45,
 46], wall 1270.9s, status `graded`, 54-column baseline (`54:1a6ec2d84a69`).
 Those five seeds are the **WFCV screen only**. The realised backtest — the arbiter —
-ran on a **single seed** (`results.json` `meta.realised_seed` = 42), so every
-`delta_cpl_own` below is one draw with no seed error bar. `facts.json`'s provenance
-block does not carry this field.
+ran on a **single seed** (`results.json` `meta.realised_seed` = 42); `facts.json`'s
+provenance block does not carry this field. That is provenance, not a missing error
+bar: the realised delta is a PAIRED difference in which both arms share the seed, the
+data, the folds and the 54 baseline columns, so the fit's seed idiosyncrasy is
+common-mode and cancels. Its error bar is the noise floor, built the same paired way
+at the same fixed seed (`PLACEBO_SEED_DEFAULT = SEEDS[0]` = 42).
 
 **Headline (realised CPL, held τ — the arbiter):**
 
