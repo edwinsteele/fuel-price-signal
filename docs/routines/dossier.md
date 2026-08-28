@@ -213,10 +213,45 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
        series still has room ("the raw gap failed, but its velocity might not") is exactly what
        lets the next generator session revisit it legitimately. Actually think about this; don't
        write "none" as a default.
+
+       Two rules make an entry sound (`fps-1p1`). This field is copied verbatim into
+       `experiments/ledger.yaml` and handed to the next generator session, so a wrong line is
+       not inert — it either sends work at closed ground or hides open ground.
+
+       1. **State whether the test is possible, and with what.** "X was not measured" is only
+          half a fact. Put every line in one of three registers, because a reader acts
+          differently on each:
+          - **Measurable now** — name the artifact it would come from (`decision_flips.rows`,
+            a sibling `noise_floor*.json`, the batch DB). If it is cheap, consider just doing it.
+          - **Blocked on a named artifact** — say which, and what would unblock it.
+          - **Permanently untestable by this pipeline** — say so plainly. This is a different
+            outcome from "pending", and conflating them is what produces a dossier that
+            recommends waiting for something that will never arrive.
+       2. **Check before you write.** Before any line of the form "Y would resolve this": look
+          for Y. Enumerate the batch directory rather than assuming the canonical filename is
+          the only artifact (`fps-30p`), and read the **current status and close reason** of any
+          bead you cite — not just its ID. **Never stake a recommendation on the outcome of a
+          bead filed in this same session**: you do not know how it will close, and "worth a
+          second look once `<bead>` lands" is worthless if it lands as "won't build".
+
+       Worked failure, `stickiness_phase_saddle` (`fps-6yi`, batch1, dossiered 2026-08-27):
+       all three of its `not_tested` lines were wrong, one per failure mode. It filed `fps-1l1`
+       and staked its recommendation on the outcome in the same document, on the same day —
+       fps-1l1 closed "don't capture", making that line *permanently untestable*, not pending
+       (rule 1, and see `experiments/candidates/TEMPLATE.py` / `fps-i2o` for why the signature
+       was ungradeable in the first place). It said a same-arity noise floor "could resolve it
+       either way" while two comparable banks sat in the directory it had just read
+       `noise_floor.json` from, both answering it (rule 2). And it declared the mechanism
+       uncheckable when `decision_flips.rows` plus the batch DB localised it cleanly (rule 1,
+       measurable-now). The corrected entry is in that run's README under
+       *Addendum — post-dossier review*.
      - An overall recommendation — **not a binary verdict**. Something like "worth a second look
        once the batch has more shock-fold coverage" or "dead end on this series, but see
        not_tested" is the right register. The dossier exists to support a human (or a follow-up
-       session) interrogating it further, not to close the question.
+       session) interrogating it further, not to close the question. A conditional recommendation
+       is only as good as its condition: gate on something checkable (data coverage, a run that
+       has not happened) and verify the condition is actually still open before you write it —
+       never on a bead outcome you have not read, per rule 2 above.
    - Embed the plots that exist for this run (`![](per_fold_delta_bars.png)` etc. — only ones
      listed in `facts["plots"]`).
 

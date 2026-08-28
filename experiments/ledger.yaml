@@ -22,6 +22,13 @@
 #   falsified   - what the run actually showed (empty for graduates)
 #   not_tested  - adjacent ground this run did NOT rule out. The field that
 #                 stops the generator being timid. Requires real judgement.
+#                 Every line must say whether the test is POSSIBLE, not just
+#                 that it was not done (fps-1p1): measurable now (name the
+#                 artifact), blocked on a named artifact, or permanently
+#                 untestable by this pipeline. "Pending" and "never" send the
+#                 generator in opposite directions, so conflating them is a
+#                 defect, not a nuance. Check any cited bead's CURRENT status
+#                 and close reason before writing it in.
 #   outcome     - graduated | rejected | inconclusive | disqualified
 #                 | aborted_candidate | aborted_environment
 #   calibration - (optional) for runs whose job was to validate the PIPELINE
