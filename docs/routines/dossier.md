@@ -151,7 +151,21 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      graded against a ruler built from MORE columns than the candidate has, which is allowed
      (a wider ruler only raises the bar, never lowers it — `docs/CONVENTIONS.md` § The band's
      ARITY) but means a candidate that failed here has not been shown to fail against its own
-     arity's band. If `available: false`, say plainly "noise-floor band: not
+     arity's band — and in that case `facts["noise_band"]["comparable_banks"]` (`fps-30p`) is
+     the field that answers it, so report it rather than writing a `not_tested` line wondering.
+     It carries every OTHER bank in the batch dir with the same `baseline_fingerprint` and
+     `tank_params`, each scored against this same delta, plus any non-comparable bank with the
+     reason it was skipped. Render them as a small table (name, arity, draws, `null_method`,
+     z, threshold) whenever any bank is comparable — and carry `narrower_than_run` into that
+     table, because a bank NARROWER than the run is biased in the candidate's favour (the
+     canonical path refuses that case outright; siblings only disclose it, since a narrower
+     bank is often exactly what answers the arity question). A narrower sibling's z is a
+     LOWER BOUND on the bar, never a verdict. Two rules: they are **corroboration only**
+     — `candidate_z_vs_band` off the canonical bank is what the Step 3 outcome keys on, and a
+     sibling that disagrees is a fact to report, never a grade to substitute — and a differing
+     `null_method` must be quoted beside the z, since a pinned-source bank measures a
+     genuinely different null. An empty list means no siblings exist, not that none were
+     checked. If `available: false`, say plainly "noise-floor band: not
      available" and quote `facts["noise_band"]["reason"]` verbatim rather than omitting the
      line or paraphrasing it (as of `fps-cf8` there is more than one refusal reason — no floor
      yet, a partial `--fold-subset` floor, or a `baseline_fingerprint` mismatch against a

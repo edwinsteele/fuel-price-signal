@@ -573,6 +573,131 @@ def _resolve_effective_n_draws(noise_floor: dict, *, nominal: int) -> float:
     return effective_n_draws(draws)
 
 
+#: Glob for every persisted noise-floor bank in a batch dir. `noise_floor.json` is the one
+#: `_noise_band` grades against; the siblings are earlier/alternative calibrations kept beside
+#: it (the arity-refusal message above tells operators to `mv` rather than `--force`, so they
+#: accumulate by design). fps-30p: read them all.
+NOISE_FLOOR_GLOB = "noise_floor*.json"
+
+
+def _comparable_noise_banks(
+    results: dict, batch_dir: pathlib.Path, *, canonical: pathlib.Path, delta: float | None
+) -> list[dict]:
+    """Every OTHER noise-floor bank in the batch dir, vetted and scored against this run.
+
+    Why (fps-30p): `_noise_band` reads one file by fixed name, so a `not_tested` line of the
+    form "a differently-shaped floor might move this call" had no way to be answered from
+    inside the dossier — and answering it by hand costs hours of placebo fits that, in the
+    case that motivated this, had ALREADY been paid. `stickiness_phase_saddle` (fps-6yi,
+    batch1) shipped exactly that line while `noise_floor_k1.json` (20 draws, arity 1, same
+    fingerprint / tank_params / null_method, computed five days earlier) sat in the same
+    directory and answered it: z=-0.81 there against -0.99 on the graded bank, and an arity-2
+    band lies between the two by construction. See
+    `feedback_committed_artifacts_before_new_compute`.
+
+    These are CORROBORATION and nothing else. The canonical bank alone drives
+    `candidate_z_vs_band` and therefore the ledger outcome (`docs/routines/dossier.md` step
+    3's mechanical `-t < z < t` split); a sibling that disagrees is a fact to report, never a
+    grade to substitute. Comparability is the same identity contract the canonical bank must
+    satisfy — `baseline_fingerprint` (fps-cf8) and `tank_params` (fps-v8o) must match the run,
+    and a `--fold-subset` bank is refused — with ONE deliberate relaxation: a differing
+    `null_method` is reported rather than refused, because a pinned-source bank
+    (`placebo_column_pinned_source`) measures a genuinely different null and its z is still
+    worth seeing, provided the reader is told which null it came from. Non-comparable banks
+    are listed with their reason rather than dropped, so "no sibling answered this" and "no
+    sibling was looked at" cannot be confused.
+    """
+    run_meta = results.get("meta", {})
+    # Local, not borrowed from _noise_band's scope — this helper is also called from the
+    # arity-refusal path before that function has finished computing its own.
+    run_arity = len(results.get("candidate", {}).get("columns") or [])
+    banks: list[dict] = []
+    for path in sorted(batch_dir.glob(NOISE_FLOOR_GLOB)):
+        if path.resolve() == canonical.resolve():
+            continue
+        entry: dict = {"name": path.name}
+        # One try around the whole per-bank read, INCLUDING the field coercions (review of
+        # PR #345). A sibling that parses as JSON but carries a non-numeric
+        # `n_placebo_columns` or `deltas_cpl_held` — a stray or half-written file matching the
+        # glob — would otherwise raise out of here and stop `build_facts` producing a
+        # facts.json at all, letting one junk side-file block a run whose canonical floor is
+        # perfectly good. A bank this function cannot read is a SKIPPED bank, never a fatal.
+        try:
+            bank = json.loads(path.read_text())
+            entry["null_method"] = bank.get("null_method")
+            entry["n_placebo_columns"] = int(bank.get("n_placebo_columns", 1))
+            deltas = np.asarray(bank.get("deltas_cpl_held", []), dtype=float)
+            entry["n_draws"] = int(deltas.size)
+            band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
+            band_mean = float(np.mean(deltas)) if deltas.size else float("nan")
+            n_eff = _resolve_effective_n_draws(bank, nominal=int(deltas.size))
+        except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
+            banks.append({**entry, "comparable": False, "reason": f"unreadable: {exc}"})
+            continue
+        for label, got, want in (
+            ("baseline_fingerprint", bank.get("baseline_fingerprint"), run_meta.get("baseline_fingerprint")),
+            ("tank_params", bank.get("tank_params"), run_meta.get("tank_params")),
+        ):
+            if got is None or got != want:
+                entry.update(comparable=False, reason=f"{label} {got!r} does not match this run's {want!r}")
+                break
+        else:
+            # A bank whose band cannot be ESTIMATED is not comparable, even when its identity
+            # matches (review of PR #345). The canonical path already treats this state as
+            # ungradeable — `docs/routines/dossier.md`'s "present-but-null z/t" rule — so a
+            # sibling in it corroborates nothing, and, worse, the arity refusal below filters
+            # on `comparable` alone: marking it True would let the refusal advise promoting a
+            # ruler that still cannot grade anything once promoted.
+            if bank.get("partial"):
+                entry.update(comparable=False, reason="computed with --fold-subset (partial fold coverage)")
+            elif deltas.size < 2:
+                entry.update(comparable=False, reason=f"only {deltas.size} draw(s) — no band to estimate")
+            elif not (np.isfinite(band_std) and band_std > 0 and float(np.ptp(deltas)) > 0):
+                # `band_std > 0` alone is NOT enough to catch "every draw landed on the same
+                # value" — the case noise_floor.py's docstring names. np.std of twenty
+                # identical 0.01s is 1.78e-18, not 0.0, because 0.01 has no exact binary
+                # representation; that sails past a `> 0` test and yields a z of order 1e18.
+                # np.ptp is exact and zero iff the draws really are identical, so the two
+                # together cover both the degenerate and the non-finite case.
+                entry.update(
+                    comparable=False,
+                    reason=f"band_std {band_std!r} is not estimable — every draw landed on the "
+                    "same value, so there is no band to compare against",
+                )
+            elif n_eff < 2:
+                entry.update(
+                    comparable=False,
+                    reason=f"effective_n_draws {n_eff:.2f} < 2 once source-column reuse is "
+                    f"priced in (nominal {deltas.size}) — not enough independent draws to grade",
+                )
+            else:
+                entry.update(
+                    comparable=True,
+                    # docs/CONVENTIONS.md groups arity with fingerprint/tank_params as the
+                    # same failure class, and the canonical path REFUSES a floor narrower
+                    # than the run (biased in the candidate's favour). Siblings are not
+                    # refused on it — a narrower bank is exactly what answers "would a
+                    # different arity move this call", and excluding it would delete the use
+                    # case this whole helper exists for (fps-6yi was resolved by an arity-1
+                    # bank against a 2-column run). So disclose rather than drop, the mirror
+                    # of `floor_arity_exceeds_run` on the canonical side: a True here means
+                    # this bank's z is biased in the CANDIDATE's favour and is a lower bound
+                    # on the bar, not a verdict. Never read it as one.
+                    narrower_than_run=bool(run_arity and entry["n_placebo_columns"] < run_arity),
+                    effective_n_draws=n_eff,
+                    band_mean_delta_cpl_held=band_mean,
+                    band_std_delta_cpl_held=band_std,
+                    candidate_z_vs_band=(
+                        (delta - band_mean) / band_std if delta is not None else None
+                    ),
+                    single_candidate_z_threshold=family_wise_z_threshold(
+                        n_candidates=1, n_draws=n_eff
+                    ),
+                )
+        banks.append(entry)
+    return banks
+
+
 def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerprint: bool = True) -> dict:
     """`check_fingerprint=False` is for retrospective.py's `_batch_noise_summary`,
     which reuses this function's math to summarise a batch's floor on its own
@@ -673,10 +798,36 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # computed at the SAME n_draws as the ruler it replaces — which is also what keeps the
         # two comparable, the thing fps-3jj.14's arity comparison needed and could not have.
         n_draws_hint = int(noise_floor.get("n_draws") or len(noise_floor.get("deltas_cpl_held", [])))
+        # fps-30p: before telling anyone to spend ~2h computing a wider ruler, look for one.
+        # These banks accumulate precisely because the promote step below says `mv`, not
+        # `--force` — so the ruler this run needs may already be sitting beside the canonical
+        # one, unread. Only comparable banks count (same fingerprint and cadence).
+        # Every condition `_noise_band` itself would apply to the promoted file, not just
+        # arity — this hint recommends a `mv`, so a bank that would fail the very next run's
+        # checks is worse than no hint at all (review of PR #345). `_comparable_noise_banks`
+        # deliberately RELAXES null_method so a pinned-source bank's z can still be reported
+        # as corroboration; that relaxation must not leak into a promote recommendation,
+        # because the canonical null_method check above is unconditional.
+        adequate = [
+            b for b in _comparable_noise_banks(results, batch_dir, canonical=path, delta=None)
+            if b.get("comparable")
+            and b.get("n_placebo_columns", 1) >= run_arity
+            and b.get("null_method") == NULL_METHOD_PLACEBO_COLUMN
+        ]
+        already = (
+            "NOTE: a wide-enough ruler may already exist in this batch dir — "
+            + ", ".join(
+                f"{b['name']} ({b['n_placebo_columns']} columns, {b['n_draws']} draws)"
+                for b in adequate
+            )
+            + ". Check it before recomputing; promoting an existing bank is step (2) alone. "
+            if adequate
+            else ""
+        )
         return {
             "available": False,
             "reason_code": NOISE_BAND_REFUSAL_ARITY,
-            "reason": f"noise_floor.json is a {floor_arity}-column null but this candidate adds "
+            "reason": already + f"noise_floor.json is a {floor_arity}-column null but this candidate adds "
             f"{run_arity} columns ({', '.join(map(str, run_columns))}) — a wider arm graded "
             "against a narrower ruler, biased in the candidate's favour by an unmeasured "
             f"amount (fps-3jj.14). This batch needs a ruler of at least {run_arity} columns, and "
@@ -816,6 +967,16 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # to fail against its OWN arity's band — the comparison fps-3jj.21 asked the dossier to
         # render rather than merely capture.
         "floor_arity_excess": max(0, floor_arity - run_arity) if run_arity else 0,
+        # fps-30p: every OTHER bank in this batch dir, vetted and scored against the same
+        # delta. Corroboration only — `candidate_z_vs_band` above (the canonical bank) is
+        # what the ledger outcome keys on, and nothing here may substitute for it. Empty
+        # under `check_fingerprint=False`, where `results` is retrospective.py's dummy and
+        # has no real fingerprint/tank_params for a sibling to be compared against.
+        "comparable_banks": (
+            _comparable_noise_banks(results, batch_dir, canonical=path, delta=delta)
+            if check_fingerprint
+            else []
+        ),
     }
 
 
