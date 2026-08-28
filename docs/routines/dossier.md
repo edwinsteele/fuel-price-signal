@@ -316,7 +316,9 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          reasoning as the `available: false` case above. This state is real, not hypothetical: the
          batch has a `noise_floor.json`, but `_noise_band` couldn't estimate a band std from it
          (fewer than 2 draws, or — even with `n_draws >= 2` — every draw landing on the same
-         value, `band_std == 0.0`), so there is no ruler to compare `delta_cpl_held` against
+         value; that reads as `float(np.ptp(deltas)) == 0.0`, not `band_std == 0.0` — `np.std` of
+         identical floats is a tiny nonzero number like `1.78e-18`, not exact zero, `fps-tnz`), so
+         there is no ruler to compare `delta_cpl_held` against
          despite `available` reading `true`. Don't treat a present-but-null `z`/`t` as "inside the
          band" (that's what `-t < z < t` is for, and it doesn't apply when either side is `null`)
          — this branch must be checked **before** the three regions below, not folded into them.
