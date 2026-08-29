@@ -1,6 +1,30 @@
 from fuel_signal.features import LOCKED_FEATURE_COLUMNS, LOCKED_FEATURE_FINGERPRINT
 
 SEEDS = (42, 43, 44, 45, 46)
+
+# Fraction of folds (by count, ceil-rounded) tagged "shock" by
+# `experiments.lib.folds.compute_shock_folds` — the top quantile by the baseline's
+# own val-fold log-loss. Replaces the fixed-index taxonomy below for the live
+# pipeline (fps-3tu): 0.25 mirrors the old set's size (4/14 folds) without pinning
+# specific calendar dates that drift as `walk_forward_folds`'s fold boundaries shift
+# with a growing data range.
+SHOCK_QUANTILE = 0.25
+
+# SUPERSEDED for the live pipeline (fps-3tu) — experiments/lib/folds.py,
+# experiments/pipeline/runner.py and experiments/pipeline/dossier_tables.py no
+# longer import this. Two independent problems, found together: (1) these
+# indices are calendar-anchored, and `walk_forward_folds`'s fold boundaries shift
+# as more history gets backfilled, so "fold 4" doesn't reliably mean the same
+# calendar window across runs; (2) the taxonomy's own origin document
+# (experiments/2026-06-05_phase_lookup_nonparametric/README.md § "Aggregates
+# under three labelling schemes") already found that a named macro event doesn't
+# reliably predict where the baseline model struggles and recommended empirical
+# labelling instead — a recommendation this constant never picked up before
+# getting extracted into shared code. Kept here, unchanged, ONLY so the historical
+# experiment scripts that hardcode/import this exact value (experiments/2026-06-*/
+# and experiments/2026-08-*/, and batch0/tgp_delta_7d's diagnostics — closed lab
+# book entries, not to be rewritten) keep importing successfully; do not add a new
+# consumer of this name.
 SHOCK_FOLDS = frozenset({1, 4, 9, 13})
 # LightGBM params shared across all experiment scripts — do not redefine per-script.
 LGBM_DEFAULTS: dict = {"verbose": -1, "subsample": 0.8, "subsample_freq": 1}
@@ -39,8 +63,8 @@ ROW_AXIS_ECONOMICS_CAVEAT: str = (
     "sub-period selected by a per-row label. That allocation has no unique answer: free "
     "bookkeeping conventions can move a cell further than the cells differ from each other, "
     "and it is a bias term, so more folds/stations/seeds do not shrink it. Report as colour, "
-    "never as a finding. Fold-cut economics (per_fold, per_regime=SHOCK_FOLDS) are unaffected "
-    "— each (fold, station) is an independent simulation with its own tank. "
+    "never as a finding. Fold-cut economics (per_fold, per_regime=shock-vs-normal) are "
+    "unaffected — each (fold, station) is an independent simulation with its own tank. "
     "See docs/CONVENTIONS.md § 'Bucketed results — check the convention spread before "
     "believing an ordering' and experiments/2026-08-21_path_coupling_audit/."
 )

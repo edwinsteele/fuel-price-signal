@@ -82,6 +82,7 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
             "git_sha": "abc1234", "bead_id": bead_id,
             "n_baseline_columns": 54, "baseline_fingerprint": "54:deadbeef1234",
             "tank_params": tank_params,
+            "shock_folds": sorted(SHOCK),
         },
     }
 
@@ -2273,7 +2274,7 @@ def _regret_fills() -> pd.DataFrame:
 
 
 def test_attach_regret_without_a_freeze_manifest_says_so(tmp_path):
-    out = dt._attach_regret(_regret_fills(), "50/3.571/1d/10%", 7, None)
+    out = dt._attach_regret(_regret_fills(), "50/3.571/1d/10%", 7, frozenset({4}), None)
     assert out["computed"] is False
     assert "freeze manifest" in out["reason"]
 
@@ -2282,7 +2283,7 @@ def test_attach_regret_with_an_absent_price_db_is_skipped_not_fatal(tmp_path):
     """The frozen price DB is gitignored and ~500 MB, so a checkout without it must still build
     every other table — this path is why regret is optional-with-a-reason rather than a raise."""
     (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": "fuel_signal.db"}))
-    out = dt._attach_regret(_regret_fills(), "50/3.571/1d/10%", 7, tmp_path)
+    out = dt._attach_regret(_regret_fills(), "50/3.571/1d/10%", 7, frozenset({4}), tmp_path)
     assert out["computed"] is False
     assert dt.FROZEN_DB_FILENAME in out["reason"] and "not present" in out["reason"]
 
@@ -2307,6 +2308,6 @@ def test_attach_regret_with_no_differing_fills_says_so(tmp_path):
     (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": "fuel_signal.db"}))
     identical = _regret_fills().iloc[[0]]
     both = pd.concat([identical, identical.assign(arm=CANDIDATE_ARM)], ignore_index=True)
-    out = dt._attach_regret(both, "50/3.571/1d/10%", 7, tmp_path)
+    out = dt._attach_regret(both, "50/3.571/1d/10%", 7, frozenset({4}), tmp_path)
     assert out["computed"] is False
     assert "no differing fills" in out["reason"]

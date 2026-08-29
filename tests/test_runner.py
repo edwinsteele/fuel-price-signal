@@ -395,7 +395,7 @@ def test_grade_run_succeeds_normally():
     realised = _FakeRealised(aggregate, pd.DataFrame())
 
     effect_resolved, effect_delta, zone, grading_error = _grade_run(
-        realised, target=None, axis_lookup=None, min_row_cell_n=30
+        realised, target=None, axis_lookup=None, shock_folds=frozenset(), min_row_cell_n=30
     )
 
     assert effect_resolved is True
@@ -412,7 +412,7 @@ def test_grade_run_catches_exception_and_reports_it_instead_of_raising():
     realised = _FakeRealised(aggregate, pd.DataFrame())
 
     effect_resolved, effect_delta, zone, grading_error = _grade_run(
-        realised, target=None, axis_lookup=None, min_row_cell_n=30
+        realised, target=None, axis_lookup=None, shock_folds=frozenset(), min_row_cell_n=30
     )
 
     assert effect_resolved is None
@@ -614,7 +614,9 @@ def _fills(n_target_each: int, n_other_each: int, *, cheaper_in_target: bool) ->
 def test_resolve_zone_by_folds_resolves_true_when_target_cell_is_cheaper():
     fills = _fills(35, 35, cheaper_in_target=True)
     target = {"folds": [4], "axis": None, "expect_concentration_in": []}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
     # A fold cut is a sum of complete independent simulations — identified, no caveat.
     assert "identification_caveat" not in result
@@ -623,24 +625,30 @@ def test_resolve_zone_by_folds_resolves_true_when_target_cell_is_cheaper():
 def test_resolve_zone_by_folds_resolves_false_when_target_cell_is_not_cheaper():
     fills = _fills(35, 35, cheaper_in_target=False)
     target = {"folds": [4]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is False
 
 
 def test_resolve_zone_regime_axis_uses_shock_folds():
-    # fold 4 is in SHOCK_FOLDS; fold 2 is not.
+    # fold 4 is in the passed-in shock_folds set; fold 2 is not.
     fills = _fills(35, 35, cheaper_in_target=True)
     target = {"axis": "regime", "expect_concentration_in": ["shock"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
-    # SHOCK_FOLDS groups WHOLE folds, so this is identified too.
+    # A regime cut groups WHOLE folds, so this is identified too.
     assert "identification_caveat" not in result
 
 
 def test_resolve_zone_inconclusive_below_min_row_cell_n():
     fills = _fills(5, 5, cheaper_in_target=True)  # below default guard
     target = {"folds": [4]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is None
     assert "min_row_cell_n" in result["reason"]
 
@@ -653,7 +661,9 @@ def test_resolve_zone_custom_axis_via_lookup():
         {"station_code": 1, "date": "2026-02-01", "axis": "weekday_Y"},
     ])
     target = {"axis": "weekday", "expect_concentration_in": ["weekday_X"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=axis_lookup, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=axis_lookup, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
     # fps-grp: a row-level axis slices THROUGH a window, so the graded delta allocates a
     # path-coupled cost to a sub-period. It still grades, but must say it is unidentified.
@@ -674,7 +684,9 @@ def test_resolve_zone_flags_a_row_level_axis_even_when_folds_also_match():
         {"station_code": 1, "date": "2026-02-01", "axis": "weekday_Y"},
     ])
     target = {"folds": [4], "axis": "weekday", "expect_concentration_in": ["weekday_X"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=axis_lookup, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=axis_lookup, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
     assert result["identification_caveat"] == ROW_AXIS_ECONOMICS_CAVEAT
 
@@ -682,14 +694,16 @@ def test_resolve_zone_flags_a_row_level_axis_even_when_folds_also_match():
 def test_resolve_zone_custom_axis_without_add_axis_is_inconclusive():
     fills = _fills(35, 35, cheaper_in_target=True)
     target = {"axis": "weekday", "expect_concentration_in": ["weekday_X"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is None
     assert "add_axis" in result["reason"]
 
 
 def test_resolve_zone_no_target_fields_is_inconclusive():
     fills = _fills(35, 35, cheaper_in_target=True)
-    result = _resolve_zone({}, fills, "R0", "candidate", axis_lookup=None)
+    result = _resolve_zone({}, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}))
     assert result["resolved"] is None
 
 
@@ -1285,7 +1299,7 @@ def test_run_candidate_posts_bd_comment_even_when_grading_failed(monkeypatch):
     aggregate = pd.DataFrame([{"arm": "R0"}])  # missing cpl_held -> _resolve_effect raises
     realised = _FakeRealised(aggregate, pd.DataFrame())
     effect_resolved, effect_delta, zone, grading_error = _grade_run(
-        realised, target=None, axis_lookup=None, min_row_cell_n=30
+        realised, target=None, axis_lookup=None, shock_folds=frozenset(), min_row_cell_n=30
     )
     results = {
         "candidate": {"name": "cand"},

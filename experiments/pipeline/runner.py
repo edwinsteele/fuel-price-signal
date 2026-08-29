@@ -78,15 +78,15 @@ Two CONFIDENCE fields (fps-3jj.4 DECIDED 2026-08-17):
     cells against the rest using pooled delta_cpl_OWN from the fills ledger
     (fills only carry each arm's own-tau fills — held-tau fills aren't
     collected by run_paired_realised_backtest), grouped by fold
-    (TARGET["folds"]), the built-in "regime" axis (SHOCK_FOLDS shock-vs-normal),
-    or a candidate's own add_axis label looked up per (station_code, date). A
+    (TARGET["folds"]), the built-in "regime" axis (an empirical shock-vs-normal split,
+    fps-3tu), or a candidate's own add_axis label looked up per (station_code, date). A
     fill counts as "in target" if it matches EITHER a named fold OR the axis —
     the parent design's "conflation is harmless" call. Cells below
     min_row_cell_n are excluded, never reported as findings (fps-3jj slicing-
     axes decision). A grade that used a row-level add_axis label carries an
     "identification_caveat" key (fps-grp): pooled CPL is a path-coupled total,
     so cutting it on a per-row label allocates that total to a sub-period and
-    has no unique answer, while a fold or SHOCK_FOLDS-regime cut is a sum of
+    has no unique answer, while a fold or regime cut is a sum of
     complete independent simulations and is fine. The key's PRESENCE is the
     signal — it is absent, not None, for an identified grade.
 """
@@ -106,7 +106,7 @@ import pandas as pd
 
 from experiments.lib.aggregate import aggregate_with_deltas
 from experiments.lib.cohorts import hard_quantile_mask
-from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SEEDS, SHOCK_FOLDS
+from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SEEDS
 from experiments.lib.fit import fit_score, per_row_log_loss
 from experiments.lib.folds import iter_folds_with_baseline_fit
 from experiments.lib.gates import seed_variance_gate
@@ -520,6 +520,12 @@ def run_candidate(
     except ValueError as exc:
         return _finish(STATUS_ABORTED_CANDIDATE, name, t0, out_dir, error=f"WFCV aggregation: {exc}", bead_id=bead_id)
 
+    # The empirical shock-fold set (fps-3tu) this run's WFCV screen already computed
+    # (experiments/lib/folds.iter_folds_with_baseline_fit) — read back off fold_run's own
+    # "regime" column rather than recomputed, so the realised-backtest zone grading below
+    # and results.json's provenance agree with what the screen actually used.
+    shock_folds = frozenset(int(f) for f in fold_run.loc[fold_run["regime"] == "shock", "fold"].unique())
+
     provider = _make_lookup_provider(candidate_frame, list(candidate.COLUMNS))
     arms = [
         ArmSpec(BASELINE_ARM, candidate_frame, feature_columns=baseline_columns),
@@ -606,7 +612,7 @@ def run_candidate(
 
     target = getattr(candidate, "TARGET", None)
     effect_resolved, effect_delta, zone, grading_error = _grade_run(
-        realised, target, axis_lookup, min_row_cell_n=min_row_cell_n
+        realised, target, axis_lookup, shock_folds=shock_folds, min_row_cell_n=min_row_cell_n
     )
 
     wall_seconds = time.perf_counter() - t0
@@ -668,6 +674,11 @@ def run_candidate(
             # order) were both silent precisely because this field did not exist.
             "n_baseline_columns": len(baseline_columns),
             "baseline_fingerprint": baseline_fingerprint(baseline_columns),
+            # The empirical shock-fold set this run actually graded the "regime" axis
+            # against (fps-3tu) — a run-level fact, not a shared constant, since it's
+            # derived from this run's own baseline fit. None for results.json predating
+            # this field, which used the old fixed-index SHOCK_FOLDS instead.
+            "shock_folds": sorted(shock_folds),
         },
     }
     results_path = out_dir / RESULTS_FILENAME
@@ -897,7 +908,8 @@ def _check_provider_health(provider) -> str | None:
 
 
 def _grade_run(
-    realised, target: dict | None, axis_lookup: pd.DataFrame | None, *, min_row_cell_n: int,
+    realised, target: dict | None, axis_lookup: pd.DataFrame | None, *,
+    shock_folds: frozenset[int], min_row_cell_n: int,
 ) -> tuple[bool | None, float | None, dict, str | None]:
     """CONFIDENCE_EFFECT / CONFIDENCE_ZONE grading, isolated so a bug here
     can't discard an already-completed (and already artifact-written)
@@ -913,7 +925,8 @@ def _grade_run(
             zone = {"resolved": None, "reason": "CONFIDENCE_EFFECT did not resolve true — scored conditionally"}
         else:
             zone = _resolve_zone(
-                target, realised.fills, BASELINE_ARM, CANDIDATE_ARM, axis_lookup, min_row_cell_n=min_row_cell_n
+                target, realised.fills, BASELINE_ARM, CANDIDATE_ARM, axis_lookup,
+                shock_folds=shock_folds, min_row_cell_n=min_row_cell_n,
             )
         return effect_resolved, effect_delta, zone, None
     except Exception as exc:  # noqa: BLE001 — a grading bug must not discard a completed backtest
@@ -934,6 +947,7 @@ def _resolve_zone(
     candidate_name: str,
     axis_lookup: pd.DataFrame | None,
     *,
+    shock_folds: frozenset[int],
     min_row_cell_n: int = DEFAULT_MIN_ROW_CELL_N,
 ) -> dict:
     """Grade TARGET's named cells against the rest, on pooled delta_cpl_OWN.
@@ -961,7 +975,7 @@ def _resolve_zone(
         in_target |= fills["fold"].isin(folds_wanted)
     if axis_name and expect:
         if axis_name == "regime":
-            regime = fills["fold"].map(lambda f: "shock" if f in SHOCK_FOLDS else "normal")
+            regime = fills["fold"].map(lambda f: "shock" if f in shock_folds else "normal")
             in_target |= regime.isin(expect)
         elif axis_lookup is None:
             return {"resolved": None, "reason": f"TARGET axis {axis_name!r} needs add_axis; candidate has none"}
@@ -996,7 +1010,7 @@ def _resolve_zone(
         "n_target_candidate_fills": n_target_cand,
         "n_other_candidate_fills": n_other_cand,
         # Only present when a row-level add_axis label contributed to the cut. Absent (not
-        # False/None) for a pure fold or SHOCK_FOLDS-regime grade, so the retrospective can
+        # False/None) for a pure fold or regime grade, so the retrospective can
         # tell an identified zone grade from an unidentified one by key presence alone.
         **({"identification_caveat": ROW_AXIS_ECONOMICS_CAVEAT} if row_level_axis else {}),
     }

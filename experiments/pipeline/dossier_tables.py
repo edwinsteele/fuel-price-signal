@@ -65,7 +65,7 @@ import pandas as pd
 from scipy.stats import norm as _norm_dist
 from scipy.stats import t as _t_dist
 
-from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
+from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT
 from experiments.lib.flips import (
     cascade_window_days,
     diff_fills,
@@ -383,9 +383,18 @@ def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
             "reason": f"clean reject (z={z:.3f} >= threshold={t:.3f}) — candidate is clearly the "
             "wrong sign vs. this batch's noise band; flip detail is unlikely to change that call.",
         }
+    raw_shock_folds = facts["provenance"].get("shock_folds")
+    if raw_shock_folds is None:
+        return {
+            "computed": False,
+            "reason": "this run's results.json predates fps-3tu's empirical shock-fold set "
+            "(meta.shock_folds) — flip/regret detail is graded per (fold, regime) and there is "
+            "no trustworthy regime tag to use; re-run the candidate to backfill it.",
+        }
+    shock_folds = frozenset(int(f) for f in raw_shock_folds)
     tank_params = facts["provenance"]["tank_params"]
     window = cascade_window_days(tank_params)
-    summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, SHOCK_FOLDS, window_days=window)
+    summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, shock_folds, window_days=window)
     summary["computed"] = True
     _attach_run_contributions(
         summary, fills, facts["breakdowns"]["per_fold"], facts["headline"]["realised"]["delta_cpl_held"],
@@ -394,14 +403,15 @@ def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
     # handed the whole facts dict, and provenance is where this module's own batch_dir lands.
     provenance_batch_dir = facts["provenance"].get("batch_dir")
     summary["regret"] = _attach_regret(
-        fills, tank_params, window,
+        fills, tank_params, window, shock_folds,
         pathlib.Path(provenance_batch_dir) if provenance_batch_dir else None,
     )
     return summary
 
 
 def _attach_regret(
-    fills: pd.DataFrame, tank_params: str, window_days: int, batch_dir: pathlib.Path | None
+    fills: pd.DataFrame, tank_params: str, window_days: int, shock_folds: frozenset[int],
+    batch_dir: pathlib.Path | None,
 ) -> dict:
     """The timing-regret table (fps-2js) — `experiments/lib/flips.summarise_regret` over this
     run's flipped fills, or an explicit `computed: false` + reason when the price DB this run
@@ -440,7 +450,7 @@ def _attach_regret(
     finally:
         conn.close()
     summary = summarise_regret(
-        flips, prices, SHOCK_FOLDS,
+        flips, prices, shock_folds,
         horizon_days=regret_horizon_days(tank_params),
         cadence_days=cadence_days,
         window_days=window_days,
@@ -615,6 +625,14 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         # absence is itself the signal, not a formatting inconvenience.
         "n_baseline_columns": meta.get("n_baseline_columns"),
         "baseline_fingerprint": meta.get("baseline_fingerprint"),
+        # This run's own empirical shock-fold set (fps-3tu, experiments.lib.folds.
+        # compute_shock_folds) — a run-level fact, not a shared constant, since it's
+        # derived from this run's own baseline fit. None for results.json that predate
+        # this field, which graded the "regime" axis (per_regime, decision_flips,
+        # summarise_regret) against the old fixed-index SHOCK_FOLDS instead — every
+        # regime-dependent table below refuses rather than silently reusing that
+        # constant post-hoc.
+        "shock_folds": meta.get("shock_folds"),
         # The cadence every realised CPL in this dossier (headline, breakdowns) was
         # produced at (fps-15c). build_facts() below refuses to proceed past this
         # point without it whenever status=="graded" — a graded run is exactly
@@ -1376,12 +1394,22 @@ def _breakdowns(
         else pd.DataFrame()
     )
 
+    # This run's own empirical shock-fold set (fps-3tu) — None for a results.json that
+    # predates it, which graded "regime" against the old fixed-index SHOCK_FOLDS. Rather
+    # than silently reuse that superseded constant post-hoc, per_fold's "regime" and the
+    # whole per_regime table degrade to an explicit refusal; nothing else here depends on
+    # shock/normal labelling.
+    raw_shock_folds = results.get("meta", {}).get("shock_folds")
+    shock_folds = frozenset(int(f) for f in raw_shock_folds) if raw_shock_folds is not None else None
+
     per_fold = []
     for fold in sorted(fills["fold"].unique()):
         delta, n, suppressed = _cell_delta(fills, fills["fold"] == fold, min_row_cell_n=min_row_cell_n)
         row = {
             "fold": int(fold),
-            "regime": "shock" if fold in SHOCK_FOLDS else "normal",
+            "regime": (
+                ("shock" if fold in shock_folds else "normal") if shock_folds is not None else None
+            ),
             "n_fills": n,
             "suppressed": suppressed,
             "delta_cpl_own": delta,
@@ -1391,11 +1419,20 @@ def _breakdowns(
             row["delta_ll_hard25_median"] = float(cand_ll.loc[fold, "delta_ll_hard25_median"])
         per_fold.append(row)
 
-    all_folds = set(fills["fold"].unique())
-    per_regime = []
-    for regime_name, folds in (("shock", SHOCK_FOLDS & all_folds), ("normal", all_folds - SHOCK_FOLDS)):
-        delta, n, suppressed = _cell_delta(fills, fills["fold"].isin(folds), min_row_cell_n=min_row_cell_n)
-        per_regime.append({"regime": regime_name, "n_fills": n, "suppressed": suppressed, "delta_cpl_own": delta})
+    if shock_folds is None:
+        per_regime = {
+            "computed": False,
+            "reason": "this run's results.json predates fps-3tu's empirical shock-fold set "
+            "(meta.shock_folds) — re-run the candidate to backfill it.",
+        }
+    else:
+        all_folds = set(fills["fold"].unique())
+        per_regime = []
+        for regime_name, folds in (("shock", shock_folds & all_folds), ("normal", all_folds - shock_folds)):
+            delta, n, suppressed = _cell_delta(fills, fills["fold"].isin(folds), min_row_cell_n=min_row_cell_n)
+            per_regime.append(
+                {"regime": regime_name, "n_fills": n, "suppressed": suppressed, "delta_cpl_own": delta}
+            )
 
     per_axis = None
     per_axis_coverage_note = None
@@ -1462,7 +1499,7 @@ def make_plots(run_dir: pathlib.Path, facts: dict, batch_dir: pathlib.Path | Non
     for fn in (
         lambda: _plot_per_fold_delta_bars(run_dir, facts, name),
         lambda: _plot_seed_mean_vs_median(run_dir, rowpreds, name),
-        lambda: _plot_realised_cpl_by_fold(run_dir, fills, name),
+        lambda: _plot_realised_cpl_by_fold(run_dir, fills, name, facts["provenance"].get("shock_folds")),
         lambda: _plot_tau_sweep(run_dir, rowpreds, name),
         lambda: _plot_candidate_over_time(run_dir, rowpreds, candidate_cols, name),
         lambda: _plot_axis_breakdown(run_dir, facts, name),
@@ -1534,22 +1571,26 @@ def _plot_seed_mean_vs_median(run_dir: pathlib.Path, rowpreds: pd.DataFrame, nam
     return path.name
 
 
-def _plot_realised_cpl_by_fold(run_dir: pathlib.Path, fills: pd.DataFrame, name: str) -> str | None:
+def _plot_realised_cpl_by_fold(
+    run_dir: pathlib.Path, fills: pd.DataFrame, name: str, shock_folds: list[int] | None,
+) -> str | None:
     folds = sorted(fills["fold"].unique())
     if not folds:
         return None
     r0_cpl = [pooled_cpl(fills[(fills["fold"] == f) & (fills["arm"] == BASELINE_ARM)]) for f in folds]
     cand_cpl = [pooled_cpl(fills[(fills["fold"] == f) & (fills["arm"] == CANDIDATE_ARM)]) for f in folds]
+    shock_set = frozenset(int(f) for f in shock_folds) if shock_folds is not None else frozenset()
 
     fig, ax = plt.subplots(figsize=(10, 5))
     for f in folds:
-        if f in SHOCK_FOLDS:
+        if f in shock_set:
             ax.axvspan(f - 0.4, f + 0.4, color="#f1c40f", alpha=0.15)
     ax.plot(folds, r0_cpl, "o-", color="#888", label=BASELINE_ARM)
     ax.plot(folds, cand_cpl, "o-", color="#c0392b", label=CANDIDATE_ARM)
     ax.set_xlabel("fold")
     ax.set_ylabel("pooled realised CPL (own τ)")
-    ax.set_title(f"{name}: realised CPL by fold (shaded = shock fold)")
+    title_suffix = "shaded = shock fold" if shock_folds is not None else "shock fold unknown — legacy run"
+    ax.set_title(f"{name}: realised CPL by fold ({title_suffix})")
     ax.set_xticks(folds)
     ax.legend()
     fig.tight_layout()
