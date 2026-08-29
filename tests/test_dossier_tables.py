@@ -2044,8 +2044,13 @@ def test_comparable_bank_discloses_when_it_is_narrower_than_the_run(
 #:   SELECT price_date, price_decicents FROM daily_prices
 #:    WHERE station_code=? AND fuel_type_id=(SELECT id FROM fuel_types WHERE code='E10')
 #: The price DB itself is ~500 MB and gitignored, so the windows are committed instead of the
-#: source. Verified byte-for-byte against the live DB: the numbers this fixture produces are
-#: identical to the ones `fuel_signal.db` produces for the same call.
+#: source. Verified against the batch's own frozen clone AND the live DB: all three produce
+#: identical regret numbers for these flips.
+#:
+#: HORIZON-BOUNDED (PR #348 review): the rows stop at last_flip + 13 days, so this fixture can
+#: only support H <= 13. Because `price_at` forward-fills, raising the horizon does NOT fail —
+#: it silently carries the last committed price off the end of the CSV and the "matches the
+#: real DB" property quietly stops holding. Regenerate the fixture before testing a larger H.
 _FPS_6YI_PRICES_CSV = pathlib.Path(__file__).parent / "data" / "fps_6yi_flip_window_prices.csv"
 
 
@@ -2094,8 +2099,8 @@ def test_summarise_regret_reproduces_the_fps_6yi_prototype_at_its_own_horizon():
         _fps_6yi_flips(), _CsvPrices(_FPS_6YI_PRICES_CSV), SHOCK_FOLDS,
         horizon_days=7, cadence_days=1, window_days=7,
     )
-    assert out["all"]["regret_baseline"] == pytest.approx(6.2242214, abs=1e-6)
-    assert out["all"]["regret_candidate"] == pytest.approx(6.2089820, abs=1e-6)
+    assert out["all"]["regret_cpl_baseline"] == pytest.approx(6.2242214, abs=1e-6)
+    assert out["all"]["regret_cpl_candidate"] == pytest.approx(6.2089820, abs=1e-6)
 
 
 def test_summarise_regret_reproduces_fps_6yi_at_the_shipped_horizon():
@@ -2117,27 +2122,27 @@ def test_summarise_regret_reproduces_fps_6yi_at_the_shipped_horizon():
     assert out["all"]["n_decisions"] == 88
 
     all_row = out["all"]
-    assert all_row["regret_baseline"] == pytest.approx(10.0259515, abs=1e-6)
-    assert all_row["regret_candidate"] == pytest.approx(9.3822754, abs=1e-6)
-    assert all_row["regret_delta"] == pytest.approx(-0.6436761, abs=1e-6)
+    assert all_row["regret_cpl_baseline"] == pytest.approx(10.0259515, abs=1e-6)
+    assert all_row["regret_cpl_candidate"] == pytest.approx(9.3822754, abs=1e-6)
+    assert all_row["regret_cpl_delta"] == pytest.approx(-0.6436761, abs=1e-6)
     # Cascade-widened, not the naive per-fill band: 2*SE = ±4.24, so even the pooled run-level
     # row cannot resolve a -0.64 difference. fps-2js is a legibility fix, not a power fix, and
     # this assertion is what stops it being sold as one.
-    assert all_row["regret_delta_se"] == pytest.approx(2.1206768, abs=1e-6)
-    assert all_row["regret_delta_inside_own_se"] is True
+    assert all_row["regret_cpl_delta_se"] == pytest.approx(2.1206768, abs=1e-6)
+    assert all_row["regret_cpl_delta_inside_own_se"] is True
 
     # Fold 13 is the cell the whole rework exists for: its flip_cpl_delta prints -32.73 c/L
     # off a single candidate fill. Under regret that same fill reads 0.00 — the candidate
     # bought the exact optimum reachable from where it stood.
     fold13 = next(row for row in out["per_fold"] if row["fold"] == 13)
     assert fold13["n_baseline"] == 5 and fold13["n_candidate"] == 1
-    assert fold13["regret_baseline"] == pytest.approx(5.7333333, abs=1e-6)
-    assert fold13["regret_candidate"] == 0.0
+    assert fold13["regret_cpl_baseline"] == pytest.approx(5.7333333, abs=1e-6)
+    assert fold13["regret_cpl_candidate"] == 0.0
 
     # And the honest headline: like flip_cpl_delta before it, no fold resolves its own delta.
-    resolvable = [r for r in out["per_fold"] if r["regret_delta_inside_own_se"] is not None]
+    resolvable = [r for r in out["per_fold"] if r["regret_cpl_delta_inside_own_se"] is not None]
     assert len(resolvable) == 12
-    assert all(r["regret_delta_inside_own_se"] for r in resolvable)
+    assert all(r["regret_cpl_delta_inside_own_se"] for r in resolvable)
 
 
 def _regret_fills() -> pd.DataFrame:
@@ -2156,18 +2161,32 @@ def test_attach_regret_without_a_freeze_manifest_says_so(tmp_path):
 
 
 def test_attach_regret_with_an_absent_price_db_is_skipped_not_fatal(tmp_path):
-    """The price DB is gitignored and ~500 MB, so a checkout without it must still build every
-    other table — this path is why regret is optional-with-a-reason rather than a raise."""
-    (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": "absent.db"}))
+    """The frozen price DB is gitignored and ~500 MB, so a checkout without it must still build
+    every other table — this path is why regret is optional-with-a-reason rather than a raise."""
+    (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": "fuel_signal.db"}))
     out = dt._attach_regret(_regret_fills(), "50/3.571/1d/10%", 7, tmp_path)
     assert out["computed"] is False
-    assert "absent.db" in out["reason"] and "not present" in out["reason"]
+    assert dt.FROZEN_DB_FILENAME in out["reason"] and "not present" in out["reason"]
+
+
+def test_attach_regret_reads_the_batchs_frozen_db_not_freeze_jsons_source_db(tmp_path):
+    """Regression (PR #348 review finding #1): `source_db` records where the freeze READ from
+    at freeze time — a repo-root-relative path to the LIVE database, which keeps changing.
+    The run was graded against the batch's frozen clone (`runner.py`'s `db_path`), so regret
+    must replay that file; resolving `source_db` instead scored later, possibly revised prices
+    and issued a WAL write against the live production DB on every dossier build.
+    """
+    (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(
+        json.dumps({"source_db": "/somewhere/else/live.db"})
+    )
+    assert dt._resolve_source_db(tmp_path) == tmp_path / dt.FROZEN_DB_FILENAME
+    # freeze.json's presence is still the gate: an unfrozen directory is not a batch.
+    assert dt._resolve_source_db(tmp_path / "no_manifest_here") is None
 
 
 def test_attach_regret_with_no_differing_fills_says_so(tmp_path):
-    db_path = tmp_path / "prices.db"
-    db_path.touch()
-    (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": str(db_path)}))
+    (tmp_path / dt.FROZEN_DB_FILENAME).touch()
+    (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": "fuel_signal.db"}))
     identical = _regret_fills().iloc[[0]]
     both = pd.concat([identical, identical.assign(arm=CANDIDATE_ARM)], ignore_index=True)
     out = dt._attach_regret(both, "50/3.571/1d/10%", 7, tmp_path)

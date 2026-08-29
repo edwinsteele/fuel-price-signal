@@ -152,41 +152,72 @@ def parse_tank_params(tank_params: str) -> tuple[float, float, int, float]:
 
 
 def regret_horizon_days(tank_params: str) -> int:
-    """How far forward `summarise_regret` looks for a better price: the LONGEST WAIT THE TANK
-    PHYSICALLY ALLOWS, `(1 - floor_fraction) * tank_size_litres / daily_consumption_litres`
-    (fps-2js).
+    """`summarise_regret`'s forward window: a FIXED, EXOGENOUS ceiling on how long a wait the
+    tank could ever fund — `(1 - floor_fraction) * tank_size_litres / daily_consumption_litres`
+    (fps-2js). At fps-6yi's tank (`50/3.571/1d/10%`), 0.9 * 50 / 3.571 = 12.6 -> **13 days**.
 
-    At fps-6yi's own tank (`50/3.571/1d/10%`) that is 0.9 * 50 / 3.571 = 12.6 -> **13 days**,
-    against a 14.0-day full-to-empty life: from a full tank the strategy must buy within 12.6
-    days or breach the emergency floor, so 13 days is the boundary of the counterfactual
-    "you could have waited and bought cheaper" — the only counterfactual a regret number is
-    entitled to charge a strategy for.
+    **This ceiling is not attained by any real fill, and must not be described as reachable**
+    (PR #348 review finding #2). A fill only happens when the tank is short, and `run_backtest`
+    buys to full (`buy_litres = size - level`), so the level immediately before a fill is
+    `size - litres`, and that fill's genuinely feasible wait is
+    `((1 - floor) * size - litres) / daily`. Since a fill is at least one depletion's worth,
+    the per-fill bound is strictly below the ceiling. Measured over fps-6yi's committed 303
+    flips: **max 11.60 days, mean 7.94, litres-weighted 5.71 (baseline) / 5.07 (candidate),
+    11 flips under one day, and 0 of 303 reaching 13.**
 
-    **Derived from the TANK, not from cycle length — a deliberate departure from fps-2js's
-    filed design, made on measurement.** The bead proposed deriving H from `cycle_mean_length`
-    on the reasoning that "longer than a cycle makes every fill look bad". The direction is
-    right but the binding constraint arrives more than twice as early: batch0's
-    `cycle_mean_length` is mean 30.5 / max 35.3 days (`experiments/pipeline/placebo.py`),
-    while this tank can only ever reach 12.6. Sweeping H over the real fps-6yi flips (all 303,
-    forward-filled price path) shows exactly that break:
+    **The fixed ceiling is kept anyway, and the reason is identification, not convenience.**
+    The per-fill bound is a function of `litres`, which is itself the residue of the arm's own
+    earlier buy/wait decisions — an ENDOGENOUS, path-coupled window. This project has already
+    established that path-coupled quantities cut per-row have no unique answer (the 2026-08-21
+    path-coupling audit; `cut economics on folds, not on row labels`), and a measurement window
+    that each arm partly chooses for itself is that same defect relocated into the estimator.
+    A fixed window is worse-calibrated but identified; a per-fill window is better-calibrated
+    but not. Both were computed, and the choice does not move any reading:
+
+        litres-weighted regret       baseline   candidate    delta
+        fixed ceiling H=13 (shipped)   10.03       9.38      -0.6437
+        per-fill feasible H_i           4.70       3.72      -0.9726
+
+    Levels roughly halve and the delta grows ~51%, but both sit far inside the run-level 2*SE
+    of +/-4.24, so neither supports a conclusion the other refuses.
+
+    **Known residual bias, stated because it is the kind this measure exists to remove.** The
+    ceiling over-charges regret to whichever arm buys in LARGER fills, because those fills have
+    the least real headroom and the fixed window over-reaches furthest for them. On fps-6yi the
+    baseline's litres-weighted capacity is 5.71 days against the candidate's 5.07, so the
+    shipped delta is conservative toward the candidate by roughly the gap the table above
+    shows. Do not read a regret delta smaller than that gap as a difference between arms.
+
+    **Derived from the TANK, not from cycle length — a departure from fps-2js as filed.** The
+    bead proposed deriving H from `cycle_mean_length` ("longer than a cycle makes every fill
+    look bad"). The direction is right, but the binding constraint arrives far earlier: batch0's
+    `cycle_mean_length` is mean 30.5 / max 35.3 days (`experiments/pipeline/placebo.py`) while
+    this tank cannot fund even 13. Sweeping H over the real fps-6yi flips:
 
         H (days)   3     5     7    10    12    13    14  |   15    18    21    28    30    61
-        cand-base  -0.44 +0.16 -0.02 -0.19 -0.65 -0.64 -0.64 | -0.98 -2.22 -3.22 -4.19 -4.71 -6.56
+        cand-base -0.44 +0.16 -0.02 -0.19 -0.65 -0.64 -0.64| -0.98 -2.22 -3.22 -4.19 -4.71 -6.56
 
-    Every horizon inside the tank's reach agrees the two arms are a DEAD HEAT (-0.65..+0.16
-    c/L), which is what the run's own realised headline says (`delta_cpl_held` = -0.0735 c/L).
-    From H=15 — one day past full-to-empty — the measure separates monotonically and without
-    limit, reaching -4.7 c/L at a cycle-length horizon: a 65x disagreement with the realised
-    arbiter, produced entirely by crediting each arm for troughs it could never have waited
-    for. The two arms' fills sit at systematically different cycle phases, so the infeasible
-    tail of a long window scores PHASE, not skill.
+    Read this as a trend, not a cliff (PR #348 review): the separation is gradual, and H=12's
+    -0.65 is already ~9x the run's realised `delta_cpl_held` of -0.0735 c/L. What the sweep
+    shows is that the measure grows without bound as the window leaves the tank's reach — at a
+    cycle-length horizon it claims ~64x the realised effect — because the two arms' fills sit at
+    systematically different cycle phases, so an infeasible window tail scores PHASE, not skill.
+    The argument for 13 rests on the tank derivation; the sweep corroborates it, and on its own
+    would not pick a number.
 
-    The practical reading is that the choice barely matters inside the feasible range and
-    matters enormously outside it, so the horizon is pinned to the feasibility boundary rather
-    than to a number chosen within the flat region: 13 is not tuned, it is the largest H that
-    is still a real alternative. (`cascade_window_days`' 7 — half the tank's life — sits inside
-    the same flat region; the two windows answer different questions and are deliberately not
-    shared.)
+    **`horizon_days` is cadence-independent but regret LEVELS ARE NOT** (PR #348 review finding
+    #3). The window's length comes from the tank, but `summarise_regret` walks it on the run's
+    own evaluation grid, so a 1-day-cadence run samples 14 candidate prices inside it and a
+    7-day run samples 2. Measured on the same fps-6yi flips at a fixed H=13:
+
+        cadence     1d              2d              7d
+        base/cand   10.03 / 9.38    9.53 / 8.84     5.80 / 5.94
+        delta       -0.644          -0.695          **+0.143**
+
+    The level nearly halves and **the sign of the delta flips**. Regret is therefore comparable
+    only within one cadence — never quote a regret figure without its `cadence_days`, and never
+    compare regret across dossiers at different cadences. Same defect class as
+    `cascade_window_days`' `n_decisions` quantisation caveat, reached by a different route.
     """
     size, daily, _cadence, floor = parse_tank_params(tank_params)
     return round((1.0 - floor) * size / daily)
@@ -549,6 +580,17 @@ def summarise_regret(
     even if a ledger price and its DB row disagree; `n_price_mismatch` counts any such
     disagreement rather than letting it vanish into the floor.
     """
+    if cadence_days > horizon_days:
+        # Only offset 0 would be evaluated, so every regret is exactly 0 and the table prints a
+        # resolved-looking dead heat that is pure arithmetic (PR #348 review finding #5). No
+        # live config reaches this — the horizon is a whole tank-life and the cadence is days —
+        # but a silently-zero table is the worst possible failure for a measure whose entire
+        # purpose is to stop unreadable numbers being read.
+        raise ValueError(
+            f"cadence_days={cadence_days} exceeds horizon_days={horizon_days}: the feasible "
+            "wait is shorter than one evaluation step, so no alternative buy day exists and "
+            "every regret would be a meaningless 0."
+        )
     per_fold: list[dict] = []
     scored = flips.copy()
     regrets: list[float | None] = []
@@ -594,7 +636,14 @@ def summarise_regret(
         row.update({
             "fold": int(fold),
             "regime": "shock" if fold in shock_folds else "normal",
+            # NOTE the different basis from summarise_flips' same-named field (PR #348 review
+            # finding #6): that one collapses EVERY flip, this one only the SCORED ones, so the
+            # two can differ for the same fold whenever a flip could not be scored.
+            # `n_unscored` beside it is what lets a reader reconcile them.
             "n_decisions": int(group_ids.nunique()),
+            "n_unscored": int(
+                len(scored[(scored["fold"] == fold) & scored["regret"].isna()])
+            ),
         })
         per_fold.append(row)
 
@@ -692,12 +741,12 @@ def _regret_row(
         "n_candidate": int(len(cand_side)),
         "litres_baseline": float(base_side["litres"].sum()),
         "litres_candidate": float(cand_side["litres"].sum()),
-        "regret_baseline": base_regret,
-        "regret_candidate": cand_regret,
-        "regret_delta": delta,
-        "regret_delta_reason": reason,
-        "regret_delta_se": se_diff,
-        "regret_delta_interval": interval,
-        "regret_delta_inside_own_se": inside,
-        "regret_delta_interval_reason": interval_reason,
+        "regret_cpl_baseline": base_regret,
+        "regret_cpl_candidate": cand_regret,
+        "regret_cpl_delta": delta,
+        "regret_cpl_delta_reason": reason,
+        "regret_cpl_delta_se": se_diff,
+        "regret_cpl_delta_interval": interval,
+        "regret_cpl_delta_inside_own_se": inside,
+        "regret_cpl_delta_interval_reason": interval_reason,
     }

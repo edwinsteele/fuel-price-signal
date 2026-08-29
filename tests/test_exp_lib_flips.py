@@ -417,9 +417,9 @@ def test_summarise_regret_scores_price_paid_minus_best_reachable():
         "2026-01-20": 150.0, "2026-01-22": 155.0,   # candidate already bought the low
     }})
     out = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
-    assert out["all"]["regret_baseline"] == pytest.approx(20.0)
-    assert out["all"]["regret_candidate"] == pytest.approx(0.0)
-    assert out["all"]["regret_delta"] == pytest.approx(-20.0)
+    assert out["all"]["regret_cpl_baseline"] == pytest.approx(20.0)
+    assert out["all"]["regret_cpl_candidate"] == pytest.approx(0.0)
+    assert out["all"]["regret_cpl_delta"] == pytest.approx(-20.0)
     assert out["n_scored"] == 2 and out["n_unscored"] == 0
 
 
@@ -430,8 +430,8 @@ def test_summarise_regret_horizon_bounds_what_counts_as_reachable():
     prices = FakePrices({100: {"2026-01-01": 180.0, "2026-01-20": 120.0}})
     inside = summarise_regret(flips, prices, set(), horizon_days=30, cadence_days=1, window_days=7)
     outside = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
-    assert inside["all"]["regret_baseline"] == pytest.approx(60.0)
-    assert outside["all"]["regret_baseline"] == pytest.approx(0.0)
+    assert inside["all"]["regret_cpl_baseline"] == pytest.approx(60.0)
+    assert outside["all"]["regret_cpl_baseline"] == pytest.approx(0.0)
 
 
 def test_summarise_regret_walks_the_runs_own_cadence_grid():
@@ -441,9 +441,9 @@ def test_summarise_regret_walks_the_runs_own_cadence_grid():
     prices = FakePrices({100: {"2026-01-01": 180.0, "2026-01-03": 100.0, "2026-01-08": 170.0}})
     daily = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=8)
     weekly = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=7, window_days=8)
-    assert daily["all"]["regret_baseline"] == pytest.approx(80.0)
+    assert daily["all"]["regret_cpl_baseline"] == pytest.approx(80.0)
     # 2026-01-08 carries 170.0; the 100.0 on the 3rd is off-grid and unreachable.
-    assert weekly["all"]["regret_baseline"] == pytest.approx(10.0)
+    assert weekly["all"]["regret_cpl_baseline"] == pytest.approx(10.0)
 
 
 def test_summarise_regret_forward_fills_dark_days_and_counts_them():
@@ -457,7 +457,7 @@ def test_summarise_regret_forward_fills_dark_days_and_counts_them():
     assert out["dark_fill_days"] == 1
     assert out["dark_fill_folds"] == [1]
     assert out["n_scored"] == 1 and out["n_unscored"] == 0
-    assert out["all"]["regret_candidate"] == pytest.approx(20.0)
+    assert out["all"]["regret_cpl_candidate"] == pytest.approx(20.0)
     assert out["n_price_mismatch"] == 0
 
 
@@ -469,7 +469,7 @@ def test_summarise_regret_flags_a_ledger_price_that_disagrees_with_the_db():
     out = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
     assert out["n_price_mismatch"] == 1
     # Floored at the price actually paid, so a bad DB row can't manufacture negative regret.
-    assert out["all"]["regret_baseline"] == pytest.approx(0.0)
+    assert out["all"]["regret_cpl_baseline"] == pytest.approx(0.0)
 
 
 def test_summarise_regret_one_arm_only_gets_a_reason_not_a_silent_null():
@@ -477,9 +477,9 @@ def test_summarise_regret_one_arm_only_gets_a_reason_not_a_silent_null():
     prices = FakePrices({100: {"2026-01-01": 180.0}})
     out = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
     row = out["per_fold"][0]
-    assert row["regret_delta"] is None
-    assert row["regret_delta_reason"] == "one arm only"
-    assert row["regret_delta_inside_own_se"] is None
+    assert row["regret_cpl_delta"] is None
+    assert row["regret_cpl_delta_reason"] == "one arm only"
+    assert row["regret_cpl_delta_inside_own_se"] is None
 
 
 def test_summarise_regret_interval_is_sized_on_decisions_not_fills():
@@ -505,8 +505,8 @@ def test_summarise_regret_interval_is_sized_on_decisions_not_fills():
     assert collapsed["n_decisions"] == 7      # 1 cascaded candidate group + 6 baseline days
     assert independent["n_decisions"] == 12   # every flip its own decision
     # Same rows, same regrets — only the decision grouping differs.
-    assert collapsed["regret_delta"] == pytest.approx(independent["regret_delta"])
-    assert collapsed["regret_delta_se"] > independent["regret_delta_se"]
+    assert collapsed["regret_cpl_delta"] == pytest.approx(independent["regret_cpl_delta"])
+    assert collapsed["regret_cpl_delta_se"] > independent["regret_cpl_delta_se"]
 
 
 def test_summarise_regret_degenerate_dispersion_prints_no_interval():
@@ -519,10 +519,10 @@ def test_summarise_regret_degenerate_dispersion_prints_no_interval():
     prices = FakePrices({100: {"2026-01-01": 180.0, "2026-02-01": 180.0}})
     out = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
     row = out["per_fold"][0]
-    assert row["regret_delta"] == pytest.approx(0.0)
-    assert row["regret_delta_se"] is None
-    assert row["regret_delta_interval"] is None
-    assert "not estimable" in row["regret_delta_interval_reason"]
+    assert row["regret_cpl_delta"] == pytest.approx(0.0)
+    assert row["regret_cpl_delta_se"] is None
+    assert row["regret_cpl_delta_interval"] is None
+    assert "not estimable" in row["regret_cpl_delta_interval_reason"]
 
 
 def test_summarise_regret_zero_litres_arm_is_not_reported_as_one_arm_only():
@@ -539,18 +539,18 @@ def test_summarise_regret_zero_litres_arm_is_not_reported_as_one_arm_only():
     row = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1,
                            window_days=7)["per_fold"][0]
     assert row["n_baseline"] == 2 and row["n_candidate"] == 1
-    assert row["regret_delta"] is None
-    assert "zero total litres" in row["regret_delta_reason"]
-    assert row["regret_delta_reason"] != "one arm only"
+    assert row["regret_cpl_delta"] is None
+    assert "zero total litres" in row["regret_cpl_delta_reason"]
+    assert row["regret_cpl_delta_reason"] != "one arm only"
 
 
 def test_summarise_regret_missing_interval_never_reports_a_dispersion_label_as_its_reason():
-    """`regret_delta_interval_reason` must be a reason, not the provenance label
+    """`regret_cpl_delta_interval_reason` must be a reason, not the provenance label
     ("fold-local"/"run-wide") the dispersion estimator returns alongside its number.
 
     The reachable case is a cell with no delta at all: dispersion is estimable run-wide (other
     folds have spread), so the old unconditional fallback printed "run-wide" as the explanation
-    for a missing interval. There is nothing to explain — `regret_delta_reason` already says
+    for a missing interval. There is nothing to explain — `regret_cpl_delta_reason` already says
     why — so it must be None.
     """
     flips = pd.DataFrame([
@@ -567,13 +567,13 @@ def test_summarise_regret_missing_interval_never_reports_a_dispersion_label_as_i
     })
     out = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
     fold1 = next(r for r in out["per_fold"] if r["fold"] == 1)
-    assert fold1["regret_delta"] is None
-    assert fold1["regret_delta_reason"] == "one arm only"
-    assert fold1["regret_delta_interval_reason"] is None
+    assert fold1["regret_cpl_delta"] is None
+    assert fold1["regret_cpl_delta_reason"] == "one arm only"
+    assert fold1["regret_cpl_delta_interval_reason"] is None
     # ...and the fold that CAN resolve still gets a real interval, so the guard above did not
     # simply suppress every reason.
     fold2 = next(r for r in out["per_fold"] if r["fold"] == 2)
-    assert fold2["regret_delta_interval"] is not None
+    assert fold2["regret_cpl_delta_interval"] is not None
 
 
 def test_summarise_regret_does_not_flag_a_mismatch_when_the_fill_day_is_unpriced():
@@ -593,3 +593,57 @@ def test_summarise_regret_does_not_flag_a_mismatch_when_the_fill_day_is_unpriced
     assert out["n_price_mismatch"] == 0
     assert out["n_scored"] == 1          # still scored off the reachable forward prices
     assert out["dark_fill_days"] == 1
+
+
+def test_summarise_regret_refuses_a_cadence_wider_than_the_horizon():
+    """Only offset 0 would be reachable, making every regret exactly 0 — a resolved-looking
+    dead heat that is pure arithmetic. Refuse rather than print it (PR #348 review finding 5)."""
+    flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 180.0, 10.0, "baseline")])
+    prices = FakePrices({100: {"2026-01-01": 180.0, "2026-01-15": 100.0}})
+    with pytest.raises(ValueError, match="meaningless 0"):
+        summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=30, window_days=7)
+
+
+def test_summarise_regret_reports_per_fold_unscored_so_decision_counts_reconcile():
+    """`n_decisions` here counts only SCORED flips, unlike summarise_flips' same-named field —
+    `n_unscored` is what lets a reader see why the two differ (PR #348 review finding 6)."""
+    class OnlyLate:
+        def price_at(self, station_code, as_of):
+            return 150.0 if as_of >= "2026-02-01" else None
+
+        def is_observed(self, station_code, as_of):
+            return as_of >= "2026-02-01"
+
+    flips = pd.DataFrame([
+        _flip(1, 100, "2020-01-01", 180.0, 10.0, "baseline"),   # window entirely before any price
+        _flip(1, 100, "2026-02-01", 160.0, 10.0, "candidate"),
+    ])
+    out = summarise_regret(flips, OnlyLate(), set(), horizon_days=13, cadence_days=1, window_days=7)
+    row = out["per_fold"][0]
+    assert out["n_unscored"] == 1
+    assert row["n_unscored"] == 1
+    assert row["n_decisions"] == 1          # only the scored candidate flip
+
+
+def test_regret_cpl_field_names_carry_the_marker_the_fps_15c_backstop_matches_on():
+    """`io.artifact_has_unstamped_cpl` is a case-insensitive substring match on "cpl", and its
+    docstring asserts every CPL field in this codebase follows that convention. These fields
+    are c/L values, so they must keep the marker (PR #348 review finding #4) — named
+    `regret_baseline`/`regret_delta` they were invisible to the backstop, and a future writer
+    emitting a regret block standalone would have sailed through unstamped.
+    """
+    from experiments.lib.io import artifact_has_unstamped_cpl
+
+    flips = pd.DataFrame([
+        _flip(1, 100, "2026-01-01", 180.0, 10.0, "baseline"),
+        _flip(1, 100, "2026-02-01", 170.0, 10.0, "candidate"),
+    ])
+    prices = FakePrices({100: {"2026-01-01": 180.0, "2026-01-05": 160.0,
+                               "2026-02-01": 170.0, "2026-02-06": 150.0}})
+    out = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
+
+    cpl_keys = [k for k in out["all"] if "cpl" in k.lower()]
+    assert {"regret_cpl_baseline", "regret_cpl_candidate", "regret_cpl_delta"} <= set(cpl_keys)
+    # Emitted on its own, the block must trip the backstop rather than pass silently.
+    assert artifact_has_unstamped_cpl(out) is True
+    assert artifact_has_unstamped_cpl({**out, "tank_params": "50/3.571/1d/10%"}) is False

@@ -76,6 +76,11 @@ from experiments.lib.flips import (
 )
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
+
+# FROZEN_DB_FILENAME is batch_freeze's artifact to name (it writes the clone); runner.py and
+# noise_floor.py already import it from there, and the dossier_tables -> runner -> batch_freeze
+# import direction already exists, so this adds no new edge.
+from experiments.pipeline.batch_freeze import FROZEN_DB_FILENAME
 from experiments.pipeline.placebo import TEXTURE_ICC_BOUND, effective_n_draws
 from experiments.pipeline.redundancy import BATCH_RECORD_JSON
 from experiments.pipeline.runner import (
@@ -448,19 +453,30 @@ def _attach_regret(
 
 
 def _resolve_source_db(batch_dir: pathlib.Path | None) -> pathlib.Path | None:
-    """The price DB this batch was frozen against, from `freeze.json`'s `source_db`.
+    """The batch's own FROZEN price DB — `batch_dir/fuel_signal.db`, the clone
+    `batch_freeze._clone_db` made and the exact file `runner.py` graded the run against.
 
-    `source_db` is recorded as the path the freeze was run with (`fuel_signal.db`, repo-root
-    relative), so a relative value is resolved against the CWD the dossier is being built from
-    — the same repo root every other relative path in this pipeline assumes.
+    **Not `freeze.json`'s `source_db`** (PR #348 review finding #1). That field records where
+    the freeze *read* from at freeze time — a repo-root-relative `fuel_signal.db` — which
+    resolves to the LIVE database, a different and continuously-updated file: `batch0`'s clone
+    is 524,197,888 bytes (17 Aug) against the live DB's 524,689,408 (22 Aug). Scoring regret
+    against later, possibly revised prices is exactly the drift `summarise_regret` forbids,
+    since the whole measure rests on replaying the price path the arms actually faced. Two
+    further harms made it concrete rather than theoretical: `_db.open_db` issues
+    `PRAGMA journal_mode=WAL`, so every dossier build was a WRITE against the live production
+    DB; and no worktree has a root `fuel_signal.db`, so regret reported `computed: false`
+    everywhere except the primary checkout while the correct frozen DB sat in the batch dir.
+
+    `runner.py` and `noise_floor.py` both already resolve the DB this way
+    (`batch_dir / FROZEN_DB_FILENAME`); this is the third reader, not a new convention.
+    `freeze.json`'s presence is still the gate — a batch dir without a manifest isn't a frozen
+    batch, and its contents are not the graded artifacts.
     """
     if batch_dir is None:
         return None
-    freeze_path = batch_dir / FREEZE_MANIFEST_FILENAME
-    if not freeze_path.exists():
+    if not (batch_dir / FREEZE_MANIFEST_FILENAME).exists():
         return None
-    source_db = json.loads(freeze_path.read_text()).get("source_db")
-    return pathlib.Path(source_db) if source_db else None
+    return batch_dir / FROZEN_DB_FILENAME
 
 
 class _DbStationPrices:

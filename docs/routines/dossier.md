@@ -224,7 +224,7 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          spend-weighted, so a 3.57 L top-up and a 42.86 L fill count identically in a flip count
          but not in the CPL; a large litres gap between arms (fps-6yi: 2064 vs 2982, a 44%
          difference) is itself worth surfacing, not just a weighting detail.
-       - **`regret_baseline` / `regret_candidate` from `decision_flips["regret"]` — the
+       - **`regret_cpl_baseline` / `regret_cpl_candidate` from `decision_flips["regret"]` — the
          rendered timing column** (fps-2js). Regret is `price paid − the cheapest price that
          same station reached inside the tank's feasible wait`; `0` means the arm bought the
          best price it could actually have reached, and lower is better. Unlike the flip CPL
@@ -232,11 +232,19 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          comparable to each other and it POOLS — always report the `all` row, which is the only
          run-level statement this table can make (fps-6yi at its 13-day horizon: baseline
          10.03 vs candidate 9.38 c/L, i.e. both arms buy about equally well, consistent with
-         the -0.0735 headline). Report `horizon_days` with it, always: the horizon is the
-         tank's own feasible wait (`regret_horizon_days`), NOT a cycle length, and the number
-         is only meaningful against it.
-         - Print `regret_delta` **beside its own interval**
-           (`regret_delta_interval` = delta ± 2×`regret_delta_se`, sized on cascade-collapsed
+         the -0.0735 headline). **Report `horizon_days` AND `cadence_days` with it, always.**
+         The horizon is a fixed ceiling on the tank's feasible wait (`regret_horizon_days`),
+         NOT a cycle length; it is deliberately a ceiling no real fill attains (fps-6yi's
+         fills top out at 11.6 days of headroom), so regret levels are conservative by
+         construction and slightly conservative toward whichever arm buys in larger fills.
+         `cadence_days` matters just as much: the window is walked on the run's own evaluation
+         grid, so a 1d run samples 14 candidate prices inside it and a 7d run samples 2. On
+         fps-6yi the same flips give -0.644 at 1d, -0.695 at 2d and **+0.143 at 7d — the level
+         nearly halves and the sign flips.** Regret is comparable only WITHIN one cadence;
+         never compare it across dossiers at different cadences. (Same defect class as the
+         `decns` quantisation caveat above.)
+         - Print `regret_cpl_delta` **beside its own interval**
+           (`regret_cpl_delta_interval` = delta ± 2×`regret_cpl_delta_se`, sized on cascade-collapsed
            DECISIONS), and apply exactly the citation rule below: fps-6yi's `all` row is
            -0.64 c/L against a ±4.24 interval, and 12 of 12 resolvable folds sit inside their
            own. **Regret is a legibility fix, not a power fix — it does not rescue a thin
