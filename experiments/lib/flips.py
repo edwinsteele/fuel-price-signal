@@ -114,7 +114,7 @@ def cascade_window_days(tank_params: str) -> int:
     **`n_decisions` is NOT cadence-invariant, and that asymmetry is quantifiable, not just
     philosophical** (PR #347 review, second pass). Gaps between same-station flips are
     quantised to the run's cadence, so the quiet period actually needed to start a new
-    decision scales with it: at a 1-day cadence the first gap exceeding an 8-day window is 9
+    decision scales with it: at a 1-day cadence the first gap exceeding the 7-day window is 8
     days; at a 7-day cadence the first gap exceeding a (floored) 8-day window is 14 days — the
     coarser-cadence run needs proportionally MORE elapsed quiet time before a second decision
     registers, and so will systematically report a LOWER `n_decisions` than a finer-cadence run
