@@ -558,10 +558,13 @@ def summarise_regret(
         as_of = pd.Timestamp(row["date"])
         dark_rows.append(not prices.is_observed(station, as_of.strftime("%Y-%m-%d")))
         reachable = []
+        fill_day_price = None
         offset = 0
         while offset <= horizon_days:
             price = prices.price_at(station, (as_of + pd.Timedelta(days=offset)).strftime("%Y-%m-%d"))
             if price is not None:
+                if offset == 0:
+                    fill_day_price = float(price)
                 reachable.append(float(price))
             offset += cadence_days
         if not reachable:
@@ -570,7 +573,11 @@ def summarise_regret(
             # outage. Score nothing rather than guess.
             regrets.append(None)
             continue
-        if reachable and abs(reachable[0] - paid) > 1e-6:
+        # Explicitly the OFFSET-0 price, not reachable[0]: `reachable` skips None lookups, so
+        # on a fill dated before its station's first price reachable[0] is some later
+        # evaluation date's price, and comparing the ledger against that would report a
+        # data-integrity mismatch that is really just an out-of-range fill date.
+        if fill_day_price is not None and abs(fill_day_price - paid) > 1e-6:
             mismatches += 1
         regrets.append(paid - min(paid, min(reachable)))
     scored["regret"] = regrets
@@ -651,14 +658,35 @@ def _regret_row(
     if delta is None:
         if base_side.empty and cand_side.empty:
             reason = "no scored flips"
-        else:
+        elif base_side.empty or cand_side.empty:
             reason = "one arm only"
-    se_diff, interval, inside = None, None, None
-    if delta is not None and se_base is not None and se_cand is not None:
-        se_diff = math.sqrt(se_base ** 2 + se_cand ** 2)
-        half_width = INTERVAL_SE_MULTIPLE * se_diff
-        interval = [delta - half_width, delta + half_width]
-        inside = bool(abs(delta) < half_width)
+        else:
+            # BOTH arms flipped, but a litres-weighted mean is undefined on a zero-litres side
+            # — "one arm only" would be a false statement about a fold that did flip on both,
+            # and docs/routines/dossier.md tells authors to quote this string verbatim. Same
+            # branch summarise_flips grew in PR #347's review (finding #4).
+            reason = (
+                "both arms have scored flips but one side carries zero total litres — a "
+                "litres-weighted regret is undefined there"
+            )
+    se_diff, interval, inside, interval_reason = None, None, None, None
+    if delta is not None:
+        if s is None:
+            interval_reason = dispersion_note
+        elif se_base is None or se_cand is None:
+            # Defensive, and unreachable as written: an arm's effective n is 0 only when its
+            # litres sum to 0, which already made its _weighted_mean None and so `delta` None
+            # above. Kept so the branch exists if either side's definition ever moves apart —
+            # the alternative is a silent None interval with no reason at all.
+            interval_reason = (
+                "regret dispersion resolvable but one arm's decision-weighted effective n "
+                "is 0 — cannot size that arm's own standard error"
+            )
+        else:
+            se_diff = math.sqrt(se_base ** 2 + se_cand ** 2)
+            half_width = INTERVAL_SE_MULTIPLE * se_diff
+            interval = [delta - half_width, delta + half_width]
+            inside = bool(abs(delta) < half_width)
     return {
         "n_baseline": int(len(base_side)),
         "n_candidate": int(len(cand_side)),
@@ -671,5 +699,5 @@ def _regret_row(
         "regret_delta_se": se_diff,
         "regret_delta_interval": interval,
         "regret_delta_inside_own_se": inside,
-        "regret_delta_interval_reason": None if se_diff is not None else dispersion_note,
+        "regret_delta_interval_reason": interval_reason,
     }

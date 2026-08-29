@@ -523,3 +523,73 @@ def test_summarise_regret_degenerate_dispersion_prints_no_interval():
     assert row["regret_delta_se"] is None
     assert row["regret_delta_interval"] is None
     assert "not estimable" in row["regret_delta_interval_reason"]
+
+
+def test_summarise_regret_zero_litres_arm_is_not_reported_as_one_arm_only():
+    """A fold where BOTH arms flipped but one carries zero litres must not claim "one arm
+    only" — dossier.md quotes this string verbatim, so it would assert something false about
+    a fold that did diverge on both sides (the gap summarise_flips closed in PR #347)."""
+    flips = pd.DataFrame([
+        _flip(1, 100, "2026-01-01", 180.0, 10.0, "baseline"),
+        _flip(1, 100, "2026-02-01", 190.0, 0.0, "candidate"),
+        _flip(1, 100, "2026-03-01", 200.0, 5.0, "baseline"),
+    ])
+    prices = FakePrices({100: {"2026-01-01": 180.0, "2026-01-05": 150.0,
+                               "2026-02-01": 190.0, "2026-03-01": 200.0, "2026-03-04": 170.0}})
+    row = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1,
+                           window_days=7)["per_fold"][0]
+    assert row["n_baseline"] == 2 and row["n_candidate"] == 1
+    assert row["regret_delta"] is None
+    assert "zero total litres" in row["regret_delta_reason"]
+    assert row["regret_delta_reason"] != "one arm only"
+
+
+def test_summarise_regret_missing_interval_never_reports_a_dispersion_label_as_its_reason():
+    """`regret_delta_interval_reason` must be a reason, not the provenance label
+    ("fold-local"/"run-wide") the dispersion estimator returns alongside its number.
+
+    The reachable case is a cell with no delta at all: dispersion is estimable run-wide (other
+    folds have spread), so the old unconditional fallback printed "run-wide" as the explanation
+    for a missing interval. There is nothing to explain — `regret_delta_reason` already says
+    why — so it must be None.
+    """
+    flips = pd.DataFrame([
+        # fold 1: candidate only -> no delta, but run-wide dispersion IS estimable from fold 2
+        _flip(1, 100, "2026-01-01", 180.0, 10.0, "candidate"),
+        _flip(2, 200, "2026-01-01", 150.0, 10.0, "baseline"),
+        _flip(2, 200, "2026-03-01", 210.0, 10.0, "candidate"),
+    ])
+    prices = FakePrices({
+        100: {"2026-01-01": 180.0, "2026-01-04": 160.0},
+        # Deliberately three DIFFERENT regrets (20 / 15 / 25) — identical ones would make the
+        # run-wide dispersion degenerate and suppress fold 2's interval for an unrelated reason.
+        200: {"2026-01-01": 150.0, "2026-01-06": 135.0, "2026-03-01": 210.0, "2026-03-05": 185.0},
+    })
+    out = summarise_regret(flips, prices, set(), horizon_days=13, cadence_days=1, window_days=7)
+    fold1 = next(r for r in out["per_fold"] if r["fold"] == 1)
+    assert fold1["regret_delta"] is None
+    assert fold1["regret_delta_reason"] == "one arm only"
+    assert fold1["regret_delta_interval_reason"] is None
+    # ...and the fold that CAN resolve still gets a real interval, so the guard above did not
+    # simply suppress every reason.
+    fold2 = next(r for r in out["per_fold"] if r["fold"] == 2)
+    assert fold2["regret_delta_interval"] is not None
+
+
+def test_summarise_regret_does_not_flag_a_mismatch_when_the_fill_day_is_unpriced():
+    """n_price_mismatch compares the ledger against the FILL DATE's price. A fill dated before
+    its station's first ever price has no such row, so there is nothing to disagree with —
+    counting the next reachable day's price would report a data-integrity problem that is
+    really an out-of-range fill date."""
+    class LateStart:
+        def price_at(self, station_code, as_of):
+            return None if as_of < "2026-01-10" else 999.0
+
+        def is_observed(self, station_code, as_of):
+            return as_of >= "2026-01-10"
+
+    flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 150.0, 10.0, "baseline")])
+    out = summarise_regret(flips, LateStart(), set(), horizon_days=13, cadence_days=1, window_days=7)
+    assert out["n_price_mismatch"] == 0
+    assert out["n_scored"] == 1          # still scored off the reachable forward prices
+    assert out["dark_fill_days"] == 1
