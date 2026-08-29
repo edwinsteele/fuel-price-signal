@@ -716,16 +716,20 @@ def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
     flips = facts["decision_flips"]
     assert flips["computed"] is True
     assert flips["n_flips"] == 2
-    # 50/3.571/7d/10% (this fixture's default tank_params) -> a 7-day evaluation cadence, so
-    # cascade_window_days derives from that string, not a hardcoded literal (fps-e1w).
-    assert flips["cascade_window_days"] == dt.cascade_window_days("50/3.571/7d/10%")
+    # 50/3.571/7d/10% (this fixture's default tank_params) derives a half-tank-life of 7 days
+    # (50/3.571/2) — which, for THIS tank_params, exactly EQUALS its own 7-day evaluation
+    # cadence. cascade_window_days floors the window strictly above the cadence (PR #347
+    # review finding #2: an unguarded window at or below the cadence is a structural
+    # degenerate case, not derived-vs-hardcoded colour), so the actual window here is 8, not
+    # the coincidental 7 the half-life formula alone would give.
+    assert flips["cascade_window_days"] == 8
     row = next(r for r in flips["per_fold"] if r["fold"] == 1)
     assert row["regime"] == "shock"
     assert row["n_baseline_only"] == 1
     assert row["n_candidate_only"] == 1
     assert row["n_flips"] == 2
-    # 2026-01-01 and 2026-01-02, one day apart, same station -> within the derived 7-day
-    # window -> one cascade, one decision, even though n_flips is 2.
+    # 2026-01-01 and 2026-01-02, one day apart, same station -> well within the 8-day window
+    # -> one cascade, one decision, even though n_flips is 2.
     assert row["n_decisions"] == 1
     assert row["litres_baseline"] == pytest.approx(10.0)
     assert row["litres_candidate"] == pytest.approx(10.0)
@@ -1216,9 +1220,11 @@ def test_decision_flips_reproduces_fps_6yi_stickiness_phase_saddle_numbers(tmp_p
     )
 
     # fold 13's 2*SE specifically (docs/routines/dossier.md's worked example: -32.73 sits
-    # inside a 2*SE of 36.77 either side, so the full interval width is 2*36.77).
+    # inside a 2*SE of ~41.05 either side — DECISION-level, not fill-level: fold 13 is 6 flips
+    # collapsed into 3 decisions, so its effective n is sized on 3 draws, not 6, per PR #347
+    # review finding #1). Full interval width is 2*41.05.
     lo, hi = by_fold[13]["flip_cpl_delta_interval"]
-    assert hi - lo == pytest.approx(2 * 36.77, abs=0.1)
+    assert hi - lo == pytest.approx(2 * 41.05, abs=0.1)
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────

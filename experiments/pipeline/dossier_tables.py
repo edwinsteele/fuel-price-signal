@@ -370,7 +370,7 @@ def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
             "wrong sign vs. this batch's noise band; flip detail is unlikely to change that call.",
         }
     window = cascade_window_days(facts["provenance"]["tank_params"])
-    summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, SHOCK_FOLDS, cascade_window_days=window)
+    summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, SHOCK_FOLDS, window_days=window)
     summary["computed"] = True
     _attach_run_contributions(
         summary, fills, facts["breakdowns"]["per_fold"], facts["headline"]["realised"]["delta_cpl_held"],
@@ -404,6 +404,22 @@ def _attach_run_contributions(
     A fold whose breakdown row is suppressed (`delta_cpl_own` is `None`, below
     `min_row_cell_n`) contributes `None` here too — its true contribution is folded into the
     residual rather than guessed at, same as any other unmeasured fold.
+
+    **The residual also absorbs any tau divergence between arms, not just composition drift**
+    (PR #347 review finding #3). `delta_cpl_own` is an OWN-tau quantity (`experiments/lib/
+    realised.py`'s per-window `cpl_own`, each arm thresholded at its own selected tau) while
+    `delta_cpl_held` is HELD-tau (both arms thresholded at the same tau — the whole point of
+    "held" being a clean, operating-point-free comparison). When the two arms' own tau
+    actually agree, own and held CPL move together and this distinction is invisible; when
+    they diverge, part of `composition_residual_cpl` is the tau gap, not composition drift, and
+    nothing here can currently tell the two apart. `run_paired_realised_backtest` computes a
+    `tau_diverges` flag internally (`experiments/lib/realised.py`'s `deltas` return value) but
+    it is discarded by `runner.py` before `results.json` is written — NOT the same thing as
+    `results["fold_run_deltas"]` (a different, WFCV-log-loss-cohort structure this module
+    already reads for `delta_ll_all_median`/`delta_ll_hard25_median`), so there is no live flag
+    here to gate this caveat on today. Threading `tau_diverges` through would be a separate,
+    bigger change to runner.py's results.json schema — filed as its own follow-up rather than
+    folded into this PR.
     """
     arms = [a for a in fills["arm"].unique() if a in (BASELINE_ARM, CANDIDATE_ARM)]
     run_litres = fills[fills["arm"].isin(arms)]["litres"].sum()

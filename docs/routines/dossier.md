@@ -211,9 +211,10 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          cascade into a run of later differing fills at the same station as the tank's state
          diverges, which `n_decisions` collapses (`experiments/lib/flips.py`'s
          `_collapse_cascades`, window derived from the run's own tank cadence via
-         `cascade_window_days`, never a hardcoded literal). fps-6yi: 303 flips are 88 decisions,
-         and fold 8's 36 flips are 5 — quoting 36 alone materially overstates that fold's
-         independent evidence.
+         `cascade_window_days`, never a hardcoded literal). fps-6yi: 303 flips are 88 decisions
+         (report the RUN-level `n_flips`/`n_decisions` alongside the table's totals for exactly
+         this reason — never just the per-fold column's sum), and fold 8's 36 flips are 5 —
+         quoting 36 alone materially overstates that fold's independent evidence.
        - `litres_baseline` / `litres_candidate` — flip-only litres per arm. `pooled_cpl` is
          spend-weighted, so a 3.57 L top-up and a 42.86 L fill count identically in a flip count
          but not in the CPL; a large litres gap between arms (fps-6yi: 2064 vs 2982, a 44%
@@ -226,7 +227,8 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          denominator and routinely cannot be distinguished from zero.** When
          `flip_cpl_delta_inside_own_se` is `true`, mark that cell (fps-6yi: 0 of 12 resolvable
          folds cleared their own interval — fold 13's headline-grabbing -32.73 sits inside a
-         2×SE of ±36.77). **A cell marked inside its own SE must never be cited as evidence in
+         2×SE of ±41.05, effective n sized on its 3 cascade-collapsed DECISIONS, not its 6
+         raw flips). **A cell marked inside its own SE must never be cited as evidence in
          the Judgement section** — "favourable flips dominate, N of M folds" is a vote count
          over cells that cannot resolve their own numbers, not corroboration (this is exactly
          how fps-6yi's original Judgement went wrong; see that run's post-dossier review
@@ -246,7 +248,12 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          reconciling exactly to the -0.0735 headline `delta_cpl_held`) — the residual is real
          (a litres-weighted average of per-fold ratios isn't exactly the ratio of pooled
          totals whenever the two arms' litres mix differs fold to fold), not a rounding
-         artefact, and hiding it would be its own distortion.
+         artefact, and hiding it would be its own distortion. It can also absorb tau
+         divergence between arms (`delta_cpl_own` is own-tau, `delta_cpl_held` is held-tau —
+         see `_attach_run_contributions`'s docstring), which is not currently observable from
+         `facts.json` — treat the residual as "composition drift, and possibly tau drift,"
+         not composition drift alone, unless a future run threads a `tau_diverges` flag
+         through.
      **Same rule as `per_axis`: flip detail is colour illustrating a mechanism, and must never
      reach the Judgement section as a second arbiter overriding the noise-band call** — one vivid
      flip (a station catching a big cheap fill one day early) is easy to find more convincing than

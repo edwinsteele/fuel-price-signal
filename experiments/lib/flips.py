@@ -95,13 +95,26 @@ def cascade_window_days(tank_params: str) -> int:
     worked example), reproduced here from the run's own parameters instead of copied as a
     literal.
 
+    **Floored strictly above the run's own fill cadence** (`evaluation_interval_days`, PR
+    #347 review finding #2). Fills only land on evaluation dates, so two flips at the SAME
+    station are never closer together than one cadence period — a half-tank-life window at or
+    below that period is a structural degenerate case, not a rare corner: this project's own
+    committed `batch0/tgp_delta_7d` and the equivalent tank size/daily ratio at a 7d cadence
+    put the two in EXACT collision (half-life 7, cadence 7), and below the cadence the
+    collapse window would be inert for every fold (no on-grid gap can ever be <= a window
+    narrower than the cadence, so `n_decisions` would silently equal `n_flips` always — the
+    opposite failure from what this window exists to prevent). `max(half_life, cadence + 1)`
+    guarantees the window can never degenerate into either extreme by an accident of rounding.
+
     `tank_params` is the formatted stamp `fuel_signal.backtest.format_tank_params` writes
-    (`f"{size}/{daily}/{interval}d/{floor}%"`) — only the first two slash-separated fields are
-    used here; parsing is safe because that function is this string's only writer
-    (`fuel_signal.backtest.require_tank_stamp` is the only sanctioned way to obtain one).
+    (`f"{size}/{daily}/{interval}d/{floor}%"`); parsing is safe because that function is this
+    string's only writer (`fuel_signal.backtest.require_tank_stamp` is the only sanctioned way
+    to obtain one).
     """
-    size_str, daily_str = tank_params.split("/")[:2]
-    return round(float(size_str) / float(daily_str) / 2)
+    size_str, daily_str, interval_str = tank_params.split("/")[:3]
+    half_life = round(float(size_str) / float(daily_str) / 2)
+    cadence_days = int(interval_str.rstrip("d"))
+    return max(half_life, cadence_days + 1)
 
 
 def _finite_positive_spread(values: pd.Series, std: float) -> bool:
@@ -164,24 +177,56 @@ def _effective_n(litres: pd.Series) -> float:
     return total ** 2 / float((litres ** 2).sum())
 
 
-def _collapse_cascades(fold_flips: pd.DataFrame, window_days: int) -> int:
-    """Cascade-collapsed decision count for one fold's flips (fps-e1w change 3): flips at the
-    SAME station within `window_days` of the previous one (either arm — a fold's flip stream
-    is one shared timeline of divergence at that station, not two independent ones) count as
-    one decision, per `flips.py`'s module docstring on cascades. A gap strictly greater than
-    the window starts a new decision.
+def _cascade_group_ids(fold_flips: pd.DataFrame, window_days: int) -> pd.Series:
+    """Decision-group id per row, index-aligned with `fold_flips`: flips at the SAME station
+    within `window_days` of the previous one (either arm — a fold's flip stream is one shared
+    timeline of divergence at that station, not two independent ones) share a group id, per
+    `flips.py`'s module docstring on cascades. A gap strictly greater than the window starts a
+    new decision.
+
+    Single-sourced (PR #347 review finding #1) so `n_decisions` (`_collapse_cascades`, below)
+    and each delta's decision-level standard error (`summarise_flips`) can never disagree
+    about what counts as one decision — before this, the SE sized effective n on individual
+    FILLS, silently contradicting `n_decisions`' own premise that a cascade isn't several
+    independent draws: a fold could print `n_decisions=5` while its SE was still computed as
+    though it had 30 independent observations, printing an interval systematically too narrow
+    in exactly the over-confident direction the whole column exists to avoid.
     """
     if fold_flips.empty:
-        return 0
+        return pd.Series(dtype="int64")
     dates = pd.to_datetime(fold_flips["date"])
-    decisions = 0
-    for _, station_dates in dates.groupby(fold_flips["station_code"].to_numpy()):
-        prev = None
-        for date in sorted(station_dates):
-            if prev is None or (date - prev).days > window_days:
-                decisions += 1
-            prev = date
-    return decisions
+    group_ids = pd.Series(-1, index=fold_flips.index, dtype="int64")
+    next_id = 0
+    for station in fold_flips["station_code"].unique():
+        station_idx = fold_flips.index[fold_flips["station_code"] == station]
+        prev_date = None
+        current_group = -1
+        for row_idx, date in dates.loc[station_idx].sort_values().items():
+            if prev_date is None or (date - prev_date).days > window_days:
+                current_group = next_id
+                next_id += 1
+            group_ids.loc[row_idx] = current_group
+            prev_date = date
+    return group_ids
+
+
+def _collapse_cascades(fold_flips: pd.DataFrame, window_days: int) -> int:
+    """Cascade-collapsed decision count for one fold's flips (fps-e1w change 3): `n_flips`'s
+    cascade-collapsed sibling — see `_cascade_group_ids`."""
+    return int(_cascade_group_ids(fold_flips, window_days).nunique())
+
+
+def _decision_litres(side: pd.DataFrame, group_ids: pd.Series) -> pd.Series:
+    """One arm's flip litres, summed per cascade-decision group rather than per fill (PR #347
+    review finding #1) — the weights `_effective_n` must size that arm's standard error on.
+    Several fills in the same cascade are one decision with one combined litres weight, not
+    several independent draws; passing per-fill litres here would let a long cascade (many
+    small fills, one continuing divergence) masquerade as many independent observations and
+    understate the delta's own SE.
+    """
+    if side.empty:
+        return side["litres"]
+    return side["litres"].groupby(group_ids.loc[side.index]).sum()
 
 
 def summarise_flips(
@@ -190,10 +235,14 @@ def summarise_flips(
     candidate_arm: str,
     shock_folds: set[int],
     *,
-    cascade_window_days: int,
+    window_days: int,
 ) -> dict:
     """Per-fold flip counts, flip-only pooled CPL, and each delta's own resolution (fps-e1w),
     plus the row-level detail.
+
+    (Parameter named `window_days`, not `cascade_window_days` — PR #347 review finding #7: the
+    module-level `cascade_window_days` function of that name would otherwise be shadowed
+    inside this function's body, a trap for a future edit that tries to call it here.)
 
     `flip_cpl_baseline` / `flip_cpl_candidate` are `pooled_cpl` computed over ONLY the fills
     that differ between arms in that fold — NOT the same quantity as that fold's
@@ -205,13 +254,17 @@ def summarise_flips(
     `flip_cpl_candidate` pool DISJOINT fills on different days at different points in the
     price cycle — their difference has no stable denominator and explodes in thin cells. Each
     delta is emitted beside its own `flip_cpl_delta_se` / `flip_cpl_delta_interval`
-    (`_price_dispersion` + `_effective_n`), and `flip_cpl_delta_inside_own_se` marks the cells
-    (routinely most of them) whose delta cannot be distinguished from zero at 2*its own SE —
-    see `docs/routines/dossier.md`'s citation rule: such a cell is not evidence.
+    (`_price_dispersion` + `_effective_n`, sized on DECISION-level litres via
+    `_decision_litres` — not per-fill litres, so a long cascade of small fills can't
+    masquerade as many independent draws and understate its own SE), and
+    `flip_cpl_delta_inside_own_se` marks the cells (routinely most of them) whose delta cannot
+    be distinguished from zero at 2*its own SE — see `docs/routines/dossier.md`'s citation
+    rule: such a cell is not evidence.
 
-    `n_decisions` (`_collapse_cascades`) is `n_flips`'s cascade-collapsed sibling: one real
-    flip can cascade into a run of later differing fills at the same station, so `n_flips`
-    overstates independent decisions — see this module's docstring.
+    `n_decisions` (`_collapse_cascades`) is `n_flips`'s cascade-collapsed sibling, both
+    per-fold and summed at the top level: one real flip can cascade into a run of later
+    differing fills at the same station, so `n_flips` overstates independent decisions — see
+    this module's docstring.
 
     `rows` carries the full flip-level detail (`diff_fills`'s output, as records) so a
     committed facts.json is self-contained — fills.parquet itself is gitignored and never
@@ -228,11 +281,23 @@ def summarise_flips(
         cand_cpl = pooled_cpl(cand_side) if n_cand else None
         litres_base = float(base_side["litres"].sum())
         litres_cand = float(cand_side["litres"].sum())
+        group_ids = _cascade_group_ids(fold_flips, window_days)
+        n_decisions = int(group_ids.nunique())
 
         delta = cand_cpl - base_cpl if base_cpl is not None and cand_cpl is not None else None
         delta_reason = None
         if delta is None:
             delta_reason = "no flips" if n_base == 0 and n_cand == 0 else "one arm only"
+        elif not math.isfinite(delta):
+            # base_cpl/cand_cpl are pooled_cpl's own NaN for a zero-litres side (PR #347
+            # review finding #4) — not None, so the branch above never fires, and a raw NaN
+            # would silently serialise to `null` (io.to_jsonable) with no reason attached,
+            # the exact "blank cell with no explanation" this whole rework exists to remove.
+            delta_reason = (
+                "one or both arms have flip fills but zero total litres on that side — "
+                "cost-per-litre is undefined"
+            )
+            delta = None
 
         se_diff, interval, inside_own_se, interval_reason = None, None, None, None
         if delta is not None:
@@ -240,8 +305,8 @@ def summarise_flips(
             if s is None:
                 interval_reason = dispersion_note
             else:
-                n_eff_base = _effective_n(base_side["litres"])
-                n_eff_cand = _effective_n(cand_side["litres"])
+                n_eff_base = _effective_n(_decision_litres(base_side, group_ids))
+                n_eff_cand = _effective_n(_decision_litres(cand_side, group_ids))
                 se_base = s / math.sqrt(n_eff_base) if n_eff_base > 0 else None
                 se_cand = s / math.sqrt(n_eff_cand) if n_eff_cand > 0 else None
                 if se_base is not None and se_cand is not None:
@@ -251,7 +316,7 @@ def summarise_flips(
                     inside_own_se = bool(abs(delta) < half_width)
                 else:
                     interval_reason = (
-                        "price dispersion resolvable but one arm's litres-weighted "
+                        "price dispersion resolvable but one arm's decision-weighted "
                         "effective n is 0 — cannot size that arm's own standard error"
                     )
 
@@ -261,7 +326,7 @@ def summarise_flips(
             "n_baseline_only": n_base,
             "n_candidate_only": n_cand,
             "n_flips": n_base + n_cand,
-            "n_decisions": _collapse_cascades(fold_flips, cascade_window_days),
+            "n_decisions": n_decisions,
             "litres_baseline": litres_base,
             "litres_candidate": litres_cand,
             "flip_cpl_baseline": base_cpl,
@@ -275,7 +340,8 @@ def summarise_flips(
         })
     return {
         "n_flips": len(flips),
-        "cascade_window_days": cascade_window_days,
+        "n_decisions": sum(row["n_decisions"] for row in per_fold),
+        "cascade_window_days": window_days,
         "per_fold": per_fold,
         "rows": flips.to_dict(orient="records"),
     }
