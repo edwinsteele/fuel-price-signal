@@ -88,11 +88,11 @@ def test_compute_shock_folds_for_batch_force_overwrites(tmp_path):
 
 
 def test_load_cached_shock_folds_returns_none_for_missing_batch_dir():
-    assert load_cached_shock_folds(None, expected_baseline_fingerprint="54:abc") is None
+    assert load_cached_shock_folds(None, baseline_fingerprint="54:abc") is None
 
 
 def test_load_cached_shock_folds_returns_none_when_file_absent(tmp_path):
-    assert load_cached_shock_folds(tmp_path, expected_baseline_fingerprint="54:abc") is None
+    assert load_cached_shock_folds(tmp_path, baseline_fingerprint="54:abc") is None
 
 
 def test_load_cached_shock_folds_returns_none_on_fingerprint_mismatch(tmp_path):
@@ -100,7 +100,46 @@ def test_load_cached_shock_folds_returns_none_on_fingerprint_mismatch(tmp_path):
     batch_dir = _write_batch_dir(tmp_path, df)
     compute_shock_folds_for_batch(batch_dir, **SMALL_OUTER, verbose=False)
 
-    assert load_cached_shock_folds(batch_dir, expected_baseline_fingerprint="54:not-a-real-fingerprint") is None
+    loaded = load_cached_shock_folds(
+        batch_dir, baseline_fingerprint="54:not-a-real-fingerprint", outer_fold_params=SMALL_OUTER,
+    )
+    assert loaded is None
+
+
+def test_load_cached_shock_folds_returns_none_on_outer_fold_params_mismatch(tmp_path):
+    """Review finding on PR #350: geometry (not just baseline_fingerprint) must gate the
+    cache — a run at different fold geometry would otherwise get handed shock-fold
+    INDICES derived under a completely different fold windowing."""
+    df = _baseline_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    compute_shock_folds_for_batch(batch_dir, **SMALL_OUTER, verbose=False)
+    fp = baseline_fingerprint(resolve_baseline_columns(df))
+
+    different_outer = {**SMALL_OUTER, "val_days": SMALL_OUTER["val_days"] * 2}
+    loaded = load_cached_shock_folds(batch_dir, baseline_fingerprint=fp, outer_fold_params=different_outer)
+    assert loaded is None
+
+
+def test_load_cached_shock_folds_returns_none_on_seed_mismatch(tmp_path):
+    df = _baseline_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    compute_shock_folds_for_batch(batch_dir, seed=1, **SMALL_OUTER, verbose=False)
+    fp = baseline_fingerprint(resolve_baseline_columns(df))
+
+    loaded = load_cached_shock_folds(batch_dir, baseline_fingerprint=fp, seed=2, outer_fold_params=SMALL_OUTER)
+    assert loaded is None
+
+
+def test_load_cached_shock_folds_returns_none_on_quantile_mismatch(tmp_path):
+    df = _baseline_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    compute_shock_folds_for_batch(batch_dir, quantile=0.25, **SMALL_OUTER, verbose=False)
+    fp = baseline_fingerprint(resolve_baseline_columns(df))
+
+    loaded = load_cached_shock_folds(
+        batch_dir, baseline_fingerprint=fp, outer_fold_params=SMALL_OUTER, quantile=0.5,
+    )
+    assert loaded is None
 
 
 def test_load_cached_shock_folds_returns_the_cached_set_on_a_match(tmp_path):
@@ -109,5 +148,5 @@ def test_load_cached_shock_folds_returns_the_cached_set_on_a_match(tmp_path):
     payload = compute_shock_folds_for_batch(batch_dir, **SMALL_OUTER, verbose=False)
 
     fp = baseline_fingerprint(resolve_baseline_columns(df))
-    loaded = load_cached_shock_folds(batch_dir, expected_baseline_fingerprint=fp)
+    loaded = load_cached_shock_folds(batch_dir, baseline_fingerprint=fp, outer_fold_params=SMALL_OUTER)
     assert loaded == frozenset(payload["shock_folds"])

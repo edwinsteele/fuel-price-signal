@@ -115,7 +115,13 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      headline realised-CPL
      delta and its `effect_resolved` verdict, the WFCV log-loss delta labelled as descriptive
      colour, the per-fold / per-regime / per-axis breakdown tables (mark suppressed cells plainly —
-     "n=18, below the min-cell-n guard, not a finding"; if `per_axis` is present, also carry
+     "n=18, below the min-cell-n guard, not a finding"; a run whose `results.json` predates
+     fps-3tu's empirical shock-fold set has `per_fold[].regime: null` and `per_regime:
+     {"computed": false, "reason": ...}` — `breakdowns["per_fold_regime_unavailable_reason"]`
+     carries that same reason and explains BOTH symptoms; state it plainly ("regime unknown —
+     this run predates the empirical shock-fold split; re-run to backfill it") rather than
+     rendering a blank regime column with no note, which reads as "no regime effect" and
+     inverts this whole contract; if `per_axis` is present, also carry
      BOTH `breakdowns["per_axis_identification_note"]` and `breakdowns["per_axis_coverage_note"]`
      verbatim — the first says the per-axis **CPL** cells are a path-coupled cost allocated to a
      sub-period and so are **not identified** (report them as colour, never as a finding; the

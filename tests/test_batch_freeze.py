@@ -339,7 +339,7 @@ def test_freeze_batch_skip_shock_folds_leaves_batch_without_a_cache(tmp_path):
     )
 
     assert not (batch_dir / "shock_folds.json").exists()
-    assert shock_folds_module.load_cached_shock_folds(batch_dir, expected_baseline_fingerprint="54:x") is None
+    assert shock_folds_module.load_cached_shock_folds(batch_dir, baseline_fingerprint="54:x") is None
 
 
 def test_freeze_batch_refuses_with_a_recovery_hint_when_only_shock_folds_is_missing(tmp_path, monkeypatch):
@@ -368,6 +368,33 @@ def test_freeze_batch_refuses_with_a_recovery_hint_when_only_shock_folds_is_miss
     message = str(exc_info.value)
     assert "shock_folds batch1" in message
     assert "noise_floor batch1" not in message
+    # Review finding on PR #350: with only ONE of the two files actually missing, the
+    # trailing clause must say so in the singular — "neither file exists yet" would
+    # falsely imply noise_floor.json (which DOES exist here) is also absent.
+    assert "the file doesn't exist yet" in message
+    assert "neither file exists yet" not in message
+
+
+def test_freeze_batch_recovery_hint_uses_plural_when_both_files_are_missing(tmp_path):
+    """The plural branch of the same clause — both final steps skipped, so BOTH files
+    are genuinely absent and the plural phrasing is accurate."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batches_dir = tmp_path / "batches"
+    freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True, skip_shock_folds=True,
+    )
+
+    with pytest.raises(FileExistsError) as exc_info:
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True, skip_shock_folds=True,
+        )
+    message = str(exc_info.value)
+    assert "noise_floor batch1" in message
+    assert "shock_folds batch1" in message
+    assert "neither file exists yet" in message
 
 
 def test_freeze_batch_handles_iso_string_price_date(tmp_path):

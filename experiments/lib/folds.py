@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import math
 from collections.abc import Generator
 
@@ -10,6 +11,20 @@ from fuel_signal import evaluate as _ev
 
 from .constants import SEEDS, SHOCK_QUANTILE
 from .fit import fit_score, per_row_log_loss
+
+# walk_forward_folds' own defaults, read off the signature rather than restated, so a
+# change there can't silently invalidate dependent code — mirrors runner.py's own
+# _WFCV_DEFAULTS derivation. Shared here (not duplicated) because fps-3tu's batch-level
+# shock-fold cache (experiments.pipeline.shock_folds) needs the same three values in a
+# second place, to resolve a caller's possibly-partial outer_fold_params dict to the
+# full config before comparing it against what a cache was computed under (review
+# finding on PR #350: a hardcoded restatement here would go stale exactly the way
+# SHOCK_FOLDS itself did).
+DEFAULT_OUTER_FOLD_PARAMS: dict = {
+    name: param.default
+    for name, param in inspect.signature(_ev.walk_forward_folds).parameters.items()
+    if name in ("train_min_days", "val_days", "step_days")
+}
 
 
 def compute_shock_folds(fold_ll: dict[int, float], quantile: float = SHOCK_QUANTILE) -> frozenset[int]:
@@ -28,9 +43,25 @@ def compute_shock_folds(fold_ll: dict[int, float], quantile: float = SHOCK_QUANT
     `fold_ll` is fold_idx -> the baseline's own val-fold log-loss (same quantity
     `iter_folds_with_baseline_fit` already computes as `baseline_ll`) — NOT a
     candidate-vs-baseline delta. quantile=0 -> empty set; quantile>=1 -> every fold.
+
+    Raises ValueError on a NaN value (a degenerate fit — e.g. a single-class val fold)
+    rather than silently including or excluding it: `sorted(..., reverse=True)` orders a
+    NaN by its POSITION relative to comparisons that involve it, which depends on
+    dict/list iteration order, not on any property of the data — the same fold could
+    land either side of the cut depending on insertion order alone (review finding on
+    PR #350). Consistent with this codebase's rule elsewhere: a value that cannot be
+    shown to be well-ordered cannot be trusted to pick a "hardest" fold.
     """
     if not fold_ll:
         return frozenset()
+    nan_folds = sorted(i for i, ll in fold_ll.items() if ll != ll)  # ll != ll <=> isnan, no numpy import needed
+    if nan_folds:
+        raise ValueError(
+            f"compute_shock_folds(): fold_ll has a NaN log-loss for fold(s) {nan_folds} — "
+            "cannot rank a fold that isn't comparable; sorted() with a NaN present is "
+            "order-dependent, not well-defined. Investigate the degenerate fit rather than "
+            "silently including or excluding it."
+        )
     quantile = max(0.0, min(1.0, quantile))
     k = math.ceil(len(fold_ll) * quantile)
     if k <= 0:
@@ -44,9 +75,9 @@ def iter_folds_with_baseline_fit(
     baseline_cols: list[str],
     seed: int = SEEDS[0],
     *,
-    train_min_days: int = 1825,
-    val_days: int = 90,
-    step_days: int = 90,
+    train_min_days: int = DEFAULT_OUTER_FOLD_PARAMS["train_min_days"],
+    val_days: int = DEFAULT_OUTER_FOLD_PARAMS["val_days"],
+    step_days: int = DEFAULT_OUTER_FOLD_PARAMS["step_days"],
     shock_quantile: float = SHOCK_QUANTILE,
     shock_folds: frozenset[int] | None = None,
 ) -> Generator[

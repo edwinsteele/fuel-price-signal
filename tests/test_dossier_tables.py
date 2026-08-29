@@ -44,7 +44,22 @@ def _fold_run_deltas() -> list[dict]:
 def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=None,
                    inputs=None, columns=None, error=None, bead_id="fps-test.1",
                    tank_params: str | None = "50/3.571/7d/10%",
-                   effect_delta_cpl_held: float = -0.05) -> dict:
+                   effect_delta_cpl_held: float = -0.05,
+                   omit_shock_folds: bool = False) -> dict:
+    meta = {
+        "batch_dir": str(batch_dir), "seeds": [42, 43, 44], "realised_seed": 42,
+        "n_windows": 4, "realised_wall_seconds": 12.3, "wall_seconds": 20.0,
+        "pass_criterion": {"criterion": "sign plus concentration"},
+        "extra_feature_provider_hits": 100, "extra_feature_provider_misses": 0,
+        "git_sha": "abc1234", "bead_id": bead_id,
+        "n_baseline_columns": 54, "baseline_fingerprint": "54:deadbeef1234",
+        "tank_params": tank_params,
+    }
+    if not omit_shock_folds:
+        # A results.json predating fps-3tu's shock-fold field simply never had the key —
+        # not present-but-null — so the legacy-path fixture omits it entirely rather than
+        # setting it to None, matching what an actual old file on disk looks like.
+        meta["shock_folds"] = sorted(SHOCK)
     return {
         "status": status,
         "candidate": {
@@ -74,16 +89,7 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
             ],
         } if status == "graded" else {},
         "error": error,
-        "meta": {
-            "batch_dir": str(batch_dir), "seeds": [42, 43, 44], "realised_seed": 42,
-            "n_windows": 4, "realised_wall_seconds": 12.3, "wall_seconds": 20.0,
-            "pass_criterion": {"criterion": "sign plus concentration"},
-            "extra_feature_provider_hits": 100, "extra_feature_provider_misses": 0,
-            "git_sha": "abc1234", "bead_id": bead_id,
-            "n_baseline_columns": 54, "baseline_fingerprint": "54:deadbeef1234",
-            "tank_params": tank_params,
-            "shock_folds": sorted(SHOCK),
-        },
+        "meta": meta,
     }
 
 
@@ -148,7 +154,7 @@ def _write_run(
     tmp_path, *, status="graded", target=None, inputs=None, columns=None,
     with_axis=False, with_cycle=False, low_n_fold=None, batch_extras=None,
     tank_params: str | None = "50/3.571/7d/10%", fills_df: pd.DataFrame | None = None,
-    effect_delta_cpl_held: float = -0.05,
+    effect_delta_cpl_held: float = -0.05, omit_shock_folds: bool = False,
 ) -> tuple[pathlib.Path, pathlib.Path]:
     batch_dir = tmp_path / "batch1"
     batch_dir.mkdir(exist_ok=True)
@@ -164,6 +170,7 @@ def _write_run(
     results = _make_results(
         batch_dir, status=status, target=target, inputs=inputs, columns=columns,
         tank_params=tank_params, effect_delta_cpl_held=effect_delta_cpl_held,
+        omit_shock_folds=omit_shock_folds,
     )
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
     if status == "graded":
@@ -289,6 +296,30 @@ def test_build_facts_graded_run_has_all_blocks_and_suppresses_thin_cells(tmp_pat
 
     # No batch.json in this batch dir — degrades gracefully rather than raising.
     assert facts["redundancy"]["available"] is False
+
+
+def test_build_facts_legacy_run_without_shock_folds_degrades_regime_facts(tmp_path):
+    """Review finding on PR #350: the whole legacy path (a results.json predating
+    fps-3tu's empirical shock-fold field) shipped uncovered — _make_results always
+    stamped shock_folds and nothing popped it, so a later refactor reintroducing the old
+    constant as a silent fallback would have passed every existing test green."""
+    run_dir, _ = _write_run(tmp_path, low_n_fold=1, omit_shock_folds=True)
+
+    facts = dt.build_facts(run_dir)
+
+    per_fold = {row["fold"]: row for row in facts["breakdowns"]["per_fold"]}
+    assert all(row["regime"] is None for row in per_fold.values())
+    # Everything else in per_fold is still computed normally — only regime degrades.
+    assert per_fold[2]["delta_cpl_own"] is not None
+
+    assert facts["breakdowns"]["per_regime"] == {
+        "computed": False,
+        "reason": "this run's results.json predates fps-3tu's empirical shock-fold set "
+        "(meta.shock_folds) — re-run the candidate to backfill it.",
+    }
+    # per_fold's bare None regime and per_regime's computed:false share ONE explanation,
+    # surfaced at the breakdowns level so a reader hitting either symptom finds it.
+    assert facts["breakdowns"]["per_fold_regime_unavailable_reason"] == facts["breakdowns"]["per_regime"]["reason"]
 
 
 def test_build_facts_validation_provider_miss_rate_partial(tmp_path):
@@ -781,6 +812,36 @@ def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
     assert row["run_contribution_cpl"] is None
 
 
+def test_decision_flips_refuses_for_a_legacy_run_without_shock_folds(tmp_path):
+    """Review finding on PR #350: this early refusal (facts["provenance"]["shock_folds"]
+    is None) was the other half of the legacy path that shipped uncovered — everything
+    upstream of it (arity 2+, noise band not a clean reject) is identical to the
+    computed-True fixture above, isolating this branch specifically."""
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [-1.0, -0.5, 0.0, 0.5, 1.0],
+            "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+            "n_placebo_columns": 2,
+        }))
+
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        fills_df=_diverging_fills(fold=1), omit_shock_folds=True,
+    )
+    facts = dt.build_facts(run_dir)
+    band = facts["noise_band"]
+    assert -band["single_candidate_z_threshold"] < band["candidate_z_vs_band"] < band["single_candidate_z_threshold"]
+
+    flips = facts["decision_flips"]
+    assert flips == {
+        "computed": False,
+        "reason": "this run's results.json predates fps-3tu's empirical shock-fold set "
+        "(meta.shock_folds) — flip/regret detail is graded per (fold, regime) and there is "
+        "no trustworthy regime tag to use; re-run the candidate to backfill it.",
+    }
+
+
 # ── decision flips: fps-6yi regression (fps-e1w) ────────────────────────────────
 
 # fps-6yi (stickiness_phase_saddle, batch1) real committed data, reproduced verbatim from
@@ -1263,6 +1324,31 @@ def test_decision_flips_reproduces_fps_6yi_stickiness_phase_saddle_numbers(tmp_p
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────
+
+def test_plot_realised_cpl_by_fold_titles_a_legacy_run_explicitly(tmp_path, monkeypatch):
+    """Review finding on PR #350: the fourth uncovered legacy branch — shock_folds=None
+    must produce a title that says the shock/normal shading is unavailable, not a plot
+    that silently renders unshaded with no indication why."""
+    import matplotlib.axes
+
+    titles: list[str] = []
+    original_set_title = matplotlib.axes.Axes.set_title
+
+    def capture_set_title(self, label, *a, **kw):
+        titles.append(label)
+        return original_set_title(self, label, *a, **kw)
+
+    monkeypatch.setattr(matplotlib.axes.Axes, "set_title", capture_set_title)
+
+    run_dir, _ = _write_run(tmp_path)
+    fills = pd.read_parquet(run_dir / dt.FILLS_FILENAME)
+
+    dt._plot_realised_cpl_by_fold(run_dir, fills, "cand", None)
+    assert "legacy run" in titles[-1]
+
+    dt._plot_realised_cpl_by_fold(run_dir, fills, "cand", [1, 4])
+    assert "shaded = shock fold" in titles[-1]
+
 
 def test_make_plots_writes_four_always_plots(tmp_path, capsys):
     run_dir, batch_dir = _write_run(tmp_path)

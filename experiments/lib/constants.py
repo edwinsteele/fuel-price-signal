@@ -20,11 +20,21 @@ SHOCK_QUANTILE = 0.25
 # under three labelling schemes") already found that a named macro event doesn't
 # reliably predict where the baseline model struggles and recommended empirical
 # labelling instead — a recommendation this constant never picked up before
-# getting extracted into shared code. Kept here, unchanged, ONLY so the historical
-# experiment scripts that hardcode/import this exact value (experiments/2026-06-*/
-# and experiments/2026-08-*/, and batch0/tgp_delta_7d's diagnostics — closed lab
-# book entries, not to be rewritten) keep importing successfully; do not add a new
-# consumer of this name.
+# getting extracted into shared code.
+#
+# Kept here, unchanged, so the historical experiment scripts that import this
+# exact value (experiments/2026-06-09_shallow_elongated/, 2026-06-11_interaction_
+# column/, 2026-06-16_regime_cycle_length/, 2026-06-20_leading_indicators/'s three
+# paired_wfcv* scripts, and batch0/tgp_delta_7d's diagnostics — closed lab book
+# entries, not to be rewritten) keep REPRODUCING their committed numbers, not
+# merely keep importing successfully — importing alone was never the risk.
+# `iter_folds_with_baseline_fit` computes an empirical regime by DEFAULT now, so
+# each of those six scripts' own `iter_folds_with_baseline_fit(...)` call passes
+# `shock_folds=SHOCK_FOLDS` explicitly (a review finding on PR #350: without that,
+# the generator's `regime` column would silently diverge from the SAME script's
+# own SHOCK_FOLDS-based aggregates/markers/meta a few lines below it — a re-run
+# would go internally inconsistent, not merely fail to reproduce). Do not add a
+# new consumer of this name without the same explicit `shock_folds=` pin.
 SHOCK_FOLDS = frozenset({1, 4, 9, 13})
 # LightGBM params shared across all experiment scripts — do not redefine per-script.
 LGBM_DEFAULTS: dict = {"verbose": -1, "subsample": 0.8, "subsample_freq": 1}

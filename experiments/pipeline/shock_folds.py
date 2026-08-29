@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 import click
 
 from experiments.lib.constants import SEEDS, SHOCK_QUANTILE
-from experiments.lib.folds import iter_folds_with_baseline_fit
+from experiments.lib.folds import DEFAULT_OUTER_FOLD_PARAMS, iter_folds_with_baseline_fit
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.pipeline.batch_freeze import (
     BASELINE_COLUMNS_FILENAME,
@@ -47,9 +47,9 @@ def compute_shock_folds_for_batch(
     *,
     quantile: float = SHOCK_QUANTILE,
     seed: int = SEEDS[0],
-    train_min_days: int = 1825,
-    val_days: int = 90,
-    step_days: int = 90,
+    train_min_days: int = DEFAULT_OUTER_FOLD_PARAMS["train_min_days"],
+    val_days: int = DEFAULT_OUTER_FOLD_PARAMS["val_days"],
+    step_days: int = DEFAULT_OUTER_FOLD_PARAMS["step_days"],
     out_name: str = SHOCK_FOLDS_FILENAME,
     force: bool = False,
     verbose: bool = True,
@@ -117,18 +117,38 @@ def compute_shock_folds_for_batch(
 
 
 def load_cached_shock_folds(
-    batch_dir: pathlib.Path | None, *, expected_baseline_fingerprint: str,
+    batch_dir: pathlib.Path | None,
+    *,
+    baseline_fingerprint: str,
+    seed: int = SEEDS[0],
+    outer_fold_params: dict | None = None,
+    quantile: float = SHOCK_QUANTILE,
 ) -> frozenset[int] | None:
     """This batch's cached shock-fold set, or None if unavailable/untrustworthy.
 
-    None (rather than raising) on every failure mode — a missing batch_dir, a missing
-    cache file, or a fingerprint mismatch (the batch's baseline was relocked since the
-    cache was written) — because the caller (runner.py) always has a correct, if
-    redundant, fallback: derive it live for this run instead. A stale cache must never
-    be trusted silently (same "cannot be shown to match, so cannot be trusted" rule
-    dossier_tables._noise_band applies to noise_floor.json), but it also must never turn
-    into a hard failure — that would make a routine baseline re-lock break every run
-    against a batch until someone remembers to re-run this module's CLI.
+    Compares the FULL config the cache was computed under — baseline_fingerprint, seed,
+    the resolved outer fold geometry, and quantile — not baseline_fingerprint alone
+    (review finding on PR #350: `seed` and `shock_quantile` were already recorded in the
+    payload but never checked, and a run launched with non-default outer fold geometry —
+    reachable via runner.py's CLI `--outer-*-days` flags — would silently apply
+    shock-fold INDICES derived under a completely different fold windowing; a smoke-
+    tested repro confirmed this on a synthetic batch). Mirrors
+    `experiments.lib.realised._baseline_cache_fingerprint`'s exact-dict-equality
+    pattern, the direct in-repo precedent for "what does a cache need to match to be
+    safely reusable" thirty lines from this module's own cache read.
+    `outer_fold_params` may be a caller's PARTIAL override dict (e.g. from
+    runner.py's CLI, which only sets the keys actually overridden) — resolved against
+    `DEFAULT_OUTER_FOLD_PARAMS` before comparing, since the payload always stores the
+    fully-resolved geometry it was computed at.
+
+    None (rather than raising) on every mismatch or failure mode — a missing batch_dir,
+    a missing cache file, or any config disagreement — because the caller (runner.py)
+    always has a correct, if redundant, fallback: derive it live for this run instead. A
+    stale cache must never be trusted silently (same "cannot be shown to match, so
+    cannot be trusted" rule dossier_tables._noise_band applies to noise_floor.json), but
+    it also must never turn into a hard failure — that would make a routine baseline
+    re-lock, or even an ordinary smoke run at custom fold geometry, break until someone
+    remembers to re-run this module's CLI.
     """
     if batch_dir is None:
         return None
@@ -139,7 +159,20 @@ def load_cached_shock_folds(
         payload = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return None
-    if payload.get("baseline_fingerprint") != expected_baseline_fingerprint:
+    resolved_outer = {**DEFAULT_OUTER_FOLD_PARAMS, **(outer_fold_params or {})}
+    expected = {
+        "baseline_fingerprint": baseline_fingerprint,
+        "seed": seed,
+        "outer_fold_params": resolved_outer,
+        "shock_quantile": quantile,
+    }
+    actual = {
+        "baseline_fingerprint": payload.get("baseline_fingerprint"),
+        "seed": payload.get("seed"),
+        "outer_fold_params": payload.get("outer_fold_params"),
+        "shock_quantile": payload.get("shock_quantile"),
+    }
+    if actual != expected:
         return None
     raw = payload.get("shock_folds")
     if raw is None:

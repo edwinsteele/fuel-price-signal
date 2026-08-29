@@ -34,7 +34,12 @@ Usage:
 #   • gate evaluation           GateSpec, evaluate_gates
 #   • meta serialisation        write_meta
 #   • timing                    time_block
-#   • shared constants          SEEDS, SHOCK_FOLDS, LGBM_DEFAULTS
+#   • shared constants          SEEDS, LGBM_DEFAULTS
+#   • shock/normal regime       computed empirically by iter_folds_with_baseline_fit
+#                               (experiments.lib.folds.compute_shock_folds, fps-3tu) —
+#                               NOT the superseded fixed-index SHOCK_FOLDS constant. To
+#                               reproduce a PRE-fps-3tu script's exact numbers, pass
+#                               shock_folds=<that script's literal set> explicitly.
 #   • the locked baseline (R0)  BASELINE_COLUMNS — never retype the group
 #                               composition, never derive it from the frame
 #
@@ -53,7 +58,7 @@ import pandas as pd
 
 from experiments.lib.aggregate import aggregate_with_deltas
 from experiments.lib.cohorts import hard_quantile_mask
-from experiments.lib.constants import BASELINE_COLUMNS, BASELINE_FINGERPRINT, SEEDS, SHOCK_FOLDS
+from experiments.lib.constants import BASELINE_COLUMNS, BASELINE_FINGERPRINT, SEEDS
 from experiments.lib.fit import fit_score, per_row_log_loss
 from experiments.lib.folds import iter_folds_with_baseline_fit
 from experiments.lib.gates import GateSpec, evaluate_gates, seed_variance_gate
@@ -199,6 +204,11 @@ def main() -> None:
     df_rows.to_csv(OUT / "runs.csv", index=False)
     print(f"\nPer-(fold,run,seed) results: {OUT / 'runs.csv'}", flush=True)
 
+    # The regime tags iter_folds_with_baseline_fit actually used this run (empirical by
+    # default, fps-3tu) — read back off df_rows's own "regime" column rather than a
+    # constant, so meta.json always describes what the run above actually did.
+    shock_folds = sorted(int(f) for f in df_rows.loc[df_rows["regime"] == "shock", "fold"].unique())
+
     collector.to_parquet(OUT / "rowpreds.parquet")
 
     # ── Aggregate + gates ─────────────────────────────────────────────────────
@@ -244,7 +254,7 @@ def main() -> None:
     # ── Write meta ────────────────────────────────────────────────────────────
     meta = {
         "seeds": list(SEEDS),
-        "shock_folds": sorted(SHOCK_FOLDS),
+        "shock_folds": shock_folds,
         # write_meta stamps meta["baseline"] (n_columns / ordered fingerprint /
         # the column list) on its own — nothing to add here.
         "candidate_columns": [CANDIDATE_COL],  # TODO: list all candidate cols

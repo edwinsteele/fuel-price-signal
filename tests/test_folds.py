@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from experiments.lib.constants import SHOCK_QUANTILE
 from experiments.lib.folds import compute_shock_folds
 
@@ -44,3 +48,24 @@ def test_compute_shock_folds_default_quantile_matches_the_shared_constant():
     assert shock == compute_shock_folds(fold_ll, quantile=SHOCK_QUANTILE)
     assert len(shock) == 4
     assert shock == frozenset({11, 12, 13, 14})  # the 4 highest-ll fold indices
+
+
+def test_compute_shock_folds_raises_on_a_nan_log_loss():
+    """Review finding on PR #350: sorted(..., reverse=True) with a NaN present is
+    order-dependent (which fold "wins" the cut depends on dict/list iteration order, not
+    the data), so a degenerate fit must raise rather than silently pick a side."""
+    fold_ll = {1: 0.30, 2: math.nan, 3: 0.45, 4: 0.20}
+    with pytest.raises(ValueError, match=r"fold\(s\) \[2\]"):
+        compute_shock_folds(fold_ll, quantile=0.25)
+
+
+def test_compute_shock_folds_raises_regardless_of_dict_insertion_order():
+    """The bug this guards against: the SAME logical mapping, built with the NaN
+    inserted first vs last, used to silently select a different 'hardest' fold. Both
+    orderings must now raise identically instead of disagreeing."""
+    forward = {1: 0.9, 2: math.nan, 3: 0.5, 4: 0.1}
+    backward = {2: math.nan, 1: 0.9, 3: 0.5, 4: 0.1}
+    with pytest.raises(ValueError):
+        compute_shock_folds(forward, quantile=0.25)
+    with pytest.raises(ValueError):
+        compute_shock_folds(backward, quantile=0.25)

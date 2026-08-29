@@ -106,7 +106,7 @@ import pandas as pd
 
 from experiments.lib.aggregate import aggregate_with_deltas
 from experiments.lib.cohorts import hard_quantile_mask
-from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SEEDS
+from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SEEDS, SHOCK_QUANTILE
 from experiments.lib.fit import fit_score, per_row_log_loss
 from experiments.lib.folds import iter_folds_with_baseline_fit
 from experiments.lib.gates import seed_variance_gate
@@ -473,14 +473,25 @@ def run_candidate(
         axis_lookup = _build_axis_lookup(frame, axis_series)
 
     # This batch's cached empirical shock-fold set (fps-3tu / fps-1lb), when present and
-    # fingerprint-matched — every candidate in a batch shares the same frozen data and
-    # baseline columns, so this call's own live derivation would be byte-identical anyway;
-    # reading the cache just skips redoing it. None (cache absent, unreadable, or the
-    # batch's baseline has since been relocked) falls back to _run_wfcv_screen deriving it
-    # live for this run, same as before this cache existed.
+    # config-matched (baseline_fingerprint, seed, outer fold geometry, quantile — see
+    # load_cached_shock_folds's docstring for why all four, not fingerprint alone) — every
+    # candidate in a batch shares the same frozen data and baseline columns, so this call's
+    # own live derivation would be byte-identical anyway; reading the cache just skips
+    # redoing it. None (cache absent, unreadable, or ANY of that config drifted since the
+    # cache was written — a baseline re-lock, or this run overriding fold geometry away
+    # from the batch's default) falls back to _run_wfcv_screen deriving it live for this
+    # run, same as before this cache existed.
     cached_shock_folds = load_cached_shock_folds(
-        batch_dir, expected_baseline_fingerprint=baseline_fingerprint(baseline_columns)
+        batch_dir,
+        baseline_fingerprint=baseline_fingerprint(baseline_columns),
+        seed=seeds[0],
+        outer_fold_params=outer_fold_params,
     )
+    # Provenance for results.json's meta below (review finding on PR #350): a batch whose
+    # cache was regenerated at a different --quantile would otherwise produce runs
+    # byte-indistinguishable in shape from any other, with no dossier reader able to tell
+    # which quantile actually graded this run, or whether it came from the cache at all.
+    shock_folds_source = "cache" if cached_shock_folds is not None else "live"
 
     try:
         df_rows, collector = _run_wfcv_screen(
@@ -690,6 +701,13 @@ def run_candidate(
             # derived from this run's own baseline fit. None for results.json predating
             # this field, which used the old fixed-index SHOCK_FOLDS instead.
             "shock_folds": sorted(shock_folds),
+            # Provenance for the two fields above (fps-15c pattern — a graded CPL with no
+            # cadence stamp is a refusal, not a silent unknown; same idea here). quantile
+            # is always the CURRENT SHOCK_QUANTILE regardless of source: load_cached_shock_
+            # folds refuses a cache computed at a different quantile, so a "cache" source
+            # is guaranteed to agree with it, not just usually.
+            "shock_quantile": SHOCK_QUANTILE,
+            "shock_folds_source": shock_folds_source,
         },
     }
     results_path = out_dir / RESULTS_FILENAME

@@ -325,10 +325,19 @@ def freeze_batch(
         if missing_steps:
             what = " and ".join(name for name, _cmd in missing_steps)
             commands = "; then ".join(f"`{cmd} {batch_name}`" for _name, cmd in missing_steps)
+            # Singular/plural phrasing must track len(missing_steps), not be restated as a
+            # literal (review finding on PR #350): a hardcoded "neither file exists yet"
+            # is simply wrong when only one of the two is actually missing, and an
+            # operator who trusts it could believe noise_floor.json also needs redoing
+            # when it's already there — overwriting the floor every dossier in the batch
+            # is already reading.
+            missing_clause = (
+                "the file doesn't exist yet" if len(missing_steps) == 1 else "neither file exists yet"
+            )
             recovery_hint = (
                 f" It looks like everything but the {what} is already pinned — if setup was "
                 f"interrupted after freezing, finish it with {commands} (no --force needed, "
-                "neither file exists yet)."
+                f"{missing_clause})."
             )
         raise FileExistsError(
             f"Batch dir already exists: {batch_dir}. Batches are frozen once.{recovery_hint}"

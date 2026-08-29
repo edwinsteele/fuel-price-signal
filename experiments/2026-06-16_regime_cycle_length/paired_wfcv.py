@@ -184,8 +184,12 @@ def main() -> None:
     rows: list[dict] = []
     collector = RowPredCollector(pd.DataFrame())
 
+    # shock_folds=SHOCK_FOLDS pins this frozen lab-book entry's regime tagging to its
+    # original fixed-index taxonomy (fps-3tu review finding): iter_folds_with_baseline_fit
+    # now derives an empirical shock-fold set by default, which would silently diverge
+    # from this script's own SHOCK_FOLDS-based aggregates/markers/meta below on a re-run.
     for fold_idx, regime, train_df, val_df, ll0, p0, t0, prl0 in iter_folds_with_baseline_fit(
-        df, baseline_cols
+        df, baseline_cols, shock_folds=SHOCK_FOLDS
     ):
         vd = pd.to_datetime(val_df["price_date"])
         val_start, val_end = vd.min(), vd.max()

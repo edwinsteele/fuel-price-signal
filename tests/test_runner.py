@@ -596,9 +596,11 @@ def test_run_candidate_threads_the_cached_shock_folds_into_the_wfcv_screen(tmp_p
     cached_set = frozenset({2})
     captured = {}
 
-    def fake_load_cached(batch_dir_arg, *, expected_baseline_fingerprint):
+    def fake_load_cached(batch_dir_arg, *, baseline_fingerprint, seed, outer_fold_params):
         captured["batch_dir"] = batch_dir_arg
-        captured["fingerprint"] = expected_baseline_fingerprint
+        captured["fingerprint"] = baseline_fingerprint
+        captured["seed"] = seed
+        captured["outer_fold_params"] = outer_fold_params
         return cached_set
 
     def fake_wfcv_screen(*args, **kwargs):
@@ -616,6 +618,8 @@ def test_run_candidate_threads_the_cached_shock_folds_into_the_wfcv_screen(tmp_p
 
     assert captured["batch_dir"] == pathlib.Path(batch_dir)
     assert captured["fingerprint"] == expected_fp
+    assert captured["seed"] == 1  # seeds[0]
+    assert captured["outer_fold_params"] == SMALL_OUTER_FOLDS
     assert captured["shock_folds_kwarg"] == cached_set
     assert result.status == STATUS_ABORTED_CANDIDATE  # from fake_wfcv_screen's raise
 

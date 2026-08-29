@@ -1401,6 +1401,17 @@ def _breakdowns(
     # shock/normal labelling.
     raw_shock_folds = results.get("meta", {}).get("shock_folds")
     shock_folds = frozenset(int(f) for f in raw_shock_folds) if raw_shock_folds is not None else None
+    # Shared with per_regime's own {"computed": False, "reason": ...} below rather than
+    # restated — one string, two symptoms. per_fold[]'s bare "regime": None otherwise
+    # carries no explanation of its own (review finding on PR #350): a reader hitting a
+    # blank regime column with no accompanying note has no way to tell "not computable"
+    # from "no regime effect", which is exactly the ambiguity this module's computed/
+    # reason contract exists to remove everywhere else.
+    regime_unavailable_reason = (
+        None if shock_folds is not None else
+        "this run's results.json predates fps-3tu's empirical shock-fold set "
+        "(meta.shock_folds) — re-run the candidate to backfill it."
+    )
 
     per_fold = []
     for fold in sorted(fills["fold"].unique()):
@@ -1420,11 +1431,7 @@ def _breakdowns(
         per_fold.append(row)
 
     if shock_folds is None:
-        per_regime = {
-            "computed": False,
-            "reason": "this run's results.json predates fps-3tu's empirical shock-fold set "
-            "(meta.shock_folds) — re-run the candidate to backfill it.",
-        }
+        per_regime = {"computed": False, "reason": regime_unavailable_reason}
     else:
         all_folds = set(fills["fold"].unique())
         per_regime = []
@@ -1464,6 +1471,11 @@ def _breakdowns(
 
     return {
         "per_fold": per_fold, "per_regime": per_regime, "per_axis": per_axis,
+        # None whenever per_fold[]'s "regime" values are real (shock/normal); explains
+        # BOTH per_fold[].regime being bare None and per_regime being computed:false
+        # otherwise, so a reader hitting either symptom finds the reason beside it
+        # rather than having to infer it from the other's shape.
+        "per_fold_regime_unavailable_reason": regime_unavailable_reason,
         "per_axis_coverage_note": per_axis_coverage_note,
         # per_fold and per_regime cut on WHOLE folds, each of which is an independent
         # simulation with its own tank, so they are sums of complete windows. per_axis cuts
