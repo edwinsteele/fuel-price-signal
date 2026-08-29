@@ -594,6 +594,38 @@ def test_build_facts_noise_band_refuses_a_floor_with_no_tank_params(tmp_path):
     assert "tank_params" in band["reason"]
 
 
+def test_noise_band_refuses_a_floor_and_run_that_both_lack_tank_params(tmp_path):
+    """review of PR #349: `_bank_admissibility` applies fps-v8o's "cannot be shown to match,
+    so cannot be trusted" rule symmetrically — a run with no tank_params of its own can't show
+    a match against a floor that also lacks the field, even though the two look equal
+    (`None == None`). Unreachable via `build_facts` itself (fps-15c already refuses a graded
+    run missing meta.tank_params before `_noise_band` is ever called — see
+    test_build_facts_raises_when_graded_run_has_no_tank_params), so this calls `_noise_band`
+    directly, the same way retrospective.py's `_batch_noise_summary` does — except with
+    check_fingerprint=True, since a hypothetical caller other than build_facts/retrospective.py
+    could reach this state."""
+    batch_dir = tmp_path / "batch1"
+    batch_dir.mkdir()
+    (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+        "deltas_cpl_held": [0.01, 0.02, -0.01], "baseline_fingerprint": "54:deadbeef1234",
+        "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
+        # No "tank_params" key.
+    }))
+    results = {
+        "candidate": {"columns": ["a"]},
+        "effect_delta_cpl_held": -0.05,
+        "meta": {"baseline_fingerprint": "54:deadbeef1234"},  # no tank_params either
+    }
+
+    band = dt._noise_band(results, batch_dir)
+
+    assert band["available"] is False
+    assert "neither side" in band["reason"]
+    # Must not be self-contradictory: the old wording, applied to this case, would read
+    # "(None) does not match this run's (None)" — a claimed mismatch between two equal values.
+    assert "(None) does not match this run's (None)" not in band["reason"]
+
+
 # ── decision flips (fps-gez) ───────────────────────────────────────────────────
 
 def _diverging_fills(fold=1) -> pd.DataFrame:
@@ -1740,6 +1772,20 @@ def test_noise_band_treats_a_floor_with_no_arity_key_as_arity_1(tmp_path):
     assert "1-column null" in multi_band["reason"]
 
 
+def test_noise_band_refuses_a_floor_declaring_zero_placebo_columns(tmp_path):
+    """review of PR #349: `n_placebo_columns: 0` is a degenerate ruler, not evidence of arity
+    1 — only a MISSING key means arity 1 (a floor predating fps-3jj.14 entirely, where the
+    parameter did not exist yet). A defensive `... or 1` fallback would silently promote a
+    bank explicitly claiming 0 placebo columns into a valid-looking arity-1 ruler, exactly the
+    bias fps-3jj.14 exists to catch."""
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with(arity=0))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_ARITY
+
+
 def test_noise_band_allows_a_wider_floor_and_discloses_it(tmp_path):
     """One-sided on purpose. A floor at arity >= the run's can only be as wide or wider,
     i.e. a HARDER bar — refusing it would force one ~2h calibration per distinct arity in a
@@ -1947,13 +1993,15 @@ def test_noise_band_sibling_with_no_estimable_band_is_not_comparable(tmp_path, o
 
 
 def test_noise_band_and_sibling_path_agree_on_a_degenerate_bank(tmp_path):
-    """fps-1x5 regression: `_noise_band` and `_comparable_noise_banks` now share both the
-    admissibility decision (`_bank_admissibility`) and the band statistics (`_score_bank`,
-    which calls the float-degeneracy guard `_band_std_usable` fps-tnz added). Put the
-    IDENTICAL degenerate bank on both paths — as the canonical file and as a sibling — and
-    assert they reach the same estimability verdict, so a future one-sided fix (the exact
-    failure mode fps-tnz found, one guard landed on one copy) is caught here instead of
-    shipping silently again."""
+    """Documents agreement on the ONE axis fps-tnz had already shared before fps-1x5
+    (`_band_std_usable`) — put the IDENTICAL degenerate bank on both paths and confirm the
+    same estimability verdict. Note this does NOT prove the two paths share code: it still
+    passes against the pre-fps-1x5 duplication (fps-tnz's fix already landed on both copies
+    by the time this PR started), so it is not itself the "would fail under the old
+    duplication" regression test fps-1x5's acceptance criteria ask for — see
+    test_noise_band_and_sibling_scores_are_both_derived_from_the_shared_score_bank below for
+    that, which proves sharing directly rather than inferring it from agreement (review of
+    PR #349)."""
     degenerate = [0.01] * 20
     run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
         _bank(arity=2, deltas_cpl_held=degenerate),
@@ -1973,6 +2021,41 @@ def test_noise_band_and_sibling_path_agree_on_a_degenerate_bank(tmp_path):
     sib = band["comparable_banks"][0]
     assert sib["comparable"] is False
     assert "same value" in sib["reason"]
+
+
+def test_noise_band_and_sibling_scores_are_both_derived_from_the_shared_score_bank(tmp_path):
+    """fps-1x5's actual unification target, proven directly rather than inferred from
+    agreement (review of PR #349): `_noise_band` and `_comparable_noise_banks` must compute
+    their band statistics by calling the SAME `_score_bank`, not two independently written
+    computations that happen to produce the same numbers today. Computes the expected
+    band_mean/std/effective_n_draws/z independently via a bare `_score_bank` call on the exact
+    same deltas the fixture bank carries, and asserts BOTH callers' facts.json numbers equal
+    it exactly — so a future fork that reintroduces even a subtly different computation in one
+    caller (a different ddof, a rounding step, a stale copy of a `_resolve_effective_n_draws`
+    call) shows up as a mismatch here, unlike the agreement test above."""
+    deltas = list(np.random.default_rng(11).normal(0, 0.03, size=15))
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
+        _bank(arity=2, deltas_cpl_held=deltas),
+        twin=_bank(arity=2, deltas_cpl_held=deltas),
+    ))
+
+    facts = dt.build_facts(run_dir)
+    band = facts["noise_band"]
+    sib = band["comparable_banks"][0]
+
+    expected = dt._score_bank(
+        np.asarray(deltas, dtype=float), band["candidate_delta_cpl_held"],
+        {"deltas_cpl_held": deltas},
+    )
+
+    for observed in (band, sib):
+        assert observed["band_mean_delta_cpl_held"] == pytest.approx(expected["band_mean"])
+        assert observed["band_std_delta_cpl_held"] == pytest.approx(expected["band_std"])
+        assert observed["effective_n_draws"] == pytest.approx(expected["effective_n_draws"])
+        assert observed["candidate_z_vs_band"] == pytest.approx(expected["candidate_z_vs_band"])
+        assert observed["single_candidate_z_threshold"] == pytest.approx(
+            expected["single_candidate_z_threshold"]
+        )
 
 
 def test_noise_band_arity_refusal_ignores_a_wide_but_ungradeable_sibling(tmp_path):
@@ -1995,6 +2078,12 @@ def test_noise_band_arity_refusal_ignores_a_wide_but_ungradeable_sibling(tmp_pat
     {"n_placebo_columns": "three"},
     {"deltas_cpl_held": ["not", "numbers"]},
     {"deltas_cpl_held": {"nested": "object"}},
+    # review of PR #349: `_score_bank` (called for `effective_n_draws` via
+    # `_resolve_effective_n_draws`) has to stay inside the same try as the coercions above —
+    # it raises ValueError on a non-numeric stamp exactly like `float(bank["deltas_cpl_held"])`
+    # does, and moving it outside the try (as an earlier revision of this PR did) let a junk
+    # side-file raise straight out of build_facts instead of being skipped.
+    {"effective_n_draws": "twenty"},
 ])
 def test_noise_band_malformed_sibling_is_skipped_not_fatal(tmp_path, overrides):
     """A stray or half-written side-file matching noise_floor*.json must not stop build_facts

@@ -832,7 +832,11 @@ def _bank_admissibility(
     corroboration listing), and forcing one wording onto both was never asked for by fps-1x5.
     """
     null_method = bank.get("null_method")
-    floor_arity = int(bank.get("n_placebo_columns", 1) or 1)
+    # NOT `... or 1` (review of PR #349) — that would silently promote a bank explicitly
+    # claiming 0 placebo columns into an arity-1 ruler, exactly the bias fps-3jj.14 exists to
+    # catch. Only a MISSING key defaults to 1 (a floor predating fps-3jj.14 entirely WAS
+    # arity 1); an explicit 0 stays 0 and fails the arity guard like it always has.
+    floor_arity = int(bank.get("n_placebo_columns", 1))
 
     if refuse_identity_mismatch:
         floor_fingerprint = bank.get("baseline_fingerprint")
@@ -860,7 +864,6 @@ def _bank_admissibility(
 
     return {
         "ok": True,
-        "null_method": null_method,
         "floor_arity": floor_arity,
         "arity_exceeds_run": bool(run_arity and floor_arity > run_arity),
         "arity_excess": max(0, floor_arity - run_arity) if run_arity else 0,
@@ -948,6 +951,13 @@ def _comparable_noise_banks(
             entry["n_placebo_columns"] = int(bank.get("n_placebo_columns", 1))
             deltas = np.asarray(bank.get("deltas_cpl_held", []), dtype=float)
             entry["n_draws"] = int(deltas.size)
+            # `_score_bank` calls `_resolve_effective_n_draws`, which coerces
+            # `effective_n_draws`/`placebo_draws` fields the same way the lines above coerce
+            # `n_placebo_columns`/`deltas_cpl_held` — a malformed value there (e.g. a
+            # non-numeric `effective_n_draws`) raises exactly the same way, so it has to stay
+            # inside this try (review of PR #349): a bank this function cannot read is a
+            # SKIPPED bank, never a fatal, for EVERY field it reads, not just the first two.
+            score = _score_bank(deltas, delta, bank)
         except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
             banks.append({**entry, "comparable": False, "reason": f"unreadable: {exc}"})
             continue
@@ -973,7 +983,6 @@ def _comparable_noise_banks(
         # sibling in it corroborates nothing, and, worse, the arity refusal below filters
         # on `comparable` alone: marking it True would let the refusal advise promoting a
         # ruler that still cannot grade anything once promoted.
-        score = _score_bank(deltas, delta, bank)
         if score["n_draws"] < 2:
             entry.update(comparable=False, reason=f"only {score['n_draws']} draw(s) — no band to estimate")
         elif not score["band_std_usable"]:
@@ -1092,9 +1101,20 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             # (fps-cf8), just along the cadence axis instead of the feature-set axis. A floor
             # with no tank_params at all (pre-fps-v8o) is treated as a mismatch, not a pass —
             # same "cannot be shown to match, so cannot be trusted" rule as the checks above.
-            # Gated on check_fingerprint like the fingerprint check itself: retrospective.py's
-            # `_batch_noise_summary` reuses this function's math with a dummy `results` that
-            # has no real meta.tank_params to compare.
+            # `_bank_admissibility` applies that rule symmetrically (review of PR #349): a run
+            # with NO tank_params of its own can't show a match either, even against a floor
+            # that also lacks the field — build_facts() itself already refuses a graded run
+            # missing meta.tank_params before ever reaching here (fps-15c), so this branch is
+            # unreachable via build_facts and only guards a caller that skips that gate.
+            if floor_value is None and run_value is None:
+                return {
+                    "available": False,
+                    "reason": "noise_floor.json has no tank_params at all (predates fps-v8o), and "
+                    "this run's own meta.tank_params is also missing — neither side can be shown "
+                    "to match the other, so the floor does not grade this run. Recompute with "
+                    "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
+                    "--force`.",
+                }
             return {
                 "available": False,
                 "reason": f"noise_floor.json's tank_params ({floor_value!r}) does not match "
@@ -1168,18 +1188,23 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
                 "becomes a real measurement once a wide-enough ruler exists. Leave it in the dossier "
                 "queue (write no README.md, no ledger entry) until then.",
             }
-        # axis == "partial": noise_floor.py's --fold-subset is an iteration/smoke speed-up —
-        # the deltas only cover some outer folds, but effect_delta_cpl_held always pools every
-        # fold. Grading a candidate against a partial-fold floor as though it were the real one
-        # would silently misjudge the delta, not just weaken the estimate — refuse rather than
-        # mislabel it.
-        return {
-            "available": False,
-            "reason": "noise_floor.json was computed with --fold-subset (partial fold "
-            "coverage) — not a valid ruler against a delta pooled over every fold. Recompute "
-            "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
-            "--force` and no --fold-subset.",
-        }
+        if axis == "partial":
+            # noise_floor.py's --fold-subset is an iteration/smoke speed-up — the deltas only
+            # cover some outer folds, but effect_delta_cpl_held always pools every fold.
+            # Grading a candidate against a partial-fold floor as though it were the real one
+            # would silently misjudge the delta, not just weaken the estimate — refuse rather
+            # than mislabel it.
+            return {
+                "available": False,
+                "reason": "noise_floor.json was computed with --fold-subset (partial fold "
+                "coverage) — not a valid ruler against a delta pooled over every fold. Recompute "
+                "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
+                "--force` and no --fold-subset.",
+            }
+        # Every axis `_bank_admissibility` can name is handled above (review of PR #349) —
+        # falling through here would silently mislabel a future axis with the --fold-subset
+        # message instead of failing loudly.
+        raise AssertionError(f"_bank_admissibility returned an unhandled refusal axis: {axis!r}")
     floor_arity = admiss["floor_arity"]
     deltas = np.asarray(noise_floor.get("deltas_cpl_held", []), dtype=float)
     delta = results.get("effect_delta_cpl_held")
