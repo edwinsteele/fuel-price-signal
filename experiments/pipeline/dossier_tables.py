@@ -796,6 +796,113 @@ def _band_std_usable(deltas: np.ndarray, band_std: float) -> bool:
     return bool(np.isfinite(band_std) and band_std > 0 and float(np.ptp(deltas)) > 0)
 
 
+def _bank_admissibility(
+    bank: dict,
+    *,
+    run_meta: dict,
+    run_arity: int,
+    refuse_identity_mismatch: bool,
+    refuse_null_method_mismatch: bool,
+    refuse_narrow_arity: bool,
+) -> dict:
+    """Everything that decides "is this bank usable" BEFORE its band statistics are computed:
+    identity (`baseline_fingerprint`, `tank_params`), `null_method`, arity, and `partial`
+    (fps-1x5 — the one place `_noise_band` and `_comparable_noise_banks` both decide this,
+    replacing two independently-written copies that had already diverged once, fps-tnz).
+
+    Strictness is a parameter per axis because the two callers deliberately disagree on it —
+    see their own docstrings for why. `refuse_identity_mismatch` mirrors `_noise_band`'s own
+    `check_fingerprint` (retrospective.py's dummy-results path sets it False; a floor cannot
+    be shown too narrow for a run with no real arity to compare against either, so
+    `_noise_band` gates `refuse_narrow_arity` the same way). `refuse_null_method_mismatch` is
+    unconditional strictness on the canonical path and always off on the sibling path — a
+    pinned-source bank measures a genuinely different null and is worth reporting, never worth
+    promoting to canonical (fps-awz vs fps-30p). `refuse_narrow_arity` only ever refuses a
+    floor NARROWER than the run; a floor at or above the run's arity is always admissible and
+    always disclosed via `arity_exceeds_run`/`arity_excess` on both paths, because a wider
+    ruler can only raise the bar (fps-3jj.14/fps-3jj.25).
+
+    Returns `{"ok": True, "floor_arity", "arity_exceeds_run", "arity_excess",
+    "narrower_than_run"}` when admissible. Returns `{"ok": False, "axis", "floor_value",
+    "run_value"}` — one of "baseline_fingerprint" / "null_method" / "tank_params" / "arity" /
+    "partial" — naming which check failed, for the caller to build its OWN (differently
+    worded — canonical is actionable-and-verbose, siblings are terse) refusal message from.
+    Message text is deliberately NOT unified here: the two callers' readers are different
+    (an unattended dossier session pasting canonical's reason into a README vs. a batch-level
+    corroboration listing), and forcing one wording onto both was never asked for by fps-1x5.
+    """
+    null_method = bank.get("null_method")
+    # NOT `... or 1` (review of PR #349) — that would silently promote a bank explicitly
+    # claiming 0 placebo columns into an arity-1 ruler, exactly the bias fps-3jj.14 exists to
+    # catch. Only a MISSING key defaults to 1 (a floor predating fps-3jj.14 entirely WAS
+    # arity 1); an explicit 0 stays 0 and fails the arity guard like it always has.
+    floor_arity = int(bank.get("n_placebo_columns", 1))
+
+    if refuse_identity_mismatch:
+        floor_fingerprint = bank.get("baseline_fingerprint")
+        run_fingerprint = run_meta.get("baseline_fingerprint")
+        if floor_fingerprint is None or floor_fingerprint != run_fingerprint:
+            return {
+                "ok": False, "axis": "baseline_fingerprint",
+                "floor_value": floor_fingerprint, "run_value": run_fingerprint,
+            }
+
+    if refuse_null_method_mismatch and null_method != NULL_METHOD_PLACEBO_COLUMN:
+        return {"ok": False, "axis": "null_method", "floor_value": null_method, "run_value": NULL_METHOD_PLACEBO_COLUMN}
+
+    if refuse_identity_mismatch:
+        floor_tank_params = bank.get("tank_params")
+        run_tank_params = run_meta.get("tank_params")
+        if floor_tank_params is None or floor_tank_params != run_tank_params:
+            return {"ok": False, "axis": "tank_params", "floor_value": floor_tank_params, "run_value": run_tank_params}
+
+    if refuse_narrow_arity and run_arity > floor_arity:
+        return {"ok": False, "axis": "arity", "floor_value": floor_arity, "run_value": run_arity}
+
+    if bank.get("partial"):
+        return {"ok": False, "axis": "partial", "floor_value": True, "run_value": False}
+
+    return {
+        "ok": True,
+        "floor_arity": floor_arity,
+        "arity_exceeds_run": bool(run_arity and floor_arity > run_arity),
+        "arity_excess": max(0, floor_arity - run_arity) if run_arity else 0,
+        "narrower_than_run": bool(run_arity and floor_arity < run_arity),
+    }
+
+
+def _score_bank(deltas: np.ndarray, delta: float | None, bank: dict) -> dict:
+    """Band statistics + score: mean, std, effective draw count, estimability, and — when
+    `delta` is given — the z-score and single-candidate threshold (fps-1x5's other shared
+    half: "one place computes mean/std/n_eff/z/threshold"). Pure computation, identical on
+    both paths.
+
+    The ESTIMABILITY GATE'S CONSEQUENCE is deliberately left to the caller, not decided here:
+    `_noise_band` still reports a bank with an unestimable std as `available: True` (with
+    `candidate_z_vs_band`/threshold null — docs/routines/dossier.md's "present-but-null"
+    rule), while `_comparable_noise_banks` refuses it outright (`comparable: False`) — a
+    pre-existing, tested divergence (see each caller) that this function does not paper over.
+    """
+    band_mean = float(np.mean(deltas)) if deltas.size else float("nan")
+    band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
+    n_eff = _resolve_effective_n_draws(bank, nominal=int(deltas.size))
+    band_std_usable = _band_std_usable(deltas, band_std)
+    band_estimable = bool(band_std_usable and n_eff >= 2)
+    single_z = family_wise_z_threshold(n_candidates=1, n_draws=n_eff) if band_estimable else None
+    return {
+        "n_draws": int(deltas.size),
+        "effective_n_draws": n_eff,
+        "band_mean": band_mean,
+        "band_std": band_std,
+        "band_std_usable": band_std_usable,
+        "band_estimable": band_estimable,
+        "single_candidate_z_threshold": single_z,
+        "candidate_z_vs_band": (
+            (delta - band_mean) / band_std if band_estimable and delta is not None else None
+        ),
+    }
+
+
 def _comparable_noise_banks(
     results: dict, batch_dir: pathlib.Path, *, canonical: pathlib.Path, delta: float | None
 ) -> list[dict]:
@@ -844,66 +951,72 @@ def _comparable_noise_banks(
             entry["n_placebo_columns"] = int(bank.get("n_placebo_columns", 1))
             deltas = np.asarray(bank.get("deltas_cpl_held", []), dtype=float)
             entry["n_draws"] = int(deltas.size)
-            band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
-            band_mean = float(np.mean(deltas)) if deltas.size else float("nan")
-            n_eff = _resolve_effective_n_draws(bank, nominal=int(deltas.size))
+            # `_score_bank` calls `_resolve_effective_n_draws`, which coerces
+            # `effective_n_draws`/`placebo_draws` fields the same way the lines above coerce
+            # `n_placebo_columns`/`deltas_cpl_held` — a malformed value there (e.g. a
+            # non-numeric `effective_n_draws`) raises exactly the same way, so it has to stay
+            # inside this try (review of PR #349): a bank this function cannot read is a
+            # SKIPPED bank, never a fatal, for EVERY field it reads, not just the first two.
+            score = _score_bank(deltas, delta, bank)
         except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
             banks.append({**entry, "comparable": False, "reason": f"unreadable: {exc}"})
             continue
-        for label, got, want in (
-            ("baseline_fingerprint", bank.get("baseline_fingerprint"), run_meta.get("baseline_fingerprint")),
-            ("tank_params", bank.get("tank_params"), run_meta.get("tank_params")),
-        ):
-            if got is None or got != want:
-                entry.update(comparable=False, reason=f"{label} {got!r} does not match this run's {want!r}")
-                break
-        else:
-            # A bank whose band cannot be ESTIMATED is not comparable, even when its identity
-            # matches (review of PR #345). The canonical path already treats this state as
-            # ungradeable — `docs/routines/dossier.md`'s "present-but-null z/t" rule — so a
-            # sibling in it corroborates nothing, and, worse, the arity refusal below filters
-            # on `comparable` alone: marking it True would let the refusal advise promoting a
-            # ruler that still cannot grade anything once promoted.
-            if bank.get("partial"):
-                entry.update(comparable=False, reason="computed with --fold-subset (partial fold coverage)")
-            elif deltas.size < 2:
-                entry.update(comparable=False, reason=f"only {deltas.size} draw(s) — no band to estimate")
-            elif not _band_std_usable(deltas, band_std):
-                entry.update(
-                    comparable=False,
-                    reason=f"band_std {band_std!r} is not estimable — every draw landed on the "
-                    "same value, so there is no band to compare against",
-                )
-            elif n_eff < 2:
-                entry.update(
-                    comparable=False,
-                    reason=f"effective_n_draws {n_eff:.2f} < 2 once source-column reuse is "
-                    f"priced in (nominal {deltas.size}) — not enough independent draws to grade",
-                )
+        # Permissive on both axes canonical is strict on (fps-1x5): a differing null_method
+        # or a narrower arity is DISCLOSED below, never a refusal reason here.
+        admiss = _bank_admissibility(
+            bank, run_meta=run_meta, run_arity=run_arity,
+            refuse_identity_mismatch=True,
+            refuse_null_method_mismatch=False,
+            refuse_narrow_arity=False,
+        )
+        if not admiss["ok"]:
+            if admiss["axis"] == "partial":
+                reason = "computed with --fold-subset (partial fold coverage)"
             else:
-                entry.update(
-                    comparable=True,
-                    # docs/CONVENTIONS.md groups arity with fingerprint/tank_params as the
-                    # same failure class, and the canonical path REFUSES a floor narrower
-                    # than the run (biased in the candidate's favour). Siblings are not
-                    # refused on it — a narrower bank is exactly what answers "would a
-                    # different arity move this call", and excluding it would delete the use
-                    # case this whole helper exists for (fps-6yi was resolved by an arity-1
-                    # bank against a 2-column run). So disclose rather than drop, the mirror
-                    # of `floor_arity_exceeds_run` on the canonical side: a True here means
-                    # this bank's z is biased in the CANDIDATE's favour and is a lower bound
-                    # on the bar, not a verdict. Never read it as one.
-                    narrower_than_run=bool(run_arity and entry["n_placebo_columns"] < run_arity),
-                    effective_n_draws=n_eff,
-                    band_mean_delta_cpl_held=band_mean,
-                    band_std_delta_cpl_held=band_std,
-                    candidate_z_vs_band=(
-                        (delta - band_mean) / band_std if delta is not None else None
-                    ),
-                    single_candidate_z_threshold=family_wise_z_threshold(
-                        n_candidates=1, n_draws=n_eff
-                    ),
-                )
+                reason = f"{admiss['axis']} {admiss['floor_value']!r} does not match this run's {admiss['run_value']!r}"
+            entry.update(comparable=False, reason=reason)
+            banks.append(entry)
+            continue
+        # A bank whose band cannot be ESTIMATED is not comparable, even when its identity
+        # matches (review of PR #345). The canonical path already treats this state as
+        # ungradeable — `docs/routines/dossier.md`'s "present-but-null z/t" rule — so a
+        # sibling in it corroborates nothing, and, worse, the arity refusal below filters
+        # on `comparable` alone: marking it True would let the refusal advise promoting a
+        # ruler that still cannot grade anything once promoted.
+        if score["n_draws"] < 2:
+            entry.update(comparable=False, reason=f"only {score['n_draws']} draw(s) — no band to estimate")
+        elif not score["band_std_usable"]:
+            entry.update(
+                comparable=False,
+                reason=f"band_std {score['band_std']!r} is not estimable — every draw landed on the "
+                "same value, so there is no band to compare against",
+            )
+        elif score["effective_n_draws"] < 2:
+            entry.update(
+                comparable=False,
+                reason=f"effective_n_draws {score['effective_n_draws']:.2f} < 2 once source-column reuse is "
+                f"priced in (nominal {score['n_draws']}) — not enough independent draws to grade",
+            )
+        else:
+            entry.update(
+                comparable=True,
+                # docs/CONVENTIONS.md groups arity with fingerprint/tank_params as the
+                # same failure class, and the canonical path REFUSES a floor narrower
+                # than the run (biased in the candidate's favour). Siblings are not
+                # refused on it — a narrower bank is exactly what answers "would a
+                # different arity move this call", and excluding it would delete the use
+                # case this whole helper exists for (fps-6yi was resolved by an arity-1
+                # bank against a 2-column run). So disclose rather than drop, the mirror
+                # of `floor_arity_exceeds_run` on the canonical side: a True here means
+                # this bank's z is biased in the CANDIDATE's favour and is a lower bound
+                # on the bar, not a verdict. Never read it as one.
+                narrower_than_run=admiss["narrower_than_run"],
+                effective_n_draws=score["effective_n_draws"],
+                band_mean_delta_cpl_held=score["band_mean"],
+                band_std_delta_cpl_held=score["band_std"],
+                candidate_z_vs_band=score["candidate_z_vs_band"],
+                single_candidate_z_threshold=score["single_candidate_z_threshold"],
+            )
         banks.append(entry)
     return banks
 
@@ -916,6 +1029,12 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
     `meta.tank_params` to compare, so the per-run identity checks below (fingerprint
     AND tank_params/cadence, fps-v8o) would always (mis)fire as a mismatch.
     `build_facts()`, which DOES grade a real run, always uses the default.
+
+    The admissibility decision and band statistics are shared with the sibling path
+    (`_comparable_noise_banks`, fps-30p) via `_bank_admissibility`/`_score_bank` (fps-1x5) —
+    this function is the STRICT caller of both: it refuses a `null_method` mismatch and a
+    narrower-than-run arity unconditionally (well, `refuse_narrow_arity` still follows
+    `check_fingerprint`, for the reason above), where the sibling path discloses instead.
     """
     if batch_dir is None:
         return {"available": False, "reason": "no batch_dir recorded in results.json meta"}
@@ -927,159 +1046,174 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             "python -m experiments.pipeline.noise_floor <batch>` (fps-3jj.9)",
         }
     noise_floor = json.loads(path.read_text())
-    floor_fingerprint = noise_floor.get("baseline_fingerprint")
-    run_fingerprint = results.get("meta", {}).get("baseline_fingerprint")
-    if check_fingerprint and (floor_fingerprint is None or floor_fingerprint != run_fingerprint):
-        # fps-cf8: a floor computed against one baseline could silently grade a
-        # candidate run against a different one (fps-sa1, fps-zci — exactly the
-        # failure class feedback_baseline_declared_not_discovered warns about). Refuse
-        # rather than trust "file exists" the way this function used to. A floor with
-        # no fingerprint at all (pre-fps-cf8) is treated as a mismatch, not a pass —
-        # it cannot be shown to match, so it cannot be trusted either.
-        return {
-            "available": False,
-            "reason": f"noise_floor.json's baseline_fingerprint ({floor_fingerprint!r}) does not "
-            f"match this run's ({run_fingerprint!r}) — the floor was computed against a "
-            "different baseline (or predates baseline_fingerprint entirely) and does not grade "
-            "this run. Recompute with `PYTHONPATH=. uv run python -m experiments.pipeline."
-            "noise_floor <batch> --force`.",
-        }
-    null_method = noise_floor.get("null_method")
-    if null_method != NULL_METHOD_PLACEBO_COLUMN:
-        # fps-awz: this PR itself changed what noise_floor.json's deltas_cpl_held MEASURE
-        # (a placebo-column null instead of a seed-swap null) without changing
-        # baseline_fingerprint (same 54 columns either way) — so the fingerprint check above
-        # would happily accept a pre-fps-awz batch's noise_floor.json (e.g. batch0's, already
-        # committed) forever, silently grading every future candidate against the OLD, wider,
-        # differently-shaped band this rework exists to replace. A floor with no null_method
-        # at all (pre-fps-awz) is treated as a mismatch, not a pass — same "cannot be shown to
-        # match, so cannot be trusted" rule the fingerprint check already applies.
-        return {
-            "available": False,
-            "reason": f"noise_floor.json's null_method ({null_method!r}) is not "
-            f"{NULL_METHOD_PLACEBO_COLUMN!r} — this floor predates the fps-awz placebo-column "
-            "rework (or was computed some other way) and does not grade this run. Recompute "
-            "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
-            "--force`.",
-        }
-    floor_tank_params = noise_floor.get("tank_params")
-    run_tank_params = results.get("meta", {}).get("tank_params")
-    if check_fingerprint and floor_tank_params != run_tank_params:
-        # fps-v8o: the consuming-side half of fps-15c's stamping work. A floor computed
-        # at one cadence (e.g. 7d) grades every draw's delta_cpl_held in that cadence's
-        # units — comparing a candidate run at a different cadence against it would
-        # silently misjudge the delta the same way a baseline_fingerprint mismatch would
-        # (fps-cf8), just along the cadence axis instead of the feature-set axis. A floor
-        # with no tank_params at all (pre-fps-v8o) is treated as a mismatch, not a pass —
-        # same "cannot be shown to match, so cannot be trusted" rule as the checks above.
-        # Gated on check_fingerprint like the fingerprint check itself: retrospective.py's
-        # `_batch_noise_summary` reuses this function's math with a dummy `results` that
-        # has no real meta.tank_params to compare.
-        return {
-            "available": False,
-            "reason": f"noise_floor.json's tank_params ({floor_tank_params!r}) does not match "
-            f"this run's ({run_tank_params!r}) — the floor was computed at a different cadence "
-            "(or predates tank_params entirely) and does not grade this run. Recompute with "
-            "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> --force`.",
-        }
-    # fps-3jj.14: arity. Same failure class as baseline_fingerprint, null_method and
-    # tank_params above — a floor that measures a DIFFERENT operation from the one the run
-    # performed — but with an asymmetry the others do not have, and the guard is one-sided
-    # because of it. A k-column candidate arm has more chances for the fit to find something
-    # than a j-column placebo arm does when k > j, so a floor BELOW the run's arity is
-    # narrow in the favourable direction and is refused. A floor at or ABOVE the run's arity
-    # can only be as wide or wider, i.e. a HARDER bar, so it is allowed and disclosed
-    # (`floor_arity_exceeds_run` below) rather than refused: refusing it would force a
-    # separate calibration run per distinct arity in a batch, which for batch1 alone
-    # (arities 3,3,3,2,2) means two ~2h runs to grade five candidates, buying nothing but a
-    # tighter bar the batch does not need.
-    #
-    # A floor with no n_placebo_columns key at all predates this and WAS arity 1 — read as
-    # 1 rather than refused, so an existing committed floor keeps grading 1-column
-    # candidates and only stops grading multi-column ones. That is the opposite of the
-    # "cannot be shown to match, so cannot be trusted" rule the checks above apply, and
-    # deliberately: those keys' absence left the value genuinely unknown, whereas this one's
-    # absence pins it (the parameter did not exist, so every such floor is arity 1).
-    floor_arity = int(noise_floor.get("n_placebo_columns", 1))
+    run_meta = results.get("meta", {})
     run_columns = results.get("candidate", {}).get("columns") or []
     run_arity = len(run_columns)
-    if check_fingerprint and run_arity > floor_arity:
-        # The draw count is no longer forced by arity (fps-3jj.21), so the wider floor is
-        # computed at the SAME n_draws as the ruler it replaces — which is also what keeps the
-        # two comparable, the thing fps-3jj.14's arity comparison needed and could not have.
-        n_draws_hint = int(noise_floor.get("n_draws") or len(noise_floor.get("deltas_cpl_held", [])))
-        # fps-30p: before telling anyone to spend ~2h computing a wider ruler, look for one.
-        # These banks accumulate precisely because the promote step below says `mv`, not
-        # `--force` — so the ruler this run needs may already be sitting beside the canonical
-        # one, unread. Only comparable banks count (same fingerprint and cadence).
-        # Every condition `_noise_band` itself would apply to the promoted file, not just
-        # arity — this hint recommends a `mv`, so a bank that would fail the very next run's
-        # checks is worse than no hint at all (review of PR #345). `_comparable_noise_banks`
-        # deliberately RELAXES null_method so a pinned-source bank's z can still be reported
-        # as corroboration; that relaxation must not leak into a promote recommendation,
-        # because the canonical null_method check above is unconditional.
-        adequate = [
-            b for b in _comparable_noise_banks(results, batch_dir, canonical=path, delta=None)
-            if b.get("comparable")
-            and b.get("n_placebo_columns", 1) >= run_arity
-            and b.get("null_method") == NULL_METHOD_PLACEBO_COLUMN
-        ]
-        already = (
-            "NOTE: a wide-enough ruler may already exist in this batch dir — "
-            + ", ".join(
-                f"{b['name']} ({b['n_placebo_columns']} columns, {b['n_draws']} draws)"
-                for b in adequate
+    # fps-1x5: the identity (baseline_fingerprint, null_method, tank_params), arity and
+    # partial checks are the CANONICAL half of `_bank_admissibility` — strict on every axis
+    # `_comparable_noise_banks` deliberately relaxes. See that function's docstring for why
+    # each strictness choice is what it is; this call only supplies the choices.
+    admiss = _bank_admissibility(
+        noise_floor, run_meta=run_meta, run_arity=run_arity,
+        refuse_identity_mismatch=check_fingerprint,
+        refuse_null_method_mismatch=True,
+        refuse_narrow_arity=check_fingerprint,
+    )
+    if not admiss["ok"]:
+        axis, floor_value, run_value = admiss["axis"], admiss["floor_value"], admiss["run_value"]
+        if axis == "baseline_fingerprint":
+            # fps-cf8: a floor computed against one baseline could silently grade a
+            # candidate run against a different one (fps-sa1, fps-zci — exactly the
+            # failure class feedback_baseline_declared_not_discovered warns about). Refuse
+            # rather than trust "file exists" the way this function used to. A floor with
+            # no fingerprint at all (pre-fps-cf8) is treated as a mismatch, not a pass —
+            # it cannot be shown to match, so it cannot be trusted either.
+            return {
+                "available": False,
+                "reason": f"noise_floor.json's baseline_fingerprint ({floor_value!r}) does not "
+                f"match this run's ({run_value!r}) — the floor was computed against a "
+                "different baseline (or predates baseline_fingerprint entirely) and does not grade "
+                "this run. Recompute with `PYTHONPATH=. uv run python -m experiments.pipeline."
+                "noise_floor <batch> --force`.",
+            }
+        if axis == "null_method":
+            # fps-awz: this PR itself changed what noise_floor.json's deltas_cpl_held MEASURE
+            # (a placebo-column null instead of a seed-swap null) without changing
+            # baseline_fingerprint (same 54 columns either way) — so the fingerprint check above
+            # would happily accept a pre-fps-awz batch's noise_floor.json (e.g. batch0's, already
+            # committed) forever, silently grading every future candidate against the OLD, wider,
+            # differently-shaped band this rework exists to replace. A floor with no null_method
+            # at all (pre-fps-awz) is treated as a mismatch, not a pass — same "cannot be shown to
+            # match, so cannot be trusted" rule the fingerprint check already applies.
+            return {
+                "available": False,
+                "reason": f"noise_floor.json's null_method ({floor_value!r}) is not "
+                f"{NULL_METHOD_PLACEBO_COLUMN!r} — this floor predates the fps-awz placebo-column "
+                "rework (or was computed some other way) and does not grade this run. Recompute "
+                "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
+                "--force`.",
+            }
+        if axis == "tank_params":
+            # fps-v8o: the consuming-side half of fps-15c's stamping work. A floor computed
+            # at one cadence (e.g. 7d) grades every draw's delta_cpl_held in that cadence's
+            # units — comparing a candidate run at a different cadence against it would
+            # silently misjudge the delta the same way a baseline_fingerprint mismatch would
+            # (fps-cf8), just along the cadence axis instead of the feature-set axis. A floor
+            # with no tank_params at all (pre-fps-v8o) is treated as a mismatch, not a pass —
+            # same "cannot be shown to match, so cannot be trusted" rule as the checks above.
+            # `_bank_admissibility` applies that rule symmetrically (review of PR #349): a run
+            # with NO tank_params of its own can't show a match either, even against a floor
+            # that also lacks the field — build_facts() itself already refuses a graded run
+            # missing meta.tank_params before ever reaching here (fps-15c), so this branch is
+            # unreachable via build_facts and only guards a caller that skips that gate.
+            if floor_value is None and run_value is None:
+                return {
+                    "available": False,
+                    "reason": "noise_floor.json has no tank_params at all (predates fps-v8o), and "
+                    "this run's own meta.tank_params is also missing — neither side can be shown "
+                    "to match the other, so the floor does not grade this run. Recompute with "
+                    "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
+                    "--force`.",
+                }
+            return {
+                "available": False,
+                "reason": f"noise_floor.json's tank_params ({floor_value!r}) does not match "
+                f"this run's ({run_value!r}) — the floor was computed at a different cadence "
+                "(or predates tank_params entirely) and does not grade this run. Recompute with "
+                "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> --force`.",
+            }
+        if axis == "arity":
+            # fps-3jj.14: same failure class as baseline_fingerprint, null_method and
+            # tank_params above — a floor that measures a DIFFERENT operation from the one the
+            # run performed — but with an asymmetry the others do not have, and the guard is
+            # one-sided because of it. A k-column candidate arm has more chances for the fit
+            # to find something than a j-column placebo arm does when k > j, so a floor BELOW
+            # the run's arity is narrow in the favourable direction and is refused. A floor at
+            # or ABOVE the run's arity can only be as wide or wider, i.e. a HARDER bar, so it
+            # is allowed and disclosed (`floor_arity_exceeds_run` below) rather than refused:
+            # refusing it would force a separate calibration run per distinct arity in a
+            # batch, which for batch1 alone (arities 3,3,3,2,2) means two ~2h runs to grade
+            # five candidates, buying nothing but a tighter bar the batch does not need.
+            floor_arity = floor_value
+            # The draw count is no longer forced by arity (fps-3jj.21), so the wider floor is
+            # computed at the SAME n_draws as the ruler it replaces — which is also what keeps
+            # the two comparable, the thing fps-3jj.14's arity comparison needed and could not
+            # have.
+            n_draws_hint = int(noise_floor.get("n_draws") or len(noise_floor.get("deltas_cpl_held", [])))
+            # fps-30p: before telling anyone to spend ~2h computing a wider ruler, look for one.
+            # These banks accumulate precisely because the promote step below says `mv`, not
+            # `--force` — so the ruler this run needs may already be sitting beside the
+            # canonical one, unread. Only comparable banks count (same fingerprint and
+            # cadence). Every condition `_noise_band` itself would apply to the promoted file,
+            # not just arity — this hint recommends a `mv`, so a bank that would fail the very
+            # next run's checks is worse than no hint at all (review of PR #345).
+            # `_comparable_noise_banks` deliberately RELAXES null_method so a pinned-source
+            # bank's z can still be reported as corroboration; that relaxation must not leak
+            # into a promote recommendation, because the canonical null_method check above is
+            # unconditional.
+            adequate = [
+                b for b in _comparable_noise_banks(results, batch_dir, canonical=path, delta=None)
+                if b.get("comparable")
+                and b.get("n_placebo_columns", 1) >= run_arity
+                and b.get("null_method") == NULL_METHOD_PLACEBO_COLUMN
+            ]
+            already = (
+                "NOTE: a wide-enough ruler may already exist in this batch dir — "
+                + ", ".join(
+                    f"{b['name']} ({b['n_placebo_columns']} columns, {b['n_draws']} draws)"
+                    for b in adequate
+                )
+                + ". Check it before recomputing; promoting an existing bank is step (2) alone. "
+                if adequate
+                else ""
             )
-            + ". Check it before recomputing; promoting an existing bank is step (2) alone. "
-            if adequate
-            else ""
-        )
-        return {
-            "available": False,
-            "reason_code": NOISE_BAND_REFUSAL_ARITY,
-            "reason": already + f"noise_floor.json is a {floor_arity}-column null but this candidate adds "
-            f"{run_arity} columns ({', '.join(map(str, run_columns))}) — a wider arm graded "
-            "against a narrower ruler, biased in the candidate's favour by an unmeasured "
-            f"amount (fps-3jj.14). This batch needs a ruler of at least {run_arity} columns, and "
-            "grading reads ONLY noise_floor.json, so producing one is two steps. (1) Compute it "
-            "beside the current ruler: `PYTHONPATH=. uv run python -m "
-            f"experiments.pipeline.noise_floor <batch> --arity {run_arity} --n-draws "
-            f"{n_draws_hint} --out-name noise_floor_k{run_arity}.json` (same draw count as the "
-            "current floor, so the two are comparable). (2) Promote it, keeping the "
-            f"old one: `mv noise_floor.json noise_floor_k{floor_arity}.json && mv "
-            f"noise_floor_k{run_arity}.json noise_floor.json`. Do NOT `--force` over "
-            "noise_floor.json instead: that destroys the ruler this batch's existing dossiers "
-            "were graded against, and the baseline any arity comparison needs. Full procedure: "
-            "docs/CONVENTIONS.md § 'The band's ARITY must be at least the candidate's'. This run is "
-            "NOT rejected and must not be written up as such — it completed and graded fine, and "
-            "becomes a real measurement once a wide-enough ruler exists. Leave it in the dossier "
-            "queue (write no README.md, no ledger entry) until then.",
-        }
-    if noise_floor.get("partial"):
-        # noise_floor.py's --fold-subset is an iteration/smoke speed-up: the deltas only cover
-        # some outer folds, but effect_delta_cpl_held always pools every fold. Grading a
-        # candidate against a partial-fold floor as though it were the real one would silently
-        # misjudge the delta, not just weaken the estimate — refuse rather than mislabel it.
-        return {
-            "available": False,
-            "reason": "noise_floor.json was computed with --fold-subset (partial fold "
-            "coverage) — not a valid ruler against a delta pooled over every fold. Recompute "
-            "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
-            "--force` and no --fold-subset.",
-        }
+            return {
+                "available": False,
+                "reason_code": NOISE_BAND_REFUSAL_ARITY,
+                "reason": already + f"noise_floor.json is a {floor_arity}-column null but this candidate adds "
+                f"{run_arity} columns ({', '.join(map(str, run_columns))}) — a wider arm graded "
+                "against a narrower ruler, biased in the candidate's favour by an unmeasured "
+                f"amount (fps-3jj.14). This batch needs a ruler of at least {run_arity} columns, and "
+                "grading reads ONLY noise_floor.json, so producing one is two steps. (1) Compute it "
+                "beside the current ruler: `PYTHONPATH=. uv run python -m "
+                f"experiments.pipeline.noise_floor <batch> --arity {run_arity} --n-draws "
+                f"{n_draws_hint} --out-name noise_floor_k{run_arity}.json` (same draw count as the "
+                "current floor, so the two are comparable). (2) Promote it, keeping the "
+                f"old one: `mv noise_floor.json noise_floor_k{floor_arity}.json && mv "
+                f"noise_floor_k{run_arity}.json noise_floor.json`. Do NOT `--force` over "
+                "noise_floor.json instead: that destroys the ruler this batch's existing dossiers "
+                "were graded against, and the baseline any arity comparison needs. Full procedure: "
+                "docs/CONVENTIONS.md § 'The band's ARITY must be at least the candidate's'. This run is "
+                "NOT rejected and must not be written up as such — it completed and graded fine, and "
+                "becomes a real measurement once a wide-enough ruler exists. Leave it in the dossier "
+                "queue (write no README.md, no ledger entry) until then.",
+            }
+        if axis == "partial":
+            # noise_floor.py's --fold-subset is an iteration/smoke speed-up — the deltas only
+            # cover some outer folds, but effect_delta_cpl_held always pools every fold.
+            # Grading a candidate against a partial-fold floor as though it were the real one
+            # would silently misjudge the delta, not just weaken the estimate — refuse rather
+            # than mislabel it.
+            return {
+                "available": False,
+                "reason": "noise_floor.json was computed with --fold-subset (partial fold "
+                "coverage) — not a valid ruler against a delta pooled over every fold. Recompute "
+                "with `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> "
+                "--force` and no --fold-subset.",
+            }
+        # Every axis `_bank_admissibility` can name is handled above (review of PR #349) —
+        # falling through here would silently mislabel a future axis with the --fold-subset
+        # message instead of failing loudly.
+        raise AssertionError(f"_bank_admissibility returned an unhandled refusal axis: {axis!r}")
+    floor_arity = admiss["floor_arity"]
     deltas = np.asarray(noise_floor.get("deltas_cpl_held", []), dtype=float)
     delta = results.get("effect_delta_cpl_held")
     if delta is None or deltas.size == 0:
         return {"available": False, "reason": "empty noise-floor sample or unresolved effect_delta_cpl_held"}
-    band_mean = float(np.mean(deltas))
-    band_std = float(np.std(deltas, ddof=1)) if deltas.size > 1 else float("nan")
-    # fps-3jj.25: grade against the band's EFFECTIVE draw count, not its nominal one.
-    n_eff = _resolve_effective_n_draws(noise_floor, nominal=int(deltas.size))
-    band_std_usable = _band_std_usable(deltas, band_std)
-    band_estimable = bool(band_std_usable and n_eff >= 2)
-    single_z = (
-        family_wise_z_threshold(n_candidates=1, n_draws=n_eff) if band_estimable else None
-    )
+    score = _score_bank(deltas, delta, noise_floor)
+    band_mean, band_std = score["band_mean"], score["band_std"]
+    n_eff, band_std_usable = score["effective_n_draws"], score["band_std_usable"]
+    single_z = score["single_candidate_z_threshold"]
     # Gated on the NOMINAL count, deliberately NOT on `band_estimable` (review of PR #336).
     # `bar_draw_count_shift_cpl_held` below is a function of the nominal draw count alone and is
     # documented as "a property of this floor alone" — routing it through `band_estimable` would
@@ -1104,7 +1238,7 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # True when the ruler is WIDER-armed than the run it grades — allowed (it can only
         # make the bar harder) but worth surfacing, because a candidate that fails against
         # such a floor has not been shown to fail against its own arity's band.
-        "floor_arity_exceeds_run": bool(run_arity and floor_arity > run_arity),
+        "floor_arity_exceeds_run": admiss["arity_exceeds_run"],
         "band_mean_delta_cpl_held": band_mean,
         "band_std_delta_cpl_held": band_std,
         "candidate_delta_cpl_held": delta,
@@ -1113,7 +1247,7 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # — (deltas > delta), not (deltas < delta). A candidate with a strong negative delta
         # against a noise band centred near zero must read as a HIGH percentile here, not near 0.
         "candidate_percentile_better_than_noise": float((deltas > delta).mean() * 100),
-        "candidate_z_vs_band": (delta - band_mean) / band_std if band_estimable else None,
+        "candidate_z_vs_band": score["candidate_z_vs_band"],
         # "The honest single-candidate bar" (docs/CONVENTIONS.md), n_candidates=1 — the magnitude
         # candidate_z_vs_band must clear, in EITHER direction, to be distinguishable from a draw
         # off this batch's own noise floor. Drives the ledger rejected/inconclusive split
@@ -1176,7 +1310,7 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         # ruler can only raise the bar) but it means a candidate failing here has not been shown
         # to fail against its OWN arity's band — the comparison fps-3jj.21 asked the dossier to
         # render rather than merely capture.
-        "floor_arity_excess": max(0, floor_arity - run_arity) if run_arity else 0,
+        "floor_arity_excess": admiss["arity_excess"],
         # fps-30p: every OTHER bank in this batch dir, vetted and scored against the same
         # delta. Corroboration only — `candidate_z_vs_band` above (the canonical bank) is
         # what the ledger outcome keys on, and nothing here may substitute for it. Empty
