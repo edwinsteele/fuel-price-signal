@@ -1946,6 +1946,35 @@ def test_noise_band_sibling_with_no_estimable_band_is_not_comparable(tmp_path, o
     assert "candidate_z_vs_band" not in banks[0]
 
 
+def test_noise_band_and_sibling_path_agree_on_a_degenerate_bank(tmp_path):
+    """fps-1x5 regression: `_noise_band` and `_comparable_noise_banks` now share both the
+    admissibility decision (`_bank_admissibility`) and the band statistics (`_score_bank`,
+    which calls the float-degeneracy guard `_band_std_usable` fps-tnz added). Put the
+    IDENTICAL degenerate bank on both paths — as the canonical file and as a sibling — and
+    assert they reach the same estimability verdict, so a future one-sided fix (the exact
+    failure mode fps-tnz found, one guard landed on one copy) is caught here instead of
+    shipping silently again."""
+    degenerate = [0.01] * 20
+    run_dir, _ = _write_run(tmp_path, columns=["a", "b"], batch_extras=_banks(
+        _bank(arity=2, deltas_cpl_held=degenerate),
+        twin=_bank(arity=2, deltas_cpl_held=degenerate),
+    ))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    # Canonical: still "available" (docs/routines/dossier.md's present-but-null rule) but
+    # ungradeable — no z, no threshold.
+    assert band["available"] is True
+    assert band["candidate_z_vs_band"] is None
+    assert band["single_candidate_z_threshold"] is None
+
+    # The IDENTICAL deltas as a sibling: refused outright, but for the same underlying
+    # reason a degenerate canonical bank is ungradeable — every draw landed on the same value.
+    sib = band["comparable_banks"][0]
+    assert sib["comparable"] is False
+    assert "same value" in sib["reason"]
+
+
 def test_noise_band_arity_refusal_ignores_a_wide_but_ungradeable_sibling(tmp_path):
     """The refusal must not advise promoting a ruler that still cannot grade once promoted —
     the arity filter keys on `comparable`, so an unestimable wide bank has to fail that gate."""
