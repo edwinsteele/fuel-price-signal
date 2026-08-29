@@ -214,7 +214,12 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          `cascade_window_days`, never a hardcoded literal). fps-6yi: 303 flips are 88 decisions
          (report the RUN-level `n_flips`/`n_decisions` alongside the table's totals for exactly
          this reason — never just the per-fold column's sum), and fold 8's 36 flips are 5 —
-         quoting 36 alone materially overstates that fold's independent evidence.
+         quoting 36 alone materially overstates that fold's independent evidence. **`decns` is
+         not comparable across runs at different cadences** (`cascade_window_days`'s docstring)
+         — a coarser cadence needs proportionally more elapsed quiet time before a gap counts
+         as a new decision, so it systematically reports a LOWER `decns` for the identical
+         underlying divergence. Never read a lower `decns` on a 7d-cadence run as weaker
+         evidence than a similar `decns` on a 1d-cadence one.
        - `litres_baseline` / `litres_candidate` — flip-only litres per arm. `pooled_cpl` is
          spend-weighted, so a 3.57 L top-up and a 42.86 L fill count identically in a flip count
          but not in the CPL; a large litres gap between arms (fps-6yi: 2064 vs 2982, a 44%

@@ -106,6 +106,22 @@ def cascade_window_days(tank_params: str) -> int:
     opposite failure from what this window exists to prevent). `max(half_life, cadence + 1)`
     guarantees the window can never degenerate into either extreme by an accident of rounding.
 
+    A long unbroken run of on-grid divergence at one station still collapses to ONE decision
+    regardless of this floor — that is the shipped design (a sustained divergence is one
+    continuing decision replayed forward, `flips.py`'s module docstring), not something the
+    floor is meant to prevent.
+
+    **`n_decisions` is NOT cadence-invariant, and that asymmetry is quantifiable, not just
+    philosophical** (PR #347 review, second pass). Gaps between same-station flips are
+    quantised to the run's cadence, so the quiet period actually needed to start a new
+    decision scales with it: at a 1-day cadence the first gap exceeding an 8-day window is 9
+    days; at a 7-day cadence the first gap exceeding a (floored) 8-day window is 14 days — the
+    coarser-cadence run needs proportionally MORE elapsed quiet time before a second decision
+    registers, and so will systematically report a LOWER `n_decisions` than a finer-cadence run
+    seeing the identical underlying divergence pattern. Do not read a lower `decns` on a
+    coarser-cadence run as weaker evidence when comparing dossiers across cadences without
+    accounting for this.
+
     `tank_params` is the formatted stamp `fuel_signal.backtest.format_tank_params` writes
     (`f"{size}/{daily}/{interval}d/{floor}%"`); parsing is safe because that function is this
     string's only writer (`fuel_signal.backtest.require_tank_stamp` is the only sanctioned way
