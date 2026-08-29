@@ -461,6 +461,38 @@ def test_run_wfcv_screen_produces_rows_for_both_runs_and_seeds_and_axis(tmp_path
     assert set(combined["axis"].unique()) <= {"A", "B"}
 
 
+def test_run_wfcv_screen_honours_a_shock_folds_override(tmp_path):
+    """fps-3tu follow-up: run_candidate passes a batch-level cached shock-fold set
+    (experiments.pipeline.shock_folds.load_cached_shock_folds) straight through to
+    _run_wfcv_screen instead of letting it derive one live — this is the wiring that
+    makes that cache actually take effect rather than being computed and ignored.
+    """
+    frame = _synth_panel(n_days=150, n_stations=2)
+    outer = {"train_min_days": 60, "val_days": 30, "step_days": 30}
+
+    df_rows, _collector = _run_wfcv_screen(
+        frame, ["f1", "f2"], ["f1", "f2", "cand"],
+        seeds=(1,), axis_series=None, outer_fold_params=outer, verbose=False,
+    )
+    live_folds = sorted(df_rows["fold"].unique())
+    assert len(live_folds) >= 2  # otherwise the override below can't be distinguishable
+
+    # Deliberately the OPPOSITE tagging of whatever live derivation would pick: everything
+    # live called "normal" is forced "shock" here, and vice versa. If the override weren't
+    # actually honoured, this would just reproduce the live result.
+    live_shock = frozenset(df_rows.loc[df_rows["regime"] == "shock", "fold"].unique())
+    override = frozenset(live_folds) - live_shock
+
+    overridden_rows, _collector2 = _run_wfcv_screen(
+        frame, ["f1", "f2"], ["f1", "f2", "cand"],
+        seeds=(1,), axis_series=None, outer_fold_params=outer, verbose=False,
+        shock_folds=override,
+    )
+    got_shock = frozenset(overridden_rows.loc[overridden_rows["regime"] == "shock", "fold"].unique())
+    assert got_shock == override
+    assert got_shock != live_shock
+
+
 # ── run_candidate reaching the realised backtest (fps-hvi findings #3, #4) ────
 
 def _full_baseline_df(n_days: int = 90, n_stations: int = 2, seed: int = 3) -> pd.DataFrame:
@@ -547,6 +579,45 @@ def test_run_candidate_aborted_environment_when_db_is_unreadable(tmp_path):
     )
 
     assert result.status == STATUS_ABORTED_ENVIRONMENT
+
+
+def test_run_candidate_threads_the_cached_shock_folds_into_the_wfcv_screen(tmp_path, monkeypatch):
+    """fps-3tu follow-up: run_candidate must load this batch's cached shock-fold set
+    (experiments.pipeline.shock_folds.load_cached_shock_folds), keyed on THIS run's own
+    baseline fingerprint, and pass it straight through to _run_wfcv_screen — not silently
+    drop it or let the screen re-derive one live. _run_wfcv_screen is faked to raise before
+    doing any real fitting, so this only exercises the wiring, not the (already separately
+    tested) derivation itself.
+    """
+    df = _full_baseline_df(n_days=90, n_stations=2)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    expected_fp = baseline_fingerprint(resolve_baseline_columns(df))
+    cached_set = frozenset({2})
+    captured = {}
+
+    def fake_load_cached(batch_dir_arg, *, expected_baseline_fingerprint):
+        captured["batch_dir"] = batch_dir_arg
+        captured["fingerprint"] = expected_baseline_fingerprint
+        return cached_set
+
+    def fake_wfcv_screen(*args, **kwargs):
+        captured["shock_folds_kwarg"] = kwargs.get("shock_folds")
+        raise RuntimeError("stop here — only the wiring into this call is under test")
+
+    monkeypatch.setattr(runner_module, "load_cached_shock_folds", fake_load_cached)
+    monkeypatch.setattr(runner_module, "_run_wfcv_screen", fake_wfcv_screen)
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out",
+        seeds=(1,), outer_fold_params=SMALL_OUTER_FOLDS, inner_fold_params=SMALL_INNER_FOLDS,
+        verbose=False,
+    )
+
+    assert captured["batch_dir"] == pathlib.Path(batch_dir)
+    assert captured["fingerprint"] == expected_fp
+    assert captured["shock_folds_kwarg"] == cached_set
+    assert result.status == STATUS_ABORTED_CANDIDATE  # from fake_wfcv_screen's raise
 
 
 # ── lookup provider ───────────────────────────────────────────────────────────

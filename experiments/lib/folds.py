@@ -48,6 +48,7 @@ def iter_folds_with_baseline_fit(
     val_days: int = 90,
     step_days: int = 90,
     shock_quantile: float = SHOCK_QUANTILE,
+    shock_folds: frozenset[int] | None = None,
 ) -> Generator[
     tuple[int, str, pd.DataFrame, pd.DataFrame, float, np.ndarray, float, np.ndarray],
     None,
@@ -62,12 +63,18 @@ def iter_folds_with_baseline_fit(
     calling script; this function only encapsulates the
     "fit baseline once per fold, reuse for R0+seed0" pattern.
 
-    `regime` is now computed empirically (fps-3tu, `compute_shock_folds` above),
-    which needs every fold's baseline log-loss before any fold can be labelled —
-    so this fits the baseline for ALL folds first (the `folds = list(...)` line
-    below already materialises every fold's train_df/val_df before the loop
-    starts, so caching the fit results alongside costs nothing extra in kind,
-    only degree), derives the shock-fold set once, then yields.
+    `regime` is computed empirically (fps-3tu, `compute_shock_folds` above) by default,
+    which needs every fold's baseline log-loss before any fold can be labelled — so this
+    fits the baseline for ALL folds first (the `folds = list(...)` line below already
+    materialises every fold's train_df/val_df before the loop starts, so caching the fit
+    results alongside costs nothing extra in kind, only degree), derives the shock-fold
+    set once, then yields.
+
+    `shock_folds`, when given, is used AS-IS instead of derived from this call's own fits
+    — the batch-level cache path (fps-1lb, `experiments.pipeline.shock_folds`): the
+    empirical set is deterministic given (data, baseline_cols, seed), so every candidate
+    in a batch would otherwise redo the identical derivation. `shock_quantile` is ignored
+    when this is set.
     """
     folds = list(
         _ev.walk_forward_folds(
@@ -88,8 +95,11 @@ def iter_folds_with_baseline_fit(
         baseline_prl = per_row_log_loss(y, baseline_p)
         fits[i] = (train_df, val_df, baseline_ll, baseline_p, baseline_t, baseline_prl)
 
-    shock_folds = compute_shock_folds({i: f[2] for i, f in fits.items()}, quantile=shock_quantile)
+    resolved_shock_folds = (
+        shock_folds if shock_folds is not None
+        else compute_shock_folds({i: f[2] for i, f in fits.items()}, quantile=shock_quantile)
+    )
 
     for i, (train_df, val_df, baseline_ll, baseline_p, baseline_t, baseline_prl) in fits.items():
-        regime = "shock" if i in shock_folds else "normal"
+        regime = "shock" if i in resolved_shock_folds else "normal"
         yield i, regime, train_df, val_df, baseline_ll, baseline_p, baseline_t, baseline_prl

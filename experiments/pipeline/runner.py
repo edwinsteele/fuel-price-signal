@@ -126,6 +126,7 @@ from experiments.pipeline.batch_freeze import (
     BaselineContractMismatch,
     check_baseline_contract,
 )
+from experiments.pipeline.shock_folds import load_cached_shock_folds
 from experiments.pipeline.validate import (
     AllNaNColumnError,
     CandidateImportError,
@@ -471,11 +472,21 @@ def run_candidate(
             )
         axis_lookup = _build_axis_lookup(frame, axis_series)
 
+    # This batch's cached empirical shock-fold set (fps-3tu / fps-1lb), when present and
+    # fingerprint-matched — every candidate in a batch shares the same frozen data and
+    # baseline columns, so this call's own live derivation would be byte-identical anyway;
+    # reading the cache just skips redoing it. None (cache absent, unreadable, or the
+    # batch's baseline has since been relocked) falls back to _run_wfcv_screen deriving it
+    # live for this run, same as before this cache existed.
+    cached_shock_folds = load_cached_shock_folds(
+        batch_dir, expected_baseline_fingerprint=baseline_fingerprint(baseline_columns)
+    )
+
     try:
         df_rows, collector = _run_wfcv_screen(
             candidate_frame, baseline_columns, candidate_cols,
             seeds=seeds, axis_series=axis_series, outer_fold_params=outer_fold_params, verbose=verbose,
-            persist_columns=list(candidate.COLUMNS),
+            persist_columns=list(candidate.COLUMNS), shock_folds=cached_shock_folds,
         )
     except Exception as exc:  # noqa: BLE001 — deliberately broad, see outcome taxonomy below
         # Nothing here except LightGBM fits on the candidate's own columns; any
@@ -703,6 +714,7 @@ def _run_wfcv_screen(
     outer_fold_params: dict,
     verbose: bool,
     persist_columns: list[str] | None = None,
+    shock_folds: frozenset[int] | None = None,
 ) -> tuple[pd.DataFrame, RowPredCollector]:
     """The WFCV log-loss screen (descriptive colour) — R0 vs candidate, all seeds.
 
@@ -724,7 +736,7 @@ def _run_wfcv_screen(
     collector = RowPredCollector(pd.DataFrame())
 
     for fold_idx, regime, train_df, val_df, ll0, p0, t_fit0, prl0 in iter_folds_with_baseline_fit(
-        candidate_frame, baseline_columns, seed=seeds[0], **wfcv_kwargs
+        candidate_frame, baseline_columns, seed=seeds[0], shock_folds=shock_folds, **wfcv_kwargs
     ):
         vd = pd.to_datetime(val_df["price_date"])
         y = val_df["label"].to_numpy(dtype=int)
