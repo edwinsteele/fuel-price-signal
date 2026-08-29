@@ -199,18 +199,63 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
      - `floor_arity_excess` — how many columns wider the ruler is than the run, the magnitude
        behind the `floor_arity_exceeds_run` flag above. If `facts["decision_flips"]["computed"]` is `true` (arity 2+
      and the noise-band call isn't a clean reject — `experiments/pipeline/dossier_tables.py`'s
-     `_decision_flips`, fps-gez), report `n_flips` and the per-fold `n_baseline_only` /
-     `n_candidate_only` / `flip_cpl_baseline` / `flip_cpl_candidate` / `flip_cpl_delta` table
-     verbatim — this is the buy/wait divergence between R0 and candidate, diffed directly off
-     `fills.parquet` (not a rowpreds proba-threshold crossing — see `experiments/lib/flips.py`'s
-     module docstring for why that substrate is the wrong one here: rowpreds' WFCV-screen proba is
-     a different, uncalibrated fit from the one that actually drove the realised decision).
+     `_decision_flips`, fps-gez), report the per-fold table — this is the buy/wait divergence
+     between R0 and candidate, diffed directly off `fills.parquet` (not a rowpreds
+     proba-threshold crossing — see `experiments/lib/flips.py`'s module docstring for why that
+     substrate is the wrong one here: rowpreds' WFCV-screen proba is a different, uncalibrated
+     fit from the one that actually drove the realised decision). Columns, in fold order (never
+     re-sorted by population — see fps-e1w's "Explicitly rejected": an n-vs-magnitude ordering
+     implies a trust hierarchy no cell in this table can actually earn):
+       - `flips` (`n_baseline_only + n_candidate_only`) and `decns` (`n_decisions`) side by
+         side, never `flips` alone. `flips` overstates independent decisions — one real flip can
+         cascade into a run of later differing fills at the same station as the tank's state
+         diverges, which `n_decisions` collapses (`experiments/lib/flips.py`'s
+         `_collapse_cascades`, window derived from the run's own tank cadence via
+         `cascade_window_days`, never a hardcoded literal). fps-6yi: 303 flips are 88 decisions,
+         and fold 8's 36 flips are 5 — quoting 36 alone materially overstates that fold's
+         independent evidence.
+       - `litres_baseline` / `litres_candidate` — flip-only litres per arm. `pooled_cpl` is
+         spend-weighted, so a 3.57 L top-up and a 42.86 L fill count identically in a flip count
+         but not in the CPL; a large litres gap between arms (fps-6yi: 2064 vs 2982, a 44%
+         difference) is itself worth surfacing, not just a weighting detail.
+       - `flip_cpl_delta` **beside its own interval**
+         (`flip_cpl_delta_interval` = delta ± 2×`flip_cpl_delta_se`), e.g. `-2.68 (-7.6 to
+         +2.3)` — print the interval, not a bare `±`, so no reader needs to know what SE stands
+         for. **`flip_cpl_baseline` and `flip_cpl_candidate` pool DISJOINT fills on different
+         days at different points in the price cycle — their difference has no stable
+         denominator and routinely cannot be distinguished from zero.** When
+         `flip_cpl_delta_inside_own_se` is `true`, mark that cell (fps-6yi: 0 of 12 resolvable
+         folds cleared their own interval — fold 13's headline-grabbing -32.73 sits inside a
+         2×SE of ±36.77). **A cell marked inside its own SE must never be cited as evidence in
+         the Judgement section** — "favourable flips dominate, N of M folds" is a vote count
+         over cells that cannot resolve their own numbers, not corroboration (this is exactly
+         how fps-6yi's original Judgement went wrong; see that run's post-dossier review
+         addendum). When `flip_cpl_delta` itself is `None`, state
+         `flip_cpl_delta_reason` verbatim (`"no flips"` / `"one arm only"`) rather than a blank
+         cell; when the delta exists but no interval could be estimated, state
+         `flip_cpl_delta_interval_reason` verbatim instead of printing a hairline interval —
+         both are honest "unmeasurable," never the same as a resolved zero-width one.
+       - `run_contribution_cpl` — **the highest-value column.** What this fold's divergence is
+         actually worth at the scale of the whole run: a litres-weighted shift-share of the
+         fold's own `delta_cpl_own` (`facts["breakdowns"]["per_fold"]`, the whole fold's pooled
+         delta, matching and flipped fills alike — NOT `flip_cpl_delta`, the flip-only figure
+         above), weighted by that fold's share of the run's TOTAL litres. Fold 13's -32.73 c/L
+         flip delta contributes only -0.0644 c/L to the run; folds 2 and 4 hand back +0.0995
+         between them. Sum the column and report `run_contribution_total_cpl` alongside
+         `composition_residual_cpl` as its own line (fps-6yi: -0.0606 total, -0.0129 residual,
+         reconciling exactly to the -0.0735 headline `delta_cpl_held`) — the residual is real
+         (a litres-weighted average of per-fold ratios isn't exactly the ratio of pooled
+         totals whenever the two arms' litres mix differs fold to fold), not a rounding
+         artefact, and hiding it would be its own distortion.
      **Same rule as `per_axis`: flip detail is colour illustrating a mechanism, and must never
      reach the Judgement section as a second arbiter overriding the noise-band call** — one vivid
      flip (a station catching a big cheap fill one day early) is easy to find more convincing than
-     the aggregate test, and it isn't. If `computed` is `false`, state the `reason` verbatim rather
-     than omitting the field — a candidate with only 1 column, or a clean reject, not having this
-     breakdown is expected, not a gap in this run.
+     the aggregate test, and it isn't. Flip counts are also a LOWER bound on decision divergence
+     (a WAIT day writes no fill row, so two arms can diverge in daily probability without ever
+     producing a differing fill — `experiments/lib/flips.py`'s module docstring). If `computed`
+     is `false`, state the `reason` verbatim rather than omitting the field — a candidate with
+     only 1 column, or a clean reject, not having this breakdown is expected, not a gap in this
+     run.
      If `facts["redundancy"]["available"]` is `true` (fps-qbv), and a candidate declares a
      falsification test naming which of its own columns is the suspect, **quote
      `per_column_r2` for that specific column, not just `block_r2`** — the block figure is the

@@ -41,7 +41,8 @@ def _fold_run_deltas() -> list[dict]:
 
 def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=None,
                    inputs=None, columns=None, error=None, bead_id="fps-test.1",
-                   tank_params: str | None = "50/3.571/7d/10%") -> dict:
+                   tank_params: str | None = "50/3.571/7d/10%",
+                   effect_delta_cpl_held: float = -0.05) -> dict:
     return {
         "status": status,
         "candidate": {
@@ -53,7 +54,7 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
             "prior_art": None, "mechanism_family": "test-family", "target": target,
         },
         "effect_resolved": True if status == "graded" else None,
-        "effect_delta_cpl_held": -0.05 if status == "graded" else None,
+        "effect_delta_cpl_held": effect_delta_cpl_held if status == "graded" else None,
         "zone": (
             {"resolved": True, "target_delta_cpl_own": -0.1, "other_delta_cpl_own": 0.02}
             if status == "graded" else {"resolved": None}
@@ -144,6 +145,7 @@ def _write_run(
     tmp_path, *, status="graded", target=None, inputs=None, columns=None,
     with_axis=False, with_cycle=False, low_n_fold=None, batch_extras=None,
     tank_params: str | None = "50/3.571/7d/10%", fills_df: pd.DataFrame | None = None,
+    effect_delta_cpl_held: float = -0.05,
 ) -> tuple[pathlib.Path, pathlib.Path]:
     batch_dir = tmp_path / "batch1"
     batch_dir.mkdir(exist_ok=True)
@@ -158,7 +160,7 @@ def _write_run(
     run_dir.mkdir(exist_ok=True)
     results = _make_results(
         batch_dir, status=status, target=target, inputs=inputs, columns=columns,
-        tank_params=tank_params,
+        tank_params=tank_params, effect_delta_cpl_held=effect_delta_cpl_held,
     )
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
     if status == "graded":
@@ -714,14 +716,509 @@ def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
     flips = facts["decision_flips"]
     assert flips["computed"] is True
     assert flips["n_flips"] == 2
+    # 50/3.571/7d/10% (this fixture's default tank_params) -> a 7-day evaluation cadence, so
+    # cascade_window_days derives from that string, not a hardcoded literal (fps-e1w).
+    assert flips["cascade_window_days"] == dt.cascade_window_days("50/3.571/7d/10%")
     row = next(r for r in flips["per_fold"] if r["fold"] == 1)
     assert row["regime"] == "shock"
     assert row["n_baseline_only"] == 1
     assert row["n_candidate_only"] == 1
+    assert row["n_flips"] == 2
+    # 2026-01-01 and 2026-01-02, one day apart, same station -> within the derived 7-day
+    # window -> one cascade, one decision, even though n_flips is 2.
+    assert row["n_decisions"] == 1
+    assert row["litres_baseline"] == pytest.approx(10.0)
+    assert row["litres_candidate"] == pytest.approx(10.0)
     assert row["flip_cpl_baseline"] == pytest.approx(200.0)
     assert row["flip_cpl_candidate"] == pytest.approx(150.0)
     assert row["flip_cpl_delta"] == pytest.approx(-50.0)
+    assert row["flip_cpl_delta_reason"] is None
     assert len(flips["rows"]) == 2
+    # This fixture's only fold has 2 flip fills total, below min_row_cell_n (30) — the whole
+    # fold's delta_cpl_own is suppressed, so nothing is attributable and the entire headline
+    # delta lands in the composition residual rather than being silently dropped.
+    assert flips["run_contribution_total_cpl"] == pytest.approx(0.0)
+    assert flips["composition_residual_cpl"] == pytest.approx(facts["headline"]["realised"]["delta_cpl_held"])
+    assert row["run_contribution_cpl"] is None
+
+
+# ── decision flips: fps-6yi regression (fps-e1w) ────────────────────────────────
+
+# fps-6yi (stickiness_phase_saddle, batch1) real committed data, reproduced verbatim from
+# experiments/candidates/batch1/stickiness_phase_saddle/facts.json's decision_flips.rows
+# (the 303 real flip fills, committed) plus this run's fills.parquet (gitignored, read once
+# locally to derive the padding below — not re-read at test time). Padding rows share a
+# dedicated per-fold/per-arm station+date key so diff_fills treats them as MATCHING (not
+# flips), giving each fold's TOTAL litres/spend the exact values the real run had, so
+# delta_cpl_own and the litres-weighted shift-share reconcile to the real headline exactly.
+_FPS_6YI_FLIP_ROWS = [
+    # (fold, station_code, date, price, litres, bought_by)
+    (2, 414, '2022-03-07', 184.9, 21.428571, 'baseline'),
+    (2, 18517, '2022-03-07', 184.9, 21.428571, 'baseline'),
+    (2, 18517, '2022-04-03', 189.9, 21.428571, 'baseline'),
+    (2, 18517, '2022-04-07', 169.9, 3.571429, 'baseline'),
+    (2, 18517, '2022-04-28', 187.7, 3.571429, 'baseline'),
+    (2, 429, '2022-02-05', 167.7, 32.142857, 'baseline'),
+    (2, 585, '2022-03-06', 174.9, 28.571429, 'baseline'),
+    (2, 261, '2022-03-05', 174.7, 17.857143, 'baseline'),
+    (2, 261, '2022-03-06', 174.7, 3.571429, 'baseline'),
+    (2, 261, '2022-03-07', 174.7, 3.571429, 'baseline'),
+    (2, 261, '2022-03-20', 191.9, 21.428571, 'baseline'),
+    (2, 261, '2022-03-26', 195.4, 21.428571, 'baseline'),
+    (3, 414, '2022-05-06', 177.9, 32.142857, 'baseline'),
+    (3, 414, '2022-05-19', 209.9, 21.428571, 'baseline'),
+    (3, 414, '2022-05-25', 206.9, 21.428571, 'baseline'),
+    (3, 414, '2022-05-31', 202.9, 21.428571, 'baseline'),
+    (3, 414, '2022-06-06', 199.9, 46.428571, 'baseline'),
+    (3, 414, '2022-06-07', 199.9, 3.571429, 'baseline'),
+    (3, 18517, '2022-05-16', 217.9, 21.428571, 'baseline'),
+    (3, 18517, '2022-05-22', 209.9, 21.428571, 'baseline'),
+    (3, 18517, '2022-05-28', 206.9, 21.428571, 'baseline'),
+    (3, 18517, '2022-06-03', 199.9, 21.428571, 'baseline'),
+    (3, 18517, '2022-06-06', 199.9, 35.714286, 'baseline'),
+    (3, 18517, '2022-06-07', 199.9, 3.571429, 'baseline'),
+    (3, 429, '2022-05-14', 172.9, 3.571429, 'baseline'),
+    (3, 429, '2022-05-17', 172.9, 3.571429, 'baseline'),
+    (3, 429, '2022-05-30', 197.9, 21.428571, 'baseline'),
+    (3, 429, '2022-07-07', 199.7, 42.857143, 'baseline'),
+    (3, 429, '2022-07-08', 199.7, 3.571429, 'baseline'),
+    (3, 429, '2022-07-09', 199.7, 3.571429, 'baseline'),
+    (3, 429, '2022-07-14', 199.7, 3.571429, 'baseline'),
+    (3, 585, '2022-07-12', 199.9, 39.285714, 'baseline'),
+    (3, 261, '2022-07-11', 187.9, 3.571429, 'baseline'),
+    (4, 414, '2022-08-17', 193.9, 10.714286, 'baseline'),
+    (4, 414, '2022-08-30', 193.9, 21.428571, 'baseline'),
+    (4, 414, '2022-10-01', 185.9, 21.428571, 'baseline'),
+    (4, 414, '2022-10-25', 185.9, 21.428571, 'baseline'),
+    (4, 18517, '2022-08-17', 193.9, 14.285714, 'baseline'),
+    (4, 18517, '2022-08-30', 193.9, 21.428571, 'baseline'),
+    (4, 18517, '2022-09-02', 179.9, 35.714286, 'baseline'),
+    (4, 18517, '2022-09-11', 159.9, 3.571429, 'baseline'),
+    (4, 429, '2022-09-02', 177.7, 21.428571, 'baseline'),
+    (4, 429, '2022-09-08', 163.9, 21.428571, 'baseline'),
+    (4, 429, '2022-09-11', 159.9, 3.571429, 'baseline'),
+    (4, 585, '2022-08-14', 193.9, 3.571429, 'baseline'),
+    (4, 585, '2022-08-18', 193.9, 3.571429, 'baseline'),
+    (4, 585, '2022-08-28', 189.9, 35.714286, 'baseline'),
+    (4, 585, '2022-08-31', 177.9, 10.714286, 'baseline'),
+    (5, 18517, '2022-11-09', 205.9, 35.714286, 'baseline'),
+    (5, 18517, '2022-11-10', 205.9, 3.571429, 'baseline'),
+    (5, 18517, '2022-11-11', 205.9, 3.571429, 'baseline'),
+    (5, 18517, '2022-11-30', 189.9, 21.428571, 'baseline'),
+    (5, 429, '2023-01-01', 202.9, 28.571429, 'baseline'),
+    (5, 429, '2023-01-14', 184.5, 21.428571, 'baseline'),
+    (6, 414, '2023-03-14', 185.9, 3.571429, 'baseline'),
+    (6, 414, '2023-03-21', 185.9, 10.714286, 'baseline'),
+    (6, 414, '2023-03-22', 185.9, 3.571429, 'baseline'),
+    (6, 414, '2023-04-04', 185.9, 21.428571, 'baseline'),
+    (6, 414, '2023-04-10', 185.9, 21.428571, 'baseline'),
+    (6, 414, '2023-04-16', 185.9, 21.428571, 'baseline'),
+    (6, 414, '2023-04-22', 185.9, 21.428571, 'baseline'),
+    (6, 414, '2023-04-28', 185.9, 21.428571, 'baseline'),
+    (6, 18517, '2023-04-25', 193.9, 35.714286, 'baseline'),
+    (6, 429, '2023-03-03', 177.9, 3.571429, 'baseline'),
+    (6, 429, '2023-03-04', 177.9, 3.571429, 'baseline'),
+    (6, 429, '2023-03-05', 177.9, 3.571429, 'baseline'),
+    (6, 429, '2023-03-06', 177.9, 3.571429, 'baseline'),
+    (6, 261, '2023-04-20', 179.9, 28.571429, 'baseline'),
+    (6, 261, '2023-04-21', 179.9, 3.571429, 'baseline'),
+    (6, 261, '2023-04-22', 179.9, 3.571429, 'baseline'),
+    (6, 261, '2023-04-23', 179.7, 3.571429, 'baseline'),
+    (6, 261, '2023-04-24', 177.9, 3.571429, 'baseline'),
+    (7, 414, '2023-05-06', 185.9, 28.571429, 'baseline'),
+    (7, 414, '2023-05-07', 185.9, 3.571429, 'baseline'),
+    (7, 414, '2023-05-08', 185.9, 3.571429, 'baseline'),
+    (7, 414, '2023-05-09', 185.9, 3.571429, 'baseline'),
+    (7, 18517, '2023-04-29', 186.9, 25.0, 'baseline'),
+    (7, 18517, '2023-05-02', 184.9, 3.571429, 'baseline'),
+    (8, 414, '2023-08-19', 215.9, 21.428571, 'baseline'),
+    (8, 414, '2023-08-25', 199.9, 21.428571, 'baseline'),
+    (8, 414, '2023-08-31', 199.9, 21.428571, 'baseline'),
+    (8, 414, '2023-09-06', 227.9, 21.428571, 'baseline'),
+    (8, 414, '2023-09-12', 227.9, 21.428571, 'baseline'),
+    (8, 414, '2023-09-18', 224.9, 21.428571, 'baseline'),
+    (8, 414, '2023-09-24', 219.9, 21.428571, 'baseline'),
+    (8, 414, '2023-09-30', 213.9, 21.428571, 'baseline'),
+    (8, 414, '2023-10-06', 207.9, 21.428571, 'baseline'),
+    (8, 414, '2023-10-12', 195.9, 21.428571, 'baseline'),
+    (8, 18517, '2023-09-28', 223.9, 21.428571, 'baseline'),
+    (8, 18517, '2023-10-04', 209.9, 21.428571, 'baseline'),
+    (8, 18517, '2023-10-10', 205.9, 21.428571, 'baseline'),
+    (8, 18517, '2023-10-16', 205.9, 21.428571, 'baseline'),
+    (8, 585, '2023-07-28', 177.9, 25.0, 'baseline'),
+    (8, 585, '2023-07-29', 177.9, 3.571429, 'baseline'),
+    (8, 585, '2023-07-30', 177.9, 3.571429, 'baseline'),
+    (8, 585, '2023-07-31', 176.9, 3.571429, 'baseline'),
+    (8, 585, '2023-08-01', 174.9, 3.571429, 'baseline'),
+    (8, 261, '2023-10-23', 178.7, 42.857143, 'baseline'),
+    (10, 429, '2024-03-03', 227.9, 21.428571, 'baseline'),
+    (10, 429, '2024-03-09', 223.9, 21.428571, 'baseline'),
+    (10, 429, '2024-03-15', 219.9, 21.428571, 'baseline'),
+    (10, 429, '2024-03-21', 207.9, 21.428571, 'baseline'),
+    (10, 429, '2024-03-27', 197.9, 21.428571, 'baseline'),
+    (10, 261, '2024-02-21', 189.9, 21.428571, 'baseline'),
+    (10, 261, '2024-03-09', 217.9, 21.428571, 'baseline'),
+    (10, 261, '2024-03-15', 202.9, 21.428571, 'baseline'),
+    (10, 261, '2024-03-21', 200.5, 21.428571, 'baseline'),
+    (10, 261, '2024-03-27', 197.9, 21.428571, 'baseline'),
+    (11, 18517, '2024-05-07', 223.9, 32.142857, 'baseline'),
+    (11, 18517, '2024-05-08', 223.9, 3.571429, 'baseline'),
+    (12, 414, '2024-08-06', 195.9, 35.714286, 'baseline'),
+    (12, 429, '2024-08-06', 195.9, 35.714286, 'baseline'),
+    (12, 429, '2024-09-11', 179.9, 28.571429, 'baseline'),
+    (13, 414, '2025-01-11', 187.9, 3.571429, 'baseline'),
+    (13, 414, '2025-01-12', 187.9, 3.571429, 'baseline'),
+    (13, 18517, '2025-01-15', 213.9, 3.571429, 'baseline'),
+    (13, 585, '2024-11-21', 207.9, 21.428571, 'baseline'),
+    (13, 585, '2024-11-27', 207.9, 21.428571, 'baseline'),
+    (14, 585, '2025-02-18', 179.9, 28.571429, 'baseline'),
+    (14, 585, '2025-02-19', 179.9, 3.571429, 'baseline'),
+    (2, 414, '2022-03-04', 184.9, 35.714286, 'candidate'),
+    (2, 414, '2022-03-10', 184.9, 21.428571, 'candidate'),
+    (2, 414, '2022-03-22', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-23', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-24', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-25', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-26', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-27', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-28', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-29', 184.9, 3.571429, 'candidate'),
+    (2, 414, '2022-03-31', 189.9, 7.142857, 'candidate'),
+    (2, 414, '2022-04-03', 182.9, 3.571429, 'candidate'),
+    (2, 414, '2022-04-23', 187.9, 3.571429, 'candidate'),
+    (2, 414, '2022-04-25', 187.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-03', 184.9, 32.142857, 'candidate'),
+    (2, 18517, '2022-03-04', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-10', 184.9, 21.428571, 'candidate'),
+    (2, 18517, '2022-03-22', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-23', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-24', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-25', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-26', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-27', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-28', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-29', 184.9, 3.571429, 'candidate'),
+    (2, 18517, '2022-03-31', 189.9, 7.142857, 'candidate'),
+    (2, 18517, '2022-04-04', 177.9, 14.285714, 'candidate'),
+    (2, 429, '2022-02-03', 167.7, 25.0, 'candidate'),
+    (2, 585, '2022-04-07', 163.4, 10.714286, 'candidate'),
+    (2, 585, '2022-05-02', 187.9, 17.857143, 'candidate'),
+    (2, 261, '2022-02-24', 180.7, 32.142857, 'candidate'),
+    (2, 261, '2022-02-25', 178.9, 3.571429, 'candidate'),
+    (2, 261, '2022-03-10', 184.9, 35.714286, 'candidate'),
+    (2, 261, '2022-03-23', 197.9, 21.428571, 'candidate'),
+    (2, 261, '2022-03-29', 191.7, 21.428571, 'candidate'),
+    (2, 261, '2022-03-31', 183.9, 32.142857, 'candidate'),
+    (2, 261, '2022-04-02', 177.9, 3.571429, 'candidate'),
+    (2, 261, '2022-04-07', 162.4, 10.714286, 'candidate'),
+    (3, 414, '2022-05-10', 179.9, 21.428571, 'candidate'),
+    (3, 414, '2022-05-16', 213.9, 21.428571, 'candidate'),
+    (3, 414, '2022-05-22', 206.9, 21.428571, 'candidate'),
+    (3, 414, '2022-05-28', 206.9, 21.428571, 'candidate'),
+    (3, 414, '2022-06-03', 199.9, 21.428571, 'candidate'),
+    (3, 18517, '2022-05-11', 174.9, 28.571429, 'candidate'),
+    (3, 18517, '2022-05-24', 206.9, 21.428571, 'candidate'),
+    (3, 18517, '2022-05-30', 202.9, 21.428571, 'candidate'),
+    (3, 18517, '2022-06-05', 199.9, 21.428571, 'candidate'),
+    (3, 429, '2022-05-29', 199.9, 21.428571, 'candidate'),
+    (3, 429, '2022-06-04', 195.9, 21.428571, 'candidate'),
+    (3, 429, '2022-07-06', 199.7, 39.285714, 'candidate'),
+    (3, 585, '2022-05-11', 173.9, 3.571429, 'candidate'),
+    (3, 261, '2022-05-12', 169.9, 32.142857, 'candidate'),
+    (3, 261, '2022-06-08', 184.7, 39.285714, 'candidate'),
+    (3, 261, '2022-06-09', 183.5, 3.571429, 'candidate'),
+    (4, 414, '2022-08-27', 193.9, 21.428571, 'candidate'),
+    (4, 414, '2022-09-08', 185.9, 21.428571, 'candidate'),
+    (4, 414, '2022-09-19', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-09-20', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-03', 185.9, 21.428571, 'candidate'),
+    (4, 414, '2022-10-04', 185.9, 28.571429, 'candidate'),
+    (4, 414, '2022-10-05', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-06', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-08', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-09', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-10', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-11', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-12', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-14', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-15', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-16', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-17', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-18', 185.9, 3.571429, 'candidate'),
+    (4, 414, '2022-10-20', 185.9, 3.571429, 'candidate'),
+    (4, 18517, '2022-08-26', 193.9, 21.428571, 'candidate'),
+    (4, 18517, '2022-09-01', 183.9, 21.428571, 'candidate'),
+    (4, 18517, '2022-10-04', 185.9, 32.142857, 'candidate'),
+    (4, 18517, '2022-10-05', 185.9, 3.571429, 'candidate'),
+    (4, 18517, '2022-10-06', 185.9, 3.571429, 'candidate'),
+    (4, 18517, '2022-10-07', 185.9, 3.571429, 'candidate'),
+    (4, 18517, '2022-10-09', 185.9, 3.571429, 'candidate'),
+    (4, 429, '2022-08-31', 179.9, 39.285714, 'candidate'),
+    (4, 429, '2022-09-03', 177.7, 10.714286, 'candidate'),
+    (4, 429, '2022-10-04', 185.9, 42.857143, 'candidate'),
+    (4, 429, '2022-10-06', 185.9, 3.571429, 'candidate'),
+    (4, 585, '2022-08-30', 185.9, 21.428571, 'candidate'),
+    (4, 585, '2022-09-01', 177.9, 32.142857, 'candidate'),
+    (4, 585, '2022-09-10', 165.9, 3.571429, 'candidate'),
+    (4, 585, '2022-09-11', 165.9, 3.571429, 'candidate'),
+    (4, 585, '2022-10-04', 187.9, 39.285714, 'candidate'),
+    (4, 585, '2022-10-05', 187.9, 3.571429, 'candidate'),
+    (4, 261, '2022-10-04', 187.9, 32.142857, 'candidate'),
+    (4, 261, '2022-10-05', 187.9, 3.571429, 'candidate'),
+    (4, 261, '2022-10-07', 177.9, 7.142857, 'candidate'),
+    (5, 414, '2022-11-23', 185.9, 28.571429, 'candidate'),
+    (5, 414, '2022-11-24', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2022-11-25', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2022-11-26', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2022-11-27', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2022-12-13', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2022-12-28', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2022-12-29', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2022-12-31', 185.9, 7.142857, 'candidate'),
+    (5, 414, '2023-01-01', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2023-01-05', 185.9, 3.571429, 'candidate'),
+    (5, 414, '2023-01-08', 185.9, 10.714286, 'candidate'),
+    (5, 18517, '2022-11-12', 205.9, 21.428571, 'candidate'),
+    (5, 18517, '2022-11-18', 199.9, 21.428571, 'candidate'),
+    (5, 18517, '2022-11-28', 189.9, 39.285714, 'candidate'),
+    (5, 18517, '2023-01-13', 191.9, 42.857143, 'candidate'),
+    (5, 18517, '2023-01-15', 191.9, 3.571429, 'candidate'),
+    (5, 18517, '2023-01-16', 191.9, 3.571429, 'candidate'),
+    (5, 429, '2023-01-06', 194.9, 21.428571, 'candidate'),
+    (5, 429, '2023-01-12', 186.5, 21.428571, 'candidate'),
+    (5, 585, '2022-12-01', 186.9, 28.571429, 'candidate'),
+    (5, 585, '2023-01-19', 177.9, 3.571429, 'candidate'),
+    (6, 414, '2023-03-20', 185.9, 7.142857, 'candidate'),
+    (6, 414, '2023-04-02', 185.9, 21.428571, 'candidate'),
+    (6, 414, '2023-04-08', 185.9, 21.428571, 'candidate'),
+    (6, 414, '2023-04-14', 185.9, 21.428571, 'candidate'),
+    (6, 414, '2023-04-20', 185.9, 21.428571, 'candidate'),
+    (6, 414, '2023-04-26', 185.9, 21.428571, 'candidate'),
+    (6, 18517, '2023-04-28', 186.9, 21.428571, 'candidate'),
+    (6, 429, '2023-04-28', 182.5, 35.714286, 'candidate'),
+    (7, 414, '2023-06-06', 165.9, 3.571429, 'candidate'),
+    (7, 414, '2023-06-07', 165.9, 3.571429, 'candidate'),
+    (7, 414, '2023-06-08', 165.9, 3.571429, 'candidate'),
+    (7, 414, '2023-06-09', 165.9, 3.571429, 'candidate'),
+    (7, 414, '2023-06-20', 165.9, 28.571429, 'candidate'),
+    (7, 414, '2023-06-21', 165.9, 3.571429, 'candidate'),
+    (7, 18517, '2023-06-24', 187.9, 42.857143, 'candidate'),
+    (7, 429, '2023-06-23', 177.9, 32.142857, 'candidate'),
+    (7, 261, '2023-06-24', 177.5, 32.142857, 'candidate'),
+    (7, 261, '2023-06-25', 175.5, 3.571429, 'candidate'),
+    (8, 414, '2023-08-04', 178.9, 28.571429, 'candidate'),
+    (8, 414, '2023-08-08', 199.9, 7.142857, 'candidate'),
+    (8, 414, '2023-08-21', 209.9, 21.428571, 'candidate'),
+    (8, 414, '2023-08-27', 199.9, 21.428571, 'candidate'),
+    (8, 414, '2023-09-02', 199.9, 21.428571, 'candidate'),
+    (8, 414, '2023-09-08', 227.9, 21.428571, 'candidate'),
+    (8, 414, '2023-09-14', 225.9, 21.428571, 'candidate'),
+    (8, 414, '2023-09-20', 224.9, 21.428571, 'candidate'),
+    (8, 414, '2023-09-26', 219.9, 21.428571, 'candidate'),
+    (8, 414, '2023-10-02', 209.9, 21.428571, 'candidate'),
+    (8, 414, '2023-10-08', 207.9, 21.428571, 'candidate'),
+    (8, 414, '2023-10-14', 195.9, 21.428571, 'candidate'),
+    (8, 18517, '2023-09-26', 223.9, 39.285714, 'candidate'),
+    (8, 18517, '2023-10-09', 205.9, 21.428571, 'candidate'),
+    (8, 18517, '2023-10-15', 205.9, 21.428571, 'candidate'),
+    (8, 18517, '2023-10-21', 195.9, 46.428571, 'candidate'),
+    (9, 585, '2024-01-19', 180.7, 42.857143, 'candidate'),
+    (9, 261, '2024-01-13', 178.5, 28.571429, 'candidate'),
+    (9, 261, '2024-01-17', 177.9, 7.142857, 'candidate'),
+    (10, 414, '2024-02-20', 191.9, 32.142857, 'candidate'),
+    (10, 414, '2024-02-21', 191.9, 3.571429, 'candidate'),
+    (10, 414, '2024-03-30', 199.9, 35.714286, 'candidate'),
+    (10, 429, '2024-02-24', 187.5, 39.285714, 'candidate'),
+    (10, 429, '2024-02-27', 187.5, 3.571429, 'candidate'),
+    (10, 429, '2024-03-11', 223.9, 21.428571, 'candidate'),
+    (10, 429, '2024-03-17', 219.9, 21.428571, 'candidate'),
+    (10, 429, '2024-03-23', 199.9, 21.428571, 'candidate'),
+    (10, 429, '2024-03-29', 197.9, 21.428571, 'candidate'),
+    (10, 585, '2024-02-20', 189.9, 35.714286, 'candidate'),
+    (10, 585, '2024-02-21', 189.9, 3.571429, 'candidate'),
+    (10, 261, '2024-02-20', 189.9, 42.857143, 'candidate'),
+    (10, 261, '2024-02-23', 189.5, 10.714286, 'candidate'),
+    (10, 261, '2024-02-24', 189.5, 3.571429, 'candidate'),
+    (10, 261, '2024-02-26', 189.5, 3.571429, 'candidate'),
+    (10, 261, '2024-02-27', 189.5, 3.571429, 'candidate'),
+    (10, 261, '2024-03-11', 217.9, 21.428571, 'candidate'),
+    (10, 261, '2024-03-17', 202.9, 21.428571, 'candidate'),
+    (10, 261, '2024-03-23', 200.5, 21.428571, 'candidate'),
+    (10, 261, '2024-03-29', 194.5, 21.428571, 'candidate'),
+    (11, 414, '2024-05-09', 205.9, 39.285714, 'candidate'),
+    (11, 414, '2024-06-28', 192.9, 3.571429, 'candidate'),
+    (11, 414, '2024-06-29', 192.9, 3.571429, 'candidate'),
+    (11, 414, '2024-07-02', 189.9, 3.571429, 'candidate'),
+    (11, 18517, '2024-05-09', 205.9, 39.285714, 'candidate'),
+    (12, 414, '2024-10-18', 172.9, 35.714286, 'candidate'),
+    (12, 261, '2024-08-07', 189.9, 39.285714, 'candidate'),
+    (13, 585, '2024-11-20', 172.9, 42.857143, 'candidate'),
+    (14, 429, '2025-02-20', 179.9, 3.571429, 'candidate'),
+    (14, 261, '2025-02-17', 177.5, 42.857143, 'candidate'),
+    (14, 261, '2025-02-19', 177.5, 3.571429, 'candidate'),
+]
+
+_FPS_6YI_PADDING = [
+    # (fold, arm, litres, spend_cents) -- one matching (non-flip) fill per fold per arm,
+    # padding that fold's total litres/spend to the real run's values.
+    (1, 'R0', 1539.2857, 257712.5),
+    (1, 'candidate', 1539.2857, 257712.5),
+    (2, 'R0', 1453.5714, 255819.2857),
+    (2, 'candidate', 1246.4286, 218660.0),
+    (3, 'R0', 1317.8571, 254876.7857),
+    (3, 'candidate', 1353.5714, 263462.5),
+    (4, 'R0', 1403.5714, 241301.7857),
+    (4, 'candidate', 1182.1429, 200993.2143),
+    (5, 'R0', 1560.7143, 290215.3571),
+    (5, 'candidate', 1389.2857, 258336.0714),
+    (6, 'R0', 1425.0, 269542.1429),
+    (6, 'candidate', 1460.7143, 275739.2857),
+    (7, 'R0', 1482.1429, 264166.0714),
+    (7, 'candidate', 1392.8571, 249235.7143),
+    (8, 'R0', 1307.1429, 258862.8571),
+    (8, 'candidate', 1310.7143, 258650.3571),
+    (9, 'R0', 1710.7143, 335413.2143),
+    (9, 'candidate', 1632.1429, 321421.0714),
+    (10, 'R0', 1357.1429, 275705.7143),
+    (10, 'candidate', 1182.1429, 242344.6429),
+    (11, 'R0', 1500.0, 303878.5714),
+    (11, 'candidate', 1446.4286, 293187.5),
+    (12, 'R0', 1550.0, 284266.4286),
+    (12, 'candidate', 1575.0, 289851.0714),
+    (13, 'R0', 1660.7143, 309671.7857),
+    (13, 'candidate', 1671.4286, 311795.7143),
+    (14, 'R0', 1671.4286, 314477.1429),
+    (14, 'candidate', 1653.5714, 311324.6429),
+]
+
+_FPS_6YI_HEADLINE_DELTA_CPL_HELD = -0.07349643460619859
+
+
+#: The real run's smallest fold had 84 fills per arm, well clear of DEFAULT_MIN_ROW_CELL_N (30)
+#: — none of its 14 folds' delta_cpl_own were suppressed (breakdowns.per_fold's `suppressed` is
+#: False throughout). Splitting each fold/arm's padding total across this many equal-sized rows
+#: (same shared key, so still non-flip) reproduces that "never suppressed" property here too,
+#: rather than collapsing each pad into the single row a bare total would need only 1 row for.
+_PAD_ROWS_PER_ARM = 40
+
+
+def _fps_6yi_fills() -> pd.DataFrame:
+    rows = []
+    for fold, station, date, price, litres, bought_by in _FPS_6YI_FLIP_ROWS:
+        arm = BASELINE_ARM if bought_by == "baseline" else CANDIDATE_ARM
+        rows.append({
+            "fold": fold, "arm": arm, "own_tau": 0.25, "date": date,
+            "station_code": station, "price": price, "litres": litres,
+            "spend_cents": price * litres, "emergency": False,
+        })
+    for fold, arm, litres, spend_cents in _FPS_6YI_PADDING:
+        # A dedicated per-fold station+date shared by BOTH arms -> diff_fills treats every one
+        # of these as a MATCHING key (present on both sides), never a flip, regardless of its
+        # price/litres — split into _PAD_ROWS_PER_ARM identical rows (not 1) so n_fills clears
+        # DEFAULT_MIN_ROW_CELL_N and delta_cpl_own isn't suppressed, matching the real run.
+        for _ in range(_PAD_ROWS_PER_ARM):
+            rows.append({
+                "fold": fold, "arm": arm, "own_tau": 0.25, "date": "2020-01-01",
+                "station_code": 900000 + fold,
+                "price": (spend_cents / litres) if litres else 0.0,
+                "litres": litres / _PAD_ROWS_PER_ARM, "spend_cents": spend_cents / _PAD_ROWS_PER_ARM,
+                "emergency": False,
+            })
+    return pd.DataFrame(rows)
+
+
+def test_decision_flips_reproduces_fps_6yi_stickiness_phase_saddle_numbers(tmp_path):
+    """Regression test (fps-e1w) against the real committed run that motivated this rework —
+    experiments/candidates/batch1/stickiness_phase_saddle/facts.json (fps-6yi) and its
+    post-dossier review addendum (that run's own README.md, quoted in fps-e1w). Every expected
+    number below was computed independently from the real fills.parquet (gitignored, not part
+    of this checkout) against the formulas fps-e1w specifies, before being reproduced here
+    against the actual summarise_flips / _attach_run_contributions implementation.
+    """
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [-1.0, -0.5, 0.0, 0.5, 1.0],
+            "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/1d/10%",
+            "n_placebo_columns": 2,
+        }))
+
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        tank_params="50/3.571/1d/10%", fills_df=_fps_6yi_fills(),
+        effect_delta_cpl_held=_FPS_6YI_HEADLINE_DELTA_CPL_HELD,
+    )
+    facts = dt.build_facts(run_dir)
+    flips = facts["decision_flips"]
+    assert flips["computed"] is True
+    assert flips["n_flips"] == 303
+    assert flips["cascade_window_days"] == 7
+
+    # fold: (n_baseline_only, n_candidate_only, n_decisions, litres_baseline, litres_candidate,
+    #        flip_cpl_delta, run_contribution_cpl)
+    expected = {
+        1: (0, 0, 0, 0.0, 0.0, None, 0.0),
+        2: (12, 38, 13, 200.0, 425.0, 1.7422268907562568, 0.055842627815360535),
+        3: (21, 16, 10, 396.428571, 360.714286, -6.378271340647672, -0.037839515753530416),
+        4: (15, 39, 16, 250.0, 478.571429, 0.8838805970149792, 0.043706015781614635),
+        5: (6, 22, 9, 114.285714, 285.714286, -7.367499999999978, -0.0007760360080724506),
+        6: (18, 8, 6, 217.857143, 171.428571, -0.1538251366120278, -0.01826674602054821),
+        7: (6, 10, 7, 67.857143, 157.142857, -9.27033492822963, 0.010398882508147125),
+        8: (20, 16, 5, 382.142857, 378.571429, 2.5837065773231984, 0.0013968648145325775),
+        9: (0, 3, 2, 0.0, 78.571429, None, 0.005339127735527151),
+        10: (10, 20, 6, 214.285714, 389.285714, -10.337981651376168, -0.03780847431320868),
+        11: (2, 5, 3, 35.714286, 89.285714, -19.680000000000035, -0.019711314604999634),
+        12: (3, 2, 5, 100.0, 75.0, -9.523809523809518, 0.003787055719386593),
+        13: (5, 1, 3, 53.571429, 42.857143, -32.73333333333335, -0.06441098866987288),
+        14: (2, 3, 3, 32.142857, 50.0, -2.2285714285714846, -0.0022349837032429095),
+    }
+    by_fold = {row["fold"]: row for row in flips["per_fold"]}
+    assert set(by_fold) == set(expected)
+    resolvable_folds = 0
+    for fold, (n_b, n_c, n_dec, lb, lc, delta, contrib) in expected.items():
+        row = by_fold[fold]
+        assert row["n_baseline_only"] == n_b, fold
+        assert row["n_candidate_only"] == n_c, fold
+        assert row["n_flips"] == n_b + n_c, fold
+        assert row["n_decisions"] == n_dec, fold
+        assert row["litres_baseline"] == pytest.approx(lb, abs=1e-3), fold
+        assert row["litres_candidate"] == pytest.approx(lc, abs=1e-3), fold
+        if delta is None:
+            assert row["flip_cpl_delta"] is None, fold
+            assert row["flip_cpl_delta_reason"] in ("no flips", "one arm only"), fold
+        else:
+            assert row["flip_cpl_delta"] == pytest.approx(delta), fold
+            # fps-6yi's own finding, quoted in fps-e1w: 0 of 12 resolvable folds print a delta
+            # larger than twice its own SE — every one must be marked unresolved.
+            assert row["flip_cpl_delta_interval"] is not None, fold
+            assert row["flip_cpl_delta_inside_own_se"] is True, fold
+            resolvable_folds += 1
+        assert row["run_contribution_cpl"] == pytest.approx(contrib, abs=1e-6), fold
+    assert resolvable_folds == 12
+
+    # Worked figures from the post-dossier review addendum, quoted verbatim in fps-e1w: fold
+    # 13's -32.73 c/L flip delta contributes -0.0644 c/L to the run; folds 2 and 4 hand back
+    # +0.0995 between them; the total is -0.0606, reconciling to the -0.0735 headline via a
+    # -0.0129 composition residual.
+    assert by_fold[13]["run_contribution_cpl"] == pytest.approx(-0.0644, abs=5e-4)
+    assert by_fold[2]["run_contribution_cpl"] + by_fold[4]["run_contribution_cpl"] == pytest.approx(
+        0.0995, abs=5e-4
+    )
+    assert flips["run_contribution_total_cpl"] == pytest.approx(-0.0606, abs=5e-4)
+    assert flips["composition_residual_cpl"] == pytest.approx(-0.0129, abs=5e-4)
+    assert facts["headline"]["realised"]["delta_cpl_held"] == pytest.approx(_FPS_6YI_HEADLINE_DELTA_CPL_HELD)
+    # The reconciliation acceptance criterion, asserted rather than eyeballed: contribution
+    # total + residual must equal the headline EXACTLY (composition_residual_cpl is defined as
+    # the difference, so this is a construction check, not a coincidence).
+    assert (
+        flips["run_contribution_total_cpl"] + flips["composition_residual_cpl"]
+        == pytest.approx(facts["headline"]["realised"]["delta_cpl_held"])
+    )
+
+    # fold 13's 2*SE specifically (docs/routines/dossier.md's worked example: -32.73 sits
+    # inside a 2*SE of 36.77 either side, so the full interval width is 2*36.77).
+    lo, hi = by_fold[13]["flip_cpl_delta_interval"]
+    assert hi - lo == pytest.approx(2 * 36.77, abs=0.1)
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────
