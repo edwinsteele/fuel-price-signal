@@ -395,7 +395,7 @@ def test_grade_run_succeeds_normally():
     realised = _FakeRealised(aggregate, pd.DataFrame())
 
     effect_resolved, effect_delta, zone, grading_error = _grade_run(
-        realised, target=None, axis_lookup=None, min_row_cell_n=30
+        realised, target=None, axis_lookup=None, shock_folds=frozenset(), min_row_cell_n=30
     )
 
     assert effect_resolved is True
@@ -412,7 +412,7 @@ def test_grade_run_catches_exception_and_reports_it_instead_of_raising():
     realised = _FakeRealised(aggregate, pd.DataFrame())
 
     effect_resolved, effect_delta, zone, grading_error = _grade_run(
-        realised, target=None, axis_lookup=None, min_row_cell_n=30
+        realised, target=None, axis_lookup=None, shock_folds=frozenset(), min_row_cell_n=30
     )
 
     assert effect_resolved is None
@@ -459,6 +459,38 @@ def test_run_wfcv_screen_produces_rows_for_both_runs_and_seeds_and_axis(tmp_path
     combined = collector.to_parquet(tmp_path / "rowpreds.parquet")
     assert "axis" in combined.columns
     assert set(combined["axis"].unique()) <= {"A", "B"}
+
+
+def test_run_wfcv_screen_honours_a_shock_folds_override(tmp_path):
+    """fps-3tu follow-up: run_candidate passes a batch-level cached shock-fold set
+    (experiments.pipeline.shock_folds.load_cached_shock_folds) straight through to
+    _run_wfcv_screen instead of letting it derive one live — this is the wiring that
+    makes that cache actually take effect rather than being computed and ignored.
+    """
+    frame = _synth_panel(n_days=150, n_stations=2)
+    outer = {"train_min_days": 60, "val_days": 30, "step_days": 30}
+
+    df_rows, _collector = _run_wfcv_screen(
+        frame, ["f1", "f2"], ["f1", "f2", "cand"],
+        seeds=(1,), axis_series=None, outer_fold_params=outer, verbose=False,
+    )
+    live_folds = sorted(df_rows["fold"].unique())
+    assert len(live_folds) >= 2  # otherwise the override below can't be distinguishable
+
+    # Deliberately the OPPOSITE tagging of whatever live derivation would pick: everything
+    # live called "normal" is forced "shock" here, and vice versa. If the override weren't
+    # actually honoured, this would just reproduce the live result.
+    live_shock = frozenset(df_rows.loc[df_rows["regime"] == "shock", "fold"].unique())
+    override = frozenset(live_folds) - live_shock
+
+    overridden_rows, _collector2 = _run_wfcv_screen(
+        frame, ["f1", "f2"], ["f1", "f2", "cand"],
+        seeds=(1,), axis_series=None, outer_fold_params=outer, verbose=False,
+        shock_folds=override,
+    )
+    got_shock = frozenset(overridden_rows.loc[overridden_rows["regime"] == "shock", "fold"].unique())
+    assert got_shock == override
+    assert got_shock != live_shock
 
 
 # ── run_candidate reaching the realised backtest (fps-hvi findings #3, #4) ────
@@ -549,6 +581,49 @@ def test_run_candidate_aborted_environment_when_db_is_unreadable(tmp_path):
     assert result.status == STATUS_ABORTED_ENVIRONMENT
 
 
+def test_run_candidate_threads_the_cached_shock_folds_into_the_wfcv_screen(tmp_path, monkeypatch):
+    """fps-3tu follow-up: run_candidate must load this batch's cached shock-fold set
+    (experiments.pipeline.shock_folds.load_cached_shock_folds), keyed on THIS run's own
+    baseline fingerprint, and pass it straight through to _run_wfcv_screen — not silently
+    drop it or let the screen re-derive one live. _run_wfcv_screen is faked to raise before
+    doing any real fitting, so this only exercises the wiring, not the (already separately
+    tested) derivation itself.
+    """
+    df = _full_baseline_df(n_days=90, n_stations=2)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    expected_fp = baseline_fingerprint(resolve_baseline_columns(df))
+    cached_set = frozenset({2})
+    captured = {}
+
+    def fake_load_cached(batch_dir_arg, *, baseline_fingerprint, seed, outer_fold_params):
+        captured["batch_dir"] = batch_dir_arg
+        captured["fingerprint"] = baseline_fingerprint
+        captured["seed"] = seed
+        captured["outer_fold_params"] = outer_fold_params
+        return cached_set
+
+    def fake_wfcv_screen(*args, **kwargs):
+        captured["shock_folds_kwarg"] = kwargs.get("shock_folds")
+        raise RuntimeError("stop here — only the wiring into this call is under test")
+
+    monkeypatch.setattr(runner_module, "load_cached_shock_folds", fake_load_cached)
+    monkeypatch.setattr(runner_module, "_run_wfcv_screen", fake_wfcv_screen)
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out",
+        seeds=(1,), outer_fold_params=SMALL_OUTER_FOLDS, inner_fold_params=SMALL_INNER_FOLDS,
+        verbose=False,
+    )
+
+    assert captured["batch_dir"] == pathlib.Path(batch_dir)
+    assert captured["fingerprint"] == expected_fp
+    assert captured["seed"] == 1  # seeds[0]
+    assert captured["outer_fold_params"] == SMALL_OUTER_FOLDS
+    assert captured["shock_folds_kwarg"] == cached_set
+    assert result.status == STATUS_ABORTED_CANDIDATE  # from fake_wfcv_screen's raise
+
+
 # ── lookup provider ───────────────────────────────────────────────────────────
 
 def test_make_lookup_provider_hits_and_misses():
@@ -614,7 +689,9 @@ def _fills(n_target_each: int, n_other_each: int, *, cheaper_in_target: bool) ->
 def test_resolve_zone_by_folds_resolves_true_when_target_cell_is_cheaper():
     fills = _fills(35, 35, cheaper_in_target=True)
     target = {"folds": [4], "axis": None, "expect_concentration_in": []}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
     # A fold cut is a sum of complete independent simulations — identified, no caveat.
     assert "identification_caveat" not in result
@@ -623,24 +700,30 @@ def test_resolve_zone_by_folds_resolves_true_when_target_cell_is_cheaper():
 def test_resolve_zone_by_folds_resolves_false_when_target_cell_is_not_cheaper():
     fills = _fills(35, 35, cheaper_in_target=False)
     target = {"folds": [4]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is False
 
 
 def test_resolve_zone_regime_axis_uses_shock_folds():
-    # fold 4 is in SHOCK_FOLDS; fold 2 is not.
+    # fold 4 is in the passed-in shock_folds set; fold 2 is not.
     fills = _fills(35, 35, cheaper_in_target=True)
     target = {"axis": "regime", "expect_concentration_in": ["shock"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
-    # SHOCK_FOLDS groups WHOLE folds, so this is identified too.
+    # A regime cut groups WHOLE folds, so this is identified too.
     assert "identification_caveat" not in result
 
 
 def test_resolve_zone_inconclusive_below_min_row_cell_n():
     fills = _fills(5, 5, cheaper_in_target=True)  # below default guard
     target = {"folds": [4]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is None
     assert "min_row_cell_n" in result["reason"]
 
@@ -653,7 +736,9 @@ def test_resolve_zone_custom_axis_via_lookup():
         {"station_code": 1, "date": "2026-02-01", "axis": "weekday_Y"},
     ])
     target = {"axis": "weekday", "expect_concentration_in": ["weekday_X"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=axis_lookup, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=axis_lookup, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
     # fps-grp: a row-level axis slices THROUGH a window, so the graded delta allocates a
     # path-coupled cost to a sub-period. It still grades, but must say it is unidentified.
@@ -674,7 +759,9 @@ def test_resolve_zone_flags_a_row_level_axis_even_when_folds_also_match():
         {"station_code": 1, "date": "2026-02-01", "axis": "weekday_Y"},
     ])
     target = {"folds": [4], "axis": "weekday", "expect_concentration_in": ["weekday_X"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=axis_lookup, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=axis_lookup, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is True
     assert result["identification_caveat"] == ROW_AXIS_ECONOMICS_CAVEAT
 
@@ -682,14 +769,16 @@ def test_resolve_zone_flags_a_row_level_axis_even_when_folds_also_match():
 def test_resolve_zone_custom_axis_without_add_axis_is_inconclusive():
     fills = _fills(35, 35, cheaper_in_target=True)
     target = {"axis": "weekday", "expect_concentration_in": ["weekday_X"]}
-    result = _resolve_zone(target, fills, "R0", "candidate", axis_lookup=None, min_row_cell_n=30)
+    result = _resolve_zone(
+        target, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}), min_row_cell_n=30
+    )
     assert result["resolved"] is None
     assert "add_axis" in result["reason"]
 
 
 def test_resolve_zone_no_target_fields_is_inconclusive():
     fills = _fills(35, 35, cheaper_in_target=True)
-    result = _resolve_zone({}, fills, "R0", "candidate", axis_lookup=None)
+    result = _resolve_zone({}, fills, "R0", "candidate", axis_lookup=None, shock_folds=frozenset({4}))
     assert result["resolved"] is None
 
 
@@ -1285,7 +1374,7 @@ def test_run_candidate_posts_bd_comment_even_when_grading_failed(monkeypatch):
     aggregate = pd.DataFrame([{"arm": "R0"}])  # missing cpl_held -> _resolve_effect raises
     realised = _FakeRealised(aggregate, pd.DataFrame())
     effect_resolved, effect_delta, zone, grading_error = _grade_run(
-        realised, target=None, axis_lookup=None, min_row_cell_n=30
+        realised, target=None, axis_lookup=None, shock_folds=frozenset(), min_row_cell_n=30
     )
     results = {
         "candidate": {"name": "cand"},

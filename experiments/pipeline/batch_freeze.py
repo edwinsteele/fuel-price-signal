@@ -241,6 +241,7 @@ def freeze_batch(
     batches_dir: pathlib.Path = DEFAULT_BATCHES_DIR,
     skip_refresh: bool = False,
     skip_noise_floor: bool = False,
+    skip_shock_folds: bool = False,
     tank: TankParams | None = None,
 ) -> pathlib.Path:
     """Freeze one batch: refresh (hard-gated) -> snapshot data + DB -> pin the column
@@ -271,6 +272,15 @@ def freeze_batch(
     candidate against a batch that doesn't have one, so a skipped batch stays
     correctly ungraded rather than silently ungraded — recompute later with
     `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch>`.
+
+    The shock-fold calibration (fps-3tu follow-up, `experiments/pipeline/shock_folds.py`
+    — ~14 baseline-only fits, no placebo arms, a few seconds) is likewise the last-but-one
+    step: every candidate run against this batch would otherwise re-derive the identical
+    empirical shock/normal split live (deterministic given this batch's own frozen data
+    and baseline columns), so computing it once here and having `runner.py` read the
+    cache is pure saved redundancy, not a correctness requirement — a run against a batch
+    with no cache (or a stale one, `skip_shock_folds` or an older batch) falls back to
+    deriving it live for that run alone. `skip_shock_folds` mirrors `skip_noise_floor`.
     """
     if not skip_refresh:
         refresh_db()
@@ -290,26 +300,47 @@ def freeze_batch(
     if batch_dir.exists():
         # Local import: dossier_tables -> runner -> batch_freeze already forms a cycle at
         # module load time, so this can't be a top-level import (same reason as the
-        # compute_noise_floor import below). Deferred to call time, by which every
-        # module in that chain is already fully loaded.
+        # compute_noise_floor/compute_shock_folds_for_batch imports below). Deferred to
+        # call time, by which every module in that chain is already fully loaded.
         from experiments.pipeline.dossier_tables import NOISE_FLOOR_FILENAME
+        from experiments.pipeline.shock_folds import SHOCK_FOLDS_FILENAME
 
-        noise_floor_hint = ""
+        # fps-cf8 / fps-3tu follow-up: noise floor and shock-fold calibration are the last
+        # two freeze steps, in that order, so a crash/interrupt partway through leaves
+        # everything else already pinned — re-running batch_freeze on this dir would
+        # otherwise look like the same "batch frozen twice by mistake" case this guard
+        # exists to catch. Point at whichever recovery step is actually missing instead of
+        # just refusing.
+        missing_steps = []
         if not (batch_dir / NOISE_FLOOR_FILENAME).exists():
-            # fps-cf8: the noise floor is now the last freeze step, so a crash/interrupt
-            # partway through (it's a ~1 baseline + ~20 placebo-fit step, fps-awz — wall
-            # time TBD pending a real run under the new construction) leaves everything else
-            # already pinned — re-running batch_freeze on this dir would otherwise look
-            # like the same "batch frozen twice by mistake" case this guard exists to
-            # catch. Point at the actual, safe recovery instead of just refusing.
-            noise_floor_hint = (
-                " It looks like everything but the noise floor is already pinned (no "
-                f"{NOISE_FLOOR_FILENAME} yet) — if setup was interrupted after freezing, "
-                "finish it with `PYTHONPATH=. uv run python -m experiments.pipeline."
-                f"noise_floor {batch_name}` (no --force needed, the file doesn't exist yet)."
+            missing_steps.append((
+                "noise floor", "PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor",
+            ))
+        if not (batch_dir / SHOCK_FOLDS_FILENAME).exists():
+            missing_steps.append((
+                "shock-fold calibration",
+                "PYTHONPATH=. uv run python -m experiments.pipeline.shock_folds",
+            ))
+        recovery_hint = ""
+        if missing_steps:
+            what = " and ".join(name for name, _cmd in missing_steps)
+            commands = "; then ".join(f"`{cmd} {batch_name}`" for _name, cmd in missing_steps)
+            # Singular/plural phrasing must track len(missing_steps), not be restated as a
+            # literal (review finding on PR #350): a hardcoded "neither file exists yet"
+            # is simply wrong when only one of the two is actually missing, and an
+            # operator who trusts it could believe noise_floor.json also needs redoing
+            # when it's already there — overwriting the floor every dossier in the batch
+            # is already reading.
+            missing_clause = (
+                "the file doesn't exist yet" if len(missing_steps) == 1 else "neither file exists yet"
+            )
+            recovery_hint = (
+                f" It looks like everything but the {what} is already pinned — if setup was "
+                f"interrupted after freezing, finish it with {commands} (no --force needed, "
+                f"{missing_clause})."
             )
         raise FileExistsError(
-            f"Batch dir already exists: {batch_dir}. Batches are frozen once.{noise_floor_hint}"
+            f"Batch dir already exists: {batch_dir}. Batches are frozen once.{recovery_hint}"
         )
     # Every column check runs on the SOURCE frame, before mkdir and before the two
     # expensive copies below. These raises are not exceptional: UnclassifiedFrameColumns
@@ -378,6 +409,13 @@ def freeze_batch(
 
         compute_noise_floor(batch_dir, tank=tank)
 
+    if not skip_shock_folds:
+        # Local import: same circularity reason as compute_noise_floor above
+        # (shock_folds.py -> batch_freeze.py at module load time).
+        from experiments.pipeline.shock_folds import compute_shock_folds_for_batch
+
+        compute_shock_folds_for_batch(batch_dir)
+
     return batch_dir
 
 
@@ -427,6 +465,14 @@ def check_baseline_contract(batch_dir: pathlib.Path, df: pd.DataFrame) -> None:
     "you run `PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch>` — "
     "for local iteration only, not normal batch setup.",
 )
+@click.option(
+    "--skip-shock-folds", is_flag=True, default=False,
+    help="Skip computing the empirical shock-fold calibration (~14 baseline-only fits, a "
+    "few seconds) as the last freeze step. Every run against this batch then falls back to "
+    "deriving it live for itself (correct, just redundant across candidates) until you run "
+    "`PYTHONPATH=. uv run python -m experiments.pipeline.shock_folds <batch>` — for local "
+    "iteration only, not normal batch setup.",
+)
 def main(
     batch_name: str,
     features_path: str,
@@ -434,6 +480,7 @@ def main(
     batches_dir: str,
     skip_refresh: bool,
     skip_noise_floor: bool,
+    skip_shock_folds: bool,
 ) -> None:
     """Freeze a batch: refresh the DB, snapshot data/features + the DB, pin the
     baseline contract, and compute the noise floor — batch setup as one command."""
@@ -444,6 +491,7 @@ def main(
         batches_dir=pathlib.Path(batches_dir),
         skip_refresh=skip_refresh,
         skip_noise_floor=skip_noise_floor,
+        skip_shock_folds=skip_shock_folds,
     )
     click.echo(f"Froze batch '{batch_name}' -> {batch_dir}")
 

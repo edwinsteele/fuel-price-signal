@@ -304,6 +304,99 @@ def test_freeze_batch_skip_noise_floor_leaves_batch_correctly_ungraded(tmp_path)
     assert band["available"] is False
 
 
+def test_freeze_batch_computes_the_shock_folds_as_its_final_step(tmp_path, monkeypatch):
+    """fps-3tu follow-up: the shock-fold calibration is likewise no longer a step the
+    operator must remember to run separately after freeze."""
+    import experiments.pipeline.shock_folds as shock_folds_module
+
+    calls: list[pathlib.Path] = []
+    monkeypatch.setattr(
+        shock_folds_module, "compute_shock_folds_for_batch", lambda batch_dir, **kw: calls.append(batch_dir)
+    )
+
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True, skip_noise_floor=True,
+    )
+
+    assert calls == [batch_dir]
+
+
+def test_freeze_batch_skip_shock_folds_leaves_batch_without_a_cache(tmp_path):
+    """The --skip-shock-folds escape hatch must not produce a batch runner.py can't
+    grade — no shock_folds.json just means every run against it falls back to deriving
+    the set live for itself (load_cached_shock_folds returns None, not an error)."""
+    import experiments.pipeline.shock_folds as shock_folds_module
+
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batch_dir = freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=tmp_path / "batches", skip_refresh=True,
+        skip_noise_floor=True, skip_shock_folds=True,
+    )
+
+    assert not (batch_dir / "shock_folds.json").exists()
+    assert shock_folds_module.load_cached_shock_folds(batch_dir, baseline_fingerprint="54:x") is None
+
+
+def test_freeze_batch_refuses_with_a_recovery_hint_when_only_shock_folds_is_missing(tmp_path, monkeypatch):
+    """The recovery hint must name whichever of the two final steps is actually absent —
+    not just noise_floor, now that shock-fold calibration is a second final step."""
+    import experiments.pipeline.noise_floor as noise_floor_module
+
+    monkeypatch.setattr(
+        noise_floor_module, "compute_noise_floor",
+        lambda batch_dir, **kw: (batch_dir / "noise_floor.json").write_text("{}"),
+    )
+
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batches_dir = tmp_path / "batches"
+    freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=batches_dir, skip_refresh=True, skip_shock_folds=True,
+    )
+
+    with pytest.raises(FileExistsError) as exc_info:
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=batches_dir, skip_refresh=True, skip_shock_folds=True,
+        )
+    message = str(exc_info.value)
+    assert "shock_folds batch1" in message
+    assert "noise_floor batch1" not in message
+    # Review finding on PR #350: with only ONE of the two files actually missing, the
+    # trailing clause must say so in the singular — "neither file exists yet" would
+    # falsely imply noise_floor.json (which DOES exist here) is also absent.
+    assert "the file doesn't exist yet" in message
+    assert "neither file exists yet" not in message
+
+
+def test_freeze_batch_recovery_hint_uses_plural_when_both_files_are_missing(tmp_path):
+    """The plural branch of the same clause — both final steps skipped, so BOTH files
+    are genuinely absent and the plural phrasing is accurate."""
+    df = _features_df()
+    features_path, db_path = _write_source(tmp_path, df)
+    batches_dir = tmp_path / "batches"
+    freeze_batch(
+        "batch1", features_path=features_path, db_path=db_path,
+        batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True, skip_shock_folds=True,
+    )
+
+    with pytest.raises(FileExistsError) as exc_info:
+        freeze_batch(
+            "batch1", features_path=features_path, db_path=db_path,
+            batches_dir=batches_dir, skip_refresh=True, skip_noise_floor=True, skip_shock_folds=True,
+        )
+    message = str(exc_info.value)
+    assert "noise_floor batch1" in message
+    assert "shock_folds batch1" in message
+    assert "neither file exists yet" in message
+
+
 def test_freeze_batch_handles_iso_string_price_date(tmp_path):
     """price_date is ISO-string in some features.csv outputs, INTEGER YYYYMMDD in the DB."""
     df = _features_df()

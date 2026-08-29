@@ -43,7 +43,7 @@ HYPOTHESIS = (
 # What you can predict against (facts.json keys, all written by dossier_tables.py):
 #   headline.realised     — delta_cpl_held / effect_resolved: sign and size of the effect
 #   breakdowns.per_fold   — delta_cpl_own, n_fills per fold: where it concentrates in TIME
-#   breakdowns.per_regime — the same, split shock vs normal (SHOCK_FOLDS)
+#   breakdowns.per_regime — the same, split shock vs normal (empirical, fps-3tu)
 #   breakdowns.per_axis   — your own add_axis(), if you define one. CPL cells here are
 #                           path-coupled and NOT identified — usable as colour, never as
 #                           the load-bearing half of a claim (see dossier.md).
@@ -91,7 +91,7 @@ CONFIDENCE_EFFECT = 0.05
 CONFIDENCE_ZONE = 0.10
 
 # Where the effect should concentrate. "axis" is either the built-in "regime"
-# (SHOCK_FOLDS shock-vs-normal) or the name add_axis(df) below produces;
+# (an empirical shock-vs-normal split, fps-3tu) or the name add_axis(df) below produces;
 # "folds" is a direct list of 1-indexed WFCV fold numbers. Either or both may
 # be set — a fill counts as "in target" if it matches EITHER. Empty list /
 # omitted axis means "not claiming a zone" (only CONFIDENCE_EFFECT is graded).
@@ -153,7 +153,7 @@ def add_axis(df: pd.DataFrame) -> pd.Series:
     cutting it on a per-row label allocates that total to a sub-period, which
     has no unique answer. Both the dossier's per_axis deltas and CONFIDENCE_ZONE
     graded on this axis ship an identification caveat and are colour, not
-    findings. TARGET["folds"] and the built-in axis "regime" (SHOCK_FOLDS) are
+    findings. TARGET["folds"] and the built-in axis "regime" (empirical shock-vs-normal) are
     graded on identified quantities instead, because each (fold, station) is an
     independent simulation with its own tank. Prefer them for the headline zone
     claim; keep add_axis for descriptive breakdowns (feature values, NaN rates,
