@@ -423,9 +423,9 @@ def _attach_regret(
     if not db_path.exists():
         return {
             "computed": False,
-            "reason": f"price DB {str(db_path)!r} (freeze.json's source_db) is not present — "
-            "it is gitignored, so a checkout without it can build every other table but not "
-            "this one.",
+            "reason": f"the batch's frozen price DB {str(db_path)!r} is not present — it is "
+            "gitignored, so a checkout without it can build every other table but not this "
+            "one.",
         }
     flips = diff_fills(fills, BASELINE_ARM, CANDIDATE_ARM)
     if flips.empty:

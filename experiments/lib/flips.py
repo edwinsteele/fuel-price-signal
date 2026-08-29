@@ -218,6 +218,17 @@ def regret_horizon_days(tank_params: str) -> int:
     only within one cadence — never quote a regret figure without its `cadence_days`, and never
     compare regret across dossiers at different cadences. Same defect class as
     `cascade_window_days`' `n_decisions` quantisation caveat, reached by a different route.
+
+    **Known limitation, filed as `fps-o0h`, NOT live at any locked config.** This reads the
+    stamp, which is a DISPLAY format — `format_tank_params` renders daily consumption `:.3f`,
+    so the default 3.5714285714285716 arrives here as 3.571 and the feasible wait computes as
+    12.6015 rather than 12.6. Both round to 13, and both committed stamps
+    (`50/3.571/1d/10%`, `50/3.571/7d/10%`) are unaffected in this function and in
+    `cascade_window_days`. Swept over 560 plausible tanks, 52 configs DO disagree with the same
+    quantity computed from `TankParams` directly (e.g. `40/2.857/1d/25%` gives 11 here against
+    10 from the dataclass), so a future re-lock could land on one. fps-o0h is about giving these
+    derived quantities a single owner on `TankParams` instead of re-deriving them from a
+    rounded string; until then, re-check this function when the tank is re-locked.
     """
     size, daily, _cadence, floor = parse_tank_params(tank_params)
     return round((1.0 - floor) * size / daily)
