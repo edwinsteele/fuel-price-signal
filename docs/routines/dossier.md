@@ -224,24 +224,63 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          spend-weighted, so a 3.57 L top-up and a 42.86 L fill count identically in a flip count
          but not in the CPL; a large litres gap between arms (fps-6yi: 2064 vs 2982, a 44%
          difference) is itself worth surfacing, not just a weighting detail.
-       - `flip_cpl_delta` **beside its own interval**
-         (`flip_cpl_delta_interval` = delta ± 2×`flip_cpl_delta_se`), e.g. `-2.68 (-7.6 to
-         +2.3)` — print the interval, not a bare `±`, so no reader needs to know what SE stands
-         for. **`flip_cpl_baseline` and `flip_cpl_candidate` pool DISJOINT fills on different
-         days at different points in the price cycle — their difference has no stable
-         denominator and routinely cannot be distinguished from zero.** When
-         `flip_cpl_delta_inside_own_se` is `true`, mark that cell (fps-6yi: 0 of 12 resolvable
-         folds cleared their own interval — fold 13's headline-grabbing -32.73 sits inside a
-         2×SE of ±41.05, effective n sized on its 3 cascade-collapsed DECISIONS, not its 6
-         raw flips). **A cell marked inside its own SE must never be cited as evidence in
-         the Judgement section** — "favourable flips dominate, N of M folds" is a vote count
-         over cells that cannot resolve their own numbers, not corroboration (this is exactly
-         how fps-6yi's original Judgement went wrong; see that run's post-dossier review
-         addendum). When `flip_cpl_delta` itself is `None`, state
-         `flip_cpl_delta_reason` verbatim (`"no flips"` / `"one arm only"`) rather than a blank
-         cell; when the delta exists but no interval could be estimated, state
-         `flip_cpl_delta_interval_reason` verbatim instead of printing a hairline interval —
-         both are honest "unmeasurable," never the same as a resolved zero-width one.
+       - **`regret_cpl_baseline` / `regret_cpl_candidate` from `decision_flips["regret"]` — the
+         rendered timing column** (fps-2js). Regret is `price paid − the cheapest price that
+         same station reached inside the tank's feasible wait`; `0` means the arm bought the
+         best price it could actually have reached, and lower is better. Unlike the flip CPL
+         columns it is **defined identically on both arms and cycle-normalised**, so cells are
+         comparable to each other and it POOLS — always report the `all` row, which is the only
+         run-level statement this table can make (fps-6yi at its 13-day horizon: baseline
+         10.03 vs candidate 9.38 c/L, i.e. both arms buy about equally well, consistent with
+         the -0.0735 headline). **Report `horizon_days` AND `cadence_days` with it, always.**
+         The horizon is a fixed ceiling on the tank's feasible wait (`regret_horizon_days`),
+         NOT a cycle length; it is deliberately a ceiling no real fill attains (fps-6yi's
+         fills top out at 11.6 days of headroom), so regret levels are conservative by
+         construction and slightly conservative toward whichever arm buys in larger fills.
+         `cadence_days` matters just as much: the window is walked on the run's own evaluation
+         grid, so a 1d run samples 14 candidate prices inside it and a 7d run samples 2. On
+         fps-6yi the same flips give -0.644 at 1d, -0.695 at 2d and **+0.143 at 7d — the level
+         nearly halves and the sign flips.** Regret is comparable only WITHIN one cadence;
+         never compare it across dossiers at different cadences. (Same defect class as the
+         `decns` quantisation caveat above.)
+         - Print `regret_cpl_delta` **beside its own interval**
+           (`regret_cpl_delta_interval` = delta ± 2×`regret_cpl_delta_se`, sized on cascade-collapsed
+           DECISIONS), and apply exactly the citation rule below: fps-6yi's `all` row is
+           -0.64 c/L against a ±4.24 interval, and 12 of 12 resolvable folds sit inside their
+           own. **Regret is a legibility fix, not a power fix — it does not rescue a thin
+           cell, it just stops the cell lying about its size.** Never present it as having
+           resolved something `flip_cpl_delta` could not.
+         - It is a **WHEN measure, not a WHAT measure** (same station only, by construction).
+           When regret and `run_contribution_cpl` disagree in sign — fps-6yi's fold 4
+           contributes +0.0437 c/L while its regret says the candidate timed 0.26 c/L better —
+           that is not a contradiction, and it is the most useful thing this pair says: the
+           difference came from WHAT was bought (volume and composition), not WHEN.
+         - Report `dark_fill_days` whenever it is non-zero (fps-6yi: 56 of 303, folds 4-7, all
+           one station's outage). Those fills ARE scored, at the forward-filled price the tank
+           simulator itself bought at — the outage does not bias the estimate, but it thins and
+           tilts specific folds, so a fold's evidence weight is not what its row count suggests.
+         - When `decision_flips["regret"]["computed"]` is `false`, state its `reason` verbatim
+           (usually: the price DB is gitignored and absent from this checkout) and render the
+           rest of the table normally — it is not a reason to skip the flip section.
+       - `flip_cpl_delta` — **kept in `facts.json`, no longer rendered in the table** (fps-2js).
+         `flip_cpl_baseline` and `flip_cpl_candidate` pool DISJOINT fills on different days at
+         different points in the price cycle: their difference has no stable denominator, so it
+         explodes in thin cells and routinely cannot be distinguished from zero (fps-6yi: 0 of
+         12 resolvable folds cleared their own interval — fold 13's headline-grabbing -32.73
+         sits inside a 2×SE of ±41.05, effective n sized on its 3 cascade-collapsed DECISIONS,
+         not its 6 raw flips; under regret that same fill reads 0.00, the exact optimum).
+         Showing it beside regret would put two measures of the same thing on screen that
+         disagree, and the louder, less trustworthy one wins that contest — so render regret
+         and leave this in the facts for anyone who wants to check it. **The citation rule
+         below applies to it regardless of whether it is rendered.**
+         **A cell marked `inside_own_se` must never be cited as evidence in the Judgement
+         section** — "favourable flips dominate, N of M folds" is a vote count over cells that
+         cannot resolve their own numbers, not corroboration (this is exactly how fps-6yi's
+         original Judgement went wrong; see that run's post-dossier review addendum). Whenever
+         a delta is `None`, state its `_reason` verbatim (`"no flips"` / `"one arm only"`)
+         rather than a blank cell; when a delta exists but no interval could be estimated,
+         state its `_interval_reason` verbatim instead of printing a hairline interval — both
+         are honest "unmeasurable," never the same as a resolved zero-width one.
        - `run_contribution_cpl` — **the highest-value column.** What this fold's divergence is
          actually worth at the scale of the whole run: a litres-weighted shift-share of the
          fold's own `delta_cpl_own` (`facts["breakdowns"]["per_fold"]`, the whole fold's pooled

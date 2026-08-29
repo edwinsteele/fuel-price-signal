@@ -50,6 +50,7 @@ Usage:
 """
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import pathlib
@@ -65,9 +66,21 @@ from scipy.stats import norm as _norm_dist
 from scipy.stats import t as _t_dist
 
 from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
-from experiments.lib.flips import cascade_window_days, summarise_flips
+from experiments.lib.flips import (
+    cascade_window_days,
+    diff_fills,
+    parse_tank_params,
+    regret_horizon_days,
+    summarise_flips,
+    summarise_regret,
+)
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
+
+# FROZEN_DB_FILENAME is batch_freeze's artifact to name (it writes the clone); runner.py and
+# noise_floor.py already import it from there, and the dossier_tables -> runner -> batch_freeze
+# import direction already exists, so this adds no new edge.
+from experiments.pipeline.batch_freeze import FROZEN_DB_FILENAME
 from experiments.pipeline.placebo import TEXTURE_ICC_BOUND, effective_n_draws
 from experiments.pipeline.redundancy import BATCH_RECORD_JSON
 from experiments.pipeline.runner import (
@@ -78,6 +91,7 @@ from experiments.pipeline.runner import (
     STATUS_GRADED,
     read_run_status,
 )
+from fuel_signal import db as _db
 from fuel_signal.dates import date_from_int
 from fuel_signal.score_phase2 import threshold_sweep
 
@@ -369,13 +383,132 @@ def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
             "reason": f"clean reject (z={z:.3f} >= threshold={t:.3f}) — candidate is clearly the "
             "wrong sign vs. this batch's noise band; flip detail is unlikely to change that call.",
         }
-    window = cascade_window_days(facts["provenance"]["tank_params"])
+    tank_params = facts["provenance"]["tank_params"]
+    window = cascade_window_days(tank_params)
     summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, SHOCK_FOLDS, window_days=window)
     summary["computed"] = True
     _attach_run_contributions(
         summary, fills, facts["breakdowns"]["per_fold"], facts["headline"]["realised"]["delta_cpl_held"],
     )
+    # facts["provenance"]["batch_dir"] rather than a new parameter: _decision_flips is already
+    # handed the whole facts dict, and provenance is where this module's own batch_dir lands.
+    provenance_batch_dir = facts["provenance"].get("batch_dir")
+    summary["regret"] = _attach_regret(
+        fills, tank_params, window,
+        pathlib.Path(provenance_batch_dir) if provenance_batch_dir else None,
+    )
     return summary
+
+
+def _attach_regret(
+    fills: pd.DataFrame, tank_params: str, window_days: int, batch_dir: pathlib.Path | None
+) -> dict:
+    """The timing-regret table (fps-2js) — `experiments/lib/flips.summarise_regret` over this
+    run's flipped fills, or an explicit `computed: false` + reason when the price DB this run
+    was graded against isn't reachable from where the dossier is being built.
+
+    Optional-with-a-reason rather than fatal, deliberately: every other input to facts.json is
+    a run artifact sitting beside results.json, but regret needs the ~500 MB gitignored price
+    DB, so a reader who pulled the repo without it must still be able to rebuild every other
+    table. Same `computed`/`reason` contract as `decision_flips` itself and `noise_band`, so no
+    downstream reader has to tell "skipped" from "forgotten".
+    """
+    db_path = _resolve_source_db(batch_dir)
+    if db_path is None:
+        return {
+            "computed": False,
+            "reason": "no batch freeze manifest — cannot tell which price DB this run was "
+            "graded against, and regret must be scored on that exact series.",
+        }
+    if not db_path.exists():
+        return {
+            "computed": False,
+            "reason": f"the batch's frozen price DB {str(db_path)!r} is not present — it is "
+            "gitignored, so a checkout without it can build every other table but not this "
+            "one.",
+        }
+    flips = diff_fills(fills, BASELINE_ARM, CANDIDATE_ARM)
+    if flips.empty:
+        return {
+            "computed": False,
+            "reason": "the two arms made no differing fills — no flipped fill to score regret on.",
+        }
+    _size, _daily, cadence_days, _floor = parse_tank_params(tank_params)
+    conn = _db.open_db(db_path)
+    try:
+        prices = _DbStationPrices(conn, sorted(int(c) for c in flips["station_code"].unique()))
+    finally:
+        conn.close()
+    summary = summarise_regret(
+        flips, prices, SHOCK_FOLDS,
+        horizon_days=regret_horizon_days(tank_params),
+        cadence_days=cadence_days,
+        window_days=window_days,
+    )
+    summary["computed"] = True
+    # Resolved, not the raw relative "fuel_signal.db" from freeze.json — facts.json is read
+    # long after and from elsewhere, so a CWD-relative path is not provenance.
+    summary["source_db"] = str(db_path.resolve())
+    return summary
+
+
+def _resolve_source_db(batch_dir: pathlib.Path | None) -> pathlib.Path | None:
+    """The batch's own FROZEN price DB — `batch_dir/fuel_signal.db`, the clone
+    `batch_freeze._clone_db` made and the exact file `runner.py` graded the run against.
+
+    **Not `freeze.json`'s `source_db`** (PR #348 review finding #1). That field records where
+    the freeze *read* from at freeze time — a repo-root-relative `fuel_signal.db` — which
+    resolves to the LIVE database, a different and continuously-updated file: `batch0`'s clone
+    is 524,197,888 bytes (17 Aug) against the live DB's 524,689,408 (22 Aug). Scoring regret
+    against later, possibly revised prices is exactly the drift `summarise_regret` forbids,
+    since the whole measure rests on replaying the price path the arms actually faced. Two
+    further harms made it concrete rather than theoretical: `_db.open_db` issues
+    `PRAGMA journal_mode=WAL`, so every dossier build was a WRITE against the live production
+    DB; and no worktree has a root `fuel_signal.db`, so regret reported `computed: false`
+    everywhere except the primary checkout while the correct frozen DB sat in the batch dir.
+
+    `runner.py` and `noise_floor.py` both already resolve the DB this way
+    (`batch_dir / FROZEN_DB_FILENAME`); this is the third reader, not a new convention.
+    `freeze.json`'s presence is still the gate — a batch dir without a manifest isn't a frozen
+    batch, and its contents are not the graded artifacts.
+    """
+    if batch_dir is None:
+        return None
+    if not (batch_dir / FREEZE_MANIFEST_FILENAME).exists():
+        return None
+    return batch_dir / FROZEN_DB_FILENAME
+
+
+class _DbStationPrices:
+    """`flips.StationPriceSource` over the run's own sqlite price DB.
+
+    Loads each station's full `daily_prices` series once and answers from memory — regret
+    walks ~`horizon_days` dates per flip, so a query per lookup would be thousands of
+    round-trips for no benefit. `price_at` reproduces `fuel_signal.backtest.PriceHistory.
+    station_price_at` exactly (same `bisect_right(...) - 1` forward-fill over the same
+    `db.get_daily_prices` series) — the point of regret is to score each arm against the price
+    path it actually faced, so this must not drift from the accessor the simulator used.
+    """
+
+    def __init__(self, conn, station_codes: list[int]) -> None:
+        self._dates: dict[int, list[str]] = {}
+        self._prices: dict[int, list[float]] = {}
+        for code in station_codes:
+            series = _db.get_daily_prices(conn, code)
+            self._dates[code] = [d for d, _ in series]
+            self._prices[code] = [p for _, p in series]
+
+    def price_at(self, station_code: int, as_of: str) -> float | None:
+        dates = self._dates.get(int(station_code))
+        if not dates:
+            return None
+        idx = bisect.bisect_right(dates, as_of) - 1
+        return self._prices[int(station_code)][idx] if idx >= 0 else None
+
+    def is_observed(self, station_code: int, as_of: str) -> bool:
+        dates = self._dates.get(int(station_code)) or []
+        idx = bisect.bisect_left(dates, as_of)
+        return idx < len(dates) and dates[idx] == as_of
 
 
 def _attach_run_contributions(

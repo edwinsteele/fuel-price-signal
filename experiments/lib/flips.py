@@ -41,6 +41,7 @@ is computed one layer up, in `experiments/pipeline/dossier_tables.py`.
 from __future__ import annotations
 
 import math
+from typing import Protocol
 
 import numpy as np
 import pandas as pd
@@ -127,10 +128,110 @@ def cascade_window_days(tank_params: str) -> int:
     string's only writer (`fuel_signal.backtest.require_tank_stamp` is the only sanctioned way
     to obtain one).
     """
-    size_str, daily_str, interval_str = tank_params.split("/")[:3]
-    half_life = round(float(size_str) / float(daily_str) / 2)
-    cadence_days = int(interval_str.rstrip("d"))
+    size, daily, cadence_days, _floor = parse_tank_params(tank_params)
+    half_life = round(size / daily / 2)
     return max(half_life, cadence_days + 1)
+
+
+def parse_tank_params(tank_params: str) -> tuple[float, float, int, float]:
+    """`(tank_size_litres, daily_consumption_litres, evaluation_interval_days, floor_fraction)`
+    from the stamp `fuel_signal.backtest.format_tank_params` writes.
+
+    Single-sourced so `cascade_window_days` and `regret_horizon_days` — two different windows
+    derived from the same four numbers — can never disagree about how the stamp is read.
+    `floor` is stamped as a percentage (`10%`) and returned as a fraction (`0.10`), matching
+    `TankParams.floor_fraction`'s own units rather than the string's.
+    """
+    size_str, daily_str, interval_str, floor_str = tank_params.split("/")
+    return (
+        float(size_str),
+        float(daily_str),
+        int(interval_str.rstrip("d")),
+        float(floor_str.rstrip("%")) / 100.0,
+    )
+
+
+def regret_horizon_days(tank_params: str) -> int:
+    """`summarise_regret`'s forward window: a FIXED, EXOGENOUS ceiling on how long a wait the
+    tank could ever fund — `(1 - floor_fraction) * tank_size_litres / daily_consumption_litres`
+    (fps-2js). At fps-6yi's tank (`50/3.571/1d/10%`), 0.9 * 50 / 3.571 = 12.6 -> **13 days**.
+
+    **This ceiling is not attained by any real fill, and must not be described as reachable**
+    (PR #348 review finding #2). A fill only happens when the tank is short, and `run_backtest`
+    buys to full (`buy_litres = size - level`), so the level immediately before a fill is
+    `size - litres`, and that fill's genuinely feasible wait is
+    `((1 - floor) * size - litres) / daily`. Since a fill is at least one depletion's worth,
+    the per-fill bound is strictly below the ceiling. Measured over fps-6yi's committed 303
+    flips: **max 11.60 days, mean 7.94, litres-weighted 5.71 (baseline) / 5.07 (candidate),
+    11 flips under one day, and 0 of 303 reaching 13.**
+
+    **The fixed ceiling is kept anyway, and the reason is identification, not convenience.**
+    The per-fill bound is a function of `litres`, which is itself the residue of the arm's own
+    earlier buy/wait decisions — an ENDOGENOUS, path-coupled window. This project has already
+    established that path-coupled quantities cut per-row have no unique answer (the 2026-08-21
+    path-coupling audit; `cut economics on folds, not on row labels`), and a measurement window
+    that each arm partly chooses for itself is that same defect relocated into the estimator.
+    A fixed window is worse-calibrated but identified; a per-fill window is better-calibrated
+    but not. Both were computed, and the choice does not move any reading:
+
+        litres-weighted regret       baseline   candidate    delta
+        fixed ceiling H=13 (shipped)   10.03       9.38      -0.6437
+        per-fill feasible H_i           4.70       3.72      -0.9726
+
+    Levels roughly halve and the delta grows ~51%, but both sit far inside the run-level 2*SE
+    of +/-4.24, so neither supports a conclusion the other refuses.
+
+    **Known residual bias, stated because it is the kind this measure exists to remove.** The
+    ceiling over-charges regret to whichever arm buys in LARGER fills, because those fills have
+    the least real headroom and the fixed window over-reaches furthest for them. On fps-6yi the
+    baseline's litres-weighted capacity is 5.71 days against the candidate's 5.07, so the
+    shipped delta is conservative toward the candidate by roughly the gap the table above
+    shows. Do not read a regret delta smaller than that gap as a difference between arms.
+
+    **Derived from the TANK, not from cycle length — a departure from fps-2js as filed.** The
+    bead proposed deriving H from `cycle_mean_length` ("longer than a cycle makes every fill
+    look bad"). The direction is right, but the binding constraint arrives far earlier: batch0's
+    `cycle_mean_length` is mean 30.5 / max 35.3 days (`experiments/pipeline/placebo.py`) while
+    this tank cannot fund even 13. Sweeping H over the real fps-6yi flips:
+
+        H (days)   3     5     7    10    12    13    14  |   15    18    21    28    30    61
+        cand-base -0.44 +0.16 -0.02 -0.19 -0.65 -0.64 -0.64| -0.98 -2.22 -3.22 -4.19 -4.71 -6.56
+
+    Read this as a trend, not a cliff (PR #348 review): the separation is gradual, and H=12's
+    -0.65 is already ~9x the run's realised `delta_cpl_held` of -0.0735 c/L. What the sweep
+    shows is that the measure grows without bound as the window leaves the tank's reach — at a
+    cycle-length horizon it claims ~64x the realised effect — because the two arms' fills sit at
+    systematically different cycle phases, so an infeasible window tail scores PHASE, not skill.
+    The argument for 13 rests on the tank derivation; the sweep corroborates it, and on its own
+    would not pick a number.
+
+    **`horizon_days` is cadence-independent but regret LEVELS ARE NOT** (PR #348 review finding
+    #3). The window's length comes from the tank, but `summarise_regret` walks it on the run's
+    own evaluation grid, so a 1-day-cadence run samples 14 candidate prices inside it and a
+    7-day run samples 2. Measured on the same fps-6yi flips at a fixed H=13:
+
+        cadence     1d              2d              7d
+        base/cand   10.03 / 9.38    9.53 / 8.84     5.80 / 5.94
+        delta       -0.644          -0.695          **+0.143**
+
+    The level nearly halves and **the sign of the delta flips**. Regret is therefore comparable
+    only within one cadence — never quote a regret figure without its `cadence_days`, and never
+    compare regret across dossiers at different cadences. Same defect class as
+    `cascade_window_days`' `n_decisions` quantisation caveat, reached by a different route.
+
+    **Known limitation, filed as `fps-o0h`, NOT live at any locked config.** This reads the
+    stamp, which is a DISPLAY format — `format_tank_params` renders daily consumption `:.3f`,
+    so the default 3.5714285714285716 arrives here as 3.571 and the feasible wait computes as
+    12.6015 rather than 12.6. Both round to 13, and both committed stamps
+    (`50/3.571/1d/10%`, `50/3.571/7d/10%`) are unaffected in this function and in
+    `cascade_window_days`. Swept over 560 plausible tanks, 52 configs DO disagree with the same
+    quantity computed from `TankParams` directly (e.g. `40/2.857/1d/25%` gives 11 here against
+    10 from the dataclass), so a future re-lock could land on one. fps-o0h is about giving these
+    derived quantities a single owner on `TankParams` instead of re-deriving them from a
+    rounded string; until then, re-check this function when the tank is re-locked.
+    """
+    size, daily, _cadence, floor = parse_tank_params(tank_params)
+    return round((1.0 - floor) * size / daily)
 
 
 def _finite_positive_spread(values: pd.Series, std: float) -> bool:
@@ -164,17 +265,31 @@ def _price_dispersion(fold_rows: pd.DataFrame, all_rows: pd.DataFrame) -> tuple[
     Returns `(None, reason)` only when NEITHER fold-local nor run-wide dispersion is usable —
     the caller must print no interval at all in that case, not a hairline one.
     """
+    return _dispersion(fold_rows, all_rows, "price", what="price")
+
+
+def _dispersion(
+    fold_rows: pd.DataFrame, all_rows: pd.DataFrame, column: str, *, what: str
+) -> tuple[float | None, str]:
+    """`_price_dispersion`'s column-generic body, shared with `summarise_regret`'s per-fill
+    REGRET dispersion (fps-2js).
+
+    Deliberately one function rather than two similar ones: the fold-local/run-wide fallback
+    and — more importantly — the `_finite_positive_spread` float-degeneracy guard are the part
+    that took a review round to get right (fps-e1w, and fps-tnz before it). A second estimator
+    with its own copy of that logic is exactly how one of the two ends up missing the next fix.
+    """
     if len(fold_rows) >= MIN_FOLD_LOCAL_DISPERSION_N:
-        local_std = float(fold_rows["price"].std(ddof=1))
-        if _finite_positive_spread(fold_rows["price"], local_std):
+        local_std = float(fold_rows[column].std(ddof=1))
+        if _finite_positive_spread(fold_rows[column], local_std):
             return local_std, "fold-local"
     if len(all_rows) >= 2:
-        run_std = float(all_rows["price"].std(ddof=1))
-        if _finite_positive_spread(all_rows["price"], run_std):
+        run_std = float(all_rows[column].std(ddof=1))
+        if _finite_positive_spread(all_rows[column], run_std):
             return run_std, "run-wide"
     return None, (
-        "price dispersion not estimable — every flip fill (fold-local and run-wide) landed "
-        "at the same price"
+        f"{what} dispersion not estimable — every flip fill (fold-local and run-wide) landed "
+        f"at the same {what}"
     )
 
 
@@ -360,4 +475,289 @@ def summarise_flips(
         "cascade_window_days": window_days,
         "per_fold": per_fold,
         "rows": flips.to_dict(orient="records"),
+    }
+
+
+class StationPriceSource(Protocol):
+    """The price accessor `summarise_regret` needs, mirroring `fuel_signal.backtest`'s
+    `PriceHistory` rather than inventing a second convention.
+
+    `price_at` MUST forward-fill ("latest price on or before as_of", `PriceHistory.
+    station_price_at`'s exact contract) — that is the price path the tank simulator itself
+    bought at, so anything else scores the arms against a series they never saw. `is_observed`
+    is the un-filled question ("did the station actually report on this date"), used only to
+    count and report the dark days, never to drop a fill.
+
+    A Protocol rather than a concrete class so this module stays DB-free: the dossier builds
+    one over sqlite, and tests build one over a dict.
+    """
+
+    def price_at(self, station_code: int, as_of: str) -> float | None: ...
+
+    def is_observed(self, station_code: int, as_of: str) -> bool: ...
+
+
+def _weighted_mean(values: pd.Series, weights: pd.Series) -> float | None:
+    """Litres-weighted mean, or None when the arm carries no litres.
+
+    Litres-weighted, not row-weighted, for the same reason `pooled_cpl` is spend-weighted: a
+    3.57 L top-up and a 42.86 L fill are not two equal observations of how well the strategy
+    bought, and the run-level number has to answer "per litre actually purchased".
+    """
+    total = float(weights.sum())
+    if total <= 0:
+        return None
+    return float((values * weights).sum() / total)
+
+
+def _regret_stats(
+    side: pd.DataFrame, group_ids: pd.Series, s: float
+) -> tuple[float | None, float | None]:
+    """One arm's litres-weighted regret and its decision-level standard error.
+
+    `n_eff` is Kish's effective n over CASCADE-COLLAPSED litres (`_decision_litres`), never
+    per-fill litres — the same correction PR #347's review forced on `flip_cpl_delta`'s SE,
+    applied here from the start rather than rediscovered. A cascade is one decision replayed
+    forward; counting its fills as independent draws understates the interval in exactly the
+    over-confident direction.
+    """
+    if side.empty:
+        return None, None
+    mean = _weighted_mean(side["regret"], side["litres"])
+    n_eff = _effective_n(_decision_litres(side, group_ids))
+    se = s / math.sqrt(n_eff) if n_eff > 0 else None
+    return mean, se
+
+
+def summarise_regret(
+    flips: pd.DataFrame,
+    prices: "StationPriceSource",
+    shock_folds: set[int],
+    *,
+    horizon_days: int,
+    cadence_days: int,
+    window_days: int,
+) -> dict:
+    """Per-arm TIMING REGRET over the flipped fills — `price paid - the cheapest price the
+    same station reached within the tank's feasible wait` (fps-2js). 0 means the arm bought
+    the best price it could actually have reached; lower is better.
+
+    **Why this exists beside `flip_cpl_delta`.** `flip_cpl_baseline`/`flip_cpl_candidate` pool
+    two DISJOINT sets of fills bought on different days at different points in the price cycle,
+    so their difference has no stable denominator and explodes in thin cells (fps-e1w, and
+    `feedback_disjoint_basket_comparison`). Regret is defined identically on both arms and is
+    cycle-normalised by construction — "how much better could this fill have done, from where
+    it stood" is comparable between a 172.90 fill in Nov 2024 and a 205.90 one in May 2024,
+    which their raw prices are not. Three consequences, all measured on fps-6yi:
+
+    - **It pools.** There is a run-level ALL row (baseline 10.03 vs candidate 9.38 c/L at
+      H=13), which a difference of disjoint baskets can never produce, and it agrees with the
+      realised headline that the arms are a dead heat. `flip_cpl_delta` is not additive and
+      has no such row.
+    - **Dispersion falls by ~38%** — per-fill regret sd 8.49 c/L against the raw flip-price
+      sd of 13.72 the old SE was sized on.
+    - **Thin cells read truthfully.** fps-6yi's fold 13, whose `flip_cpl_delta` prints a much-
+      quoted -32.73 c/L off ONE candidate fill, reads baseline 5.73 / candidate 0.00: the
+      candidate bought the exact optimum. Same fill, a description that survives contact with
+      its own sample size.
+
+    **This is a WHEN measure, not a WHAT measure — same station only, deliberately.** The
+    counterfactual is that same station's own forward prices, so regret scores timing and
+    nothing else. A cross-station variant ("cheapest among the preferred set") was considered
+    and rejected: it would fold station choice into the same number and destroy the one
+    decomposition this table is for — fps-6yi's fold 4 contributes +0.0437 c/L to the headline
+    (unfavourable) while its regret says the candidate timed 0.26 c/L BETTER, and reading that
+    as "the difference came from WHAT was bought, not WHEN" only works while regret is purely
+    a WHEN measure.
+
+    **Dark days are FORWARD-FILLED, and that is not a policy choice** — it is the price path
+    the arms actually faced. `fuel_signal.backtest.PriceHistory.station_price_at` returns "the
+    latest price on or before as_of" (its own docstring: "station_price_at forward-fills, so
+    None occurs only as a leading prefix in practice"), so the tank simulator bought at the
+    carried price on days the station reported nothing. `prices` must implement those same
+    semantics. Scoring regret against observed-only prices would compare each arm to a series
+    it never saw AND drop fills asymmetrically — on fps-6yi, 56 of 303 flips fall on dark days
+    (all station 414, folds 4-7; 42 candidate vs 14 baseline, 364 vs 207 litres), so dropping
+    them would reintroduce the disjoint-basket defect through the back door. The count is
+    reported as `dark_fill_days` because the outage is non-random (it thins and tilts specific
+    folds) even though it no longer biases the estimate.
+
+    `prices` is any object with `price_at(station_code, as_of) -> float | None` and
+    `is_observed(station_code, as_of) -> bool`; the window is walked on the run's OWN
+    `cadence_days` grid anchored at the fill date (a fill only ever lands on an evaluation
+    date), because those are the days the strategy could actually have bought on.
+
+    The reference price is `min(price paid, cheapest reachable)`, so regret is never negative
+    even if a ledger price and its DB row disagree; `n_price_mismatch` counts any such
+    disagreement rather than letting it vanish into the floor.
+    """
+    if cadence_days > horizon_days:
+        # Only offset 0 would be evaluated, so every regret is exactly 0 and the table prints a
+        # resolved-looking dead heat that is pure arithmetic (PR #348 review finding #5). No
+        # live config reaches this — the horizon is a whole tank-life and the cadence is days —
+        # but a silently-zero table is the worst possible failure for a measure whose entire
+        # purpose is to stop unreadable numbers being read.
+        raise ValueError(
+            f"cadence_days={cadence_days} exceeds horizon_days={horizon_days}: the feasible "
+            "wait is shorter than one evaluation step, so no alternative buy day exists and "
+            "every regret would be a meaningless 0."
+        )
+    per_fold: list[dict] = []
+    scored = flips.copy()
+    regrets: list[float | None] = []
+    dark_rows, mismatches = [], 0
+    for _, row in flips.iterrows():
+        station, paid = int(row["station_code"]), float(row["price"])
+        as_of = pd.Timestamp(row["date"])
+        dark_rows.append(not prices.is_observed(station, as_of.strftime("%Y-%m-%d")))
+        reachable = []
+        fill_day_price = None
+        offset = 0
+        while offset <= horizon_days:
+            price = prices.price_at(station, (as_of + pd.Timedelta(days=offset)).strftime("%Y-%m-%d"))
+            if price is not None:
+                if offset == 0:
+                    fill_day_price = float(price)
+                reachable.append(float(price))
+            offset += cadence_days
+        if not reachable:
+            # station_price_at only returns None before a station's first ever price, so this
+            # is a fill dated ahead of its own station's series — a broken ledger, not an
+            # outage. Score nothing rather than guess.
+            regrets.append(None)
+            continue
+        # Explicitly the OFFSET-0 price, not reachable[0]: `reachable` skips None lookups, so
+        # on a fill dated before its station's first price reachable[0] is some later
+        # evaluation date's price, and comparing the ledger against that would report a
+        # data-integrity mismatch that is really just an out-of-range fill date.
+        if fill_day_price is not None and abs(fill_day_price - paid) > 1e-6:
+            mismatches += 1
+        regrets.append(paid - min(paid, min(reachable)))
+    scored["regret"] = regrets
+    scored["dark"] = dark_rows
+    resolvable = scored[scored["regret"].notna()]
+
+    for fold in sorted(flips["fold"].unique()) if not flips.empty else []:
+        fold_rows = resolvable[resolvable["fold"] == fold]
+        base_side = fold_rows[fold_rows["bought_by"] == "baseline"]
+        cand_side = fold_rows[fold_rows["bought_by"] == "candidate"]
+        group_ids = _cascade_group_ids(fold_rows, window_days)
+        s, dispersion_note = _dispersion(fold_rows, resolvable, "regret", what="regret")
+        row = _regret_row(base_side, cand_side, group_ids, s, dispersion_note)
+        row.update({
+            "fold": int(fold),
+            "regime": "shock" if fold in shock_folds else "normal",
+            # NOTE the different basis from summarise_flips' same-named field (PR #348 review
+            # finding #6): that one collapses EVERY flip, this one only the SCORED ones, so the
+            # two can differ for the same fold whenever a flip could not be scored.
+            # `n_unscored` beside it is what lets a reader reconcile them.
+            "n_decisions": int(group_ids.nunique()),
+            "n_unscored": int(
+                len(scored[(scored["fold"] == fold) & scored["regret"].isna()])
+            ),
+        })
+        per_fold.append(row)
+
+    all_groups = _cascade_group_ids_run_wide(resolvable, window_days)
+    s_all, note_all = _dispersion(resolvable, resolvable, "regret", what="regret")
+    all_row = _regret_row(
+        resolvable[resolvable["bought_by"] == "baseline"],
+        resolvable[resolvable["bought_by"] == "candidate"],
+        all_groups, s_all, note_all,
+    )
+    all_row["n_decisions"] = int(all_groups.nunique()) if len(all_groups) else 0
+    return {
+        "horizon_days": horizon_days,
+        "cadence_days": cadence_days,
+        "n_scored": int(len(resolvable)),
+        "n_unscored": int(len(scored) - len(resolvable)),
+        "dark_fill_days": int(scored["dark"].sum()),
+        "dark_fill_folds": sorted(int(f) for f in scored.loc[scored["dark"], "fold"].unique()),
+        "n_price_mismatch": mismatches,
+        "per_fold": per_fold,
+        "all": all_row,
+    }
+
+
+def _cascade_group_ids_run_wide(rows: pd.DataFrame, window_days: int) -> pd.Series:
+    """`_cascade_group_ids` applied per fold and re-offset so ids stay unique run-wide.
+
+    The ALL row's standard error has to be sized on the run's whole decision population, and
+    `_cascade_group_ids` allocates ids fold-locally — concatenating them without an offset
+    would merge unrelated folds' cascades into one group and understate `n_decisions`.
+    """
+    if rows.empty:
+        return pd.Series(dtype="int64")
+    out = pd.Series(-1, index=rows.index, dtype="int64")
+    offset = 0
+    for _, fold_rows in rows.groupby("fold"):
+        ids = _cascade_group_ids(fold_rows, window_days)
+        out.loc[fold_rows.index] = ids + offset
+        offset += int(ids.max()) + 1
+    return out
+
+
+def _regret_row(
+    base_side: pd.DataFrame,
+    cand_side: pd.DataFrame,
+    group_ids: pd.Series,
+    s: float | None,
+    dispersion_note: str,
+) -> dict:
+    """One cell (a fold, or the ALL row): both arms' regret, their difference, and the
+    difference's own 2*SE — the same "print the interval or print nothing" contract
+    `summarise_flips` follows, so the two tables cannot be read to different standards."""
+    base_regret, se_base = _regret_stats(base_side, group_ids, s) if s is not None else (
+        _weighted_mean(base_side["regret"], base_side["litres"]) if not base_side.empty else None, None
+    )
+    cand_regret, se_cand = _regret_stats(cand_side, group_ids, s) if s is not None else (
+        _weighted_mean(cand_side["regret"], cand_side["litres"]) if not cand_side.empty else None, None
+    )
+    delta = cand_regret - base_regret if base_regret is not None and cand_regret is not None else None
+    reason = None
+    if delta is None:
+        if base_side.empty and cand_side.empty:
+            reason = "no scored flips"
+        elif base_side.empty or cand_side.empty:
+            reason = "one arm only"
+        else:
+            # BOTH arms flipped, but a litres-weighted mean is undefined on a zero-litres side
+            # — "one arm only" would be a false statement about a fold that did flip on both,
+            # and docs/routines/dossier.md tells authors to quote this string verbatim. Same
+            # branch summarise_flips grew in PR #347's review (finding #4).
+            reason = (
+                "both arms have scored flips but one side carries zero total litres — a "
+                "litres-weighted regret is undefined there"
+            )
+    se_diff, interval, inside, interval_reason = None, None, None, None
+    if delta is not None:
+        if s is None:
+            interval_reason = dispersion_note
+        elif se_base is None or se_cand is None:
+            # Defensive, and unreachable as written: an arm's effective n is 0 only when its
+            # litres sum to 0, which already made its _weighted_mean None and so `delta` None
+            # above. Kept so the branch exists if either side's definition ever moves apart —
+            # the alternative is a silent None interval with no reason at all.
+            interval_reason = (
+                "regret dispersion resolvable but one arm's decision-weighted effective n "
+                "is 0 — cannot size that arm's own standard error"
+            )
+        else:
+            se_diff = math.sqrt(se_base ** 2 + se_cand ** 2)
+            half_width = INTERVAL_SE_MULTIPLE * se_diff
+            interval = [delta - half_width, delta + half_width]
+            inside = bool(abs(delta) < half_width)
+    return {
+        "n_baseline": int(len(base_side)),
+        "n_candidate": int(len(cand_side)),
+        "litres_baseline": float(base_side["litres"].sum()),
+        "litres_candidate": float(cand_side["litres"].sum()),
+        "regret_cpl_baseline": base_regret,
+        "regret_cpl_candidate": cand_regret,
+        "regret_cpl_delta": delta,
+        "regret_cpl_delta_reason": reason,
+        "regret_cpl_delta_se": se_diff,
+        "regret_cpl_delta_interval": interval,
+        "regret_cpl_delta_inside_own_se": inside,
+        "regret_cpl_delta_interval_reason": interval_reason,
     }
