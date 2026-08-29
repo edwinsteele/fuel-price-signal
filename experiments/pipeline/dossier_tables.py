@@ -65,7 +65,7 @@ from scipy.stats import norm as _norm_dist
 from scipy.stats import t as _t_dist
 
 from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
-from experiments.lib.flips import summarise_flips
+from experiments.lib.flips import cascade_window_days, summarise_flips
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.zones import assign_regime, pooled_cpl
 from experiments.pipeline.placebo import TEXTURE_ICC_BOUND, effective_n_draws
@@ -369,9 +369,77 @@ def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
             "reason": f"clean reject (z={z:.3f} >= threshold={t:.3f}) — candidate is clearly the "
             "wrong sign vs. this batch's noise band; flip detail is unlikely to change that call.",
         }
-    summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, SHOCK_FOLDS)
+    window = cascade_window_days(facts["provenance"]["tank_params"])
+    summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, SHOCK_FOLDS, window_days=window)
     summary["computed"] = True
+    _attach_run_contributions(
+        summary, fills, facts["breakdowns"]["per_fold"], facts["headline"]["realised"]["delta_cpl_held"],
+    )
     return summary
+
+
+def _attach_run_contributions(
+    summary: dict, fills: pd.DataFrame, breakdown_per_fold: list[dict], delta_cpl_held: float,
+) -> None:
+    """The "→ run Δ c/L" column (fps-e1w change 1): what each fold's flip divergence is
+    actually worth at the scale of the whole run, litres-weighted so it reconciles EXACTLY to
+    `delta_cpl_held` (mutates `summary` in place).
+
+    This is NOT `w_f * flip_cpl_delta` — a flip-only shift-share does not reconcile (a fills-
+    weighted version was tried and lands on -0.0008 against a -0.0735 headline; see design
+    note). It is the standard shift-share of the run's OWN headline ratio: `w_f`, the fold's
+    share of TOTAL run litres (every fill, not just flipped ones — the same population
+    `delta_cpl_held` itself pools), times `delta_cpl_own` (facts["breakdowns"]["per_fold"]'s
+    whole-fold pooled delta, matching and flipped fills alike — NOT `flip_cpl_delta`, which
+    only covers the flipped subset). `flip_cpl_delta` stays useful as a DESCRIPTIVE figure
+    beside its own SE; it is not the input to this reconciliation.
+
+    `composition_residual_cpl` is the leftover between `sum_f w_f * delta_cpl_own_f` and the
+    true `delta_cpl_held` — real, not a rounding artefact, because a litres-weighted average
+    of per-fold RATIOS is not exactly the ratio of pooled totals whenever the two arms' litres
+    mix differs fold to fold (the composition of WHERE volume falls, not just how much). fps-
+    6yi's own residual was -0.0129 against a -0.0735 headline, ~18% of it — material enough
+    to show as its own line rather than absorb silently.
+
+    A fold whose breakdown row is suppressed (`delta_cpl_own` is `None`, below
+    `min_row_cell_n`) contributes `None` here too — its true contribution is folded into the
+    residual rather than guessed at, same as any other unmeasured fold.
+
+    **The residual also absorbs any tau divergence between arms, not just composition drift**
+    (PR #347 review finding #3). `delta_cpl_own` is an OWN-tau quantity (`experiments/lib/
+    realised.py`'s per-window `cpl_own`, each arm thresholded at its own selected tau) while
+    `delta_cpl_held` is HELD-tau (both arms thresholded at the same tau — the whole point of
+    "held" being a clean, operating-point-free comparison). When the two arms' own tau
+    actually agree, own and held CPL move together and this distinction is invisible; when
+    they diverge, part of `composition_residual_cpl` is the tau gap, not composition drift, and
+    nothing here can currently tell the two apart. `run_paired_realised_backtest` computes a
+    `tau_diverges` flag internally (`experiments/lib/realised.py`'s `deltas` return value) but
+    it is discarded by `runner.py` before `results.json` is written — NOT the same thing as
+    `results["fold_run_deltas"]` (a different, WFCV-log-loss-cohort structure this module
+    already reads for `delta_ll_all_median`/`delta_ll_hard25_median`), so there is no live flag
+    here to gate this caveat on today. Threading `tau_diverges` through would be a separate,
+    bigger change to runner.py's results.json schema — filed as its own follow-up rather than
+    folded into this PR.
+    """
+    arms = [a for a in fills["arm"].unique() if a in (BASELINE_ARM, CANDIDATE_ARM)]
+    run_litres = fills[fills["arm"].isin(arms)]["litres"].sum()
+    delta_own_by_fold = {row["fold"]: row.get("delta_cpl_own") for row in breakdown_per_fold}
+
+    contributions: dict[int, float | None] = {}
+    for row in summary["per_fold"]:
+        fold = row["fold"]
+        fold_litres = fills.loc[
+            (fills["fold"] == fold) & (fills["arm"].isin(arms)), "litres"
+        ].sum()
+        weight = fold_litres / run_litres if run_litres > 0 else 0.0
+        delta_own = delta_own_by_fold.get(fold)
+        contribution = weight * delta_own if delta_own is not None else None
+        row["run_contribution_cpl"] = contribution
+        contributions[fold] = contribution
+
+    total = sum(v for v in contributions.values() if v is not None)
+    summary["run_contribution_total_cpl"] = total
+    summary["composition_residual_cpl"] = delta_cpl_held - total
 
 
 def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
