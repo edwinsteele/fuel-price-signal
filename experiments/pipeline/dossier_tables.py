@@ -594,19 +594,23 @@ def _attach_run_contributions(
     `delta_cpl_held` is HELD-tau (both arms thresholded at the same tau — the whole point of
     "held" being a clean, operating-point-free comparison). When the two arms' own tau
     actually agree, own and held CPL move together and this distinction is invisible; when
-    they diverge, part of `composition_residual_cpl` is the tau gap, not composition drift, and
-    nothing here can currently tell the two apart. `run_paired_realised_backtest` computes a
-    `tau_diverges` flag internally (`experiments/lib/realised.py`'s `deltas` return value) but
-    it is discarded by `runner.py` before `results.json` is written — NOT the same thing as
-    `results["fold_run_deltas"]` (a different, WFCV-log-loss-cohort structure this module
-    already reads for `delta_ll_all_median`/`delta_ll_hard25_median`), so there is no live flag
-    here to gate this caveat on today. Threading `tau_diverges` through would be a separate,
-    bigger change to runner.py's results.json schema — filed as its own follow-up rather than
-    folded into this PR.
+    they diverge, part of `composition_residual_cpl` is the tau gap, not composition drift.
+
+    fps-4je threads `run_paired_realised_backtest`'s own `tau_diverges` flag (`experiments/
+    lib/realised.py`'s `deltas` return value, per fold) through `results["realised_deltas"]`
+    into `breakdown_per_fold`'s `tau_diverges` column, so this can now be told apart rather
+    than caveated unconditionally. `summary["tau_diverges_any"]` set here is the reader's
+    single gate: `True` — at least one graded fold's own-tau genuinely differed between arms,
+    so `composition_residual_cpl` is composition drift AND tau drift, not composition drift
+    alone; `False` — own-tau agreed in every graded fold, so the residual is composition drift
+    only; `None` — this results.json predates fps-4je (no `realised_deltas` key at all), so
+    fall back to the old unconditional "composition drift, and possibly tau drift" caveat
+    (docs/routines/dossier.md).
     """
     arms = [a for a in fills["arm"].unique() if a in (BASELINE_ARM, CANDIDATE_ARM)]
     run_litres = fills[fills["arm"].isin(arms)]["litres"].sum()
     delta_own_by_fold = {row["fold"]: row.get("delta_cpl_own") for row in breakdown_per_fold}
+    tau_diverges_by_fold = {row["fold"]: row.get("tau_diverges") for row in breakdown_per_fold}
 
     contributions: dict[int, float | None] = {}
     for row in summary["per_fold"]:
@@ -623,6 +627,10 @@ def _attach_run_contributions(
     total = sum(v for v in contributions.values() if v is not None)
     summary["run_contribution_total_cpl"] = total
     summary["composition_residual_cpl"] = delta_cpl_held - total
+    tau_flags = list(tau_diverges_by_fold.values())
+    summary["tau_diverges_any"] = (
+        any(tau_flags) if tau_flags and all(f is not None for f in tau_flags) else None
+    )
 
 
 def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
@@ -1434,6 +1442,23 @@ def _breakdowns(
         else pd.DataFrame()
     )
 
+    # tau_diverges per fold (fps-4je): sourced from realised.py's own per-fold comparison of
+    # the candidate's vs. baseline's own-tau, threaded through results["realised_deltas"] —
+    # not re-derived here. None (not False) for a results.json predating fps-4je, which never
+    # wrote this key at all, so a legacy run can't be misread as "tau agreed everywhere".
+    raw_realised_deltas = results.get("realised_deltas")
+    tau_diverges_by_fold: dict[int, bool] | None = None
+    if raw_realised_deltas is not None:
+        realised_deltas = pd.DataFrame(raw_realised_deltas)
+        cand_deltas = (
+            realised_deltas[realised_deltas["arm"] == CANDIDATE_ARM]
+            if len(realised_deltas)
+            else realised_deltas
+        )
+        tau_diverges_by_fold = {
+            int(row["fold"]): bool(row["tau_diverges"]) for _, row in cand_deltas.iterrows()
+        }
+
     # This run's own empirical shock-fold set (fps-3tu) — None for a results.json that
     # predates it, which graded "regime" against the old fixed-index SHOCK_FOLDS. Rather
     # than silently reuse that superseded constant post-hoc, per_fold's "regime" and the
@@ -1464,6 +1489,9 @@ def _breakdowns(
             "n_fills": n,
             "suppressed": suppressed,
             "delta_cpl_own": delta,
+            "tau_diverges": (
+                tau_diverges_by_fold.get(int(fold)) if tau_diverges_by_fold is not None else None
+            ),
         }
         if fold in cand_ll.index:
             row["delta_ll_all_median"] = float(cand_ll.loc[fold, "delta_ll_all_median"])

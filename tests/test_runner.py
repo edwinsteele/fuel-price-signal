@@ -1188,6 +1188,12 @@ class _FakeRealisedFull:
             {"arm": "candidate", "cpl_held": 195.0},
         ])
         self.fills = pd.DataFrame(columns=["fold", "arm", "station_code", "date"])
+        # fps-4je: results.json's "realised_deltas" key reads this verbatim off the real
+        # RealisedResult — the fake must carry the same shape (deltas.py's per-(fold, arm)
+        # tau_diverges flag) or run_candidate's results-dict build fails before grading.
+        self.deltas = pd.DataFrame(
+            columns=["fold", "arm", "delta_cpl_held", "delta_cpl_own", "tau_diverges"]
+        )
         self.meta = {
             "n_windows": 1, "total_wall_seconds": 1.0,
             "baseline_cache_used": baseline_cache is not None, "baseline_cache_hit_folds": [],

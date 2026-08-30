@@ -303,10 +303,15 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          totals whenever the two arms' litres mix differs fold to fold), not a rounding
          artefact, and hiding it would be its own distortion. It can also absorb tau
          divergence between arms (`delta_cpl_own` is own-tau, `delta_cpl_held` is held-tau —
-         see `_attach_run_contributions`'s docstring), which is not currently observable from
-         `facts.json` — treat the residual as "composition drift, and possibly tau drift,"
-         not composition drift alone, unless a future run threads a `tau_diverges` flag
-         through.
+         see `_attach_run_contributions`'s docstring). **Branch the caveat on
+         `decision_flips["tau_diverges_any"]` (fps-4je)** rather than stating it
+         unconditionally: `true` — at least one graded fold's own-tau genuinely differed
+         between arms, so state the residual as "composition drift AND tau drift"; `false` —
+         own-tau agreed in every graded fold, so state it as "composition drift" alone;
+         `None` — this run's results.json predates fps-4je (no `realised_deltas` key), so fall
+         back to "composition drift, and possibly tau drift" as before. The same flag is
+         available per fold as `facts["breakdowns"]["per_fold"][i]["tau_diverges"]` if a
+         specific fold's contribution needs the same caveat.
      **Same rule as `per_axis`: flip detail is colour illustrating a mechanism, and must never
      reach the Judgement section as a second arbiter overriding the noise-band call** — one vivid
      flip (a station catching a big cheap fill one day early) is easy to find more convincing than
