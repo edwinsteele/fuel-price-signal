@@ -1188,6 +1188,17 @@ class _FakeRealisedFull:
             {"arm": "candidate", "cpl_held": 195.0},
         ])
         self.fills = pd.DataFrame(columns=["fold", "arm", "station_code", "date"])
+        # fps-4je: results.json's "realised_deltas" key reads this verbatim off the real
+        # RealisedResult — the fake must carry the same shape (realised.py's per-(fold, arm)
+        # tau_diverges flag) or run_candidate's results-dict build fails before grading. A real
+        # (non-empty) row, not just the right columns, so a column-name typo in runner.py's
+        # `.to_dict(orient="records")` call would show up as a wrong VALUE in a test's
+        # assertion rather than passing silently against an empty frame (PR #354 review
+        # finding #4 — this was previously empty, so no value ever flowed through here).
+        self.deltas = pd.DataFrame([
+            {"fold": 1, "arm": "candidate", "delta_cpl_held": -5.0, "delta_cpl_own": -6.0,
+             "tau_diverges": True},
+        ])
         self.meta = {
             "n_windows": 1, "total_wall_seconds": 1.0,
             "baseline_cache_used": baseline_cache is not None, "baseline_cache_hit_folds": [],
@@ -1300,6 +1311,33 @@ def test_run_candidate_records_the_tank_params_it_was_graded_at(tmp_path, monkey
 
     assert result.status == STATUS_GRADED
     assert result.results["meta"]["tank_params"] == "50/3.571/7d/10%"
+
+
+def test_run_candidate_persists_realised_deltas_into_results_json(tmp_path, monkeypatch):
+    """PR #354 review finding #4: the realised.py -> results.json column contract
+    (results["realised_deltas"] == realised.deltas.to_dict(orient="records")) is hard-indexed
+    on both ends (dossier_tables.py reads "fold"/"arm"/"tau_diverges" by name) but was untested
+    end to end — every other fps-4je test hand-writes results.json fixtures directly, so a
+    rename in either runner.py or realised.py could pass the whole suite while breaking every
+    real run. This pins the runner half: results.json's "realised_deltas" must be exactly
+    RealisedResult.deltas, verbatim."""
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    fake = _FakeRealisedFull(None)
+    monkeypatch.setattr(runner_module, "run_paired_realised_backtest", lambda *a, **k: fake)
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+    )
+
+    assert result.status == STATUS_GRADED
+    assert result.results["realised_deltas"] == fake.deltas.to_dict(orient="records")
+    written = json.loads(result.results_path.read_text())
+    assert written["realised_deltas"] == [
+        {"fold": 1, "arm": "candidate", "delta_cpl_held": -5.0, "delta_cpl_own": -6.0,
+         "tau_diverges": True},
+    ]
 
 
 def test_run_candidate_does_not_persist_when_baseline_cache_is_none(tmp_path, monkeypatch):

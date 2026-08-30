@@ -46,7 +46,8 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
                    inputs=None, columns=None, error=None, bead_id="fps-test.1",
                    tank_params: str | None = "50/3.571/7d/10%",
                    effect_delta_cpl_held: float = -0.05,
-                   omit_shock_folds: bool = False) -> dict:
+                   omit_shock_folds: bool = False,
+                   realised_deltas: list[dict] | None = None) -> dict:
     meta = {
         "batch_dir": str(batch_dir), "seeds": [42, 43, 44], "realised_seed": 42,
         "n_windows": 4, "realised_wall_seconds": 12.3, "wall_seconds": 20.0,
@@ -83,6 +84,11 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
             {"arm": CANDIDATE_ARM, "cpl_own": 4.15, "cpl_held": 4.20, "saving_own_pct": 3.2, "saving_held_pct": 3.0},
         ] if status == "graded" else None,
         "fold_run_deltas": _fold_run_deltas() if status == "graded" else None,
+        # fps-4je: real results.json now always carries this key for a graded run. A caller
+        # that doesn't pass `realised_deltas` gets the key OMITTED entirely (not an empty
+        # list) — matching an actual results.json written before fps-4je landed, which never
+        # had this key at all. Tests that care about the "legacy" path rely on exactly this.
+        **({"realised_deltas": realised_deltas} if status == "graded" and realised_deltas is not None else {}),
         "seed_variance": {
             "summary": {"all": {"cohort_median_seed_std": 0.01, "n_cells": 8, "n_flagged_gt_5x": 1}},
             "flags": [
@@ -156,6 +162,7 @@ def _write_run(
     with_axis=False, with_cycle=False, low_n_fold=None, batch_extras=None,
     tank_params: str | None = "50/3.571/7d/10%", fills_df: pd.DataFrame | None = None,
     effect_delta_cpl_held: float = -0.05, omit_shock_folds: bool = False,
+    realised_deltas: list[dict] | None = None,
 ) -> tuple[pathlib.Path, pathlib.Path]:
     batch_dir = tmp_path / "batch1"
     batch_dir.mkdir(exist_ok=True)
@@ -171,7 +178,7 @@ def _write_run(
     results = _make_results(
         batch_dir, status=status, target=target, inputs=inputs, columns=columns,
         tank_params=tank_params, effect_delta_cpl_held=effect_delta_cpl_held,
-        omit_shock_folds=omit_shock_folds,
+        omit_shock_folds=omit_shock_folds, realised_deltas=realised_deltas,
     )
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
     if status == "graded":
@@ -933,17 +940,11 @@ def test_decision_flips_computed_when_clearing_noise_on_the_good_side(tmp_path):
 
 def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
     # Wide noise band (std ~0.79) around the candidate's -0.05 delta -> z is tiny,
-    # well inside (-t, t) regardless of n_draws -> the trigger fires.
-    def add_noise_floor(batch_dir):
-        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
-            "deltas_cpl_held": [-1.0, -0.5, 0.0, 0.5, 1.0],
-            "baseline_fingerprint": "54:deadbeef1234",
-            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
-            "n_placebo_columns": 2,
-        }))
-
+    # well inside (-t, t) regardless of n_draws -> the trigger fires. Fixture factored out
+    # as _wide_noise_floor (defined further down this file) — the fps-4je tau_diverges tests
+    # reuse the same "computed True" trigger.
     run_dir, _ = _write_run(
-        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
         fills_df=_diverging_fills(fold=1),
     )
     facts = dt.build_facts(run_dir)
@@ -981,6 +982,151 @@ def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
     assert flips["run_contribution_total_cpl"] == pytest.approx(0.0)
     assert flips["composition_residual_cpl"] == pytest.approx(facts["headline"]["realised"]["delta_cpl_held"])
     assert row["run_contribution_cpl"] is None
+
+
+def _wide_noise_floor(batch_dir):
+    """Wide noise band (std ~0.79) around the -0.05 default `effect_delta_cpl_held` -> z is
+    tiny, well inside (-t, t) regardless of n_draws -> decision_flips["computed"] is True.
+    Shared by test_decision_flips_computed_when_inside_the_noise_band and the fps-4je
+    tau_diverges tests below (PR #354 review finding #6 — this used to be duplicated)."""
+    (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+        "deltas_cpl_held": [-1.0, -0.5, 0.0, 0.5, 1.0],
+        "baseline_fingerprint": "54:deadbeef1234",
+        "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+        "n_placebo_columns": 2,
+    }))
+
+
+def test_decision_flips_surfaces_tau_diverges_per_fold_and_flags_the_residual(tmp_path):
+    """fps-4je: run_paired_realised_backtest's own per-fold tau_diverges flag
+    (experiments/lib/realised.py's `deltas` return value), threaded through
+    results["realised_deltas"] by runner.py, must reach facts["breakdowns"]["per_fold"] and
+    gate decision_flips["tau_diverges_any"] — sourced from the flag, not re-derived from
+    fills. Uses the default (non-suppressed, every cell >= min_row_cell_n) fills fixture over
+    all of FOLDS so the roll-up genuinely mixes True and False across UNSUPPRESSED folds
+    (PR #354 review finding #3 — a single-fold fixture can't tell any() from all())."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        realised_deltas=[
+            {"fold": f, "arm": CANDIDATE_ARM, "delta_cpl_held": -0.05, "delta_cpl_own": -0.05,
+             "tau_diverges": f == 1}
+            for f in FOLDS
+        ],
+    )
+    facts = dt.build_facts(run_dir)
+
+    per_fold = {row["fold"]: row for row in facts["breakdowns"]["per_fold"]}
+    assert set(per_fold) == set(FOLDS)
+    assert per_fold[1]["tau_diverges"] is True
+    assert all(per_fold[f]["tau_diverges"] is False for f in FOLDS if f != 1)
+    assert all(not row["suppressed"] for row in per_fold.values()), "fixture must not suppress"
+
+    flips = facts["decision_flips"]
+    assert flips["computed"] is True
+    assert flips["tau_diverges_any"] is True
+
+
+def test_decision_flips_tau_diverges_any_false_when_own_tau_agrees_every_fold(tmp_path):
+    """Mirror of the test above: when realised.py's flag is False in every UNSUPPRESSED
+    graded fold, tau_diverges_any must be False, not None — a reader needs to be able to tell
+    "checked, own-tau agreed" apart from "not checked" (see the legacy test below)."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        realised_deltas=[
+            {"fold": f, "arm": CANDIDATE_ARM, "delta_cpl_held": -0.05, "delta_cpl_own": -0.05,
+             "tau_diverges": False}
+            for f in FOLDS
+        ],
+    )
+    facts = dt.build_facts(run_dir)
+
+    assert all(row["tau_diverges"] is False for row in facts["breakdowns"]["per_fold"])
+    assert facts["decision_flips"]["tau_diverges_any"] is False
+
+
+def test_decision_flips_tau_diverges_any_excludes_a_suppressed_folds_flag(tmp_path):
+    """PR #354 review finding #1: a suppressed fold's own-tau was never used in
+    `run_contribution_total_cpl` (its `delta_cpl_own` is None, below `min_row_cell_n`), so its
+    `tau_diverges` flag must not vote on whether the RESIDUAL reflects tau drift — even though
+    it is `True`, `composition_residual_cpl` here is 100% unmeasured fold (the whole headline
+    delta), not evidence of tau drift, and `tau_diverges_any` must be `None`, not `True`. The
+    fold's own `tau_diverges` still surfaces in `breakdowns.per_fold` (untouched by the
+    exclusion) — only the run-level roll-up excludes it."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        fills_df=_diverging_fills(fold=1),  # 2 fills total — below min_row_cell_n (30)
+        realised_deltas=[{
+            "fold": 1, "arm": CANDIDATE_ARM,
+            "delta_cpl_held": -0.05, "delta_cpl_own": -0.05, "tau_diverges": True,
+        }],
+    )
+    facts = dt.build_facts(run_dir)
+
+    per_fold = facts["breakdowns"]["per_fold"]
+    assert per_fold[0]["suppressed"] is True
+    assert per_fold[0]["tau_diverges"] is True  # per-fold field is unaffected by the exclusion
+
+    flips = facts["decision_flips"]
+    assert flips["run_contribution_total_cpl"] == pytest.approx(0.0)
+    assert flips["composition_residual_cpl"] == pytest.approx(facts["headline"]["realised"]["delta_cpl_held"])
+    assert flips["tau_diverges_any"] is None
+
+
+def test_decision_flips_tau_diverges_any_none_when_an_unsuppressed_folds_flag_is_missing(tmp_path):
+    """PR #354 review finding #3's second gap: a fold that DID enter the contribution sum
+    (not suppressed) but has no record in results["realised_deltas"] (partial/incomplete data,
+    distinct from the "key absent entirely" legacy case below) must still collapse the roll-up
+    to None — a real True elsewhere must not paper over a genuinely unknown fold."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        realised_deltas=[
+            {"fold": f, "arm": CANDIDATE_ARM, "delta_cpl_held": -0.05, "delta_cpl_own": -0.05,
+             "tau_diverges": f == 1}
+            for f in FOLDS if f != 4  # fold 4's record is simply missing
+        ],
+    )
+    facts = dt.build_facts(run_dir)
+
+    per_fold = {row["fold"]: row for row in facts["breakdowns"]["per_fold"]}
+    assert per_fold[4]["suppressed"] is False  # unsuppressed — its flag SHOULD have counted
+    assert per_fold[4]["tau_diverges"] is None
+    assert facts["decision_flips"]["tau_diverges_any"] is None
+
+
+def test_breakdowns_per_fold_tau_diverges_null_cell_stays_none_not_false(tmp_path):
+    """PR #354 review finding #5: an explicit null `tau_diverges` VALUE in a
+    results["realised_deltas"] record (as opposed to the fold's record being absent
+    entirely, covered above) must read as None, not silently coerce to False under a bare
+    `bool(...)` — pd.DataFrame gives a column mixing None and real bools object dtype, and
+    `bool(None)` is False, which would misreport "own-tau agreed" for a fold that was never
+    actually checked. Reverting _breakdowns's `None if pd.isna(...) else bool(...)` back to a
+    bare `bool(row["tau_diverges"])` fails this test."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        fills_df=_diverging_fills(fold=1),
+        realised_deltas=[{
+            "fold": 1, "arm": CANDIDATE_ARM,
+            "delta_cpl_held": -0.05, "delta_cpl_own": -0.05, "tau_diverges": None,
+        }],
+    )
+    facts = dt.build_facts(run_dir)
+
+    assert facts["breakdowns"]["per_fold"][0]["tau_diverges"] is None
+
+
+def test_decision_flips_tau_diverges_any_none_for_a_legacy_run_without_realised_deltas(tmp_path):
+    """A results.json written before fps-4je never had a "realised_deltas" key at all —
+    per_fold's "tau_diverges" and decision_flips["tau_diverges_any"] must degrade to None
+    (unavailable), not be misread as False ("checked, own-tau agreed everywhere")."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        fills_df=_diverging_fills(fold=1),
+        # realised_deltas omitted entirely — see _make_results's handling of this default.
+    )
+    facts = dt.build_facts(run_dir)
+
+    assert facts["breakdowns"]["per_fold"][0]["tau_diverges"] is None
+    assert facts["decision_flips"]["tau_diverges_any"] is None
 
 
 def test_decision_flips_refuses_for_a_legacy_run_without_shock_folds(tmp_path):

@@ -303,10 +303,24 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          totals whenever the two arms' litres mix differs fold to fold), not a rounding
          artefact, and hiding it would be its own distortion. It can also absorb tau
          divergence between arms (`delta_cpl_own` is own-tau, `delta_cpl_held` is held-tau —
-         see `_attach_run_contributions`'s docstring), which is not currently observable from
-         `facts.json` — treat the residual as "composition drift, and possibly tau drift,"
-         not composition drift alone, unless a future run threads a `tau_diverges` flag
-         through.
+         see `_attach_run_contributions`'s docstring). **Branch the caveat on
+         `decision_flips["tau_diverges_any"]` (fps-4je)** rather than stating it
+         unconditionally: `true` — at least one fold that actually entered
+         `run_contribution_total_cpl` (i.e. not suppressed) had its own-tau genuinely differ
+         between arms, so state the residual as "composition drift AND tau drift"; `false` —
+         own-tau agreed in every such fold, so state it as "composition drift" alone; `None` —
+         UNAVAILABLE, never read as "checked, agrees": either the key is present but every
+         unsuppressed fold's own flag was itself unavailable, or — the common case for any run
+         dossiered before fps-4je landed (PR #354 review finding #2:
+         every batch1 facts.json committed as of fps-4je has `decision_flips.computed: true`
+         with no `tau_diverges_any` key at all, i.e. a **missing key**, not a `null` value) —
+         `results["realised_deltas"]` doesn't exist yet. A missing `tau_diverges_any` key reads
+         exactly the same as an explicit `None`: fall back to "composition drift, and possibly
+         tau drift" in both cases. The same flag is available per fold as
+         `facts["breakdowns"]["per_fold"][i]["tau_diverges"]` if a specific fold's contribution
+         needs the same caveat — note that field is populated even for a suppressed fold (it
+         just doesn't feed the run-level roll-up), so don't cite a suppressed fold's own
+         `tau_diverges` as evidence about the residual either.
      **Same rule as `per_axis`: flip detail is colour illustrating a mechanism, and must never
      reach the Judgement section as a second arbiter overriding the noise-band call** — one vivid
      flip (a station catching a big cheap fill one day early) is easy to find more convincing than

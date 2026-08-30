@@ -670,6 +670,14 @@ def run_candidate(
         "fold_run_deltas": fold_run[
             ["fold", "regime", "run", "delta_ll_all_median", "delta_ll_hard25_median"]
         ].to_dict(orient="records"),
+        # Per-(fold, arm) tau_diverges (fps-4je): realised.py's own computation of whether
+        # this fold's candidate own-tau differs from the baseline's own-tau, threaded through
+        # verbatim rather than re-derived — dossier_tables.py's composition_residual_cpl can
+        # otherwise only warn that its residual MIGHT be tau drift, never confirm it either
+        # way. Kept as its own key rather than folded into "aggregate" (which is fold-
+        # independent) or "fold_run_deltas" (a different, WFCV-log-loss-cohort structure with
+        # no tau column at all — PR #347 review finding #3 originally conflated the two).
+        "realised_deltas": realised.deltas.to_dict(orient="records"),
         "seed_variance": {"summary": seed_var_summary, "flags": seed_var_flags},
         "error": None,
         "meta": {
