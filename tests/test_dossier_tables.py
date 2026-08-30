@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import os
 import pathlib
 
 import numpy as np
@@ -196,6 +197,39 @@ def test_find_pending_runs_skips_in_progress_and_already_dossiered(tmp_path):
     pending = dt.find_pending_runs(tmp_path)
 
     assert pending == [run_dir]
+
+
+def test_find_pending_runs_surfaces_deliberate_rerun(tmp_path):
+    """fps-0yd: a candidate re-run after its prior dossiering still gets picked up.
+
+    Mirror image of fps-g31's abort-then-succeed case: here the run dir already has a
+    README from an earlier dossiering, and a human deliberately re-runs the candidate
+    (e.g. after a contract fix), overwriting results.json with a fresh verdict. Requiring
+    "no README.md" alone would hide that re-run forever; the results.json being NEWER than
+    the stale README is what should make it pending again.
+    """
+    run_dir = tmp_path / "rerun"
+    run_dir.mkdir()
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": "graded"}))
+    # Force an unambiguous mtime ordering regardless of filesystem timestamp resolution.
+    old = readme.stat().st_mtime - 10
+    os.utime(readme, (old, old))
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_skips_readme_newer_than_results(tmp_path):
+    """A README written AFTER the current results.json (the ordinary post-dossier state)
+    stays out of the queue — only a results.json newer than its README counts as pending."""
+    run_dir = tmp_path / "dossiered"
+    run_dir.mkdir()
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+    (run_dir / dt.README_FILENAME).write_text("# done")
+
+    assert dt.find_pending_runs(tmp_path) == []
 
 
 @pytest.mark.parametrize("status", sorted(RETRYABLE_STATUSES))

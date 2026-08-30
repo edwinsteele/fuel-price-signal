@@ -213,31 +213,41 @@ CYCLE_PHASE_COLUMNS = {"cycle_pct_through", "cycle_days_since_peak"}
 # ── work queue ────────────────────────────────────────────────────────────────
 
 def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
-    """Any directory under `root` with results.json, no README.md, and a non-retryable status.
+    """Any directory under `root` with a results.json newer than its README.md (or no
+    README.md at all), and a non-retryable status.
 
     Matches the parent design's "work queue is self-describing" rule. A run still in progress
     has neither file and is silently skipped.
 
     The RETRYABLE_STATUSES exclusion is load-bearing, not tidiness (fps-g31). A run dir is
-    keyed on the candidate, so a re-run REUSES it. Without the exclusion:
+    keyed on the candidate, so a re-run REUSES it. Without it:
 
       night 1  candidate aborts (aborted_pipeline); results.json written
                this scan sees results.json + no README -> writes facts.json, session writes README
       night 2  launch releases the claim, candidate re-runs and SUCCEEDS, overwriting results.json
       night 2  this scan sees the README from night 1 -> run is not pending -> never dossiered
 
-    The successful run would be silently invisible forever. That failure mode only became
-    reachable when aborts started going back on the queue, which is why the guard lives here
-    rather than in the caller: anything that reuses a run dir has to agree on what "finished"
-    means, so both sides read runner.read_run_status.
+    The mtime comparison (fps-0yd) covers the mirror image: a candidate DELIBERATELY re-run
+    after a contract fix, whose prior dossiering already left a README behind. Requiring "no
+    README.md" alone made that re-run permanently invisible even though its results.json was
+    overwritten with a fresh verdict — the same "silently invisible forever" failure the
+    RETRYABLE_STATUSES guard above exists to prevent, just triggered by a human re-queuing
+    rather than an automatic retry. Comparing mtimes rather than adding a second provenance
+    field to facts.json: results.json and README.md are already the two files this function
+    reads, and runner.py always writes results.json fresh on every run (never touches an
+    existing README), so a newer results.json is exactly "dossiered content is stale".
     """
     root = pathlib.Path(root)
-    return sorted({
-        p.parent
-        for p in root.rglob(RESULTS_FILENAME)
-        if not (p.parent / README_FILENAME).exists()
-        and read_run_status(p.parent) not in RETRYABLE_STATUSES
-    })
+    pending = set()
+    for p in root.rglob(RESULTS_FILENAME):
+        run_dir = p.parent
+        readme = run_dir / README_FILENAME
+        if readme.exists() and readme.stat().st_mtime >= p.stat().st_mtime:
+            continue
+        if read_run_status(run_dir) in RETRYABLE_STATUSES:
+            continue
+        pending.add(run_dir)
+    return sorted(pending)
 
 
 # ── facts.json ────────────────────────────────────────────────────────────────
