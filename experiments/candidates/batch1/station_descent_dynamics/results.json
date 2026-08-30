@@ -327,6 +327,14 @@
     "git_sha": "f536e98b9c183e754620d46ee0a6ef13681e7c35",
     "bead_id": "fps-6to",
     "n_baseline_columns": 54,
-    "baseline_fingerprint": "54:1a6ec2d84a69"
+    "baseline_fingerprint": "54:1a6ec2d84a69",
+    "shock_folds": [
+      1,
+      3,
+      4,
+      14
+    ],
+    "shock_quantile": 0.25,
+    "shock_folds_source": "cache"
   }
 }

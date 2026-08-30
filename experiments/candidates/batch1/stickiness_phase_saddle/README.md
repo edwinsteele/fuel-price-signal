@@ -1,6 +1,6 @@
 # batch1 / stickiness_phase_saddle
 
-- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-27
+- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-27 / regime labels corrected 2026-08-30 (`fps-hnp`)
 - **Branch:** main
 - **SHA:** 9362d46d74f63ccc2a430e96379dfd8658f2036d
 - **Status:** done — **inconclusive**
@@ -72,30 +72,40 @@ makes the two comparable.
 report for this candidate (unlike `station_descent_dynamics` or
 `lga_trough_propagation` in the same batch).
 
-**Per-fold:**
+**Per-fold** (regime column reflects the corrected empirical shock-fold set
+`{1, 3, 4, 14}`, not the fixed `{1, 4, 9, 13}` this dossier originally used
+— folds 3 and 9 swap regime labels, as do 13 and 14 — see the Correction
+note near the end of this dossier; this candidate declared no zone TARGET
+at all, so nothing here is graded on regime, but the descriptive per-regime
+split below is not):
 
 | fold | regime | n_fills | delta_cpl_own |
 |---|---|---|---|
 | 1 | shock | 190 | 0.0000 |
 | 2 | normal | 200 | +0.7729 |
-| 3 | normal | 186 | -0.5079 |
+| 3 | shock | 186 | -0.5079 |
 | 4 | shock | 239 | +0.6069 |
 | 5 | normal | 185 | -0.0107 |
 | 6 | normal | 125 | -0.2567 |
 | 7 | normal | 235 | +0.1544 |
 | 8 | normal | 84 | +0.0190 |
-| 9 | shock | 112 | +0.0718 |
+| 9 | normal | 112 | +0.0718 |
 | 10 | normal | 96 | -0.5536 |
 | 11 | normal | 161 | -0.2953 |
 | 12 | normal | 184 | +0.0528 |
-| 13 | shock | 142 | **-0.8646** |
-| 14 | normal | 169 | -0.0302 |
+| 13 | normal | 142 | **-0.8646** |
+| 14 | shock | 169 | -0.0302 |
 
 No cell is suppressed (`min_row_cell_n` = 30, smallest cell here is 84).
 
-**Per-regime:** shock -0.0614 c/L (n=687), normal -0.0768 c/L (n=1645) —
-both favour the candidate, unlike several batch1 siblings where the two
-regimes disagree in sign.
+**Per-regime:** shock **+0.0047** c/L (n=789), normal **-0.1034** c/L
+(n=1543) — **corrected 2026-08-30:** this no longer reads as "both favour
+the candidate." Under the old fixed shock set both regimes were favourable
+(shock -0.0614, normal -0.0768); under the corrected set, fold 13 (this
+run's single largest favourable cell) moves from shock to normal, leaving
+shock essentially flat/negligibly unfavourable and normal more clearly
+favourable. This candidate joins, rather than stands apart from, the
+batch1 siblings where the two regimes disagree in sign.
 
 `per_axis` is `null` — this candidate declared no `add_axis` beyond the
 (unresolved) zone check above.
@@ -155,22 +165,23 @@ candidate's `fills.parquet` directly on `(fold, station_code, date)`):
 |---|---|---|---|---|---|---|
 | 1 | shock | 0 | 0 | — | — | — |
 | 2 | normal | 12 | 38 | 181.63 | 183.37 | +1.74 |
-| 3 | normal | 21 | 16 | 200.36 | 193.98 | -6.38 |
+| 3 | shock | 21 | 16 | 200.36 | 193.98 | -6.38 |
 | 4 | shock | 15 | 39 | 184.34 | 185.22 | +0.88 |
 | 5 | normal | 6 | 22 | 198.14 | 190.77 | -7.37 |
 | 6 | normal | 18 | 8 | 185.47 | 185.32 | -0.15 |
 | 7 | normal | 6 | 10 | 186.22 | 176.95 | -9.27 |
 | 8 | normal | 20 | 16 | 205.37 | 207.96 | +2.58 |
-| 9 | shock | 0 | 3 | — (no baseline-only fills) | 179.65 | — |
+| 9 | normal | 0 | 3 | — (no baseline-only fills) | 179.65 | — |
 | 10 | normal | 10 | 20 | 208.66 | 198.32 | **-10.34** |
 | 11 | normal | 2 | 5 | 223.90 | 204.22 | **-19.68** |
 | 12 | normal | 3 | 2 | 191.33 | 181.80 | -9.52 |
-| 13 | shock | 5 | 1 | 205.63 | 172.90 | **-32.73** |
-| 14 | normal | 2 | 3 | 179.90 | 177.67 | -2.23 |
+| 13 | normal | 5 | 1 | 205.63 | 172.90 | **-32.73** |
+| 14 | shock | 2 | 3 | 179.90 | 177.67 | -2.23 |
 
 Favourable (`flip_cpl_delta` < 0) flips dominate — 9 of the 12 folds with
-a computable delta — with the largest concentration in fold 13 (shock)
-and fold 11 (normal); folds 2, 4, and 8 move the other way. `n_flips`
+a computable delta — with the largest concentration in fold 13 (`normal`
+under the corrected regime split; was `shock` under the old fixed set) and
+fold 11 (`normal` under both); folds 2, 4, and 8 move the other way. `n_flips`
 (303) spread across 13 of the 14 folds is consistent with the predicted
 "spread across folds, not concentrated" shape, though `decision_flips`
 carries no station-level stickiness data, so it cannot confirm the more
@@ -197,8 +208,11 @@ signature grade here is a property of how the claim was phrased, not a
 measurement of the claim.
 
 What the run itself showed: realised delta -0.0735 c/L in the favourable
-direction, 303 decision flips across 13 of 14 folds, both regimes
-favouring the candidate. Inside the noise band on the ruler used.
+direction, 303 decision flips across 13 of 14 folds. Inside the noise band
+on the ruler used. (Under the corrected empirical shock-fold set — see the
+Correction note near the end of this dossier — the per-regime split no
+longer has both regimes favouring the candidate; that was true only under
+the old fixed shock set and is superseded.)
 
 **This dossier's original recommendation was wrong and has been replaced**
 — see the post-dossier review addendum below. Both routes it named for a
@@ -312,6 +326,24 @@ two arms' flips fall on different days (two decision sets, not a paired
 test), and 303 flips are ~87 independent decisions once cascades are
 collapsed. The effect-size conclusion is solid; the mechanism
 localisation is suggestive and under-powered.
+
+## Correction note — 2026-08-30 (`fps-hnp`, backfill of PR #350 / `fps-3tu`)
+
+PR #350 replaced the batch's fixed shock-fold index (`SHOCK_FOLDS =
+{1, 4, 9, 13}`) with a per-batch empirical set derived from the baseline's
+own val-fold log-loss. batch1's corrected set is **`{1, 3, 4, 14}`**
+(`experiments/batches/batch1/shock_folds.json`) — folds 3 and 9 swap
+regime labels, as do 13 and 14, relative to the old fixed set. **This
+candidate declared no zone `TARGET` at all** (`resolved: null`), so
+nothing here was ever graded on the regime axis and the Recommendation is
+entirely unaffected. What does change is the descriptive per-regime split
+used as colour in the Facts and Judgement sections: fold 13 (this run's
+single largest favourable cell) moves from shock to normal, which flips
+the "both regimes favour the candidate" reading (shock -0.0614/normal
+-0.0768 → shock +0.0047/normal -0.1034) — both sections above have been
+rewritten in place. This backfill reused the run's already-persisted
+`fills.parquet` and `rowpreds.parquet`; no re-run of the realised backtest
+was needed.
 
 ## Addendum — batch-wide coverage caveat
 
