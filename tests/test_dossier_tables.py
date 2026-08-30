@@ -1062,6 +1062,27 @@ def test_decision_flips_tau_diverges_any_none_when_an_unsuppressed_folds_flag_is
     assert facts["decision_flips"]["tau_diverges_any"] is None
 
 
+def test_breakdowns_per_fold_tau_diverges_null_cell_stays_none_not_false(tmp_path):
+    """PR #354 review finding #5: an explicit null `tau_diverges` VALUE in a
+    results["realised_deltas"] record (as opposed to the fold's record being absent
+    entirely, covered above) must read as None, not silently coerce to False under a bare
+    `bool(...)` — pd.DataFrame gives a column mixing None and real bools object dtype, and
+    `bool(None)` is False, which would misreport "own-tau agreed" for a fold that was never
+    actually checked. Reverting _breakdowns's `None if pd.isna(...) else bool(...)` back to a
+    bare `bool(row["tau_diverges"])` fails this test."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        fills_df=_diverging_fills(fold=1),
+        realised_deltas=[{
+            "fold": 1, "arm": CANDIDATE_ARM,
+            "delta_cpl_held": -0.05, "delta_cpl_own": -0.05, "tau_diverges": None,
+        }],
+    )
+    facts = dt.build_facts(run_dir)
+
+    assert facts["breakdowns"]["per_fold"][0]["tau_diverges"] is None
+
+
 def test_decision_flips_tau_diverges_any_none_for_a_legacy_run_without_realised_deltas(tmp_path):
     """A results.json written before fps-4je never had a "realised_deltas" key at all —
     per_fold's "tau_diverges" and decision_flips["tau_diverges_any"] must degrade to None
