@@ -372,8 +372,9 @@ class TankParams:
         **Not bit-equivalent to the old ``level / size < floor_fraction`` form** (PR #355
         review finding #7) — ``a / b < c`` and ``a < c * b`` can round differently, and the
         depletion walk can land exactly on the boundary where they disagree. Counterexample:
-        ``size=50``, ``daily=2.0`` (a 25-day life), ``floor=0.14``; a decide point exactly 8
-        depletions in reaches ``level=7.0``. ``7.0/50.0 == 0.14`` exactly, so the old form's
+        ``size=50``, ``daily=2.0`` (a 25-day life), ``floor=0.14``; a decide point exactly 9
+        depletions in (from the ``0.5 * size = 25.0`` start) reaches ``level=7.0``.
+        ``7.0/50.0 == 0.14`` exactly, so the old form's
         ``0.14 < 0.14`` is `False` (no emergency fill); ``0.14 * 50.0 == 7.000000000000001``,
         so this form's ``7.0 < 7.000000000000001`` is `True` (fires one). This only bites a
         whole-number daily rate landing the walk exactly on ``floor_fraction * size`` — a

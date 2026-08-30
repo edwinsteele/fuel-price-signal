@@ -1303,7 +1303,7 @@ def test_run_dry_gap_not_bit_equivalent_to_level_over_size_form():
     documents this; this test pins the specific numbers so a future float-handling change
     can't silently move them without notice."""
     tank = TankParams(tank_size_litres=50.0, daily_consumption_litres=2.0, floor_fraction=0.14)
-    level = 7.0  # exactly 8 depletions into this tank's walk from a 25.0 start
+    level = 7.0  # exactly 9 depletions into this tank's walk from a 25.0 start (25 - 9*2 = 7)
     assert level / tank.tank_size_litres == 0.14
     assert not (level / tank.tank_size_litres < tank.floor_fraction)  # old form: no emergency
     assert tank.run_dry_gap == 7.000000000000001
