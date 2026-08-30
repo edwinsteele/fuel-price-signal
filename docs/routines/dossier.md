@@ -17,8 +17,9 @@ PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables --scan experim
 ```
 
 This does one thing, mechanically (`experiments/pipeline/dossier_tables.py`, fps-3jj.6): **facts.json
-+ PNGs for every completed, undossiered run.** For every directory with a `results.json` and no
-`README.md` yet, it writes `facts.json` (the only source of numbers you are allowed to use below)
++ PNGs for every completed, undossiered run.** For every directory with a `results.json` newer than
+its `README.md` — or no `README.md` yet (see `find_pending_runs`, fps-0yd) — it writes `facts.json`
+(the only source of numbers you are allowed to use below)
 and the applicable plots (always: `per_fold_delta_bars.png`, `seed_mean_vs_median.png`,
 `realised_cpl_by_fold.png`, `tau_sweep.png`, `candidate_over_time.png`; conditional:
 `axis_breakdown.png`, `cycle_phase_breakdown.png`, `external_series_overlay.png`). One bad/partial
@@ -28,9 +29,11 @@ for any `failed, skipping` lines and flag them rather than silently ignoring.
 **Retryable aborts are skipped entirely, before anything is written (fps-g31).** `find_pending_runs`
 excludes any run whose `results.json` carries a `RETRYABLE_STATUSES` status (`aborted_pipeline` /
 `aborted_environment`). Those runs never got a fair hearing, their bd claim goes back on the queue,
-and the re-run **reuses the same directory** — so a `README.md` written for the aborted attempt
-would permanently exclude the successful re-run from this queue (`find_pending_runs` requires *no*
-`README.md`). No `facts.json`, no `README.md`, no ledger row, no INDEX row: wait for the re-run.
+and the re-run **reuses the same directory** — so a `facts.json`/`README.md` written for a
+retryable status is exactly the wrong content to leave behind (the run never reached the scoring
+stages; there is no real verdict to write up), regardless of what the successful re-run's
+`results.json` mtime later does. No `facts.json`, no `README.md`, no ledger row, no INDEX row:
+wait for the re-run.
 `aborted_candidate` and `disqualified` are NOT retryable — those are real verdicts and get written
 up normally.
 
