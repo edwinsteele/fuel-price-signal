@@ -1295,6 +1295,21 @@ def test_tank_params_derived_quantities_at_locked_config():
     assert tank.run_dry_gap == pytest.approx(5.0)
 
 
+def test_run_dry_gap_not_bit_equivalent_to_level_over_size_form():
+    """PR #355 review finding #7: `level < tank.run_dry_gap` (`floor_fraction * size`) is not
+    bit-equivalent to the pre-fps-o0h form it replaced (`level / size < floor_fraction`) — `a
+    * b` and `a / b` can round differently, and this counterexample (found by the review's own
+    sweep) lands exactly on the boundary where they disagree. `run_dry_gap`'s docstring
+    documents this; this test pins the specific numbers so a future float-handling change
+    can't silently move them without notice."""
+    tank = TankParams(tank_size_litres=50.0, daily_consumption_litres=2.0, floor_fraction=0.14)
+    level = 7.0  # exactly 8 depletions into this tank's walk from a 25.0 start
+    assert level / tank.tank_size_litres == 0.14
+    assert not (level / tank.tank_size_litres < tank.floor_fraction)  # old form: no emergency
+    assert tank.run_dry_gap == 7.000000000000001
+    assert level < tank.run_dry_gap  # new form: fires one — earlier, i.e. more conservative
+
+
 def test_tank_params_feasible_wait_days_is_the_per_fill_bound():
     """A BUY fill's genuinely feasible wait (the headroom right BEFORE the fill, since the
     post-fill level is always a full tank regardless of litres) is

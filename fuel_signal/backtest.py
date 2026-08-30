@@ -362,9 +362,27 @@ class TankParams:
 
     @property
     def run_dry_gap(self) -> float:
-        """Litres remaining at the floor-comfort emergency threshold
-        (``level / size < floor_fraction``, run_backtest's other trigger besides
-        depletion-survival)."""
+        """Litres remaining at the floor-comfort emergency threshold: every floor check in
+        this module (``validate_never_dry``, ``run_backtest``, ``_oracle_transitions``) tests
+        ``level < tank.run_dry_gap`` rather than restating ``level / size < floor_fraction``
+        (fps-o0h) — migrating all three together matters, not just for tidiness: it's what
+        guarantees ``validate_never_dry`` can never drift from what ``run_backtest`` actually
+        does, since a change to one now changes all three identically.
+
+        **Not bit-equivalent to the old ``level / size < floor_fraction`` form** (PR #355
+        review finding #7) — ``a / b < c`` and ``a < c * b`` can round differently, and the
+        depletion walk can land exactly on the boundary where they disagree. Counterexample:
+        ``size=50``, ``daily=2.0`` (a 25-day life), ``floor=0.14``; a decide point exactly 8
+        depletions in reaches ``level=7.0``. ``7.0/50.0 == 0.14`` exactly, so the old form's
+        ``0.14 < 0.14`` is `False` (no emergency fill); ``0.14 * 50.0 == 7.000000000000001``,
+        so this form's ``7.0 < 7.000000000000001`` is `True` (fires one). This only bites a
+        whole-number daily rate landing the walk exactly on ``floor_fraction * size`` — a
+        560-config x 400-decide-point sweep found exactly this one config, and both committed
+        stamps (``50/3.571/1d/10%``, ``50/3.571/7d/10%``) are clean over 20k decide points
+        each. Where it does bite, this form fires the emergency fill one step EARLIER than the
+        old one — more conservative w.r.t. the never-dry guarantee, not less — but a future
+        re-lock landing on a config like the counterexample should not assume the two forms
+        are interchangeable."""
         return self.floor_fraction * self.tank_size_litres
 
     @property
