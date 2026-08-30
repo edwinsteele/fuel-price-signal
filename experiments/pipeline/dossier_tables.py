@@ -1125,7 +1125,22 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
             # failure class feedback_baseline_declared_not_discovered warns about). Refuse
             # rather than trust "file exists" the way this function used to. A floor with
             # no fingerprint at all (pre-fps-cf8) is treated as a mismatch, not a pass —
-            # it cannot be shown to match, so it cannot be trusted either.
+            # it cannot be shown to match, so it cannot be trusted either. `_bank_admissibility`
+            # applies that rule symmetrically: a run with NO baseline_fingerprint of its own
+            # can't show a match either, even against a floor that also lacks the field
+            # (fps-74x, same both-missing case fps-1x5's review round already fixed on the
+            # tank_params axis below — there is no build_facts-level hard refusal for a
+            # missing meta.baseline_fingerprint the way fps-15c added for tank_params, so this
+            # branch IS reachable via build_facts, unlike the tank_params one).
+            if floor_value is None and run_value is None:
+                return {
+                    "available": False,
+                    "reason": "noise_floor.json has no baseline_fingerprint at all (predates "
+                    "fps-cf8), and this run's own meta.baseline_fingerprint is also missing — "
+                    "neither side can be shown to match the other, so the floor does not grade "
+                    "this run. Recompute with `PYTHONPATH=. uv run python -m experiments.pipeline."
+                    "noise_floor <batch> --force`.",
+                }
             return {
                 "available": False,
                 "reason": f"noise_floor.json's baseline_fingerprint ({floor_value!r}) does not "
