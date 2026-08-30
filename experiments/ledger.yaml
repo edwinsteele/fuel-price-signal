@@ -75,20 +75,26 @@
     own arity, floor_arity_exceeds_run=true) -- a cleaner clearance than
     either prior TGP expression, both of which sat inside their noise bands.
     But the predicted concentration is inverted: shock folds show a larger
-    favourable delta (-0.3405 c/L) than normal folds (-0.1392 c/L), which
+    favourable delta (-0.2884 c/L) than normal folds (-0.1603 c/L), which
     the candidate's own signature names as the specific pattern that would
-    refute its wholesale-lead mechanism. The shock aggregate is not even a
-    clean shock story on its own terms -- 2 of 4 shock folds (1, 9) hurt the
-    candidate, and fold 13 alone (-1.60 c/L) drives most of the favourable
-    shock number. Max per-column R^2 against the 49-column lock is 0.583,
-    concentrated entirely in the days_since_trough_entry_* LGA family, and
-    the one candidate-arm seed-instability flag (fold 3, hard25 cohort)
-    lands in exactly the fold with this candidate's best normal-fold
-    delta_cpl_own reading.
+    refute its wholesale-lead mechanism. [CORRECTED 2026-08-30, fps-hnp:
+    regraded against the corrected empirical shock-fold set {1,3,4,14},
+    not the original fixed {1,4,9,13} -- the sign relationship and outcome
+    are unchanged, but the specific numbers and driving fold are not.] The
+    shock aggregate is not even a clean shock story on its own terms -- 2
+    of 4 shock folds (1, 14) hurt the candidate, and fold 3 alone
+    (-1.09 c/L) drives most of the favourable shock number (excluding it
+    flips the shock-zone delta to +0.005 c/L). Max per-column R^2 against
+    the 49-column lock is 0.583, concentrated entirely in the
+    days_since_trough_entry_* LGA family, and the one candidate-arm
+    seed-instability flag (fold 3, hard25 cohort) now lands in exactly the
+    fold that alone drives the shock-zone reading (fold 3 was `normal`
+    under the original fixed shock-fold set).
   not_tested: >-
-    Whether the shock-fold gain is fold-13-specific rather than a genuine
-    shock mechanism -- 2 of 4 shock folds actually hurt the candidate.
-    Whether testing the actual claim -- decision timing keyed to the
+    Whether the shock-fold gain is fold-3-specific (named fold 13 before
+    the 2026-08-30 shock-fold correction, fps-hnp; fold 13 is now
+    `normal`) rather than a genuine shock mechanism -- 2 of 4 shock folds
+    actually hurt the candidate. Whether testing the actual claim -- decision timing keyed to the
     MAGNITUDE of floor displacement since the peak, not the coarse
     shock/normal regime label -- would recover the predicted normal-fold
     concentration; no per-axis breakdown by displacement magnitude was built
@@ -194,39 +200,45 @@
     earlier WAIT->BUY flips concentrated on non-shock folds (a shock's
     wholesale move overrides propagation order).
   falsified: >-
-    The predicted mechanism specifically. The pipeline's own zone test on the
-    candidate's declared target (normal/non-shock folds) reads resolved=false:
-    the target zone is slightly WORSE for the candidate (target_delta_cpl_own
-    =+0.0463) while the entire favourable effect sits in the zone predicted
-    to be inert (shock, other_delta_cpl_own=-0.3794) -- the reverse of the
-    prediction, not merely an absence of one. The headline realised delta
-    (-0.0675 c/L held-tau) also sits inside batch1's single-candidate noise
-    band (z=-0.93 vs threshold 1.92, arity-3 floor).
+    NOT falsified as of the 2026-08-30 shock-fold correction (fps-hnp) --
+    CONFIRMED. Originally read as falsified against the fixed shock-fold
+    set {1,4,9,13}: zone resolved=false, target(normal) slightly worse
+    (+0.0463), the whole favourable effect in the zone predicted inert
+    (shock, -0.3794). Regraded against the corrected empirical set
+    {1,3,4,14} (PR #350, fps-3tu), the zone flips to resolved=true: target
+    (normal) is favourable (target_delta_cpl_own=-0.1073) and the zone
+    predicted inert (shock) is statistically flat (other_delta_cpl_own=
+    +0.0026) -- exactly the predicted shape. Cause: fold 13, this run's
+    single largest cell (-1.5646 c/L), was `shock` under the old fixed set
+    and is `normal` under the correction. The headline realised delta
+    (-0.0675 c/L held-tau, unaffected by the correction) still sits inside
+    batch1's single-candidate noise band (z=-0.93 vs threshold 1.92,
+    arity-3 floor), so this remains `inconclusive` at the CPL level even
+    though the zone/mechanism read is now confirmed.
   not_tested: >-
-    Whether the mechanism helps at all within ordinary (non-shock) cycles --
-    the regime it was built for. The observed sign there is negative, not
-    merely flat, but fold 3 (the worst-offending fold, +10.78 c/L flip delta)
-    is also the most seed-unstable cell in the run (candidate/all cohort,
-    75.4x cohort-median seed_std, an order of magnitude past every other
-    flagged cell) -- a fold-3-excluded re-read or wider seed sweep would
-    separate a real mild harm from a noisy draw. The candidate's own proposed
+    Whether the propagation-wave mechanism holds with fold 13 excluded --
+    the confirmed zone above rests entirely on it: excluding fold 13
+    (litre-weighted, against the actually-persisted fills.parquet) flips
+    the normal-zone delta from -0.1073 to +0.0588 c/L, the opposite sign.
+    A wider seed sweep or a genuine re-run would separate "the mechanism
+    works, fold 13 is just where it shows up most" from "fold 13 is one
+    unusual window carrying the whole read." The candidate's own proposed
     falsification test (level-only vs velocity/leader-lead-driven) is
     untested -- needs per-column SHAP/attribution against the candidate's
     fitted model, which this pipeline doesn't currently persist (same gap
-    network_move_breadth's dossier already named). Whether a genuine
-    shock-fold restoration mechanism exists here is undetermined on this run
-    alone -- and it rests on fold 13 ALONE (-1.56 c/L, 104% of the shock
-    zone's net; excluding it the zone flips to +0.016), not on folds 4 and 13
-    as an earlier revision of this entry said: fold 4 is -0.0732 c/L, noise.
-    Fold 1, the other shock fold, is a 3-station measurement gap (both Blue
-    Mountains stations dark, neither closed) rather than a null. Note also
-    that the realised arbiter ran on a SINGLE seed (meta.realised_seed=42;
-    the five seeds are the WFCV screen), and that the 75.4x seed_std flag
-    above is WFCV log-loss, not CPL -- no CPL seed-variance exists for this
-    run. See the 2026-08-26 review addendum in the evidence directory.
-    Whether combining this with network_move_breadth (same
-    batch, same cross-sectional-consensus family, same folds 11-13 cluster)
-    does better than either alone.
+    network_move_breadth's dossier already named); partial corroboration
+    exists (lga_leader_lead_days, not the breadth level, is this
+    candidate's most lock-reconstructible column). Fold 3 (the run's most
+    seed-unstable cell, candidate/all cohort, 75.4x cohort-median
+    seed_std) was `normal` under the old fixed shock-fold set and is
+    `shock` under the correction, so it no longer sits inside the zone
+    the confirmed verdict depends on. Note also that the realised arbiter
+    ran on a SINGLE seed (meta.realised_seed=42; the five seeds are the
+    WFCV screen). See the 2026-08-30 Correction note and the 2026-08-26
+    review addendum in the evidence directory. Whether combining this with
+    network_move_breadth (same batch, same cross-sectional-consensus
+    family, same folds 11-13 cluster, now entirely `normal` for both
+    candidates) does better than either alone.
   outcome: inconclusive
   evidence: experiments/candidates/batch1/lga_trough_propagation/
 
@@ -251,12 +263,18 @@
     improvement (other_delta_cpl_own=-0.0345). Folds 3/7 individually are
     unremarkable (-0.15 / +0.20 c/L) next to fold 13's -1.28 or fold 11's
     -0.57, neither predicted. Flip count is large and diffuse (439 across all
-    14 folds, tens per fold) not modest and concentrated. What aggregate
-    improvement exists traces mostly to shock-regime folds (per-regime: shock
-    -0.2837 vs normal +0.0706 c/L), a mechanism never proposed. None of this
-    reaches the arbiter either way -- headline -0.0272 c/L held-tau sits well
-    inside batch1's own noise band (z=-0.52 vs threshold 1.92, 60th
-    percentile of the noise draws).
+    14 folds, tens per fold) not modest and concentrated. This candidate's
+    TARGET grades on folds 3/7 directly, not regime, so the zone verdict
+    above is unaffected by the shock-fold correction -- but the descriptive
+    per-regime framing of "what aggregate improvement exists" is: [CORRECTED
+    2026-08-30, fps-hnp] against the corrected empirical shock-fold set
+    {1,3,4,14} (not the original fixed {1,4,9,13}), what improvement exists
+    now traces mostly to NORMAL-regime folds (per-regime: shock +0.0703 vs
+    normal -0.0720 c/L) -- the reverse of the original reading, because
+    fold 13 (the single largest favourable cell) moves from shock to
+    normal. None of this reaches the arbiter either way -- headline
+    -0.0272 c/L held-tau sits well inside batch1's own noise band (z=-0.52
+    vs threshold 1.92, 60th percentile of the noise draws).
   not_tested: >-
     Whether an evaluation that can SEE a fat-tailed payoff would resolve
     these columns. A post-hoc conditional read of this run's own rowpreds
@@ -304,16 +322,28 @@
     attribution landed: the real per-fold flip-only CPL deltas show the
     favourable effect is NOT one outlier fold. Three CONSECUTIVE folds carry it
     -- 11 (-14.47 c/L), 12 (-14.42 c/L), 13 (-12.95 c/L) -- a sustained pattern,
-    not a single lucky catch. But only fold 13 of those three is a SHOCK fold;
-    11-12 are "normal", so the concrete wins are calendar-adjacent, not
-    regime-adjacent, contradicting the predicted shock-restoration mechanism
-    even though the coarser per-regime aggregate (shock -0.3065 vs normal
-    -0.0925 c/L) still nominally points the predicted way. The headline
-    realised delta (-0.1552 c/L held-tau) still sits inside batch1's
-    single-candidate noise band (z=-1.80 vs threshold 1.92, arity-3 floor).
+    not a single lucky catch. Originally: only fold 13 of those three was a
+    SHOCK fold (against the fixed set {1,4,9,13}); 11-12 were "normal", so the
+    concrete wins were calendar-adjacent, not regime-adjacent, contradicting
+    the predicted shock-restoration mechanism even though the coarser
+    per-regime aggregate (shock -0.3065 vs normal -0.0925 c/L) still nominally
+    pointed the predicted way. [CORRECTED 2026-08-30, fps-hnp: regraded
+    against the corrected empirical shock-fold set {1,3,4,14} -- fold 13
+    moves to `normal`, so ALL THREE of folds 11-13 are now `normal`; the
+    calendar-vs-regime-adjacent contradiction is sharper, not resolved.
+    Zone `resolved` stays true, but for a different reason: fold 3, which
+    moves INTO shock under the correction, now drives ~74% of the
+    shock-zone effect on its own (excluding it: -0.2111 -> -0.0546 c/L),
+    and is also one of this run's seed-instability flags. Per-regime is now
+    shock -0.2111 vs normal -0.1310 c/L.] The headline realised delta
+    (-0.1552 c/L held-tau, unaffected by the correction) still sits inside
+    batch1's single-candidate noise band (z=-1.80 vs threshold 1.92, arity-3
+    floor).
   not_tested: >-
-    Why folds 11-13 specifically: a real calendar-clustered event these columns
-    caught regardless of SHOCK_FOLDS labelling, or within the range noise would
+    Why folds 11-13 specifically: now unambiguously all-`normal` under the
+    corrected shock-fold set (fps-hnp), sharpening rather than answering
+    the question -- a real calendar-clustered event these columns
+    caught regardless of any regime labelling, or within the range noise would
     produce at this fold count (the batch's noise floor is pooled, not
     per-fold, so it can't answer this directly). Whether network_fall_breadth_3d
     actually pushes WAIT longer as predicted, or is inert/reinforcing (needs

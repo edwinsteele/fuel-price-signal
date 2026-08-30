@@ -30,10 +30,10 @@
   "effect_delta_cpl_held": -0.15523421583191066,
   "zone": {
     "resolved": true,
-    "target_delta_cpl_own": -0.3064786613969943,
-    "other_delta_cpl_own": -0.09247080097171079,
-    "n_target_candidate_fills": 705,
-    "n_other_candidate_fills": 1619
+    "target_delta_cpl_own": -0.21114156872656054,
+    "other_delta_cpl_own": -0.1310240695194409,
+    "n_target_candidate_fills": 785,
+    "n_other_candidate_fills": 1539
   },
   "grading_error": null,
   "aggregate": [
@@ -332,6 +332,14 @@
     "git_sha": "19b65549181cd94bca63fffde682f180faabd606",
     "bead_id": "fps-2l9",
     "n_baseline_columns": 54,
-    "baseline_fingerprint": "54:1a6ec2d84a69"
+    "baseline_fingerprint": "54:1a6ec2d84a69",
+    "shock_folds": [
+      1,
+      3,
+      4,
+      14
+    ],
+    "shock_quantile": 0.25,
+    "shock_folds_source": "cache"
   }
 }

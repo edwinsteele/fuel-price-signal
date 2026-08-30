@@ -1,9 +1,9 @@
 # batch1 / lga_trough_propagation
 
-- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-26
+- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-26 / zone corrected 2026-08-30 (`fps-hnp`)
 - **Branch:** main
 - **SHA:** b8c01f8aa5e73d9ceaa57f7d41b9ec9393b5dd61
-- **Status:** done — **inconclusive**
+- **Status:** done — **inconclusive** (headline CPL); zone mechanism **confirmed** as of the 2026-08-30 correction — see § Correction note
 - **Bead:** fps-cgf
 - **Cadence:** `50/3.571/1d/10%` (batch1's canonical daily cadence)
 
@@ -66,35 +66,40 @@ at the same fixed seed (`PLACEBO_SEED_DEFAULT = SEEDS[0]` = 42).
 
 **Zone (regime axis — safe to cut; a fold is an independent simulation, not
 a row-label slice). Target = normal (the concentration the candidate
-predicted), other = shock:**
+predicted), other = shock. Graded against the corrected empirical
+shock-fold set `{1, 3, 4, 14}` (`experiments/batches/batch1/shock_folds.json`,
+`fps-3tu`/`fps-hnp`) — see the Correction note below the Judgement section
+for what changed and why:**
 
 | | target (normal) | other (shock) |
 |---|---|---|
-| delta_cpl_own | +0.0463 | -0.3794 |
-| n_fills | 1633 | 693 |
+| delta_cpl_own | -0.1073 | +0.0026 |
+| n_fills | 1541 | 785 |
 
-`resolved`: **false** — the target zone (normal) is slightly WORSE for the
-candidate, and the entire favourable effect sits in the zone the candidate
-predicted would be inert.
+`resolved`: **true** — the target zone (normal) is favourable for the
+candidate, and the zone the candidate predicted would be inert (shock) is
+in fact indistinguishable from zero.
 
-**Per-fold:**
+**Per-fold** (regime column reflects the corrected empirical shock-fold set
+`{1, 3, 4, 14}`, not the fixed `{1, 4, 9, 13}` this dossier originally used
+— folds 3 and 9 swap regime labels, as do 13 and 14 vs. the set below):
 
 | fold | regime | n_fills | delta_cpl_own |
 |---|---|---|---|
 | 1 | shock | 190 | 0.0000 |
 | 2 | normal | 186 | +0.6506 |
-| 3 | normal | 188 | +0.2313 |
+| 3 | shock | 188 | +0.2313 |
 | 4 | shock | 239 | -0.0732 |
 | 5 | normal | 185 | -0.1116 |
 | 6 | normal | 135 | +0.0323 |
 | 7 | normal | 235 | +0.0530 |
 | 8 | normal | 87 | +0.7971 |
-| 9 | shock | 112 | +0.2326 |
+| 9 | normal | 112 | +0.2326 |
 | 10 | normal | 96 | -0.5082 |
 | 11 | normal | 161 | -0.5000 |
 | 12 | normal | 184 | -0.0078 |
-| 13 | shock | 143 | **-1.5646** |
-| 14 | normal | 165 | -0.0864 |
+| 13 | normal | 143 | **-1.5646** |
+| 14 | shock | 165 | -0.0864 |
 
 No cell is suppressed (`min_row_cell_n` = 30, smallest cell here is 87).
 
@@ -106,8 +111,11 @@ the ordinary 5.4–6.6× range (fold 2 `all`/R0, fold 3 `all`/R0, fold 2
 `hard25`/R0, fold 3 `hard25`/R0, fold 3 `hard25`/candidate, fold 5
 `hard25`/R0). The seventh is an outlier among the outliers: **fold 3, `all`
 cohort, candidate run, 75.4× the cohort median** — an order of magnitude
-past every other flagged cell. Fold 3 is a `normal` (target-zone) fold and
-is also the single worst per-fold flip-delta in the table below.
+past every other flagged cell. Fold 3 is a `shock` (other-zone) fold under
+the corrected empirical split — it was `normal` (target-zone) under the
+old fixed-index set, so this instability no longer sits inside the zone
+the resolved verdict below rests on. It is also the single worst per-fold
+flip-delta in the table below.
 
 Every `seed_std` here is **WFCV log-loss**, not realised CPL —
 `experiments/lib/gates.py`'s `seed_variance_gate` runs on `ll_all`/`ll_hard25`.
@@ -136,18 +144,18 @@ total flips**. Per fold:
 |---|---|---|---|---|---|---|
 | 1 | shock | 0 | 0 | — | — | — |
 | 2 | normal | 38 | 24 | 184.25 | 184.33 | +0.08 |
-| 3 | normal | 9 | 6 | 187.74 | 198.53 | **+10.78** |
+| 3 | shock | 9 | 6 | 187.74 | 198.53 | **+10.78** |
 | 4 | shock | 23 | 26 | 187.23 | 181.02 | -6.21 |
 | 5 | normal | 15 | 18 | 191.41 | 188.15 | -3.26 |
 | 6 | normal | 11 | 13 | 184.95 | 185.83 | +0.88 |
 | 7 | normal | 5 | 5 | 180.89 | 172.70 | -8.19 |
 | 8 | normal | 10 | 9 | 188.79 | 195.62 | +6.82 |
-| 9 | shock | 0 | 6 | — (no baseline-only fills) | 181.06 | — |
+| 9 | normal | 0 | 6 | — (no baseline-only fills) | 181.06 | — |
 | 10 | normal | 5 | 11 | 200.81 | 189.70 | -11.11 |
 | 11 | normal | 3 | 3 | 221.99 | 202.28 | -19.72 |
 | 12 | normal | 5 | 4 | 184.73 | 182.66 | -2.06 |
-| 13 | shock | 9 | 6 | 199.54 | 180.48 | **-19.05** |
-| 14 | normal | 6 | 2 | 182.95 | 177.50 | -5.45 |
+| 13 | normal | 9 | 6 | 199.54 | 180.48 | **-19.05** |
+| 14 | shock | 6 | 2 | 182.95 | 177.50 | -5.45 |
 
 Fold 1's delta is unavailable (both arms have zero differing fills — no
 flips at all that fold). Fold 9 mirrors the same shape seen in this batch's
@@ -163,65 +171,86 @@ arms swapped timing."
 
 ## Judgement
 
-**Signature grading: contradicted.** The candidate specifically predicted
-concentration in non-shock (normal) folds, with shock folds inert because a
-shock's wholesale move overrides propagation order. The pipeline's own zone
-test contradicts this directly: `resolved=false`, the target (normal) zone
-is slightly WORSE for the candidate (+0.0463 c/L) while the entire
-favourable effect sits in the zone predicted to be inert (shock,
--0.3794 c/L). This is the reverse of the predicted mechanism, not merely an
-absence of one — echoing the same shape this batch's `station_descent_dynamics`
-dossier found for its own zone test. The aggregate is also statistically
-inconclusive on top of pointing the wrong way: -0.0675 c/L held-τ sits
-inside batch1's single-candidate noise band (z=-0.93 vs t=1.92).
+**Signature grading: confirmed — corrected 2026-08-30 (`fps-hnp`), reversing
+the original `contradicted` read. See the Correction note below for what
+changed and why; the account below supersedes the original Judgement and
+the 2026-08-26 Review addendum wherever they discussed the shock/normal
+split.**
+
+The candidate specifically predicted concentration in non-shock (normal)
+folds, with shock folds inert because a shock's wholesale move overrides
+propagation order. Graded against the corrected empirical shock-fold set
+(`{1, 3, 4, 14}`, not the old fixed `{1, 4, 9, 13}`), the pipeline's zone
+test now confirms this: `resolved=true`, the target (normal) zone is
+favourable for the candidate (-0.1073 c/L) while the zone predicted to be
+inert (shock) is statistically indistinguishable from zero (+0.0026 c/L) —
+exactly the "concentrated in normal, inert in shock" shape the hypothesis
+named. The aggregate is still not itself past the noise band: -0.0675 c/L
+held-τ sits inside batch1's single-candidate band (z=-0.93 vs t=1.92), so
+this is a zone-mechanism confirmation, not a graduation.
+
+**But the confirmed zone rests entirely on one fold, and it is worth saying
+so as plainly as the old `contradicted` read said the mirror-image thing.**
+Excluding fold 13 (delta -1.5646 c/L, the single largest cell in the whole
+run, litre-weighted using the actually-persisted `fills.parquet`) the
+normal-zone delta flips from -0.1073 c/L to **+0.0588 c/L** — the opposite
+sign. Every other normal fold nets out close to flat. This is the same
+single-fold dependency the original `contradicted` verdict had (fold 13 was
+then filed under shock and carried the whole -0.3794 c/L shock number); the
+correction did not remove that fragility, it just re-filed which zone it
+sits in and, in doing so, moved it into the zone the candidate actually
+predicted. Unlike the old story, though, fold 13 itself is not one of this
+run's seed-instability flags — that flag now sits on fold 3 (see below),
+which under the correction moved OUT of the target zone and into shock
+(where the zone reads as noise anyway), so the instability no longer
+tangles with the confirmed reading the way it used to.
 
 The flip-level detail is colour, not a second arbiter (per
 `docs/routines/dossier.md`'s guardrail), but two things stand out. First,
-fold 3 — a normal (target-zone) fold — carries both the single worst
+fold 3 — now a shock (other-zone) fold — carries both the single worst
 flip-delta (+10.78 c/L, the candidate's worst fold) and a 75.4×
 cohort-median seed_std for the candidate run, an order of magnitude past
-every other flagged cell in this run. That combination makes fold 3's
-contribution to the normal-zone read look more like an unstable draw than a
-reliable signal either way. Second, the two largest favourable flip-deltas
-(fold 11, -19.72 c/L, normal; fold 13, -19.05 c/L, shock) straddle the
-regime boundary much like `network_move_breadth`'s folds 11–13 cluster did —
-raising the same open question that dossier flagged: is there a real
-calendar-clustered event in that window that both candidates' columns
-happen to catch, independent of the regime label each candidate was
-actually built to key off?
+every other flagged cell in this run; it no longer sits inside the zone
+the resolved verdict depends on. Second, the two largest favourable
+flip-deltas (fold 11, -19.72 c/L, normal; fold 13, -19.05 c/L, normal) both
+now sit inside the same (normal) regime — under the old labelling fold 13
+was shock and this pair straddled the boundary the way `network_move_breadth`'s
+folds 11–13 cluster did; under the correction all three of 11, 12, 13 are
+normal for both candidates. The open question from the original dossier —
+whether there's a real calendar-clustered event in that window both
+candidates' columns catch, independent of any regime label — is if
+anything sharpened, not resolved, by the correction: it's no longer
+plausible to describe as "straddling a boundary" when the boundary moved
+away from all three folds.
 
 **not_tested:**
 
-- Whether the propagation-wave mechanism helps at all within ordinary
-  (non-shock) cycles — the regime it was built for. The observed sign there
-  is negative, not merely flat, but fold 3 (the worst offender) is also the
-  most seed-unstable cell in the run; a wider seed sweep or a fold-3-excluded
-  re-read would separate "the mechanism mildly hurts in normal folds" from
-  "fold 3 is a noisy draw distorting the normal-zone average."
+- Whether the propagation-wave mechanism holds with fold 13 excluded — as
+  shown above, the confirmed zone flips sign without it. A wider seed
+  sweep or a genuine re-run (this backfill reused the existing
+  `fills.parquet`, so seed variance on CPL itself still doesn't exist for
+  this candidate) would separate "the mechanism works, fold 13 is just
+  where it shows up most" from "fold 13 is one unusual window carrying the
+  whole read."
 - The candidate's own proposed falsification test — whether gains trace to
   `lga_trough_breadth_7d`'s level alone with velocity/leader-lead columns
   inert — is untested here; it needs per-column SHAP/attribution against the
   candidate's fitted model, which this pipeline doesn't currently persist
-  (same gap `network_move_breadth`'s dossier already named).
-- Whether there's a real shock-fold restoration mechanism here (distinct
-  from what was proposed) — **fold 13 alone** shows a large favourable effect
-  during a shock, which the candidate never predicted and this run cannot
-  distinguish from a single unusual window. (An earlier revision said "folds 4
-  and 13"; fold 4 is -0.0732 c/L — noise. See the addendum.)
+  (same gap `network_move_breadth`'s dossier already named). Partial
+  corroboration exists below (§ Correction note point 3, carried over from
+  the original addendum): `lga_leader_lead_days`, not the breadth level, is
+  this candidate's most lock-reconstructible column.
 - Whether combining this with `network_move_breadth` (same batch, same
-  cross-sectional-consensus family, same folds 11–13 pattern) does better
-  than either alone — flagged from both sides now.
+  cross-sectional-consensus family, same folds 11–13 pattern, now entirely
+  inside `normal` for both candidates) does better than either alone.
 
-**Recommendation:** dead end on the propagation-during-ordinary-cycles
-framing as stated — the evidence points the opposite way from the
-prediction, and the one fold most responsible for that reading is also the
-most seed-unstable in the run. There may be a genuine shock-fold mechanism
-worth reframing as its own hypothesis, but it rests on **fold 13 alone**, and
-fold 1 — another shock fold — turns out to be a measurement gap rather than a
-null (see the addendum). It should be
-checked jointly with `network_move_breadth` before either is pursued
-further, since both candidates in this batch cluster their wins in the same
-fold window through mechanisms neither one predicted.
+**Recommendation:** the zone mechanism is now confirmed rather than
+contradicted, but it is carried by a single fold (13) whose exclusion flips
+the sign — treat this as reopened, not resolved. It should be checked
+jointly with `network_move_breadth` (same folds 11-13 cluster, same
+now-unambiguous regime placement) before either is pursued further, and a
+fold-13-excluded re-read is the most direct next step for this candidate
+specifically.
 
 ## Followups
 
@@ -232,8 +261,41 @@ fold window through mechanisms neither one predicted.
 - If the batch retrospective revisits the folds-11-13(-4) cluster shared
   between this candidate and `network_move_breadth`, treat it as one
   question, not two.
+- A genuine fold-13-excluded re-run (not just a leave-one-out read on the
+  existing fills, which already flips the sign — see the Judgement section
+  above) would settle whether the confirmed zone mechanism survives without
+  its single largest fold.
+
+## Correction note — 2026-08-30 (`fps-hnp`, backfill of PR #350 / `fps-3tu`)
+
+PR #350 replaced the batch's fixed shock-fold index (`SHOCK_FOLDS =
+{1, 4, 9, 13}`) with a per-batch empirical set derived from the baseline's
+own val-fold log-loss. batch1's corrected set is **`{1, 3, 4, 14}`**
+(`experiments/batches/batch1/shock_folds.json`) — folds 3 and 9 swap
+regime labels, as do 13 and 14, relative to the old fixed set. This
+dossier was originally written against the old set and its headline zone
+verdict has flipped as a result: **`resolved` was `false` ("mechanism
+contradicted"), it is now `true` ("mechanism confirmed")** — see the
+Judgement section above, rewritten in place. The realised CPL headline
+(-0.0675 c/L, still inside the noise band) is unaffected; only the
+regime-axis zone grade depended on the shock-fold set.
+
+This backfill reused the run's already-persisted `fills.parquet` and
+`rowpreds.parquet` — no re-run of the realised backtest was needed or
+performed. The Facts tables, the Judgement section, and this note are the
+only parts of the dossier rewritten; the Review addendum below is kept
+verbatim as a historical record of the 2026-08-26 review, with an
+introductory flag on the one item (§1) that no longer applies to the
+current regime split.
 
 ## Review addendum — 2026-08-26
+
+**Superseded note (2026-08-30): §1 below decomposes the OLD shock zone
+(`{1, 4, 9, 13}`) and is kept only as a historical record of that review —
+its numbers no longer describe this dossier's live zone grade. §§2-4 do not
+depend on the shock/normal split and remain current; §4's "retention gap"
+is also now moot, since this backfill's own leave-fold-13-out re-read (see
+Judgement above) used the `fills.parquet` that gap said was missing.**
 
 A later interactive review of this dossier. Everything below is new analysis on the
 same run, kept out of Facts because it is not transcription from `facts.json`; each

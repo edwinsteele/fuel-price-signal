@@ -1,6 +1,6 @@
 # batch1 / network_move_breadth
 
-- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-24
+- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-24 / zone corrected 2026-08-30 (`fps-hnp`)
 - **Branch:** main
 - **SHA:** 19b65549181cd94bca63fffde682f180faabd606
 - **Status:** done — **inconclusive**
@@ -52,34 +52,41 @@ wall 1782.6s, status `graded`, 54-column baseline (`54:1a6ec2d84a69`).
 -0.0114, Δll_hard25 mean -0.0570. Both favour the candidate.
 
 **Zone (regime axis — safe to cut; a fold is an independent simulation, not a
-row-label slice):**
+row-label slice). Graded against the corrected empirical shock-fold set
+`{1, 3, 4, 14}` (`experiments/batches/batch1/shock_folds.json`,
+`fps-3tu`/`fps-hnp`), not the fixed `{1, 4, 9, 13}` this dossier originally
+used — see the Correction note below the Judgement section:**
 
 | | target (shock) | other (normal) |
 |---|---|---|
-| delta_cpl_own | -0.3065 | -0.0925 |
-| n_fills | 705 | 1619 |
+| delta_cpl_own | -0.2111 | -0.1310 |
+| n_fills | 785 | 1539 |
 
 `resolved`: **true** — shock is more negative than normal, in the direction
-the candidate predicted.
+the candidate predicted. The margin is narrower than under the old fixed
+shock set (-0.3065 / -0.0925 → -0.2111 / -0.1310), but the verdict is
+unchanged.
 
-**Per-fold:**
+**Per-fold** (regime column reflects the corrected empirical shock-fold set
+`{1, 3, 4, 14}` — folds 3 and 9 swap regime labels, as do 13 and 14, vs. the
+old fixed set):
 
 | fold | regime | n_fills | delta_cpl_own |
 |---|---|---|---|
 | 1 | shock | 188 | +0.0573 |
 | 2 | normal | 197 | -0.4233 |
-| 3 | normal | 178 | -0.6392 |
+| 3 | shock | 178 | -0.6392 |
 | 4 | shock | 239 | -0.1729 |
 | 5 | normal | 185 | +0.3301 |
 | 6 | normal | 127 | +0.1767 |
 | 7 | normal | 232 | -0.0622 |
 | 8 | normal | 88 | -0.0602 |
-| 9 | shock | 112 | +0.2894 |
+| 9 | normal | 112 | +0.2894 |
 | 10 | normal | 96 | +0.8968 |
 | 11 | normal | 161 | -0.3535 |
 | 12 | normal | 177 | -0.7462 |
-| 13 | shock | 146 | **-1.3250** |
-| 14 | normal | 168 | -0.0281 |
+| 13 | normal | 146 | **-1.3250** |
+| 14 | shock | 168 | -0.0281 |
 
 No cell is suppressed (`min_row_cell_n` = 30, smallest cell here is 88).
 
@@ -88,7 +95,13 @@ regime split above, so there is no path-coupled per-row zone to caveat here.
 
 **Seed stability:** 5 cells exceed 5× the cohort-median seed_std, all on run
 R0 — folds 2 and 3 (`all` cohort) and folds 2, 3, 5 (`hard25` cohort), each
-around 5.4–6.0× the median. None of the four shock folds appear in this list.
+around 5.4–6.0× the median. Under the old fixed shock set none of these
+were shock folds; under the corrected empirical set **fold 3 is now
+shock**, so one of the four shock folds (both its `all` and `hard25` R0
+cells) is seed-unstable. Fold 3 also turns out to be this dossier's
+single largest driver of the shock-zone effect (see Judgement below), so
+this instability is directly relevant to the zone verdict in a way it
+wasn't under the old labelling.
 
 **Validation:** PIT passed (differential PIT truncation test found no leak).
 INPUTS check passed. Candidate column NaN rate 0.0% for all three columns.
@@ -111,18 +124,18 @@ which pools every fill): **336 total flips**. Per fold:
 |---|---|---|---|---|---|---|
 | 1 | shock | 4 | 2 | 153.11 | 167.90 | +14.79 |
 | 2 | normal | 31 | 28 | 182.35 | 176.28 | -6.06 |
-| 3 | normal | 25 | 12 | 197.30 | 195.53 | -1.77 |
+| 3 | shock | 25 | 12 | 197.30 | 195.53 | -1.77 |
 | 4 | shock | 26 | 38 | 181.82 | 183.59 | +1.77 |
 | 5 | normal | 22 | 22 | 186.37 | 187.96 | +1.59 |
 | 6 | normal | 15 | 7 | 185.48 | 187.37 | +1.88 |
 | 7 | normal | 8 | 5 | 178.78 | 176.52 | -2.26 |
 | 8 | normal | 6 | 7 | 185.35 | 187.16 | +1.80 |
-| 9 | shock | 0 | 8 | — (no baseline-only fills) | 181.35 | — |
+| 9 | normal | 0 | 8 | — (no baseline-only fills) | 181.35 | — |
 | 10 | normal | 5 | 12 | 199.99 | 202.64 | +2.64 |
 | 11 | normal | 3 | 5 | 212.45 | 197.97 | **-14.47** |
 | 12 | normal | 11 | 3 | 186.93 | 172.51 | **-14.42** |
-| 13 | shock | 10 | 10 | 199.03 | 186.08 | **-12.95** |
-| 14 | normal | 6 | 5 | 181.62 | 178.52 | -3.11 |
+| 13 | normal | 10 | 10 | 199.03 | 186.08 | **-12.95** |
+| 14 | shock | 6 | 5 | 181.62 | 178.52 | -3.11 |
 
 Fold 9's `flip_cpl_delta` is unavailable (`null`): the candidate has 8
 candidate-only fills there and R0 has zero baseline-only fills to compare
@@ -138,44 +151,65 @@ two arms swapped timing" — a different shape than every other row.
 
 ## Judgement
 
-**Signature grading: inconclusive** — revised 2026-08-24 with `decision_flips`
-now available; supersedes the original fold-13-only read below. **The
-favourable effect is real and sustained, not a single-fold artifact**: three
-CONSECUTIVE folds — 11 (-14.47 c/L), 12 (-14.42 c/L), 13 (-12.95 c/L) — each
-show a flip-only CPL delta of similar, large magnitude, on double-digit flip
-counts each. That is a materially stronger finding than "one dominant shock
-fold" — it looks like a genuine multi-week period where these columns paid
-off, not a single lucky catch.
+**Signature grading: inconclusive.** Zone `resolved` is still **true** under
+the corrected empirical shock-fold set (`{1, 3, 4, 14}`, `fps-hnp`) — see
+the Correction note below — but the account of *why* changes materially
+from the 2026-08-24 revision below, which was written against the old
+fixed set `{1, 4, 9, 13}` and is superseded on every point involving fold 3
+or fold 13's regime label.
 
-**But it contradicts the specific mechanism predicted.** Only fold 13 of
-those three is a SHOCK fold (`SHOCK_FOLDS = {1, 4, 9, 13}`); folds 11 and 12
-are classified `normal`. The predicted signature was explicit — concentration
-on shock (restoration) folds specifically — and the actual per-flip wins
-straddle the shock/normal boundary rather than sitting inside it. The
-per-regime aggregate (shock -0.3065 vs. normal -0.0925 c/L) still nominally
-points the predicted way, but that now reads more like a coincidence of which
-folds happen to carry the `SHOCK_FOLDS` label than confirmation of a
-restoration-timing mechanism — the three winning folds are calendar-adjacent,
-not regime-adjacent. Elsewhere the flip-level effect is flat-to-unfavourable
-(folds 1, 4–8, 10 all sit between +1.6 and +14.8 c/L, i.e. worse for the
-candidate), and fold 9 is a different shape again — 8 candidate-only fills
-with zero matched baseline-only fills, i.e. more frequent buying rather than
-swapped timing. The headline realised delta (-0.1552 c/L) still sits inside
-this batch's single-candidate noise band, so nothing here overrides that —
-per `docs/routines/dossier.md`'s guardrail, this flip-level detail is colour
-explaining *why* the aggregate looks the way it does, not a second arbiter.
+**The favourable effect is real and sustained, not a single-fold
+artifact**: three CONSECUTIVE folds — 11 (-14.47 c/L), 12 (-14.42 c/L), 13
+(-12.95 c/L) — each show a flip-only CPL delta of similar, large magnitude,
+on double-digit flip counts each. That is a materially stronger finding
+than "one dominant shock fold" — it looks like a genuine multi-week period
+where these columns paid off, not a single lucky catch.
+
+**Under the corrected shock-fold set, none of those three folds is
+shock — all of 11, 12, and 13 are `normal`.** Under the old fixed set, fold
+13 alone carried a shock label and the other two were normal, which read as
+"straddling the shock/normal boundary." The correction removes that
+straddle entirely: the whole folds-11-13 favourable cluster now sits
+inside one regime, sharpening rather than resolving the open question —
+this looks even more like a calendar-adjacent event than a regime-adjacent
+one. **The zone still resolves true, but for a different reason than
+before**: fold 3, which moved INTO shock under the correction, now drives
+most of the shock-zone effect on its own — excluding it (litre-weighted,
+against the actually-persisted `fills.parquet`) takes the shock-zone delta
+from -0.2111 c/L to -0.0546 c/L, roughly a 74% reduction, though the sign
+does not flip the way it does for `lga_trough_propagation`'s zone. Fold 3
+is also one of this run's seed-instability flags (both `all` and `hard25`
+cohorts, R0 run — see Facts above), so the zone verdict now rests
+partly on an unstable-fitting window in a way it didn't under the old
+labelling.
+
+Elsewhere the flip-level effect is flat-to-unfavourable (folds 1, 4, 5–8,
+10 all sit between +1.6 and +14.8 c/L, i.e. worse for the candidate — fold
+3 itself is a mild favourable -1.77 c/L, not one of the large movers), and
+fold 9 is a different shape again — 8 candidate-only fills with zero
+matched baseline-only fills, i.e. more frequent buying rather than swapped
+timing. The headline realised delta (-0.1552 c/L, unaffected by the shock-
+fold correction) still sits inside this batch's single-candidate noise
+band, so nothing here overrides that — per `docs/routines/dossier.md`'s
+guardrail, this flip-level detail is colour explaining *why* the aggregate
+looks the way it does, not a second arbiter.
 
 **not_tested:**
 
-- **Why folds 11–13 specifically.** Three calendar-adjacent folds carrying
-  the whole favourable pattern, crossing the shock/normal label boundary, is
-  a concrete new question this run raises rather than answers: is there a
-  real event in that window (visible in `candidate_over_time.png` or the raw
-  snapshot) that these columns caught regardless of the `SHOCK_FOLDS`
-  labelling, or is 3-folds-in-a-row itself within the range pure noise would
-  produce at this batch's fold count? The batch's own noise floor is
-  fold-pooled (10 draws, no per-fold breakdown), so it can't answer the
-  second half directly.
+- **Why folds 11–13 specifically.** Under the correction these three
+  calendar-adjacent folds carrying the whole favourable flip pattern are
+  now unambiguously all-`normal`, sharpening rather than answering the
+  original question: is there a real event in that window (visible in
+  `candidate_over_time.png` or the raw snapshot) that these columns caught,
+  independent of any regime labelling, or is 3-folds-in-a-row itself within
+  the range pure noise would produce at this batch's fold count? The
+  batch's own noise floor is fold-pooled (10 draws, no per-fold breakdown),
+  so it can't answer the second half directly.
+- Whether the shock-zone read survives excluding fold 3 the way it doesn't
+  survive for `lga_trough_propagation`'s normal zone excluding fold 13 —
+  here it shrinks (-0.2111 → -0.0546 c/L) but stays the predicted sign, a
+  materially different fragility than a sign flip, worth stating precisely
+  rather than lumping the two candidates' single-fold dependencies together.
 - **The rise/fall asymmetry.** Nothing here checks whether
   `network_fall_breadth_3d` is actually pushing WAIT longer as predicted, or
   whether it's inert (or even reinforcing) — that needs per-column
@@ -193,10 +227,12 @@ explaining *why* the aggregate looks the way it does, not a second arbiter.
 **Recommendation:** not a graduation candidate on this run — the headline
 sits inside the batch's own noise floor — but this is now better-evidenced
 open ground, not a coin-flip. The favourable pattern is real and sustained
-(folds 11–13), which rules out "one lucky fold," but it isn't the predicted
-mechanism (it isn't shock-concentrated) — so if this series gets revisited,
-the next hypothesis should be built around "what happened in this
-calendar window" rather than "restoration timing during shocks."
+(folds 11–13), which rules out "one lucky fold," and under the corrected
+regime split it is now unambiguous that this cluster sits entirely outside
+shock — so if this series gets revisited, the next hypothesis should be
+built around "what happened in this calendar window" rather than
+"restoration timing during shocks," with the same recommendation now
+stronger than it was under the old, boundary-straddling read.
 
 ## Followups
 
@@ -207,6 +243,26 @@ calendar window" rather than "restoration timing during shocks."
 - The rise/fall per-column attribution gap (SHAP, needs the candidate model
   persisted) remains open — worth its own bead if a future candidate's
   grading depends on it, rather than building it speculatively now.
+
+## Correction note — 2026-08-30 (`fps-hnp`, backfill of PR #350 / `fps-3tu`)
+
+PR #350 replaced the batch's fixed shock-fold index (`SHOCK_FOLDS =
+{1, 4, 9, 13}`) with a per-batch empirical set derived from the baseline's
+own val-fold log-loss. batch1's corrected set is **`{1, 3, 4, 14}`**
+(`experiments/batches/batch1/shock_folds.json`) — folds 3 and 9 swap
+regime labels, as do 13 and 14, relative to the old fixed set. This
+dossier's zone verdict (`resolved: true`) is unchanged by the correction,
+but the margin narrows (-0.3065/-0.0925 → -0.2111/-0.1310 c/L) and, more
+consequentially, the folds-11-13 favourable cluster discussed at length in
+the Judgement section moves from "straddling the shock/normal boundary" to
+"entirely inside normal" — the Judgement section above has been rewritten
+in place to reflect this; the 2026-08-24 revision it describes is kept
+inline as historical context but its shock/normal claims about folds 3, 9,
+13, 14 no longer hold. The realised CPL headline (-0.1552 c/L, still
+inside the noise band) is unaffected — only the regime-axis zone grade and
+its supporting per-fold/flip commentary depended on the shock-fold set.
+This backfill reused the run's already-persisted `fills.parquet` and
+`rowpreds.parquet`; no re-run of the realised backtest was needed.
 
 ## Addendum — 2026-08-26: batch-wide coverage caveat
 

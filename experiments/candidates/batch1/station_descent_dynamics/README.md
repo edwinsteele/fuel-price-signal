@@ -1,6 +1,6 @@
 # batch1 / station_descent_dynamics
 
-- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-25
+- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-25 / regime labels corrected 2026-08-30 (`fps-hnp`)
 - **Branch:** main
 - **SHA:** f536e98b9c183e754620d46ee0a6ef13681e7c35
 - **Status:** done — **inconclusive**
@@ -69,28 +69,37 @@ Transcribed from `facts.json` — no new arithmetic.
 `resolved`: **false** — the target zone shows a small WORSENING, not the
 predicted improvement; the improvement instead sits in the "other" fills.
 
-**Per-fold:**
+**Per-fold** (regime column reflects the corrected empirical shock-fold set
+`{1, 3, 4, 14}`, not the fixed `{1, 4, 9, 13}` this dossier originally used
+— folds 3 and 9 swap regime labels, as do 13 and 14 — see the Correction
+note below the Judgement section; this candidate's TARGET grades on folds
+3/7, not regime, so `resolved` above is unaffected, but the descriptive
+per-regime split below is not):
 
 | fold | regime | n_fills | delta_cpl_own |
 |---|---|---|---|
 | 1 | shock | 169 | -0.2459 |
 | 2 | normal | 200 | +0.3586 |
-| 3 | normal | 191 | -0.1517 |
+| 3 | shock | 191 | -0.1517 |
 | 4 | shock | 239 | +0.3787 |
 | 5 | normal | 179 | +0.4037 |
 | 6 | normal | 130 | -0.0735 |
 | 7 | normal | 231 | +0.1968 |
 | 8 | normal | 88 | -0.1318 |
-| 9 | shock | 112 | +0.1273 |
+| 9 | normal | 112 | +0.1273 |
 | 10 | normal | 95 | +0.2791 |
 | 11 | normal | 161 | -0.5651 |
 | 12 | normal | 185 | -0.2809 |
-| 13 | shock | 146 | **-1.2787** |
-| 14 | normal | 169 | +0.3727 |
+| 13 | normal | 146 | **-1.2787** |
+| 14 | shock | 169 | +0.3727 |
 
 No cell is suppressed (`min_row_cell_n` = 30, smallest cell here is 88).
 
-**Per-regime:** shock -0.2837 c/L (n=683), normal +0.0706 c/L (n=1645).
+**Per-regime:** shock **+0.0703** c/L (n=785), normal **-0.0720** c/L
+(n=1543) — **the sign of both cells flips relative to the old fixed shock
+set** (was shock -0.2837, normal +0.0706), because fold 13 (this run's
+single largest favourable cell, -1.28 c/L) moves from shock to normal
+under the correction. See the Correction note below.
 
 `per_axis` is `null` — this candidate declared no `add_axis` beyond the
 folds-3/7 zone check above, so there is no path-coupled per-row zone to
@@ -123,18 +132,18 @@ not the same quantity as `delta_cpl_own` above, which pools every fill):
 |---|---|---|---|---|---|---|
 | 1 | shock | 21 | 0 | 166.83 | — (no candidate-only fills) | — |
 | 2 | normal | 39 | 46 | 181.28 | 182.37 | +1.09 |
-| 3 | normal | 14 | 23 | 205.56 | 200.98 | -4.57 |
+| 3 | shock | 14 | 23 | 205.56 | 200.98 | -4.57 |
 | 4 | shock | 23 | 30 | 183.29 | 183.18 | -0.12 |
 | 5 | normal | 32 | 26 | 188.61 | 189.24 | +0.63 |
 | 6 | normal | 17 | 12 | 187.36 | 186.34 | -1.02 |
 | 7 | normal | 16 | 12 | 178.31 | 177.15 | -1.16 |
 | 8 | normal | 6 | 9 | 183.85 | 182.31 | -1.54 |
-| 9 | shock | 6 | 6 | 198.55 | 195.06 | -3.48 |
+| 9 | normal | 6 | 6 | 198.55 | 195.06 | -3.48 |
 | 10 | normal | 20 | 19 | 205.93 | 204.78 | -1.15 |
 | 11 | normal | 4 | 5 | 212.03 | 197.57 | **-14.46** |
 | 12 | normal | 5 | 9 | 188.75 | 181.79 | **-6.96** |
-| 13 | shock | 8 | 18 | 199.81 | 186.16 | **-13.65** |
-| 14 | normal | 6 | 7 | 180.73 | 184.55 | +3.82 |
+| 13 | normal | 8 | 18 | 199.81 | 186.16 | **-13.65** |
+| 14 | shock | 6 | 7 | 180.73 | 184.55 | +3.82 |
 
 Fold 1's `flip_cpl_delta` is unavailable (`null`): R0 has 21 baseline-only
 fills there and the candidate has zero candidate-only fills to compare
@@ -233,10 +242,19 @@ improvement (-0.0345 c/L). Folds 3 and 7 individually are unremarkable
 (-0.15 and +0.20 c/L) next to fold 13's -1.28 c/L or fold 11's -0.57 c/L —
 neither of which the candidate predicted. The flip count (439, tens per
 fold across all 14) is large and diffuse, not the "modest, concentrated"
-shape predicted. What aggregate improvement exists traces mostly to
-shock-regime folds (per-regime: shock -0.2837 vs normal +0.0706 c/L) — a
-mechanism the candidate never proposed; its whole framing was about
-elongated *normal*-regime descents.
+shape predicted. **Corrected 2026-08-30 (`fps-hnp`):** what aggregate
+improvement exists now traces mostly to **normal**-regime folds
+(per-regime: shock +0.0703 vs normal -0.0720 c/L, against the corrected
+empirical shock-fold set `{1, 3, 4, 14}`) — the reverse of the original
+2026-08-25 reading below, which (against the old fixed set `{1, 4, 9, 13}`)
+attributed the improvement to shock-regime folds instead. Fold 13, the
+single largest favourable cell, is the reason: it was `shock` under the
+old set and is `normal` under the corrected one. Read literally, this is
+now closer to — not further from — the candidate's own framing (elongated
+*normal*-regime descents), though the candidate's declared axis was
+elongation (folds 3/7) specifically, not the regime label, and the zone
+test above still reads `resolved: false` against that declared axis
+regardless of this regime reattribution.
 
 None of this reaches the arbiter, though: the headline -0.0272 c/L sits
 well inside this batch's own noise band (z=-0.52 vs threshold 1.92, 60th
@@ -292,6 +310,25 @@ columns at a shock-restoration story and scoring it the same way.
 - None filed — the per-column-attribution gap (SHAP, needs the candidate
   model persisted) is a repeat of the same open item noted on
   `network_move_breadth`; not worth a second bead for the same ask.
+
+## Correction note — 2026-08-30 (`fps-hnp`, backfill of PR #350 / `fps-3tu`)
+
+PR #350 replaced the batch's fixed shock-fold index (`SHOCK_FOLDS =
+{1, 4, 9, 13}`) with a per-batch empirical set derived from the baseline's
+own val-fold log-loss. batch1's corrected set is **`{1, 3, 4, 14}`**
+(`experiments/batches/batch1/shock_folds.json`) — folds 3 and 9 swap
+regime labels, as do 13 and 14, relative to the old fixed set. **This
+candidate's TARGET grades on folds 3/7 directly, not on the regime axis,
+so the zone `resolved: false` verdict is entirely unaffected.** What does
+change is the descriptive per-regime breakdown used as colour in the
+Facts and Judgement sections: fold 13 (this run's single largest
+favourable cell) moves from shock to normal, which **flips the sign of
+both per-regime cells** (shock -0.2837/normal +0.0706 →
+shock +0.0703/normal -0.0720) and reverses which regime the Judgement
+section credits with the aggregate improvement — both sections above have
+been rewritten in place. This backfill reused the run's already-persisted
+`fills.parquet` and `rowpreds.parquet`; no re-run of the realised backtest
+was needed.
 
 ## Addendum — 2026-08-26: batch-wide coverage caveat
 
