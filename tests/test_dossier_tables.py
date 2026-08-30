@@ -191,8 +191,14 @@ def test_find_pending_runs_skips_in_progress_and_already_dossiered(tmp_path):
     (tmp_path / "in_progress").mkdir()  # no results.json at all
     done_dir = tmp_path / "done"
     done_dir.mkdir()
-    (done_dir / dt.RESULTS_FILENAME).write_text("{}")
-    (done_dir / dt.README_FILENAME).write_text("# done")
+    done_results = done_dir / dt.RESULTS_FILENAME
+    done_results.write_text("{}")
+    done_readme = done_dir / dt.README_FILENAME
+    done_readme.write_text("# done")
+    # Force an unambiguous mtime ordering regardless of filesystem timestamp resolution —
+    # see test_find_pending_runs_surfaces_deliberate_rerun for why this matters.
+    newer = done_results.stat().st_mtime + 10
+    os.utime(done_readme, (newer, newer))
 
     pending = dt.find_pending_runs(tmp_path)
 
@@ -226,8 +232,54 @@ def test_find_pending_runs_skips_readme_newer_than_results(tmp_path):
     stays out of the queue — only a results.json newer than its README counts as pending."""
     run_dir = tmp_path / "dossiered"
     run_dir.mkdir()
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": "graded"}))
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# done")
+    # Force an unambiguous mtime ordering — see test_find_pending_runs_surfaces_deliberate_rerun.
+    newer = results.stat().st_mtime + 10
+    os.utime(readme, (newer, newer))
+
+    assert dt.find_pending_runs(tmp_path) == []
+
+
+def test_find_pending_runs_treats_equal_mtimes_as_pending(tmp_path):
+    """fps-0yd review (Sourcery): coarse filesystem timestamp resolution can give a genuine
+    re-run's results.json the SAME mtime as the stale README it's meant to supersede. Ties
+    must resolve to pending, not skipped — re-dossiering an already-current run is a harmless
+    no-op, while silently dropping a real re-run on a tie is the exact bug this function
+    exists to fix."""
+    run_dir = tmp_path / "tied"
+    run_dir.mkdir()
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": "graded"}))
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+    tied = results.stat().st_mtime
+    os.utime(readme, (tied, tied))
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_skips_run_whose_readme_vanishes_mid_scan(tmp_path, monkeypatch):
+    """fps-0yd review (Sourcery): a concurrent launch/rerun can remove or replace a run's
+    files between the `rglob` listing and the `stat()` calls this function now makes. The
+    resulting OSError must be swallowed for that one run, not propagate and abort the whole
+    `--scan` before every other run dir gets a chance."""
+    run_dir = tmp_path / "raced"
+    run_dir.mkdir()
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
-    (run_dir / dt.README_FILENAME).write_text("# done")
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+
+    real_stat = pathlib.Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self == readme:
+            raise FileNotFoundError(self)
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", flaky_stat)
 
     assert dt.find_pending_runs(tmp_path) == []
 

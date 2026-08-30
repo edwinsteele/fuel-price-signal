@@ -10,8 +10,8 @@ Every number in `facts.json` traces back to one of those inputs; nothing here re
 
 Why split this way (see fps-3jj parent design): a number computed in-context by a Claude session
 cannot be checked short of a re-run; if the Claude step dies mid-session the facts already exist
-on disk, so the work queue (any dir with results.json and no README.md) stays correct and
-re-runnable; and it keeps the overnight Claude burst short.
+on disk, so the work queue (any dir with a results.json newer than its README.md, see
+`find_pending_runs`) stays correct and re-runnable; and it keeps the overnight Claude burst short.
 
 Stale-claim recovery is deliberately NOT implemented here. fps-3jj.5 (launch routine) merged
 after this module's first version was written with its own claim.json-based recovery — that
@@ -236,13 +236,27 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
     field to facts.json: results.json and README.md are already the two files this function
     reads, and runner.py always writes results.json fresh on every run (never touches an
     existing README), so a newer results.json is exactly "dossiered content is stale".
+
+    Ties (equal mtimes — a real possibility on filesystems with coarse timestamp resolution)
+    are treated as PENDING, not dossiered: re-dossiering a run that was actually already
+    written up is a harmless no-op (facts.json is deterministic from the same run artifacts),
+    while the reverse — silently dropping a genuine re-run because its mtime happened to
+    collide with the stale README's — is exactly the failure this function exists to close.
+
+    A results.json or README.md that vanishes between the `rglob` listing and the `stat()`
+    calls below (a concurrent launch/rerun) is skipped for this pass rather than raised —
+    stat's `OSError` would otherwise abort the whole scan instead of leaving that one run to
+    be picked up on the next `--scan`.
     """
     root = pathlib.Path(root)
     pending = set()
     for p in root.rglob(RESULTS_FILENAME):
         run_dir = p.parent
         readme = run_dir / README_FILENAME
-        if readme.exists() and readme.stat().st_mtime >= p.stat().st_mtime:
+        try:
+            if readme.exists() and readme.stat().st_mtime > p.stat().st_mtime:
+                continue
+        except OSError:
             continue
         if read_run_status(run_dir) in RETRYABLE_STATUSES:
             continue
