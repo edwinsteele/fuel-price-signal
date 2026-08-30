@@ -353,6 +353,62 @@ class TankParams:
     evaluation_interval_days: int = 1              # how often signal is checked
     floor_fraction: float = 0.10                   # emergency half-fill threshold
 
+    @property
+    def depletion_litres(self) -> float:
+        """Litres consumed between decide points: one evaluation interval at this
+        consumption rate. The single definition every fill/emergency/never-dry check
+        below (and the oracle's mirror of them) computes against (fps-o0h)."""
+        return self.daily_consumption_litres * self.evaluation_interval_days
+
+    @property
+    def run_dry_gap(self) -> float:
+        """Litres remaining at the floor-comfort emergency threshold
+        (``level / size < floor_fraction``, run_backtest's other trigger besides
+        depletion-survival)."""
+        return self.floor_fraction * self.tank_size_litres
+
+    @property
+    def full_to_empty_days(self) -> float:
+        """Days a full tank lasts at this consumption rate — the physical scale
+        `experiments/lib/flips.cascade_window_days` halves for its cascade window."""
+        return self.tank_size_litres / self.daily_consumption_litres
+
+    @property
+    def max_feasible_wait_days(self) -> float:
+        """Fixed, exogenous ceiling on how long a wait this tank could ever fund: floor to
+        full, at this consumption rate. Not attained by any real fill — a fill only happens
+        when the tank is short, so its true headroom is always less; see
+        ``feasible_wait_days`` for the per-fill bound (fps-o0h)."""
+        return (1.0 - self.floor_fraction) * self.tank_size_litres / self.daily_consumption_litres
+
+    def feasible_wait_days(self, litres: float) -> float:
+        """The wait a fill of ``litres`` genuinely funds. ``run_backtest`` always buys to
+        full (``buy_litres = size - level``), so the level right after this fill is
+        ``tank_size_litres - litres``, and the headroom down to the floor is
+        ``max_feasible_wait_days`` less the empty-days this fill already used up
+        (``litres / daily_consumption_litres``) — i.e. ``(1 - floor_fraction) * size -
+        litres``, divided by the daily rate (fps-o0h)."""
+        return self.max_feasible_wait_days - litres / self.daily_consumption_litres
+
+
+def tank_params_fields(tank: TankParams) -> dict[str, float | int]:
+    """The four numbers behind the stamp, exact rather than display-rounded (fps-o0h).
+
+    ``format_tank_params`` renders ``daily_consumption_litres`` at 3dp for glanceability,
+    which round-trips losslessly for almost every config but can flip a downstream derived
+    window on an exact rounding tie (e.g. ``40/2.857/1d/25%``: the exact ratio is precisely
+    10.5, the stamped one 10.500525..., and Python's round-half-to-even sends them to
+    different integers). A reader deriving a quantity from these fields (rather than
+    re-parsing the display string) can't hit that tie. Persist this alongside the stamp,
+    never instead of it — the stamp is still the one contract-bound artifact
+    (``require_tank_stamp``, fps-15c)."""
+    return {
+        "tank_size_litres": tank.tank_size_litres,
+        "daily_consumption_litres": tank.daily_consumption_litres,
+        "evaluation_interval_days": tank.evaluation_interval_days,
+        "floor_fraction": tank.floor_fraction,
+    }
+
 
 def format_tank_params(tank: TankParams) -> str:
     """Render as size/daily/interval/floor, e.g. ``50/3.571/1d/10%``.
@@ -417,7 +473,7 @@ def validate_never_dry(tank: TankParams, *, max_states: int = 10_000) -> list[Ne
     violation names the stranded level and the depletion it fails to cover.
     """
     size = tank.tank_size_litres
-    depletion = tank.daily_consumption_litres * tank.evaluation_interval_days
+    depletion = tank.depletion_litres
 
     def _wait_post(level: float) -> float:
         if level < depletion or level / size < tank.floor_fraction:
@@ -563,7 +619,7 @@ def run_backtest(
             realised_cpl=float("nan"),
         )
 
-    depletion = tank.daily_consumption_litres * tank.evaluation_interval_days
+    depletion = tank.depletion_litres
     tank_level = tank.tank_size_litres * 0.5  # start at 50%
     total_spend = 0.0
     total_litres = 0.0
@@ -724,7 +780,7 @@ def _oracle_transitions(
     a leading prefix in practice.
     """
     size = tank.tank_size_litres
-    depletion = tank.daily_consumption_litres * tank.evaluation_interval_days
+    depletion = tank.depletion_litres
     out: list[tuple[float, float, float, bool]] = []
 
     def _emit(post: float, spend_add: float, litres_add: float, emergency: bool) -> None:

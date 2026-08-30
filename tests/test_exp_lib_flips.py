@@ -14,6 +14,7 @@ from experiments.lib.flips import (
     summarise_flips,
     summarise_regret,
 )
+from fuel_signal.backtest import TankParams, format_tank_params, tank_params_fields
 
 BASELINE = "R0"
 CANDIDATE = "candidate"
@@ -79,6 +80,63 @@ def test_cascade_window_days_derives_half_tank_life_not_hardcoded():
 def test_cascade_window_days_scales_with_a_different_tank():
     # A 20L tank at 2L/day empties in 10 days -> half-life window of 5.
     assert cascade_window_days("20/2.000/1d/10%") == 5
+
+
+# ── exact_fields (fps-o0h): removes the rounding-tie disagreement ──────────────
+
+def test_regret_horizon_days_exact_fields_resolves_the_known_rounding_tie():
+    """`40/2.857/1d/25%` is fps-o0h's own worked example: the exact ceiling
+    30/(40/14) = 10.5, exactly a rounding tie (round-half-to-even -> 10), but the
+    display-rounded stamp `30/2.857` = 10.500525... rounds to 11 instead. Passing
+    `exact_fields` routes through `TankParams.max_feasible_wait_days` and gets the
+    tie right; the stamp-only path is left exactly as it was (no silent behaviour
+    change for old results.json that predate this field)."""
+    tank = TankParams(
+        tank_size_litres=40.0, daily_consumption_litres=40.0 / 14,
+        evaluation_interval_days=1, floor_fraction=0.25,
+    )
+    stamp = format_tank_params(tank)
+    assert stamp == "40/2.857/1d/25%"
+
+    assert regret_horizon_days(stamp) == 11  # unchanged legacy (lossy) behaviour
+    assert regret_horizon_days(stamp, exact_fields=tank_params_fields(tank)) == 10
+    assert round(tank.max_feasible_wait_days) == 10
+
+
+def test_cascade_window_days_and_regret_horizon_days_agree_with_tankparams_via_exact_fields():
+    """Sweep plausible tank configs (mirroring fps-o0h's own 560-config sweep: sizes
+    40-70L, 8-21 day tank life, floor 5-25%, 1d/7d cadence) and assert both windows
+    computed via `exact_fields` always agree with the same quantity computed directly
+    off `TankParams` — never re-derived from the (display-rounded) stamp. This must
+    hold for every config, including the exact-.5 ties that are the only cases the
+    legacy stamp-only path ever got wrong."""
+    for size in (40, 50, 60, 70):
+        for tank_life in range(8, 22):
+            daily = size / tank_life
+            for floor_pct in (5, 10, 15, 20, 25):
+                for cadence in (1, 7):
+                    tank = TankParams(
+                        tank_size_litres=float(size), daily_consumption_litres=daily,
+                        evaluation_interval_days=cadence, floor_fraction=floor_pct / 100.0,
+                    )
+                    stamp = format_tank_params(tank)
+                    fields = tank_params_fields(tank)
+
+                    expected_cascade = max(round(tank.full_to_empty_days / 2), cadence + 1)
+                    assert cascade_window_days(stamp, exact_fields=fields) == expected_cascade
+
+                    expected_regret = round(tank.max_feasible_wait_days)
+                    assert regret_horizon_days(stamp, exact_fields=fields) == expected_regret
+
+
+def test_cascade_window_days_and_regret_horizon_days_unchanged_at_locked_config_with_exact_fields():
+    """Acceptance criterion: passing exact_fields must not move the two numbers
+    every dossier already quotes for fps-6yi's locked tank."""
+    tank = TankParams()
+    fields = tank_params_fields(tank)
+    stamp = format_tank_params(tank)
+    assert cascade_window_days(stamp, exact_fields=fields) == 7
+    assert regret_horizon_days(stamp, exact_fields=fields) == 13
 
 
 # ── summarise_flips: baseline shape ─────────────────────────────────────────────

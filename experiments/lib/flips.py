@@ -41,12 +41,13 @@ is computed one layer up, in `experiments/pipeline/dossier_tables.py`.
 from __future__ import annotations
 
 import math
-from typing import Protocol
+from typing import Mapping, Protocol
 
 import numpy as np
 import pandas as pd
 
 from experiments.lib.zones import pooled_cpl
+from fuel_signal.backtest import TankParams
 
 FLIP_KEY_COLUMNS = ["fold", "station_code", "date"]
 FLIP_ROW_COLUMNS = FLIP_KEY_COLUMNS + ["price", "litres", "spend_cents", "bought_by"]
@@ -83,7 +84,19 @@ def diff_fills(fills: pd.DataFrame, baseline_arm: str, candidate_arm: str) -> pd
     )
 
 
-def cascade_window_days(tank_params: str) -> int:
+def _tank_from_exact_fields(exact_fields: Mapping[str, float]) -> TankParams:
+    """Build the real `TankParams` from `fuel_signal.backtest.tank_params_fields`'s exact
+    numbers, so a caller that has them can get windows straight from their one owner
+    (`TankParams`'s own properties, fps-o0h) instead of this module's stamp-parsing path."""
+    return TankParams(
+        tank_size_litres=float(exact_fields["tank_size_litres"]),
+        daily_consumption_litres=float(exact_fields["daily_consumption_litres"]),
+        evaluation_interval_days=int(exact_fields["evaluation_interval_days"]),
+        floor_fraction=float(exact_fields["floor_fraction"]),
+    )
+
+
+def cascade_window_days(tank_params: str, *, exact_fields: Mapping[str, float] | None = None) -> int:
     """The flip-cascade collapse window, derived from the run's OWN tank cadence rather than
     a hardcoded literal (fps-e1w change 3).
 
@@ -127,9 +140,23 @@ def cascade_window_days(tank_params: str) -> int:
     (`f"{size}/{daily}/{interval}d/{floor}%"`); parsing is safe because that function is this
     string's only writer (`fuel_signal.backtest.require_tank_stamp` is the only sanctioned way
     to obtain one).
+
+    `exact_fields` (fps-o0h), when given, is `fuel_signal.backtest.tank_params_fields(tank)`'s
+    dict — the exact floats behind the stamp, persisted structurally alongside it. Pass it
+    whenever the caller's meta carries it: `format_tank_params` renders daily consumption at
+    3dp, which round-trips losslessly almost always but can flip this window's half-life on an
+    exact rounding tie (a 560-config sweep found 12 such disagreements, all ties — see
+    `tank_params_fields`'s docstring). `tank_params` (the stamp) is still required even when
+    `exact_fields` is given: it is the one contract-bound identity string (fps-15c), and this
+    function still needs `evaluation_interval_days` from it for the cadence floor below —
+    `exact_fields` only replaces the `size`/`daily` half-life computation, via `TankParams`'s
+    own `full_to_empty_days` (fps-o0h's single owner for that quantity).
     """
     size, daily, cadence_days, _floor = parse_tank_params(tank_params)
-    half_life = round(size / daily / 2)
+    if exact_fields is not None:
+        half_life = round(_tank_from_exact_fields(exact_fields).full_to_empty_days / 2)
+    else:
+        half_life = round(size / daily / 2)
     return max(half_life, cadence_days + 1)
 
 
@@ -151,7 +178,7 @@ def parse_tank_params(tank_params: str) -> tuple[float, float, int, float]:
     )
 
 
-def regret_horizon_days(tank_params: str) -> int:
+def regret_horizon_days(tank_params: str, *, exact_fields: Mapping[str, float] | None = None) -> int:
     """`summarise_regret`'s forward window: a FIXED, EXOGENOUS ceiling on how long a wait the
     tank could ever fund — `(1 - floor_fraction) * tank_size_litres / daily_consumption_litres`
     (fps-2js). At fps-6yi's tank (`50/3.571/1d/10%`), 0.9 * 50 / 3.571 = 12.6 -> **13 days**.
@@ -219,17 +246,22 @@ def regret_horizon_days(tank_params: str) -> int:
     compare regret across dossiers at different cadences. Same defect class as
     `cascade_window_days`' `n_decisions` quantisation caveat, reached by a different route.
 
-    **Known limitation, filed as `fps-o0h`, NOT live at any locked config.** This reads the
+    **Rounding-tie limitation, and its fix (fps-o0h).** Without `exact_fields`, this reads the
     stamp, which is a DISPLAY format — `format_tank_params` renders daily consumption `:.3f`,
     so the default 3.5714285714285716 arrives here as 3.571 and the feasible wait computes as
-    12.6015 rather than 12.6. Both round to 13, and both committed stamps
-    (`50/3.571/1d/10%`, `50/3.571/7d/10%`) are unaffected in this function and in
-    `cascade_window_days`. Swept over 560 plausible tanks, 52 configs DO disagree with the same
-    quantity computed from `TankParams` directly (e.g. `40/2.857/1d/25%` gives 11 here against
-    10 from the dataclass), so a future re-lock could land on one. fps-o0h is about giving these
-    derived quantities a single owner on `TankParams` instead of re-deriving them from a
-    rounded string; until then, re-check this function when the tank is re-locked.
+    12.6015 rather than 12.6. Both round to 13, so neither committed stamp
+    (`50/3.571/1d/10%`, `50/3.571/7d/10%`) is affected in this function or in
+    `cascade_window_days`. Swept over 560 plausible tanks, 52 configs DID disagree with the
+    same quantity computed from `TankParams` directly (e.g. `40/2.857/1d/25%` gave 11 here
+    against 10 from the dataclass) — always on an exact rounding tie, never general float
+    drift. Passing `exact_fields` (`fuel_signal.backtest.tank_params_fields(tank)`'s dict,
+    persisted alongside the stamp) routes the computation through `TankParams.
+    max_feasible_wait_days` instead — the single owner of this quantity — and removes the tie
+    entirely. Prefer `exact_fields` whenever the caller's meta carries it; fall back to the
+    stamp only for results.json predating fps-o0h.
     """
+    if exact_fields is not None:
+        return round(_tank_from_exact_fields(exact_fields).max_feasible_wait_days)
     size, daily, _cadence, floor = parse_tank_params(tank_params)
     return round((1.0 - floor) * size / daily)
 

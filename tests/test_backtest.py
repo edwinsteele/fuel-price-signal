@@ -25,6 +25,7 @@ from fuel_signal.backtest import (
     main,
     run_backtest,
     run_oracle_backtest,
+    tank_params_fields,
     validate_never_dry,
 )
 from fuel_signal.features import FEATURE_COLUMNS
@@ -1273,3 +1274,50 @@ def test_require_tank_stamp_returns_format_tank_params_when_tank_given():
 
     tank = TankParams(evaluation_interval_days=1)
     assert require_tank_stamp(tank, what="anything") == format_tank_params(tank) == "50/3.571/1d/10%"
+
+
+# ---------------------------------------------------------------------------
+# TankParams derived quantities (fps-o0h) — one owner for what a tank can do,
+# instead of restating the arithmetic at each call site.
+# ---------------------------------------------------------------------------
+
+def test_tank_params_derived_quantities_at_locked_config():
+    """fps-6yi's locked tank (50/3.571.../1d/10%): full_to_empty_days = 14,
+    max_feasible_wait_days = 0.9 * 50 / (50/14) = 12.6 (fps-2js's worked example),
+    depletion_litres and run_dry_gap match the plain arithmetic every call site used
+    to restate."""
+    import pytest
+
+    tank = TankParams()
+    assert tank.full_to_empty_days == pytest.approx(14.0)
+    assert tank.max_feasible_wait_days == pytest.approx(12.6)
+    assert tank.depletion_litres == pytest.approx(tank.daily_consumption_litres)
+    assert tank.run_dry_gap == pytest.approx(5.0)
+
+
+def test_tank_params_feasible_wait_days_is_the_per_fill_bound():
+    """regret_horizon_days' docstring: a fill's genuinely feasible wait is
+    ((1 - floor) * size - litres) / daily, strictly below max_feasible_wait_days
+    for any real (positive-litres) fill."""
+    import pytest
+
+    tank = TankParams()
+    assert tank.feasible_wait_days(0.0) == pytest.approx(tank.max_feasible_wait_days)
+    # A 20L fill uses up 20 / (50/14) = 5.6 empty-days of headroom.
+    assert tank.feasible_wait_days(20.0) == pytest.approx(12.6 - 20.0 / (50.0 / 14))
+    assert tank.feasible_wait_days(20.0) < tank.max_feasible_wait_days
+
+
+def test_tank_params_fields_round_trips_exactly():
+    """tank_params_fields carries the exact floats — no display rounding — unlike
+    format_tank_params's 3dp daily-consumption stamp."""
+    tank = TankParams(daily_consumption_litres=40.0 / 14)
+    fields = tank_params_fields(tank)
+    assert fields["daily_consumption_litres"] == 40.0 / 14
+    rebuilt = TankParams(
+        tank_size_litres=fields["tank_size_litres"],
+        daily_consumption_litres=fields["daily_consumption_litres"],
+        evaluation_interval_days=fields["evaluation_interval_days"],
+        floor_fraction=fields["floor_fraction"],
+    )
+    assert rebuilt == tank
