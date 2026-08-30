@@ -284,6 +284,38 @@ def test_find_pending_runs_skips_run_whose_readme_vanishes_mid_scan(tmp_path, mo
     assert dt.find_pending_runs(tmp_path) == []
 
 
+def test_find_pending_runs_survives_a_non_missing_stat_error(tmp_path, monkeypatch, capsys):
+    """fps-0yd review round 2 (peer session pr-347-code-review-127a7f-56): an earlier version
+    of this fix narrowed the guard to `except FileNotFoundError`, which meant any OTHER
+    OSError (a permissions error, an NFS staleness error) on one run's stat() call propagated
+    OUT of find_pending_runs() uncaught — aborting the ENTIRE `--scan` before a single run_dir
+    reached main()'s per-run try/except, including every unrelated healthy run_dir. That is a
+    wider blast radius than the original "no README.md" bug. This pins the fix: a PermissionError
+    on one run excludes only that run (printing a warning, not silently), while a healthy
+    sibling run_dir is still returned."""
+    healthy_dir = tmp_path / "healthy"
+    healthy_dir.mkdir()
+    (healthy_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+
+    broken_dir = tmp_path / "broken"
+    broken_dir.mkdir()
+    (broken_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+    broken_readme = broken_dir / dt.README_FILENAME
+    broken_readme.write_text("# stale")
+
+    real_stat = pathlib.Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self == broken_readme:
+            raise PermissionError(self)
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", flaky_stat)
+
+    assert dt.find_pending_runs(tmp_path) == [healthy_dir]
+    assert "broken" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("status", sorted(RETRYABLE_STATUSES))
 def test_find_pending_runs_skips_retryable_aborts(tmp_path, status):
     """fps-g31: dossiering a retryable abort permanently hides its successful re-run.

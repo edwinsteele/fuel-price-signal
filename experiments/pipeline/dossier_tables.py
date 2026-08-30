@@ -243,14 +243,21 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
     while the reverse — silently dropping a genuine re-run because its mtime happened to
     collide with the stale README's — is exactly the failure this function exists to close.
 
-    A README.md that vanishes between the `readme.exists()` check and the `readme.stat()`
-    call right after it (a concurrent launch/rerun deleting it, e.g. via `rm` as part of a
-    re-queue) is skipped for this pass rather than raised — `FileNotFoundError` would
-    otherwise abort the whole scan instead of leaving that one run to be picked up on the
-    next `--scan`. Deliberately narrow to `FileNotFoundError`, not a bare `OSError` (fps-0yd
-    review): a permissions error or an NFS staleness error on this path is a real fault worth
-    surfacing loudly, not something to swallow indefinitely with no log line — only "the file
-    is legitimately gone now" is the race this function is documented to tolerate.
+    A results.json or README.md whose `stat()` fails here — vanished mid-race (a concurrent
+    launch/rerun deleting it, e.g. via `rm` as part of a re-queue), a permissions error, an NFS
+    staleness error — is excluded for this pass rather than raised (fps-0yd review round 2). A
+    narrower `except FileNotFoundError` was tried first and rejected: this function builds its
+    whole return list eagerly (it is not a generator), and `main()`'s `--scan` loop only wraps
+    `process_run` in a per-run try/except, not this call — so ANY exception escaping here
+    aborts the entire scan before a single run_dir is even offered to `process_run`, including
+    every unrelated, healthy run_dir. That is a wider blast radius than the original "no
+    README.md" bug this function exists to fix, and it also contradicts the totality
+    `runner.read_run_status` (called two lines below) already commits to for the exact same
+    unattended-overnight reason. So: catch broadly, like `read_run_status` does, but — unlike a
+    bare `continue` — print a line first (the same `print(..., flush=True)` warning pattern
+    `_plot_tau_sweep` below already uses for a different non-fatal anomaly in this module) so a
+    run silently dropped from the queue by a real I/O fault is still visible in `--scan`'s
+    output rather than swallowed with no trace.
     """
     root = pathlib.Path(root)
     pending = set()
@@ -260,7 +267,12 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
         try:
             if readme.exists() and readme.stat().st_mtime > p.stat().st_mtime:
                 continue
-        except FileNotFoundError:
+        except OSError as exc:
+            print(
+                f"[dossier_tables] {run_dir}: could not compare results.json/README.md "
+                f"timestamps ({exc!r}) — excluding from this scan.",
+                flush=True,
+            )
             continue
         if read_run_status(run_dir) in RETRYABLE_STATUSES:
             continue
