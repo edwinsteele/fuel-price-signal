@@ -53,7 +53,8 @@
       4,
       14
     ],
-    "tank_params": "50/3.571/1d/10%"
+    "tank_params": "50/3.571/1d/10%",
+    "tank_params_fields": null
   },
   "headline": {
     "realised": {
@@ -87,6 +88,7 @@
         "n_fills": 169,
         "suppressed": false,
         "delta_cpl_own": -0.24593967517409965,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.0018619906945165354,
         "delta_ll_hard25_median": 0.002343434962203572
       },
@@ -96,6 +98,7 @@
         "n_fills": 200,
         "suppressed": false,
         "delta_cpl_own": 0.3586033117350951,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.002642298804179627,
         "delta_ll_hard25_median": -0.0647500338515643
       },
@@ -105,6 +108,7 @@
         "n_fills": 191,
         "suppressed": false,
         "delta_cpl_own": -0.15166666666667084,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.01661451873212849,
         "delta_ll_hard25_median": -0.008695086585555956
       },
@@ -114,6 +118,7 @@
         "n_fills": 239,
         "suppressed": false,
         "delta_cpl_own": 0.3787084325365129,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.022354486670998985,
         "delta_ll_hard25_median": -0.039080506274288496
       },
@@ -123,6 +128,7 @@
         "n_fills": 179,
         "suppressed": false,
         "delta_cpl_own": 0.40371865693899167,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.0033409657345128685,
         "delta_ll_hard25_median": 0.01277979829134368
       },
@@ -132,6 +138,7 @@
         "n_fills": 130,
         "suppressed": false,
         "delta_cpl_own": -0.07347226068492319,
+        "tau_diverges": null,
         "delta_ll_all_median": -0.011194221781548969,
         "delta_ll_hard25_median": -0.07699901160889122
       },
@@ -141,6 +148,7 @@
         "n_fills": 231,
         "suppressed": false,
         "delta_cpl_own": 0.19677419354837866,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.011494571482254134,
         "delta_ll_hard25_median": 0.011819607644422803
       },
@@ -150,6 +158,7 @@
         "n_fills": 88,
         "suppressed": false,
         "delta_cpl_own": -0.13176377966689756,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.004896364533232028,
         "delta_ll_hard25_median": 0.019271372291510325
       },
@@ -159,6 +168,7 @@
         "n_fills": 112,
         "suppressed": false,
         "delta_cpl_own": 0.12734864300631443,
+        "tau_diverges": null,
         "delta_ll_all_median": -0.003100645136829172,
         "delta_ll_hard25_median": -0.003769855897044927
       },
@@ -168,6 +178,7 @@
         "n_fills": 95,
         "suppressed": false,
         "delta_cpl_own": 0.2790909090908542,
+        "tau_diverges": null,
         "delta_ll_all_median": -0.012141684352105137,
         "delta_ll_hard25_median": -0.051311341820655
       },
@@ -177,6 +188,7 @@
         "n_fills": 161,
         "suppressed": false,
         "delta_cpl_own": -0.5651162790697697,
+        "tau_diverges": null,
         "delta_ll_all_median": -0.01933116168424387,
         "delta_ll_hard25_median": -0.032208407360971525
       },
@@ -186,6 +198,7 @@
         "n_fills": 185,
         "suppressed": false,
         "delta_cpl_own": -0.28085497835499496,
+        "tau_diverges": null,
         "delta_ll_all_median": 0.0008894653480241987,
         "delta_ll_hard25_median": 0.02327705181097528
       },
@@ -195,6 +208,7 @@
         "n_fills": 146,
         "suppressed": false,
         "delta_cpl_own": -1.2787499999999739,
+        "tau_diverges": null,
         "delta_ll_all_median": -0.013603524780197773,
         "delta_ll_hard25_median": -0.03959414468523714
       },
@@ -204,6 +218,7 @@
         "n_fills": 169,
         "suppressed": false,
         "delta_cpl_own": 0.37274633123692524,
+        "tau_diverges": null,
         "delta_ll_all_median": -0.012648318808536785,
         "delta_ll_hard25_median": -0.04233793182790535
       }
@@ -4495,6 +4510,7 @@
     "computed": true,
     "run_contribution_total_cpl": -0.04449319825953669,
     "composition_residual_cpl": 0.017321529835917067,
+    "tau_diverges_any": null,
     "regret": {
       "horizon_days": 13,
       "cadence_days": 1,
@@ -4820,7 +4836,7 @@
         "n_decisions": 106
       },
       "computed": true,
-      "source_db": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1/fuel_signal.db"
+      "graded_db": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1/fuel_signal.db"
     }
   },
   "seed_flags": [
