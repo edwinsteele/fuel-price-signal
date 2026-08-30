@@ -723,6 +723,37 @@ def test_build_facts_noise_band_refuses_a_mismatched_baseline_fingerprint(tmp_pa
     assert "fingerprint" in band["reason"]
 
 
+def test_build_facts_noise_band_refuses_a_floor_and_run_that_both_lack_baseline_fingerprint(tmp_path):
+    """fps-74x: the old wording, applied to this case, read "(None) does not match this
+    run's (None)" — a claimed mismatch between two equal values. `_bank_admissibility`
+    applies fps-cf8's "cannot be shown to match, so cannot be trusted" rule symmetrically
+    (the same fix fps-1x5's review round already made on the tank_params axis — see
+    test_noise_band_refuses_a_floor_and_run_that_both_lack_tank_params), but unlike
+    tank_params there is no build_facts-level hard refusal for a graded run missing
+    meta.baseline_fingerprint, so this state IS reachable through a normal fixture rather
+    than needing to call `_noise_band` directly."""
+    noise_deltas = list(np.random.default_rng(2).normal(0, 0.02, size=20))
+
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": noise_deltas,
+            # No "baseline_fingerprint" key — the exact shape of a pre-fps-cf8 noise_floor.json.
+        }))
+
+    run_dir, _ = _write_run(tmp_path, batch_extras=add_noise_floor)
+    results = json.loads((run_dir / dt.RESULTS_FILENAME).read_text())
+    del results["meta"]["n_baseline_columns"]
+    del results["meta"]["baseline_fingerprint"]
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
+
+    facts = dt.build_facts(run_dir)
+
+    band = facts["noise_band"]
+    assert band["available"] is False
+    assert "neither side" in band["reason"]
+    assert "(None) does not match this run's (None)" not in band["reason"]
+
+
 def test_build_facts_noise_band_refuses_a_mismatched_tank_params(tmp_path):
     """fps-v8o: the consuming-side half of fps-15c's stamping work — a floor computed at
     one cadence must not silently grade a run at a different cadence, the same failure
