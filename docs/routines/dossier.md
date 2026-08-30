@@ -43,8 +43,8 @@ once launch.py's real implementation was confirmed to already cover this correct
 reintroduce it here.
 
 **FIXED — run-directory convention (fps-icv).** This routine's queue model (`find_pending_runs`: a
-directory with `results.json` and no `README.md`) assumes one subdirectory per candidate. That now
-holds: launch.py's `launch_detached` and runner.py's `run_candidate` both default a candidate's
+directory with a `results.json` newer than its `README.md`, or no `README.md` at all — see fps-0yd)
+assumes one subdirectory per candidate. That now holds: launch.py's `launch_detached` and runner.py's `run_candidate` both default a candidate's
 `out_dir` to `runner.default_out_dir(candidate_path)` (candidate_path with its `.py` suffix
 stripped), not `candidate_path.parent` (the whole **batch** directory shared by every candidate
 module filed against it). Before this fix, candidate 2+ in any batch would overwrite candidate 1's
@@ -398,8 +398,9 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          to the `rejected` rule below would stamp DEAD GROUND — what the next generator reads as
          "don't re-propose this" — onto a claim nothing has measured, which is precisely the harm
          `fps-3jj.17` exists to prevent. Writing no README.md is deliberate and load-bearing:
-         `find_pending_runs` keys the queue on "results.json present, README.md absent", so
-         staying silent leaves the run to be picked up correctly on a later night. Check this
+         `find_pending_runs` treats an absent README.md as pending (same as a README.md older
+         than the run's results.json — fps-0yd), so staying silent leaves the run to be picked
+         up correctly on a later night. Check this
          BEFORE the `available` test below — the arity case sets `available: false` too, so
          ordering is what keeps it out of the `rejected` branch.
 

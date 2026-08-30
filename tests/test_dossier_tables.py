@@ -289,13 +289,35 @@ def test_find_pending_runs_skips_retryable_aborts(tmp_path, status):
     """fps-g31: dossiering a retryable abort permanently hides its successful re-run.
 
     A run dir is keyed on the candidate, so the re-run reuses it. Write a README
-    for the aborted attempt and find_pending_runs (which requires no README)
-    will never surface the re-run that overwrote results.json with a real
-    verdict.
+    for the aborted attempt and find_pending_runs (which excludes retryable
+    statuses regardless of the results.json/README.md mtime comparison — see
+    fps-0yd) will never surface the re-run that overwrote results.json with a
+    real verdict.
     """
     aborted = tmp_path / "aborted"
     aborted.mkdir()
     (aborted / dt.RESULTS_FILENAME).write_text(json.dumps({"status": status, "error": "bad config"}))
+
+    assert dt.find_pending_runs(tmp_path) == []
+
+
+@pytest.mark.parametrize("status", sorted(RETRYABLE_STATUSES))
+def test_find_pending_runs_retryable_status_excluded_even_when_results_newer(tmp_path, status):
+    """fps-0yd review (peer session pr-347-code-review-127a7f-56): the mtime check and the
+    RETRYABLE_STATUSES check are two independent `continue`s in the same loop body, so
+    neither can force the OTHER to include a run — only pin that composition down with a
+    case where they'd disagree if it were broken: results.json newer than a stale README
+    (the mtime check alone would call this pending) but with a retryable status (the
+    RETRYABLE_STATUSES check must still exclude it, exactly as it does with no README at
+    all in test_find_pending_runs_skips_retryable_aborts above)."""
+    run_dir = tmp_path / "retryable_with_stale_readme"
+    run_dir.mkdir()
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": status, "error": "bad config"}))
+    old = readme.stat().st_mtime - 10
+    os.utime(readme, (old, old))
 
     assert dt.find_pending_runs(tmp_path) == []
 

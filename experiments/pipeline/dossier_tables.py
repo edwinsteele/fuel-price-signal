@@ -243,10 +243,14 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
     while the reverse — silently dropping a genuine re-run because its mtime happened to
     collide with the stale README's — is exactly the failure this function exists to close.
 
-    A results.json or README.md that vanishes between the `rglob` listing and the `stat()`
-    calls below (a concurrent launch/rerun) is skipped for this pass rather than raised —
-    stat's `OSError` would otherwise abort the whole scan instead of leaving that one run to
-    be picked up on the next `--scan`.
+    A README.md that vanishes between the `readme.exists()` check and the `readme.stat()`
+    call right after it (a concurrent launch/rerun deleting it, e.g. via `rm` as part of a
+    re-queue) is skipped for this pass rather than raised — `FileNotFoundError` would
+    otherwise abort the whole scan instead of leaving that one run to be picked up on the
+    next `--scan`. Deliberately narrow to `FileNotFoundError`, not a bare `OSError` (fps-0yd
+    review): a permissions error or an NFS staleness error on this path is a real fault worth
+    surfacing loudly, not something to swallow indefinitely with no log line — only "the file
+    is legitimately gone now" is the race this function is documented to tolerate.
     """
     root = pathlib.Path(root)
     pending = set()
@@ -256,7 +260,7 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
         try:
             if readme.exists() and readme.stat().st_mtime > p.stat().st_mtime:
                 continue
-        except OSError:
+        except FileNotFoundError:
             continue
         if read_run_status(run_dir) in RETRYABLE_STATUSES:
             continue
