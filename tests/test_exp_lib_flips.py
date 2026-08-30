@@ -82,15 +82,30 @@ def test_cascade_window_days_scales_with_a_different_tank():
     assert cascade_window_days("20/2.000/1d/10%") == 5
 
 
-# ── exact_fields (fps-o0h): removes the rounding-tie disagreement ──────────────
+# ── exact_fields (fps-o0h): fixes the STAMP tie, not rounding ties in general ───
+#
+# PR #355 review corrected two overclaims in the first version of this section:
+# (finding #2) "exact_fields removes the tie entirely" is false — it only removes the
+# specific tie caused by re-parsing the 3dp display stamp. A DIFFERENT floating-point
+# tie (non-invertibility of `size / (size / life)` for an odd `life`) survives
+# `exact_fields` and can even make it LESS accurate than the stamp path it replaces
+# (see `test_cascade_window_days_exact_fields_can_be_less_accurate_than_the_stamp`
+# below). (finding #1) the sweep test previously asserted `exact_fields`'s answer
+# against the implementation's OWN expression (`round(tank.full_to_empty_days / 2)`)
+# rather than an independent true value — a tautology that could not have caught
+# either bug. It now checks WIRING (does `exact_fields` reach `TankParams`'s
+# properties at all) separately from ACCURACY (does the answer match the true,
+# exact-rational value), and pins the real disagreement counts (90 for cascade, 12
+# for regret — not the 12/52 the two docstrings had transplanted from each other).
 
-def test_regret_horizon_days_exact_fields_resolves_the_known_rounding_tie():
+def test_regret_horizon_days_exact_fields_resolves_this_specific_known_tie():
     """`40/2.857/1d/25%` is fps-o0h's own worked example: the exact ceiling
     30/(40/14) = 10.5, exactly a rounding tie (round-half-to-even -> 10), but the
     display-rounded stamp `30/2.857` = 10.500525... rounds to 11 instead. Passing
-    `exact_fields` routes through `TankParams.max_feasible_wait_days` and gets the
+    `exact_fields` routes through `TankParams.max_feasible_wait_days` and gets THIS
     tie right; the stamp-only path is left exactly as it was (no silent behaviour
-    change for old results.json that predate this field)."""
+    change for old results.json that predate this field). This is one worked example,
+    not a general guarantee — see the counterexample test below."""
     tank = TankParams(
         tank_size_litres=40.0, daily_consumption_litres=40.0 / 14,
         evaluation_interval_days=1, floor_fraction=0.25,
@@ -103,13 +118,38 @@ def test_regret_horizon_days_exact_fields_resolves_the_known_rounding_tie():
     assert round(tank.max_feasible_wait_days) == 10
 
 
-def test_cascade_window_days_and_regret_horizon_days_agree_with_tankparams_via_exact_fields():
-    """Sweep plausible tank configs (mirroring fps-o0h's own 560-config sweep: sizes
-    40-70L, 8-21 day tank life, floor 5-25%, 1d/7d cadence) and assert both windows
-    computed via `exact_fields` always agree with the same quantity computed directly
-    off `TankParams` — never re-derived from the (display-rounded) stamp. This must
-    hold for every config, including the exact-.5 ties that are the only cases the
-    legacy stamp-only path ever got wrong."""
+def test_cascade_window_days_exact_fields_can_be_less_accurate_than_the_stamp():
+    """PR #355 review finding #2: `exact_fields` is not strictly more accurate than the
+    legacy stamp path — it trades one failure mode for a different one. `TankParams(50.0,
+    50.0 / 11)`'s true half-life is exactly 5.5 (round-half-to-even -> 6), but
+    `full_to_empty_days` computes `50.0 / (50.0 / 11)` as `10.999999999999998` — an
+    unavoidable double-rounding artifact of the intermediate `50.0 / 11`, not something
+    reordering the division fixes — so `exact_fields` rounds this DOWN to 5. The legacy
+    stamp path (`50/4.545/...`) happens to land on the correct 6 here, because 3dp-rounding
+    `daily` up to 4.545 nudges the ratio to just ABOVE the tie instead of just below it."""
+    tank = TankParams(
+        tank_size_litres=50.0, daily_consumption_litres=50.0 / 11,
+        evaluation_interval_days=1, floor_fraction=0.10,
+    )
+    assert tank.full_to_empty_days != 11.0  # the double-rounding artifact itself
+    stamp = format_tank_params(tank)
+    assert stamp == "50/4.545/1d/10%"
+
+    assert cascade_window_days(stamp) == 6  # legacy: correct, by luck of the stamp rounding
+    assert cascade_window_days(stamp, exact_fields=tank_params_fields(tank)) == 5  # exact: wrong
+
+
+def test_cascade_window_days_and_regret_horizon_days_exact_fields_reach_tankparams_properties():
+    """Wiring check, not an accuracy claim (see the two tests above for accuracy): sweep
+    fps-o0h's own 560-config grid (sizes 40-70L, 8-21 day tank life, floor 5-25%, 1d/7d
+    cadence) and confirm passing `exact_fields` always routes through the SAME `TankParams`
+    properties a caller would get by constructing the dataclass directly — i.e. `exact_fields`
+    isn't silently ignored or partially applied. Also pins the real disagreement counts
+    against the legacy stamp-only path at exactly 90 (cascade) and 12 (regret) — the two
+    docstrings previously had these numbers TRANSPLANTED from each other (PR #355 review
+    finding #1 / #4)."""
+    n_cascade_disagree = 0
+    n_regret_disagree = 0
     for size in (40, 50, 60, 70):
         for tank_life in range(8, 22):
             daily = size / tank_life
@@ -122,11 +162,32 @@ def test_cascade_window_days_and_regret_horizon_days_agree_with_tankparams_via_e
                     stamp = format_tank_params(tank)
                     fields = tank_params_fields(tank)
 
+                    # Wiring: exact_fields reaches TankParams's own properties exactly.
                     expected_cascade = max(round(tank.full_to_empty_days / 2), cadence + 1)
                     assert cascade_window_days(stamp, exact_fields=fields) == expected_cascade
-
                     expected_regret = round(tank.max_feasible_wait_days)
                     assert regret_horizon_days(stamp, exact_fields=fields) == expected_regret
+
+                    if cascade_window_days(stamp) != expected_cascade:
+                        n_cascade_disagree += 1
+                    if regret_horizon_days(stamp) != expected_regret:
+                        n_regret_disagree += 1
+
+    assert n_cascade_disagree == 90
+    assert n_regret_disagree == 12
+
+
+def test_exact_fields_mismatched_with_tank_params_raises():
+    """PR #355 review finding #6: `exact_fields` and `tank_params` are supposed to be a
+    matched pair from the SAME run (`realised.py`'s meta writes both off one `tank`) — pass
+    fields from a different tank than the stamp and both functions must refuse rather than
+    silently compute against the wrong one, the same provenance discipline `fps-cf8`/`fps-v8o`
+    already apply to `baseline_fingerprint`/`tank_params` themselves."""
+    mismatched_fields = tank_params_fields(TankParams(tank_size_litres=999.0))
+    with pytest.raises(ValueError, match="two different tanks"):
+        cascade_window_days("50/3.571/1d/10%", exact_fields=mismatched_fields)
+    with pytest.raises(ValueError, match="two different tanks"):
+        regret_horizon_days("50/3.571/1d/10%", exact_fields=mismatched_fields)
 
 
 def test_cascade_window_days_and_regret_horizon_days_unchanged_at_locked_config_with_exact_fields():

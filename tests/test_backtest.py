@@ -1296,7 +1296,8 @@ def test_tank_params_derived_quantities_at_locked_config():
 
 
 def test_tank_params_feasible_wait_days_is_the_per_fill_bound():
-    """regret_horizon_days' docstring: a fill's genuinely feasible wait is
+    """A BUY fill's genuinely feasible wait (the headroom right BEFORE the fill, since the
+    post-fill level is always a full tank regardless of litres) is
     ((1 - floor) * size - litres) / daily, strictly below max_feasible_wait_days
     for any real (positive-litres) fill."""
     import pytest
@@ -1306,6 +1307,20 @@ def test_tank_params_feasible_wait_days_is_the_per_fill_bound():
     # A 20L fill uses up 20 / (50/14) = 5.6 empty-days of headroom.
     assert tank.feasible_wait_days(20.0) == pytest.approx(12.6 - 20.0 / (50.0 / 14))
     assert tank.feasible_wait_days(20.0) < tank.max_feasible_wait_days
+
+
+def test_tank_params_feasible_wait_days_emergency_uses_the_half_fill_target():
+    """PR #355 review finding #3: litres alone doesn't distinguish a BUY fill (post-fill =
+    full) from an emergency fill (post-fill = half) — the pre-fill level, and so the feasible
+    wait, differs for the same litres depending on which kind of fill it was. A 10L emergency
+    fill on the default tank came from level 25 - 10 = 15L (post-fill target is always
+    0.5 * size = 25); headroom from 15L down to the floor (5L) is (15 - 5) / (50/14) = 2.8
+    days — very different from the 9.8 days a 10L BUY fill (from level 40L) would report."""
+    import pytest
+
+    tank = TankParams()
+    assert tank.feasible_wait_days(10.0, emergency=True) == pytest.approx(2.8)
+    assert tank.feasible_wait_days(10.0, emergency=False) == pytest.approx(9.8)
 
 
 def test_tank_params_fields_round_trips_exactly():

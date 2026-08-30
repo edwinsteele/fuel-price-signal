@@ -405,6 +405,11 @@ def test_build_facts_graded_run_has_all_blocks_and_suppresses_thin_cells(tmp_pat
     assert facts["provenance"]["n_baseline_columns"] == 54
     assert facts["provenance"]["baseline_fingerprint"] == "54:deadbeef1234"
     assert facts["provenance"]["tank_params"] == "50/3.571/7d/10%"
+    # None, not a refusal: this fixture's meta predates fps-o0h's tank_params_fields, exactly
+    # like every real results.json from before this PR (PR #355 review finding #8) —
+    # cascade_window_days/regret_horizon_days must fall back to the stamp-only path rather
+    # than raise or silently misbehave when this key is simply absent.
+    assert facts["provenance"]["tank_params_fields"] is None
     assert facts["provenance"]["realised_seed"] == 42
 
     assert facts["headline"]["realised"]["delta_cpl_held"] == -0.05

@@ -381,14 +381,26 @@ class TankParams:
         ``feasible_wait_days`` for the per-fill bound (fps-o0h)."""
         return (1.0 - self.floor_fraction) * self.tank_size_litres / self.daily_consumption_litres
 
-    def feasible_wait_days(self, litres: float) -> float:
-        """The wait a fill of ``litres`` genuinely funds. ``run_backtest`` always buys to
-        full (``buy_litres = size - level``), so the level right after this fill is
-        ``tank_size_litres - litres``, and the headroom down to the floor is
-        ``max_feasible_wait_days`` less the empty-days this fill already used up
-        (``litres / daily_consumption_litres``) — i.e. ``(1 - floor_fraction) * size -
-        litres``, divided by the daily rate (fps-o0h)."""
-        return self.max_feasible_wait_days - litres / self.daily_consumption_litres
+    def feasible_wait_days(self, litres: float, *, emergency: bool = False) -> float:
+        """How long the tank could have waited BEFORE a fill that bought ``litres`` litres —
+        the headroom down to the floor at the level the tank was at right before the fill, not
+        after (fixed from an inverted pre/post description, PR #355 review finding #3: the
+        POST-fill level is a fixed constant — ``tank_size_litres`` for a BUY, ``0.5 *
+        tank_size_litres`` for an emergency half-fill — independent of ``litres`` either way,
+        so it can never be the thing this function's ``litres`` argument is answering).
+
+        ``run_backtest``'s BUY branch always fills to full (``buy_litres = size - level``), so
+        the level right BEFORE a BUY fill of ``litres`` was ``tank_size_litres - litres``
+        (``emergency=False``, the default). Its emergency branch always tops up to HALF full
+        (``target = 0.5 * size``, ``emerg_litres = target - level``), so the level right before
+        an emergency fill of ``litres`` was ``0.5 * tank_size_litres - litres``
+        (``emergency=True``). ``litres`` alone cannot tell the two apart — a 10L fill could be
+        either a BUY from 40L or an emergency fill from 15L — so the caller must know and pass
+        which kind of fill it is; passing the wrong one silently returns the headroom for the
+        wrong starting level (fps-o0h; this method has no production caller yet, so this
+        distinction was previously untested)."""
+        pre_fill_level = (0.5 if emergency else 1.0) * self.tank_size_litres - litres
+        return (pre_fill_level - self.run_dry_gap) / self.daily_consumption_litres
 
 
 def tank_params_fields(tank: TankParams) -> dict[str, float | int]:
@@ -476,7 +488,7 @@ def validate_never_dry(tank: TankParams, *, max_states: int = 10_000) -> list[Ne
     depletion = tank.depletion_litres
 
     def _wait_post(level: float) -> float:
-        if level < depletion or level / size < tank.floor_fraction:
+        if level < depletion or level < tank.run_dry_gap:
             target = 0.5 * size
             return target if target > level else level
         return level
@@ -679,7 +691,7 @@ def run_backtest(
         # _oracle_transitions' deplete=False handling of the final date).
         elif (
             (i != last_i and tank_level < depletion)
-            or tank_level / tank.tank_size_litres < tank.floor_fraction
+            or tank_level < tank.run_dry_gap
         ):
             # Emergency half-fill to avoid running dry before next evaluation
             target = tank.tank_size_litres * 0.5
@@ -805,7 +817,7 @@ def _oracle_transitions(
     # forced fill on the depletion-survival ground for the final date, which has
     # no next depletion to survive) can't survive to the next decide point, else
     # hold. Kept in sync with run_backtest's condition.
-    if (deplete and level < depletion) or level / size < tank.floor_fraction:
+    if (deplete and level < depletion) or level < tank.run_dry_gap:
         target = 0.5 * size
         emerg_litres = max(0.0, target - level)
         post = target if emerg_litres > 1e-9 else level

@@ -47,7 +47,7 @@ import numpy as np
 import pandas as pd
 
 from experiments.lib.zones import pooled_cpl
-from fuel_signal.backtest import TankParams
+from fuel_signal.backtest import TankParams, format_tank_params
 
 FLIP_KEY_COLUMNS = ["fold", "station_code", "date"]
 FLIP_ROW_COLUMNS = FLIP_KEY_COLUMNS + ["price", "litres", "spend_cents", "bought_by"]
@@ -84,16 +84,36 @@ def diff_fills(fills: pd.DataFrame, baseline_arm: str, candidate_arm: str) -> pd
     )
 
 
-def _tank_from_exact_fields(exact_fields: Mapping[str, float]) -> TankParams:
+def _tank_from_exact_fields(exact_fields: Mapping[str, float], tank_params: str) -> TankParams:
     """Build the real `TankParams` from `fuel_signal.backtest.tank_params_fields`'s exact
     numbers, so a caller that has them can get windows straight from their one owner
-    (`TankParams`'s own properties, fps-o0h) instead of this module's stamp-parsing path."""
-    return TankParams(
+    (`TankParams`'s own properties, fps-o0h) instead of this module's stamp-parsing path.
+
+    Asserts the rebuilt tank re-formats to the SAME stamp the caller also passed
+    (PR #355 review finding #6) — the two are supposed to be the same run's paired fields
+    (`experiments/lib/realised.py`'s meta writes both off the one `tank`), so a mismatch means
+    a caller mixed fields from a different run/results.json into this one, the same class of
+    provenance bug `fps-cf8`/`fps-v8o` already guard against for `baseline_fingerprint`/
+    `tank_params` themselves. This does NOT catch every float-precision hazard `exact_fields`
+    can hit (see `cascade_window_days`'/`regret_horizon_days`' docstrings for the one it
+    can't: floating-point non-invertibility already baked into a stored `daily_consumption_litres`
+    value, independent of which run it came from) — it only catches the fields belonging to
+    the wrong tank entirely.
+    """
+    tank = TankParams(
         tank_size_litres=float(exact_fields["tank_size_litres"]),
         daily_consumption_litres=float(exact_fields["daily_consumption_litres"]),
         evaluation_interval_days=int(exact_fields["evaluation_interval_days"]),
         floor_fraction=float(exact_fields["floor_fraction"]),
     )
+    restamped = format_tank_params(tank)
+    if restamped != tank_params:
+        raise ValueError(
+            f"exact_fields {exact_fields!r} re-stamp to {restamped!r}, not the tank_params "
+            f"{tank_params!r} passed alongside them — these belong to two different tanks/runs, "
+            "not a matched pair (fps-o0h, PR #355 review finding #6)."
+        )
+    return tank
 
 
 def cascade_window_days(tank_params: str, *, exact_fields: Mapping[str, float] | None = None) -> int:
@@ -145,16 +165,42 @@ def cascade_window_days(tank_params: str, *, exact_fields: Mapping[str, float] |
     dict — the exact floats behind the stamp, persisted structurally alongside it. Pass it
     whenever the caller's meta carries it: `format_tank_params` renders daily consumption at
     3dp, which round-trips losslessly almost always but can flip this window's half-life on an
-    exact rounding tie (a 560-config sweep found 12 such disagreements, all ties — see
-    `tank_params_fields`'s docstring). `tank_params` (the stamp) is still required even when
-    `exact_fields` is given: it is the one contract-bound identity string (fps-15c), and this
-    function still needs `evaluation_interval_days` from it for the cadence floor below —
-    `exact_fields` only replaces the `size`/`daily` half-life computation, via `TankParams`'s
-    own `full_to_empty_days` (fps-o0h's single owner for that quantity).
+    exact rounding tie. `tank_params` (the stamp) is still required even when `exact_fields` is
+    given — it is the one contract-bound identity string (fps-15c) — but every number this
+    function derives, INCLUDING the cadence floor, now comes from the rebuilt `TankParams` when
+    `exact_fields` is available, not a mix of the two sources (PR #355 review finding #6): ints
+    round-trip a stamp exactly, so there was never a precision reason to keep parsing
+    `evaluation_interval_days` off the string once `exact_fields` is in hand, only an
+    inconsistency risk.
+
+    **`exact_fields` does not "solve" rounding ties in general — it only removes the specific
+    one this window can suffer from re-parsing the display stamp** (PR #355 review finding #2,
+    correcting this docstring's earlier overclaim). A 560-config sweep (mirroring
+    `tests/test_exp_lib_flips.py`'s own) found **90** configs where the stamp-only and
+    `exact_fields` answers disagree — not the 12 an earlier draft of this docstring claimed
+    (that number belongs to `regret_horizon_days`, transplanted here in error). Every one of the
+    90 has an ODD `tank_size_litres / daily_consumption_litres` in low terms (so the true
+    half-life is an exact `n.5`), confirming the disagreement is real rounding-tie territory,
+    not noise — but `exact_fields` does not reliably pick the mathematically-correct side of
+    it. Worked counterexample: `TankParams(50.0, 50.0/11)` has a true, exact half-life of 5.5
+    (round-half-to-even -> 6), but `full_to_empty_days` computes `50.0 / (50.0/11)` as
+    `10.999999999999998` (an unavoidable double-rounding artifact of the intermediate
+    `50.0/11` — no reordering of the division recovers exactness), so `exact_fields` rounds
+    this one DOWN to 5 where the stamp-only path (`50/4.545/1d/...`, `50/4.545/2` computing
+    slightly *above* 5.5) happens to land on the correct 6. So `exact_fields` trades the
+    stamp's specific, well-understood failure mode (3dp display truncation) for a different,
+    equally-real one (floating-point non-invertibility already latent in a `daily_consumption_
+    litres` value that was itself constructed by division) — it is not strictly more accurate,
+    only differently imprecise, and both paths can disagree with the "true" tie on different
+    configs. Pass it anyway when available, because the two failure modes are NOT the same size
+    in practice for HOW THIS RUN'S TANK is normally constructed (`tank_life` in whole days,
+    `daily = size / tank_life`) — but do not describe it as removing ties, here or downstream.
     """
     size, daily, cadence_days, _floor = parse_tank_params(tank_params)
     if exact_fields is not None:
-        half_life = round(_tank_from_exact_fields(exact_fields).full_to_empty_days / 2)
+        tank = _tank_from_exact_fields(exact_fields, tank_params)
+        half_life = round(tank.full_to_empty_days / 2)
+        cadence_days = tank.evaluation_interval_days
     else:
         half_life = round(size / daily / 2)
     return max(half_life, cadence_days + 1)
@@ -246,22 +292,49 @@ def regret_horizon_days(tank_params: str, *, exact_fields: Mapping[str, float] |
     compare regret across dossiers at different cadences. Same defect class as
     `cascade_window_days`' `n_decisions` quantisation caveat, reached by a different route.
 
-    **Rounding-tie limitation, and its fix (fps-o0h).** Without `exact_fields`, this reads the
-    stamp, which is a DISPLAY format — `format_tank_params` renders daily consumption `:.3f`,
-    so the default 3.5714285714285716 arrives here as 3.571 and the feasible wait computes as
-    12.6015 rather than 12.6. Both round to 13, so neither committed stamp
-    (`50/3.571/1d/10%`, `50/3.571/7d/10%`) is affected in this function or in
-    `cascade_window_days`. Swept over 560 plausible tanks, 52 configs DID disagree with the
-    same quantity computed from `TankParams` directly (e.g. `40/2.857/1d/25%` gave 11 here
-    against 10 from the dataclass) — always on an exact rounding tie, never general float
-    drift. Passing `exact_fields` (`fuel_signal.backtest.tank_params_fields(tank)`'s dict,
-    persisted alongside the stamp) routes the computation through `TankParams.
-    max_feasible_wait_days` instead — the single owner of this quantity — and removes the tie
-    entirely. Prefer `exact_fields` whenever the caller's meta carries it; fall back to the
-    stamp only for results.json predating fps-o0h.
+    **Rounding-tie limitation (fps-o0h), and what `exact_fields` does and does not fix.**
+    Without `exact_fields`, this reads the stamp, which is a DISPLAY format —
+    `format_tank_params` renders daily consumption `:.3f`, so the default 3.5714285714285716
+    arrives here as 3.571 and the feasible wait computes as 12.6015 rather than 12.6. Both
+    round to 13, so neither committed stamp (`50/3.571/1d/10%`, `50/3.571/7d/10%`) is affected
+    in this function or in `cascade_window_days`. Swept over the same 560-config grid
+    `tests/test_exp_lib_flips.py` uses, **12** configs disagree with the same quantity computed
+    from `TankParams` directly (e.g. `40/2.857/1d/25%` gives 11 here against 10 from the
+    dataclass) — always on an exact rounding tie, never general float drift.
+
+    **`exact_fields` does NOT remove rounding ties in general — it only removes the specific
+    one caused by re-parsing the 3dp stamp** (PR #355 review finding #2, correcting this
+    docstring's earlier claim that it "removes the tie entirely"; see finding #4 too — an
+    earlier draft here also said "52 configs", which was `cascade_window_days`' count,
+    transplanted). All 12 of THIS 560-config sweep's disagreements happen to resolve correctly
+    with `exact_fields` (matching round-half-to-even on the true, exact ceiling) — but a wider
+    sweep (`size` 20-120, `tank_life` 6-39, `floor` 1-50%) finds `exact_fields` landing on the
+    WRONG side of the tie for roughly 11% of exact-.5 ceilings, for the same reason
+    `cascade_window_days`' docstring documents: `max_feasible_wait_days` is `(1 - floor) * size
+    / daily`, and when `daily` was itself constructed as `size / tank_life`, the round-trip
+    `size / (size / tank_life)` is not always exactly `tank_life` in double precision — an
+    unavoidable floating-point property of the STORED values, not something `TankParams` or
+    `exact_fields` can correct after the fact. Passing `exact_fields` (`fuel_signal.backtest.
+    tank_params_fields(tank)`'s dict, persisted alongside the stamp) still routes the
+    computation through `TankParams.max_feasible_wait_days` — the single owner of this
+    quantity, so at least both callers computing it agree with EACH OTHER — but "single owner"
+    is not the same claim as "exact", and this docstring no longer conflates the two. Prefer
+    `exact_fields` whenever the caller's meta carries it (it fixes the one well-understood,
+    avoidable failure mode); fall back to the stamp only for results.json predating fps-o0h.
+
+    **Separately, `round()` vs. `math.ceil()` (PR #355 review finding #5, pre-existing, out of
+    scope here).** This function is documented as a "ceiling", but `round()` on an exact `.5`
+    can round DOWN (banker's rounding), understating the ceiling it claims to be — `math.ceil`
+    would resolve every tie upward instead, by definition rather than float parity. That
+    question predates fps-o0h (this function used `round()` before `exact_fields` existed) and
+    changing it would move MANY non-tie values too (any fractional ceiling `round()` currently
+    rounds down), not just the tie cases — a real behaviour change to a locked function,
+    needing its own decision and sign-off, not something to fold into a refactor whose own
+    acceptance criterion is that the locked config's answer (13) must not move. Filed
+    separately; not fixed here.
     """
     if exact_fields is not None:
-        return round(_tank_from_exact_fields(exact_fields).max_feasible_wait_days)
+        return round(_tank_from_exact_fields(exact_fields, tank_params).max_feasible_wait_days)
     size, daily, _cadence, floor = parse_tank_params(tank_params)
     return round((1.0 - floor) * size / daily)
 
