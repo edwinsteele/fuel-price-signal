@@ -909,17 +909,11 @@ def test_decision_flips_computed_when_clearing_noise_on_the_good_side(tmp_path):
 
 def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
     # Wide noise band (std ~0.79) around the candidate's -0.05 delta -> z is tiny,
-    # well inside (-t, t) regardless of n_draws -> the trigger fires.
-    def add_noise_floor(batch_dir):
-        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
-            "deltas_cpl_held": [-1.0, -0.5, 0.0, 0.5, 1.0],
-            "baseline_fingerprint": "54:deadbeef1234",
-            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
-            "n_placebo_columns": 2,
-        }))
-
+    # well inside (-t, t) regardless of n_draws -> the trigger fires. Fixture factored out
+    # as _wide_noise_floor (defined further down this file) — the fps-4je tau_diverges tests
+    # reuse the same "computed True" trigger.
     run_dir, _ = _write_run(
-        tmp_path, columns=["col_a", "col_b"], batch_extras=add_noise_floor,
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
         fills_df=_diverging_fills(fold=1),
     )
     facts = dt.build_facts(run_dir)
@@ -960,9 +954,10 @@ def test_decision_flips_computed_when_inside_the_noise_band(tmp_path):
 
 
 def _wide_noise_floor(batch_dir):
-    """Same wide-band fixture as test_decision_flips_computed_when_inside_the_noise_band —
-    factored out so the fps-4je tau_diverges tests below can reuse the "computed True"
-    trigger without restating it."""
+    """Wide noise band (std ~0.79) around the -0.05 default `effect_delta_cpl_held` -> z is
+    tiny, well inside (-t, t) regardless of n_draws -> decision_flips["computed"] is True.
+    Shared by test_decision_flips_computed_when_inside_the_noise_band and the fps-4je
+    tau_diverges tests below (PR #354 review finding #6 — this used to be duplicated)."""
     (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
         "deltas_cpl_held": [-1.0, -0.5, 0.0, 0.5, 1.0],
         "baseline_fingerprint": "54:deadbeef1234",
@@ -976,10 +971,59 @@ def test_decision_flips_surfaces_tau_diverges_per_fold_and_flags_the_residual(tm
     (experiments/lib/realised.py's `deltas` return value), threaded through
     results["realised_deltas"] by runner.py, must reach facts["breakdowns"]["per_fold"] and
     gate decision_flips["tau_diverges_any"] — sourced from the flag, not re-derived from
-    fills."""
+    fills. Uses the default (non-suppressed, every cell >= min_row_cell_n) fills fixture over
+    all of FOLDS so the roll-up genuinely mixes True and False across UNSUPPRESSED folds
+    (PR #354 review finding #3 — a single-fold fixture can't tell any() from all())."""
     run_dir, _ = _write_run(
         tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
-        fills_df=_diverging_fills(fold=1),
+        realised_deltas=[
+            {"fold": f, "arm": CANDIDATE_ARM, "delta_cpl_held": -0.05, "delta_cpl_own": -0.05,
+             "tau_diverges": f == 1}
+            for f in FOLDS
+        ],
+    )
+    facts = dt.build_facts(run_dir)
+
+    per_fold = {row["fold"]: row for row in facts["breakdowns"]["per_fold"]}
+    assert set(per_fold) == set(FOLDS)
+    assert per_fold[1]["tau_diverges"] is True
+    assert all(per_fold[f]["tau_diverges"] is False for f in FOLDS if f != 1)
+    assert all(not row["suppressed"] for row in per_fold.values()), "fixture must not suppress"
+
+    flips = facts["decision_flips"]
+    assert flips["computed"] is True
+    assert flips["tau_diverges_any"] is True
+
+
+def test_decision_flips_tau_diverges_any_false_when_own_tau_agrees_every_fold(tmp_path):
+    """Mirror of the test above: when realised.py's flag is False in every UNSUPPRESSED
+    graded fold, tau_diverges_any must be False, not None — a reader needs to be able to tell
+    "checked, own-tau agreed" apart from "not checked" (see the legacy test below)."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        realised_deltas=[
+            {"fold": f, "arm": CANDIDATE_ARM, "delta_cpl_held": -0.05, "delta_cpl_own": -0.05,
+             "tau_diverges": False}
+            for f in FOLDS
+        ],
+    )
+    facts = dt.build_facts(run_dir)
+
+    assert all(row["tau_diverges"] is False for row in facts["breakdowns"]["per_fold"])
+    assert facts["decision_flips"]["tau_diverges_any"] is False
+
+
+def test_decision_flips_tau_diverges_any_excludes_a_suppressed_folds_flag(tmp_path):
+    """PR #354 review finding #1: a suppressed fold's own-tau was never used in
+    `run_contribution_total_cpl` (its `delta_cpl_own` is None, below `min_row_cell_n`), so its
+    `tau_diverges` flag must not vote on whether the RESIDUAL reflects tau drift — even though
+    it is `True`, `composition_residual_cpl` here is 100% unmeasured fold (the whole headline
+    delta), not evidence of tau drift, and `tau_diverges_any` must be `None`, not `True`. The
+    fold's own `tau_diverges` still surfaces in `breakdowns.per_fold` (untouched by the
+    exclusion) — only the run-level roll-up excludes it."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        fills_df=_diverging_fills(fold=1),  # 2 fills total — below min_row_cell_n (30)
         realised_deltas=[{
             "fold": 1, "arm": CANDIDATE_ARM,
             "delta_cpl_held": -0.05, "delta_cpl_own": -0.05, "tau_diverges": True,
@@ -988,31 +1032,34 @@ def test_decision_flips_surfaces_tau_diverges_per_fold_and_flags_the_residual(tm
     facts = dt.build_facts(run_dir)
 
     per_fold = facts["breakdowns"]["per_fold"]
-    assert len(per_fold) == 1
-    assert per_fold[0]["fold"] == 1
-    assert per_fold[0]["tau_diverges"] is True
+    assert per_fold[0]["suppressed"] is True
+    assert per_fold[0]["tau_diverges"] is True  # per-fold field is unaffected by the exclusion
 
     flips = facts["decision_flips"]
-    assert flips["computed"] is True
-    assert flips["tau_diverges_any"] is True
+    assert flips["run_contribution_total_cpl"] == pytest.approx(0.0)
+    assert flips["composition_residual_cpl"] == pytest.approx(facts["headline"]["realised"]["delta_cpl_held"])
+    assert flips["tau_diverges_any"] is None
 
 
-def test_decision_flips_tau_diverges_any_false_when_own_tau_agrees_every_fold(tmp_path):
-    """Mirror of the test above: when realised.py's flag is False in every graded fold,
-    tau_diverges_any must be False, not None — a reader needs to be able to tell "checked,
-    own-tau agreed" apart from "not checked" (see the legacy test below)."""
+def test_decision_flips_tau_diverges_any_none_when_an_unsuppressed_folds_flag_is_missing(tmp_path):
+    """PR #354 review finding #3's second gap: a fold that DID enter the contribution sum
+    (not suppressed) but has no record in results["realised_deltas"] (partial/incomplete data,
+    distinct from the "key absent entirely" legacy case below) must still collapse the roll-up
+    to None — a real True elsewhere must not paper over a genuinely unknown fold."""
     run_dir, _ = _write_run(
         tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
-        fills_df=_diverging_fills(fold=1),
-        realised_deltas=[{
-            "fold": 1, "arm": CANDIDATE_ARM,
-            "delta_cpl_held": -0.05, "delta_cpl_own": -0.05, "tau_diverges": False,
-        }],
+        realised_deltas=[
+            {"fold": f, "arm": CANDIDATE_ARM, "delta_cpl_held": -0.05, "delta_cpl_own": -0.05,
+             "tau_diverges": f == 1}
+            for f in FOLDS if f != 4  # fold 4's record is simply missing
+        ],
     )
     facts = dt.build_facts(run_dir)
 
-    assert facts["breakdowns"]["per_fold"][0]["tau_diverges"] is False
-    assert facts["decision_flips"]["tau_diverges_any"] is False
+    per_fold = {row["fold"]: row for row in facts["breakdowns"]["per_fold"]}
+    assert per_fold[4]["suppressed"] is False  # unsuppressed — its flag SHOULD have counted
+    assert per_fold[4]["tau_diverges"] is None
+    assert facts["decision_flips"]["tau_diverges_any"] is None
 
 
 def test_decision_flips_tau_diverges_any_none_for_a_legacy_run_without_realised_deltas(tmp_path):

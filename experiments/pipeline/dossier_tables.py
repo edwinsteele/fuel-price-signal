@@ -600,12 +600,25 @@ def _attach_run_contributions(
     lib/realised.py`'s `deltas` return value, per fold) through `results["realised_deltas"]`
     into `breakdown_per_fold`'s `tau_diverges` column, so this can now be told apart rather
     than caveated unconditionally. `summary["tau_diverges_any"]` set here is the reader's
-    single gate: `True` — at least one graded fold's own-tau genuinely differed between arms,
-    so `composition_residual_cpl` is composition drift AND tau drift, not composition drift
-    alone; `False` — own-tau agreed in every graded fold, so the residual is composition drift
-    only; `None` — this results.json predates fps-4je (no `realised_deltas` key at all), so
-    fall back to the old unconditional "composition drift, and possibly tau drift" caveat
-    (docs/routines/dossier.md).
+    single gate: `True` — at least one fold that actually entered `run_contribution_total_cpl`
+    (i.e. NOT suppressed — see below) had its own-tau genuinely differ between arms, so
+    `composition_residual_cpl` is composition drift AND tau drift, not composition drift
+    alone; `False` — own-tau agreed in every such fold, so the residual is composition drift
+    only; `None` — either this results.json predates fps-4je (no `realised_deltas` key at
+    all — same fallback if the key is simply absent from an older facts.json, PR #354 review
+    finding #2), or every graded fold was suppressed, leaving nothing to vote either way. Fall
+    back to the old unconditional "composition drift, and possibly tau drift" caveat
+    (docs/routines/dossier.md) whenever this is `None`.
+
+    **A suppressed fold's `tau_diverges` must not vote here** (PR #354 review finding #1): a
+    suppressed fold (`delta_cpl_own` is `None`, below `min_row_cell_n`) contributes `None` to
+    `run_contribution_total_cpl` above — its own-tau was never actually used in the sum this
+    flag is meant to explain, so a divergence there says nothing about whether the RESIDUAL
+    reflects tau drift. Only counting suppressed-fold flags would let a single thin, unmeasured
+    fold force `composition_residual_cpl` to be mis-captioned as "tau drift" when the residual
+    is 100% unmeasured composition, as the review's own reproduction against this module's test
+    fixture showed. `breakdown_per_fold`'s own `tau_diverges` column is untouched by this —
+    only the run-level roll-up excludes suppressed folds.
     """
     arms = [a for a in fills["arm"].unique() if a in (BASELINE_ARM, CANDIDATE_ARM)]
     run_litres = fills[fills["arm"].isin(arms)]["litres"].sum()
@@ -627,7 +640,11 @@ def _attach_run_contributions(
     total = sum(v for v in contributions.values() if v is not None)
     summary["run_contribution_total_cpl"] = total
     summary["composition_residual_cpl"] = delta_cpl_held - total
-    tau_flags = list(tau_diverges_by_fold.values())
+    # Only folds that actually entered `total` above (delta_own_by_fold is not None — not
+    # suppressed) get a say in whether the RESIDUAL reflects tau drift.
+    tau_flags = [
+        tau_diverges_by_fold.get(fold) for fold in contributions if delta_own_by_fold.get(fold) is not None
+    ]
     summary["tau_diverges_any"] = (
         any(tau_flags) if tau_flags and all(f is not None for f in tau_flags) else None
     )
@@ -1455,8 +1472,13 @@ def _breakdowns(
             if len(realised_deltas)
             else realised_deltas
         )
+        # PR #354 review finding #5: don't coerce blindly — a missing/NaN cell (heterogeneous
+        # records feeding a NaN into this column) must stay None, not silently become False
+        # (missing) or True (NaN is truthy under bool()). Same None-vs-False discipline as the
+        # results["realised_deltas"] is not None check above, one level down.
         tau_diverges_by_fold = {
-            int(row["fold"]): bool(row["tau_diverges"]) for _, row in cand_deltas.iterrows()
+            int(row["fold"]): (None if pd.isna(row["tau_diverges"]) else bool(row["tau_diverges"]))
+            for _, row in cand_deltas.iterrows()
         }
 
     # This run's own empirical shock-fold set (fps-3tu) — None for a results.json that
