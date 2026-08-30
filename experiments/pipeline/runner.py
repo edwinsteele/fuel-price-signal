@@ -691,6 +691,8 @@ def run_candidate(
             # double that predates this field) fails loudly here rather than
             # silently writing a CPL with no cadence stamp.
             "tank_params": realised.meta["tank_params"],
+            # Exact fields behind the stamp above (fps-o0h) — see realised.py's meta for why.
+            "tank_params_fields": realised.meta["tank_params_fields"],
             "realised_wall_seconds": realised.meta["total_wall_seconds"],
             "baseline_cache_used": realised.meta["baseline_cache_used"],
             "baseline_cache_hit_folds": realised.meta["baseline_cache_hit_folds"],

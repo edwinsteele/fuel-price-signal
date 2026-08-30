@@ -25,6 +25,7 @@ from fuel_signal.backtest import (
     main,
     run_backtest,
     run_oracle_backtest,
+    tank_params_fields,
     validate_never_dry,
 )
 from fuel_signal.features import FEATURE_COLUMNS
@@ -1273,3 +1274,80 @@ def test_require_tank_stamp_returns_format_tank_params_when_tank_given():
 
     tank = TankParams(evaluation_interval_days=1)
     assert require_tank_stamp(tank, what="anything") == format_tank_params(tank) == "50/3.571/1d/10%"
+
+
+# ---------------------------------------------------------------------------
+# TankParams derived quantities (fps-o0h) — one owner for what a tank can do,
+# instead of restating the arithmetic at each call site.
+# ---------------------------------------------------------------------------
+
+def test_tank_params_derived_quantities_at_locked_config():
+    """fps-6yi's locked tank (50/3.571.../1d/10%): full_to_empty_days = 14,
+    max_feasible_wait_days = 0.9 * 50 / (50/14) = 12.6 (fps-2js's worked example),
+    depletion_litres and run_dry_gap match the plain arithmetic every call site used
+    to restate."""
+    import pytest
+
+    tank = TankParams()
+    assert tank.full_to_empty_days == pytest.approx(14.0)
+    assert tank.max_feasible_wait_days == pytest.approx(12.6)
+    assert tank.depletion_litres == pytest.approx(tank.daily_consumption_litres)
+    assert tank.run_dry_gap == pytest.approx(5.0)
+
+
+def test_run_dry_gap_not_bit_equivalent_to_level_over_size_form():
+    """PR #355 review finding #7: `level < tank.run_dry_gap` (`floor_fraction * size`) is not
+    bit-equivalent to the pre-fps-o0h form it replaced (`level / size < floor_fraction`) — `a
+    * b` and `a / b` can round differently, and this counterexample (found by the review's own
+    sweep) lands exactly on the boundary where they disagree. `run_dry_gap`'s docstring
+    documents this; this test pins the specific numbers so a future float-handling change
+    can't silently move them without notice."""
+    tank = TankParams(tank_size_litres=50.0, daily_consumption_litres=2.0, floor_fraction=0.14)
+    level = 7.0  # exactly 9 depletions into this tank's walk from a 25.0 start (25 - 9*2 = 7)
+    assert level / tank.tank_size_litres == 0.14
+    assert not (level / tank.tank_size_litres < tank.floor_fraction)  # old form: no emergency
+    assert tank.run_dry_gap == 7.000000000000001
+    assert level < tank.run_dry_gap  # new form: fires one — earlier, i.e. more conservative
+
+
+def test_tank_params_feasible_wait_days_is_the_per_fill_bound():
+    """A BUY fill's genuinely feasible wait (the headroom right BEFORE the fill, since the
+    post-fill level is always a full tank regardless of litres) is
+    ((1 - floor) * size - litres) / daily, strictly below max_feasible_wait_days
+    for any real (positive-litres) fill."""
+    import pytest
+
+    tank = TankParams()
+    assert tank.feasible_wait_days(0.0) == pytest.approx(tank.max_feasible_wait_days)
+    # A 20L fill uses up 20 / (50/14) = 5.6 empty-days of headroom.
+    assert tank.feasible_wait_days(20.0) == pytest.approx(12.6 - 20.0 / (50.0 / 14))
+    assert tank.feasible_wait_days(20.0) < tank.max_feasible_wait_days
+
+
+def test_tank_params_feasible_wait_days_emergency_uses_the_half_fill_target():
+    """PR #355 review finding #3: litres alone doesn't distinguish a BUY fill (post-fill =
+    full) from an emergency fill (post-fill = half) — the pre-fill level, and so the feasible
+    wait, differs for the same litres depending on which kind of fill it was. A 10L emergency
+    fill on the default tank came from level 25 - 10 = 15L (post-fill target is always
+    0.5 * size = 25); headroom from 15L down to the floor (5L) is (15 - 5) / (50/14) = 2.8
+    days — very different from the 9.8 days a 10L BUY fill (from level 40L) would report."""
+    import pytest
+
+    tank = TankParams()
+    assert tank.feasible_wait_days(10.0, emergency=True) == pytest.approx(2.8)
+    assert tank.feasible_wait_days(10.0, emergency=False) == pytest.approx(9.8)
+
+
+def test_tank_params_fields_round_trips_exactly():
+    """tank_params_fields carries the exact floats — no display rounding — unlike
+    format_tank_params's 3dp daily-consumption stamp."""
+    tank = TankParams(daily_consumption_litres=40.0 / 14)
+    fields = tank_params_fields(tank)
+    assert fields["daily_consumption_litres"] == 40.0 / 14
+    rebuilt = TankParams(
+        tank_size_litres=fields["tank_size_litres"],
+        daily_consumption_litres=fields["daily_consumption_litres"],
+        evaluation_interval_days=fields["evaluation_interval_days"],
+        floor_fraction=fields["floor_fraction"],
+    )
+    assert rebuilt == tank

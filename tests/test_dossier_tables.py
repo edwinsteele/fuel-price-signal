@@ -12,6 +12,7 @@ import bisect
 import json
 import os
 import pathlib
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -404,6 +405,11 @@ def test_build_facts_graded_run_has_all_blocks_and_suppresses_thin_cells(tmp_pat
     assert facts["provenance"]["n_baseline_columns"] == 54
     assert facts["provenance"]["baseline_fingerprint"] == "54:deadbeef1234"
     assert facts["provenance"]["tank_params"] == "50/3.571/7d/10%"
+    # None, not a refusal: this fixture's meta predates fps-o0h's tank_params_fields, exactly
+    # like every real results.json from before this PR (PR #355 review finding #8) —
+    # cascade_window_days/regret_horizon_days must fall back to the stamp-only path rather
+    # than raise or silently misbehave when this key is simply absent.
+    assert facts["provenance"]["tank_params_fields"] is None
     assert facts["provenance"]["realised_seed"] == 42
 
     assert facts["headline"]["realised"]["delta_cpl_held"] == -0.05
@@ -2714,3 +2720,35 @@ def test_attach_regret_with_no_differing_fills_says_so(tmp_path):
     out = dt._attach_regret(both, "50/3.571/1d/10%", 7, frozenset({4}), tmp_path)
     assert out["computed"] is False
     assert "no differing fills" in out["reason"]
+
+
+class _FixedPrice:
+    """Minimal StationPriceSource stand-in — every date prices the same, just enough for
+    summarise_regret to run to completion without a real DB."""
+
+    def __init__(self, price: float = 170.0):
+        self._price = price
+
+    def price_at(self, station_code, as_of):
+        return self._price
+
+    def is_observed(self, station_code, as_of):
+        return True
+
+
+def test_attach_regret_success_path_writes_graded_db_not_source_db(tmp_path, monkeypatch):
+    """`source_db` was fps-o0h's item 3: this dict's key collided in NAME (not meaning) with
+    freeze.json's own `source_db`, which records a DIFFERENT path (the freeze-time read
+    location, not the frozen clone this function actually scores against — see
+    `_resolve_source_db`'s docstring). Renamed to `graded_db` so a reader diffing provenance
+    across facts.json and freeze.json can no longer read the shared name as shared meaning."""
+    (tmp_path / dt.FROZEN_DB_FILENAME).touch()
+    (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": "fuel_signal.db"}))
+    monkeypatch.setattr(dt._db, "open_db", lambda path: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(dt, "_DbStationPrices", lambda conn, codes: _FixedPrice())
+
+    out = dt._attach_regret(_regret_fills(), "50/3.571/1d/10%", 7, frozenset({4}), tmp_path)
+
+    assert out["computed"] is True
+    assert out["graded_db"] == str((tmp_path / dt.FROZEN_DB_FILENAME).resolve())
+    assert "source_db" not in out

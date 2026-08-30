@@ -1203,6 +1203,10 @@ class _FakeRealisedFull:
             "n_windows": 1, "total_wall_seconds": 1.0,
             "baseline_cache_used": baseline_cache is not None, "baseline_cache_hit_folds": [],
             "tank_params": "50/3.571/7d/10%",
+            "tank_params_fields": {
+                "tank_size_litres": 50.0, "daily_consumption_litres": 50.0 / 14,
+                "evaluation_interval_days": 7, "floor_fraction": 0.10,
+            },
         }
         self.baseline_cache = baseline_cache
 

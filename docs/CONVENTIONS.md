@@ -273,6 +273,30 @@ experiment scripts already call) also accepts an optional `tank=` and stamps it 
 same way, so a *new* mechanism inherits the discipline by using the existing shared
 helper instead of reinventing it.
 
+**`tank_params_fields` is a companion, not a replacement (`fps-o0h`).** `RealisedResult.meta`
+and `runner.py`'s `results.json` also carry `tank_params_fields`, `fuel_signal.backtest.
+tank_params_fields(tank)`'s dict of the same four numbers at full precision, alongside —
+never instead of — the `tank_params` stamp above. The stamp stays the one contract-bound
+identity string this section is about (glanceable, `require_tank_stamp`-gated, what
+`_noise_band()` compares); the exact fields exist only so a derived quantity computed at the
+dossier layer (`experiments/lib/flips.cascade_window_days`/`regret_horizon_days`, both take
+an optional `exact_fields=`) doesn't have to round-trip through the stamp's 3dp-rounded daily
+consumption, which can flip such a quantity on an exact rounding tie. `dossier_tables.
+build_facts`'s `facts.json` carries it too, as `provenance["tank_params_fields"]` — `None`,
+not a refusal, for results.json predating this field, in which case those two functions fall
+back to their original stamp-parsing behaviour.
+
+**`exact_fields` fixes ONE specific tie hazard, not rounding ties in general** (PR #355
+review). It removes the stamp-truncation failure mode above, but a genuinely exact tie can
+already be latent in a stored `daily_consumption_litres` float itself (e.g. when it was
+constructed as `size / tank_life` for an odd `tank_life`) — `TankParams`'s own derived
+properties can land on either side of that kind of tie, same as the stamp path can, for
+reasons that are float-representation artifacts rather than a bug either path could fix. See
+`cascade_window_days`'/`regret_horizon_days`'s own docstrings for a worked counterexample
+where the stamp path is the more accurate one. "Single owner" means every caller computes the
+quantity the same way and agrees with each other; it is not a claim that the quantity is now
+exact.
+
 **A CLI default must be sourced from `TankParams()`, never a hand-copied literal
 (`fps-q3p`).** `backtest.py`'s `--daily-use` option defaulted to
 `round(50.0 / 14, 3)` while `TankParams.daily_consumption_litres` defaults to the

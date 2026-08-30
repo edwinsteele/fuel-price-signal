@@ -66,6 +66,7 @@ from fuel_signal.backtest import (
     _evaluation_dates,
     load_history,
     require_tank_stamp,
+    tank_params_fields,
 )
 from fuel_signal.backtest_phase2 import aggregate_backtest
 from fuel_signal.calibrate import _CalibratedPipeline, pool_oof_predictions
@@ -647,6 +648,11 @@ def run_paired_realised_backtest(
         # so every downstream reader can rely on the SAME stamping path, not a
         # bespoke format_tank_params(tank) call that could drift from it.
         "tank_params": require_tank_stamp(tank, what="run_paired_realised_backtest"),
+        # Exact numeric fields behind the stamp above (fps-o0h) — persisted alongside it so a
+        # downstream reader (experiments.lib.flips's cascade_window_days/regret_horizon_days)
+        # can derive tank-scale windows without round-tripping the display-rounded stamp,
+        # which can land on a rounding tie the exact fields never can.
+        "tank_params_fields": tank_params_fields(tank),
         "held_tau": held_tau,
         "outer_fold_params": outer_fold_params,
         "inner_fold_params": inner_fold_params,

@@ -433,7 +433,10 @@ def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
         }
     shock_folds = frozenset(int(f) for f in raw_shock_folds)
     tank_params = facts["provenance"]["tank_params"]
-    window = cascade_window_days(tank_params)
+    # None for results.json predating fps-o0h — cascade_window_days/regret_horizon_days both
+    # fall back to re-parsing the (display-rounded, tie-prone) stamp in that case.
+    exact_fields = facts["provenance"].get("tank_params_fields")
+    window = cascade_window_days(tank_params, exact_fields=exact_fields)
     summary = summarise_flips(fills, BASELINE_ARM, CANDIDATE_ARM, shock_folds, window_days=window)
     summary["computed"] = True
     _attach_run_contributions(
@@ -445,13 +448,14 @@ def _decision_flips(facts: dict, fills: pd.DataFrame) -> dict:
     summary["regret"] = _attach_regret(
         fills, tank_params, window, shock_folds,
         pathlib.Path(provenance_batch_dir) if provenance_batch_dir else None,
+        exact_fields=exact_fields,
     )
     return summary
 
 
 def _attach_regret(
     fills: pd.DataFrame, tank_params: str, window_days: int, shock_folds: frozenset[int],
-    batch_dir: pathlib.Path | None,
+    batch_dir: pathlib.Path | None, *, exact_fields: dict | None = None,
 ) -> dict:
     """The timing-regret table (fps-2js) — `experiments/lib/flips.summarise_regret` over this
     run's flipped fills, or an explicit `computed: false` + reason when the price DB this run
@@ -462,6 +466,10 @@ def _attach_regret(
     DB, so a reader who pulled the repo without it must still be able to rebuild every other
     table. Same `computed`/`reason` contract as `decision_flips` itself and `noise_band`, so no
     downstream reader has to tell "skipped" from "forgotten".
+
+    `exact_fields` (fps-o0h) is threaded straight through to `regret_horizon_days` — see that
+    function's docstring for why a caller with the run's `tank_params_fields` should always
+    pass it.
     """
     db_path = _resolve_source_db(batch_dir)
     if db_path is None:
@@ -491,14 +499,17 @@ def _attach_regret(
         conn.close()
     summary = summarise_regret(
         flips, prices, shock_folds,
-        horizon_days=regret_horizon_days(tank_params),
+        horizon_days=regret_horizon_days(tank_params, exact_fields=exact_fields),
         cadence_days=cadence_days,
         window_days=window_days,
     )
     summary["computed"] = True
     # Resolved, not the raw relative "fuel_signal.db" from freeze.json — facts.json is read
-    # long after and from elsewhere, so a CWD-relative path is not provenance.
-    summary["source_db"] = str(db_path.resolve())
+    # long after and from elsewhere, so a CWD-relative path is not provenance. Named
+    # "graded_db" (fps-o0h), not "source_db": freeze.json also has a field named "source_db"
+    # but meaning a DIFFERENT path (the freeze-time read location, not this frozen clone) —
+    # see `_resolve_source_db`'s docstring. Same name, different meaning, was the trap.
+    summary["graded_db"] = str(db_path.resolve())
     return summary
 
 
@@ -703,6 +714,10 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         # point without it whenever status=="graded" — a graded run is exactly
         # the case where headline/breakdowns are about to carry a CPL.
         "tank_params": meta.get("tank_params"),
+        # Exact numeric fields behind the stamp above (fps-o0h) — None for results.json
+        # that predate this field, in which case decision-flip/regret windows fall back to
+        # re-parsing the (display-rounded, tie-prone) stamp string instead.
+        "tank_params_fields": meta.get("tank_params_fields"),
     }
 
 
