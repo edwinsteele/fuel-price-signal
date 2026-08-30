@@ -295,10 +295,14 @@ def default_out_dir(candidate_path: pathlib.Path) -> pathlib.Path:
     section), so candidate_path.parent is the whole BATCH directory, shared by
     every candidate filed against it. Using that as out_dir meant candidate
     2+ in a batch overwrote candidate 1's run.log/results.json/rowpreds.parquet/
-    fills.parquet in place, and dossier_tables.py's find_pending_runs (any dir
-    with results.json and no README.md) would then treat the directory as
-    already-dossiered and never surface the overwriting candidate (fps-icv).
-    Stripping .py gives each candidate its own subdirectory instead.
+    fills.parquet in place, and dossier_tables.py's find_pending_runs — at the
+    time keyed on "results.json present, README.md absent" — would then treat
+    the directory as already-dossiered and never surface the overwriting
+    candidate (fps-icv). Stripping .py gives each candidate its own
+    subdirectory instead. (find_pending_runs' queue rule has since moved to an
+    mtime comparison, fps-0yd, which would also catch this case — but this
+    fix is the one that actually prevents candidates sharing a directory at
+    all, so it stays regardless.)
     """
     return candidate_path.with_suffix("")
 

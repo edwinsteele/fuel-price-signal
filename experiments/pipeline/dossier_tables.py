@@ -10,8 +10,8 @@ Every number in `facts.json` traces back to one of those inputs; nothing here re
 
 Why split this way (see fps-3jj parent design): a number computed in-context by a Claude session
 cannot be checked short of a re-run; if the Claude step dies mid-session the facts already exist
-on disk, so the work queue (any dir with results.json and no README.md) stays correct and
-re-runnable; and it keeps the overnight Claude burst short.
+on disk, so the work queue (any dir with a results.json newer than its README.md, see
+`find_pending_runs`) stays correct and re-runnable; and it keeps the overnight Claude burst short.
 
 Stale-claim recovery is deliberately NOT implemented here. fps-3jj.5 (launch routine) merged
 after this module's first version was written with its own claim.json-based recovery — that
@@ -213,31 +213,71 @@ CYCLE_PHASE_COLUMNS = {"cycle_pct_through", "cycle_days_since_peak"}
 # ── work queue ────────────────────────────────────────────────────────────────
 
 def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
-    """Any directory under `root` with results.json, no README.md, and a non-retryable status.
+    """Any directory under `root` with a results.json newer than its README.md (or no
+    README.md at all), and a non-retryable status.
 
     Matches the parent design's "work queue is self-describing" rule. A run still in progress
     has neither file and is silently skipped.
 
     The RETRYABLE_STATUSES exclusion is load-bearing, not tidiness (fps-g31). A run dir is
-    keyed on the candidate, so a re-run REUSES it. Without the exclusion:
+    keyed on the candidate, so a re-run REUSES it. Without it:
 
       night 1  candidate aborts (aborted_pipeline); results.json written
                this scan sees results.json + no README -> writes facts.json, session writes README
       night 2  launch releases the claim, candidate re-runs and SUCCEEDS, overwriting results.json
       night 2  this scan sees the README from night 1 -> run is not pending -> never dossiered
 
-    The successful run would be silently invisible forever. That failure mode only became
-    reachable when aborts started going back on the queue, which is why the guard lives here
-    rather than in the caller: anything that reuses a run dir has to agree on what "finished"
-    means, so both sides read runner.read_run_status.
+    The mtime comparison (fps-0yd) covers the mirror image: a candidate DELIBERATELY re-run
+    after a contract fix, whose prior dossiering already left a README behind. Requiring "no
+    README.md" alone made that re-run permanently invisible even though its results.json was
+    overwritten with a fresh verdict — the same "silently invisible forever" failure the
+    RETRYABLE_STATUSES guard above exists to prevent, just triggered by a human re-queuing
+    rather than an automatic retry. Comparing mtimes rather than adding a second provenance
+    field to facts.json: results.json and README.md are already the two files this function
+    reads, and runner.py always writes results.json fresh on every run (never touches an
+    existing README), so a newer results.json is exactly "dossiered content is stale".
+
+    Ties (equal mtimes — a real possibility on filesystems with coarse timestamp resolution)
+    are treated as PENDING, not dossiered: re-dossiering a run that was actually already
+    written up is a harmless no-op (facts.json is deterministic from the same run artifacts),
+    while the reverse — silently dropping a genuine re-run because its mtime happened to
+    collide with the stale README's — is exactly the failure this function exists to close.
+
+    A results.json or README.md whose `stat()` fails here — vanished mid-race (a concurrent
+    launch/rerun deleting it, e.g. via `rm` as part of a re-queue), a permissions error, an NFS
+    staleness error — is excluded for this pass rather than raised (fps-0yd review round 2). A
+    narrower `except FileNotFoundError` was tried first and rejected: this function builds its
+    whole return list eagerly (it is not a generator), and `main()`'s `--scan` loop only wraps
+    `process_run` in a per-run try/except, not this call — so ANY exception escaping here
+    aborts the entire scan before a single run_dir is even offered to `process_run`, including
+    every unrelated, healthy run_dir. That is a wider blast radius than the original "no
+    README.md" bug this function exists to fix, and it also contradicts the totality
+    `runner.read_run_status` (called two lines below) already commits to for the exact same
+    unattended-overnight reason. So: catch broadly, like `read_run_status` does, but — unlike a
+    bare `continue` — print a line first (the same `print(..., flush=True)` warning pattern
+    `_plot_tau_sweep` below already uses for a different non-fatal anomaly in this module) so a
+    run silently dropped from the queue by a real I/O fault is still visible in `--scan`'s
+    output rather than swallowed with no trace.
     """
     root = pathlib.Path(root)
-    return sorted({
-        p.parent
-        for p in root.rglob(RESULTS_FILENAME)
-        if not (p.parent / README_FILENAME).exists()
-        and read_run_status(p.parent) not in RETRYABLE_STATUSES
-    })
+    pending = set()
+    for p in root.rglob(RESULTS_FILENAME):
+        run_dir = p.parent
+        readme = run_dir / README_FILENAME
+        try:
+            if readme.exists() and readme.stat().st_mtime > p.stat().st_mtime:
+                continue
+        except OSError as exc:
+            print(
+                f"[dossier_tables] {run_dir}: could not compare results.json/README.md "
+                f"timestamps ({exc!r}) — excluding from this scan.",
+                flush=True,
+            )
+            continue
+        if read_run_status(run_dir) in RETRYABLE_STATUSES:
+            continue
+        pending.add(run_dir)
+    return sorted(pending)
 
 
 # ── facts.json ────────────────────────────────────────────────────────────────

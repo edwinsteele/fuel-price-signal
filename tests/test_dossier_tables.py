@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import os
 import pathlib
 
 import numpy as np
@@ -190,12 +191,129 @@ def test_find_pending_runs_skips_in_progress_and_already_dossiered(tmp_path):
     (tmp_path / "in_progress").mkdir()  # no results.json at all
     done_dir = tmp_path / "done"
     done_dir.mkdir()
-    (done_dir / dt.RESULTS_FILENAME).write_text("{}")
-    (done_dir / dt.README_FILENAME).write_text("# done")
+    done_results = done_dir / dt.RESULTS_FILENAME
+    done_results.write_text("{}")
+    done_readme = done_dir / dt.README_FILENAME
+    done_readme.write_text("# done")
+    # Force an unambiguous mtime ordering regardless of filesystem timestamp resolution —
+    # see test_find_pending_runs_surfaces_deliberate_rerun for why this matters.
+    newer = done_results.stat().st_mtime + 10
+    os.utime(done_readme, (newer, newer))
 
     pending = dt.find_pending_runs(tmp_path)
 
     assert pending == [run_dir]
+
+
+def test_find_pending_runs_surfaces_deliberate_rerun(tmp_path):
+    """fps-0yd: a candidate re-run after its prior dossiering still gets picked up.
+
+    Mirror image of fps-g31's abort-then-succeed case: here the run dir already has a
+    README from an earlier dossiering, and a human deliberately re-runs the candidate
+    (e.g. after a contract fix), overwriting results.json with a fresh verdict. Requiring
+    "no README.md" alone would hide that re-run forever; the results.json being NEWER than
+    the stale README is what should make it pending again.
+    """
+    run_dir = tmp_path / "rerun"
+    run_dir.mkdir()
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": "graded"}))
+    # Force an unambiguous mtime ordering regardless of filesystem timestamp resolution.
+    old = readme.stat().st_mtime - 10
+    os.utime(readme, (old, old))
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_skips_readme_newer_than_results(tmp_path):
+    """A README written AFTER the current results.json (the ordinary post-dossier state)
+    stays out of the queue — only a results.json newer than its README counts as pending."""
+    run_dir = tmp_path / "dossiered"
+    run_dir.mkdir()
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": "graded"}))
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# done")
+    # Force an unambiguous mtime ordering — see test_find_pending_runs_surfaces_deliberate_rerun.
+    newer = results.stat().st_mtime + 10
+    os.utime(readme, (newer, newer))
+
+    assert dt.find_pending_runs(tmp_path) == []
+
+
+def test_find_pending_runs_treats_equal_mtimes_as_pending(tmp_path):
+    """fps-0yd review (Sourcery): coarse filesystem timestamp resolution can give a genuine
+    re-run's results.json the SAME mtime as the stale README it's meant to supersede. Ties
+    must resolve to pending, not skipped — re-dossiering an already-current run is a harmless
+    no-op, while silently dropping a real re-run on a tie is the exact bug this function
+    exists to fix."""
+    run_dir = tmp_path / "tied"
+    run_dir.mkdir()
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": "graded"}))
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+    tied = results.stat().st_mtime
+    os.utime(readme, (tied, tied))
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_skips_run_whose_readme_vanishes_mid_scan(tmp_path, monkeypatch):
+    """fps-0yd review (Sourcery): a concurrent launch/rerun can remove or replace a run's
+    files between the `rglob` listing and the `stat()` calls this function now makes. The
+    resulting OSError must be swallowed for that one run, not propagate and abort the whole
+    `--scan` before every other run dir gets a chance."""
+    run_dir = tmp_path / "raced"
+    run_dir.mkdir()
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+
+    real_stat = pathlib.Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self == readme:
+            raise FileNotFoundError(self)
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", flaky_stat)
+
+    assert dt.find_pending_runs(tmp_path) == []
+
+
+def test_find_pending_runs_survives_a_non_missing_stat_error(tmp_path, monkeypatch, capsys):
+    """fps-0yd review round 2 (peer session pr-347-code-review-127a7f-56): an earlier version
+    of this fix narrowed the guard to `except FileNotFoundError`, which meant any OTHER
+    OSError (a permissions error, an NFS staleness error) on one run's stat() call propagated
+    OUT of find_pending_runs() uncaught — aborting the ENTIRE `--scan` before a single run_dir
+    reached main()'s per-run try/except, including every unrelated healthy run_dir. That is a
+    wider blast radius than the original "no README.md" bug. This pins the fix: a PermissionError
+    on one run excludes only that run (printing a warning, not silently), while a healthy
+    sibling run_dir is still returned."""
+    healthy_dir = tmp_path / "healthy"
+    healthy_dir.mkdir()
+    (healthy_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+
+    broken_dir = tmp_path / "broken"
+    broken_dir.mkdir()
+    (broken_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+    broken_readme = broken_dir / dt.README_FILENAME
+    broken_readme.write_text("# stale")
+
+    real_stat = pathlib.Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self == broken_readme:
+            raise PermissionError(self)
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", flaky_stat)
+
+    assert dt.find_pending_runs(tmp_path) == [healthy_dir]
+    assert "broken" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("status", sorted(RETRYABLE_STATUSES))
@@ -203,13 +321,35 @@ def test_find_pending_runs_skips_retryable_aborts(tmp_path, status):
     """fps-g31: dossiering a retryable abort permanently hides its successful re-run.
 
     A run dir is keyed on the candidate, so the re-run reuses it. Write a README
-    for the aborted attempt and find_pending_runs (which requires no README)
-    will never surface the re-run that overwrote results.json with a real
-    verdict.
+    for the aborted attempt and find_pending_runs (which excludes retryable
+    statuses regardless of the results.json/README.md mtime comparison — see
+    fps-0yd) will never surface the re-run that overwrote results.json with a
+    real verdict.
     """
     aborted = tmp_path / "aborted"
     aborted.mkdir()
     (aborted / dt.RESULTS_FILENAME).write_text(json.dumps({"status": status, "error": "bad config"}))
+
+    assert dt.find_pending_runs(tmp_path) == []
+
+
+@pytest.mark.parametrize("status", sorted(RETRYABLE_STATUSES))
+def test_find_pending_runs_retryable_status_excluded_even_when_results_newer(tmp_path, status):
+    """fps-0yd review (peer session pr-347-code-review-127a7f-56): the mtime check and the
+    RETRYABLE_STATUSES check are two independent `continue`s in the same loop body, so
+    neither can force the OTHER to include a run — only pin that composition down with a
+    case where they'd disagree if it were broken: results.json newer than a stale README
+    (the mtime check alone would call this pending) but with a retryable status (the
+    RETRYABLE_STATUSES check must still exclude it, exactly as it does with no README at
+    all in test_find_pending_runs_skips_retryable_aborts above)."""
+    run_dir = tmp_path / "retryable_with_stale_readme"
+    run_dir.mkdir()
+    readme = run_dir / dt.README_FILENAME
+    readme.write_text("# stale")
+    results = run_dir / dt.RESULTS_FILENAME
+    results.write_text(json.dumps({"status": status, "error": "bad config"}))
+    old = readme.stat().st_mtime - 10
+    os.utime(readme, (old, old))
 
     assert dt.find_pending_runs(tmp_path) == []
 
