@@ -589,9 +589,15 @@ class StationPriceSource(Protocol):
 
     `price_at` MUST forward-fill ("latest price on or before as_of", `PriceHistory.
     station_price_at`'s exact contract) — that is the price path the tank simulator itself
-    bought at, so anything else scores the arms against a series they never saw. `is_observed`
-    is the un-filled question ("did the station actually report on this date"), used only to
-    count and report the dark days, never to drop a fill.
+    bought at, so anything else scores the arms against a series they never saw. Since
+    fps-2i4, that contract is gap-capped: a station dark for more than `max_gap_days`
+    resolves to `None`, and the cap applies to the whole ENCLOSING gap between two real
+    observations (fill.py's all-or-nothing-per-gap rule), not to how many days `as_of` sits
+    past the last one — a days-since-last-observation cap would still forward-fill the first
+    `max_gap_days` of an arbitrarily long closure. `_DbStationPrices` (`experiments.pipeline.
+    dossier_tables`) is the production implementation and must track this contract exactly;
+    `is_observed` is the un-filled question ("did the station actually report on this date"),
+    used only to count and report the dark days, never to drop a fill.
 
     A Protocol rather than a concrete class so this module stays DB-free: the dossier builds
     one over sqlite, and tests build one over a dict.
@@ -675,17 +681,30 @@ def summarise_regret(
     as "the difference came from WHAT was bought, not WHEN" only works while regret is purely
     a WHEN measure.
 
-    **Dark days are FORWARD-FILLED, and that is not a policy choice** — it is the price path
-    the arms actually faced. `fuel_signal.backtest.PriceHistory.station_price_at` returns "the
-    latest price on or before as_of" (its own docstring: "station_price_at forward-fills, so
-    None occurs only as a leading prefix in practice"), so the tank simulator bought at the
-    carried price on days the station reported nothing. `prices` must implement those same
-    semantics. Scoring regret against observed-only prices would compare each arm to a series
-    it never saw AND drop fills asymmetrically — on fps-6yi, 56 of 303 flips fall on dark days
-    (all station 414, folds 4-7; 42 candidate vs 14 baseline, 364 vs 207 litres), so dropping
-    them would reintroduce the disjoint-basket defect through the back door. The count is
-    reported as `dark_fill_days` because the outage is non-random (it thins and tilts specific
-    folds) even though it no longer biases the estimate.
+    **Dark days are FORWARD-FILLED (up to MAX_GAP_FILL_DAYS), and that is not a policy
+    choice** — it is the price path the arms actually faced. `fuel_signal.backtest.
+    PriceHistory.station_price_at` returns "the latest price on or before as_of", capped at
+    `MAX_GAP_FILL_DAYS` (fps-2i4 — a station dark longer than that reads as no price, not a
+    stale carried one), so the tank simulator bought at the carried price on short-gap days
+    the station reported nothing for. `prices` must implement those same semantics. Scoring
+    regret against observed-only prices would compare each arm to a series it never saw AND
+    drop fills asymmetrically — on fps-6yi (run BEFORE fps-2i4's cap existed), 56 of 303
+    flips fell on dark days (all station 414, folds 4-7; 42 candidate vs 14 baseline, 364 vs
+    207 litres), so dropping them would reintroduce the disjoint-basket defect through the
+    back door. The count is reported as `dark_fill_days` because the outage is non-random (it
+    thins and tilts specific folds) even though it no longer biases the estimate. Post fps-2i4
+    a fold-long closure like 414's no longer produces dark fills at all — the simulator skips
+    those station-days rather than transacting through them — so `dark_fill_days` on a FRESH
+    run (a `flips` ledger produced by a post-fps-2i4 simulator) should only ever reflect short
+    (≤MAX_GAP_FILL_DAYS) reporting gaps.
+
+    **Do not re-run this against a `flips` ledger produced BEFORE fps-2i4 landed** (fps-2i4
+    review finding #3) — its dark-day fills WILL still be present (the old simulator
+    transacted through the closure), but `prices.price_at` now can't resolve a price near
+    them at all (not even at offset 0, the fill's own date), so `reachable` comes back empty
+    and they get dropped via the `not reachable` branch below — asymmetrically across arms,
+    reintroducing exactly the defect this docstring argues against. Regenerate the ledger
+    (re-run the candidate's backtest) with the current simulator before re-scoring regret.
 
     `prices` is any object with `price_at(station_code, as_of) -> float | None` and
     `is_observed(station_code, as_of) -> bool`; the window is walked on the run's OWN
@@ -726,9 +745,29 @@ def summarise_regret(
                 reachable.append(float(price))
             offset += cadence_days
         if not reachable:
-            # station_price_at only returns None before a station's first ever price, so this
-            # is a fill dated ahead of its own station's series — a broken ledger, not an
-            # outage. Score nothing rather than guess.
+            # Two DIFFERENT things collapse into this branch, and the Protocol as it
+            # stands cannot tell them apart (fps-2i4 review finding #3, investigated
+            # and left unresolved rather than silently papered over):
+            #  (a) the original, intended case — a fill dated entirely outside the
+            #      station's known series (before its first-ever observation, or a
+            #      genuinely corrupted ledger row). Score nothing rather than guess.
+            #  (b) fps-2i4's gap cap means `prices.price_at` can now ALSO return None
+            #      at every offset (including 0, the fill's own date) for a flip that
+            #      genuinely happened — scored against a `flips` ledger a PRE-fps-2i4
+            #      simulator produced, re-scored against a POST-fps-2i4 `prices`
+            #      source. The fill is real (`paid` is ground truth), but this
+            #      function can't reach a real price near it any more, so it drops —
+            #      and does so ASYMMETRICALLY across arms (fps-6yi: 42 candidate vs
+            #      14 baseline dark-day flips), reintroducing the disjoint-basket
+            #      defect this function exists to prevent.
+            # Distinguishing (a) from (b) needs knowing whether `as_of` falls between
+            # the station's actual first and last observations, which `price_at`/
+            # `is_observed` don't expose and a naive `paid`-as-fallback fix breaks (a)
+            # silently — see fuel-price-signal issue tracker (bd) for the fps-2i4
+            # follow-up. Until resolved: DO NOT re-run `summarise_regret`/`_attach_regret`
+            # against a `fills.parquet` produced before fps-2i4 landed — regenerate it
+            # (re-run the candidate's backtest) first, or its regret numbers are
+            # silently biased by exactly this mechanism.
             regrets.append(None)
             continue
         # Explicitly the OFFSET-0 price, not reachable[0]: `reachable` skips None lookups, so
