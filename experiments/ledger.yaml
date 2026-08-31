@@ -53,6 +53,81 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: diagnostic — is the WFCV log-loss gain located where the decision rule
+    reads it? (no feature under test; batch1/tgp_cycle_displacement as the specimen)
+  inputs: [rowpreds.parquet (screen, raw probabilities), r0_cache.joblib (arbiter's
+    cached isotonic calibrator + OOF tau)]
+  claim: >-
+    Both prior TGP expressions improve the WFCV log-loss screen and neither reaches
+    the realised arbiter, and the per-fold deltas of the two barely agree (6/14 sign,
+    corr -0.176). Asserted cause: the probability improvement lands on rows nowhere
+    near tau = 0.25, so the decision rule never consults it -- "it improves a quantity
+    the decision rule does not read". If true, the whole TGP track is answered.
+  falsified: >-
+    The gain is not threshold-remote; it is threshold-INDIFFERENT, and the asserted
+    cause is not what separates the two statistics. (1) The ruler in the claim is the
+    wrong one: tau = 0.25 is a CALIBRATED threshold, the screen's probabilities are
+    RAW, and the equivalent raw threshold is 0.1136-0.1590 across the 14 folds
+    (tau = 0.25 exactly on 14/14). Measuring |p_raw - 0.25| aims ~0.10 wide of the
+    boundary, into the most gain-dense bin in the profile -- it would have manufactured
+    a confirmation. (2) Rows within one isotonic step of tau are 0.83% of rows and carry
+    0.8% of the gain: a concentration ratio of 1.01x, i.e. exactly proportional (per-seed
+    range 0.02-1.10%, sd 0.43pp). (3) ~4.0% of rows change side of the boundary between
+    arms (sd 0.45pp over 5 seeds, flat under a +/-30% tau_raw sweep), 232 of them at the
+    arbiter's own five stations -- against the realised run's independently derived
+    423 flips / 92 decisions. The decision rule is demonstrably not blind to the feature.
+    The claim is true only of the extreme tail: the top 1% by |delta p| sit 3x farther
+    from the boundary than a typical row (0.41 vs 0.14) and are 5x under-represented in
+    the one-step band, but carry only ~25% of the gain. WHAT ACTUALLY SEPARATES THEM IS
+    POPULATION. The screen scores 714 stations; the arbiter replays five; the overlap is
+    5,693 of 798,649 rows = 0.71%. Per-fold corr(arbiter delta_cpl, screen delta_ll) is
+    -0.096 paired / -0.176 published-convention over all 714 stations (the latter
+    reproduces the cited figure exactly, which is the provenance check), and +0.478 /
+    +0.543 with the screen restricted to the arbiter's five -- sign agreement 7/14 and
+    5/14 versus 10/14 and 11/14. Population is the ONLY change between those rows: same
+    model, same folds, same seeds, same statistic. Fold-level bootstrap of the gap
+    (20,000 resamples, n=14): +0.574, 95% CI [+0.101, +1.033], P(gap>0) = 0.991. The
+    five stations are not special -- their per-row gain (-1.075e-02) sits 0.33 SE from
+    the network-wide figure (-1.319e-02) -- they are 141x smaller, and at that size the
+    effect fails to clear its own fold-clustered 2*SE (1.459e-02) even on log-loss,
+    which is far smoother than realised CPL. So the screen measures the right quantity
+    on a population the arbiter mostly cannot act on. CONSEQUENCE FOR THE TRACK: the
+    bead's acceptance criterion 4 ("if threshold-remote, close the TGP track") does not
+    fire, and closing it on this evidence would be wrong -- nothing here is specific to
+    TGP, or to any feature. It is a property of the screen/arbiter seam that every
+    candidate in every batch runs through.
+  not_tested: >-
+    MEASURABLE NOW, no new fit: the same population decomposition for the other four
+    batch1 candidates and for batch0 -- every rowpreds.parquet and r0_cache.joblib
+    needed is already on disk, so whether the near-zero all-station correlation is
+    universal or specific to this candidate is one script away. MEASURABLE NOW, needs
+    a fit: the candidate arm's own isotonic calibrator was never cached, so both arms
+    here are ruled against R0's tau_raw; refitting it would separate movement of the
+    probabilities from relocation of the boundary directly instead of relying on
+    own_tau_median = held_tau_median = 0.25 plus a +/-30% sweep. BLOCKED on fps-4z6:
+    whether a preferred-five-restricted screen is a usable second indicator depends on
+    its own noise band, which nothing computes yet -- it is better ALIGNED but lower
+    POWERED, and must not become a graduation gate before that is priced. PERMANENTLY
+    UNTESTABLE by this pipeline as configured: whether the five stations' CPL outcome
+    is predictable at all from 5,693 rows -- the design has 14 folds and no mechanism
+    to widen the replay universe without changing what the arbiter is for.
+  outcome: rejected
+  calibration: >-
+    Pipeline-validation run, and it reproduced its independent reference exactly. The
+    screen's stored R0/seed-42 raw probabilities were re-derived from the arbiter's
+    cached baseline pipeline on folds 1/7/14: max absolute difference 2.980e-08, i.e.
+    float32 epsilon (the run asserts < 1e-6 and aborts otherwise). The screen and the
+    arbiter are the SAME FIT on the SAME ROWS -- LGBM_DEFAULTS and build_pipeline are
+    the same estimator, and _plan_folds walks the same walk_forward_folds geometry --
+    so the isotonic map converts between the two probability scales with no fitting and
+    no approximation. Two discrepancies were chased to their causes rather than
+    tolerated: the published per-fold delta_ll_all_median is a DIFFERENCE OF MEDIANS
+    over seeds while the natural paired estimator is the MEDIAN OF DIFFERENCES (they
+    differ by up to 0.0127 nats and flip sign on fold 2 -- filed as fps-2kc, every
+    correlation above reported under both conventions); and tau = 0.25 is calibrated
+    rather than raw, which is Result 1 above.
+  evidence: experiments/2026-08-31_tau_distance_of_logloss_gain/
+
 - candidate: tgp_cycle_displacement_cents, tgp_cycle_displacement_frac_amp (wholesale
     floor displacement since the retail cycle's own peak)
   inputs: [price_date, tgp_delta_7d, cycle_days_since_peak, cycle_last_max_cents,
