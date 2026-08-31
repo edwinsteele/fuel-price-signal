@@ -54,6 +54,7 @@ import bisect
 import json
 import math
 import pathlib
+from datetime import date
 
 import click
 import matplotlib
@@ -93,6 +94,7 @@ from experiments.pipeline.runner import (
 )
 from fuel_signal import db as _db
 from fuel_signal.dates import date_from_int
+from fuel_signal.fill import MAX_GAP_FILL_DAYS
 from fuel_signal.score_phase2 import threshold_sweep
 
 RESULTS_FILENAME = "results.json"
@@ -546,9 +548,10 @@ class _DbStationPrices:
     Loads each station's full `daily_prices` series once and answers from memory — regret
     walks ~`horizon_days` dates per flip, so a query per lookup would be thousands of
     round-trips for no benefit. `price_at` reproduces `fuel_signal.backtest.PriceHistory.
-    station_price_at` exactly (same `bisect_right(...) - 1` forward-fill over the same
-    `db.get_daily_prices` series) — the point of regret is to score each arm against the price
-    path it actually faced, so this must not drift from the accessor the simulator used.
+    station_price_at` exactly (same `bisect_right(...) - 1` forward-fill, gap-capped at
+    `MAX_GAP_FILL_DAYS`, over the same `db.get_daily_prices` series — fps-2i4) — the point of
+    regret is to score each arm against the price path it actually faced, so this must not
+    drift from the accessor the simulator used.
     """
 
     def __init__(self, conn, station_codes: list[int]) -> None:
@@ -564,7 +567,12 @@ class _DbStationPrices:
         if not dates:
             return None
         idx = bisect.bisect_right(dates, as_of) - 1
-        return self._prices[int(station_code)][idx] if idx >= 0 else None
+        if idx < 0:
+            return None
+        gap = (date.fromisoformat(as_of) - date.fromisoformat(dates[idx])).days
+        if gap > MAX_GAP_FILL_DAYS:
+            return None
+        return self._prices[int(station_code)][idx]
 
     def is_observed(self, station_code: int, as_of: str) -> bool:
         dates = self._dates.get(int(station_code)) or []

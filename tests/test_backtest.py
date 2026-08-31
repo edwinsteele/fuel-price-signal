@@ -488,6 +488,28 @@ def test_empty_date_range_returns_nan_cpl():
     assert math.isnan(result.realised_cpl)
 
 
+def test_station_dark_for_whole_val_window_yields_no_fills_not_stale_price():
+    """fps-2i4: a station closed for the entire replay window used to transact
+    every evaluation date at its last pre-closure price (station_price_at forward-
+    filled with no cap). Past MAX_GAP_FILL_DAYS it must now return None instead, so
+    run_backtest skips every date — no fills, no RuntimeError, NaN CPL — rather than
+    buying a whole window at a price that didn't exist on any of those days."""
+    from fuel_signal.fill import MAX_GAP_FILL_DAYS
+
+    last_observed = [("2020-01-01", 180.0)]
+    history = PriceHistory(avg_series=last_observed, station_prices={1: last_observed})
+    dark_start = datetime.date.fromisoformat("2020-01-01") + datetime.timedelta(
+        days=MAX_GAP_FILL_DAYS + 7
+    )
+    dark_end = dark_start + datetime.timedelta(days=60)
+    result = run_backtest(
+        history, AlwaysBuyStrategy(), 1, dark_start.isoformat(), dark_end.isoformat(), TANK
+    )
+    assert result.fill_events == 0
+    assert result.total_litres == 0.0
+    assert math.isnan(result.realised_cpl)
+
+
 # ---------------------------------------------------------------------------
 # BacktestResult.set_baseline
 # ---------------------------------------------------------------------------
@@ -547,6 +569,29 @@ def test_price_history_station_price_at_returns_latest_on_or_before():
     assert h.station_price_at(42, "2020-01-02") == 155.0
     assert h.station_price_at(42, "2020-01-03") == 160.0
     assert h.station_price_at(99, "2020-01-01") is None  # unknown station
+
+
+def test_price_history_station_price_at_stops_forward_filling_past_gap_cap():
+    """fps-2i4: a station dark for longer than MAX_GAP_FILL_DAYS must read as no
+    price, not the last price it happened to post before going dark — daily_prices
+    itself already leaves gaps that wide unfilled (fill.py), so PriceHistory's
+    in-memory as-of lookup must not silently re-introduce the forward-fill."""
+    from fuel_signal.fill import MAX_GAP_FILL_DAYS
+
+    prices = [("2020-01-01", 155.0)]
+    h = PriceHistory(avg_series=prices, station_prices={42: prices})
+    last_day = datetime.date.fromisoformat("2020-01-01")
+    within_cap = (last_day + datetime.timedelta(days=MAX_GAP_FILL_DAYS)).isoformat()
+    past_cap = (last_day + datetime.timedelta(days=MAX_GAP_FILL_DAYS + 1)).isoformat()
+    assert h.station_price_at(42, within_cap) == 155.0
+    assert h.station_price_at(42, past_cap) is None
+
+
+def test_price_history_station_price_at_respects_custom_max_gap_days():
+    prices = [("2020-01-01", 155.0)]
+    h = PriceHistory(avg_series=prices, station_prices={42: prices})
+    assert h.station_price_at(42, "2020-01-06", max_gap_days=10) == 155.0
+    assert h.station_price_at(42, "2020-01-06", max_gap_days=4) is None
 
 
 def test_price_history_gradient_returns_none_when_insufficient_data():
@@ -634,8 +679,12 @@ _ORACLE_TANK = TankParams(
 def test_oracle_plan_replays_identically_through_run_backtest():
     """The DP's accounting equals the engine's: replaying the oracle's chosen
     fills through run_backtest reproduces its spend, litres and CPL exactly."""
+    # n_cycles=20 (280d of data) so the window below (2020-01-07..2020-09-16, 259d)
+    # is fully covered by real prices — station_price_at no longer forward-fills
+    # past MAX_GAP_FILL_DAYS (fps-2i4), and the oracle needs the WHOLE window
+    # feasible (unlike run_backtest, it has no partial-coverage forgiveness).
     history = _square_wave_history(
-        50, "2020-01-01", n_cycles=10, high_cents=200.0, low_cents=150.0, half_period=7
+        50, "2020-01-01", n_cycles=20, high_cents=200.0, low_cents=150.0, half_period=7
     )
     oracle = run_oracle_backtest(
         history, 50, "2020-01-07", "2020-09-16", _ORACLE_TANK, collect_fills=True
@@ -652,8 +701,9 @@ def test_oracle_plan_replays_identically_through_run_backtest():
 
 def test_oracle_no_cheaper_than_any_feasible_strategy():
     """Oracle CPL is the floor: ≤ always-buy and ≤ a low-price threshold rule."""
+    # n_cycles=20, see test_oracle_plan_replays_identically_through_run_backtest.
     history = _square_wave_history(
-        50, "2020-01-01", n_cycles=10, high_cents=200.0, low_cents=150.0, half_period=7
+        50, "2020-01-01", n_cycles=20, high_cents=200.0, low_cents=150.0, half_period=7
     )
     args = (50, "2020-01-07", "2020-09-16", _ORACLE_TANK)
     oracle = run_oracle_backtest(history, *args)
@@ -732,6 +782,37 @@ def test_oracle_handles_leading_no_data_prefix():
     ).station_prices[9]]
     history = PriceHistory(avg_series=avg, station_prices={9: station})
     args = (9, "2020-01-01", "2020-06-01", gentle)
+    oracle = run_oracle_backtest(history, *args, collect_fills=True)
+    assert not math.isnan(oracle.realised_cpl)
+    chosen = {f.date for f in oracle.fills if not f.emergency}
+    replay = run_backtest(history, _ReplayStrategy(chosen), *args)
+    assert math.isclose(replay.total_spend_cents, oracle.total_spend_cents, rel_tol=1e-9)
+    assert math.isclose(replay.total_litres, oracle.total_litres, rel_tol=1e-9)
+    assert math.isclose(replay.realised_cpl, oracle.realised_cpl, rel_tol=1e-9)
+
+
+def test_oracle_handles_mid_series_dark_gap():
+    """fps-2i4: station_price_at can now return None mid-series (a station dark
+    for more than MAX_GAP_FILL_DAYS), not just as a leading prefix. The DP treats
+    a None date uniformly regardless of position — skip, keep depleting — so the
+    plan must still be engine-faithful with a gap sitting in the middle."""
+    from fuel_signal.fill import MAX_GAP_FILL_DAYS
+
+    gentle = TankParams(
+        tank_size_litres=50.0,
+        daily_consumption_litres=50.0 / 70,
+        evaluation_interval_days=7,
+        floor_fraction=0.10,
+    )
+    before = [(d, 180.0) for d in _dates_from("2020-01-01", 30)]
+    gap_end = datetime.date.fromisoformat("2020-01-30") + datetime.timedelta(
+        days=MAX_GAP_FILL_DAYS + 14
+    )
+    after = [(d, 180.0) for d in _dates_from(gap_end.isoformat(), 90)]
+    station = before + after
+    avg = [(d, 180.0) for d, _ in station]
+    history = PriceHistory(avg_series=avg, station_prices={9: station})
+    args = (9, "2020-01-01", (gap_end + datetime.timedelta(days=80)).isoformat(), gentle)
     oracle = run_oracle_backtest(history, *args, collect_fills=True)
     assert not math.isnan(oracle.realised_cpl)
     chosen = {f.date for f in oracle.fills if not f.emergency}

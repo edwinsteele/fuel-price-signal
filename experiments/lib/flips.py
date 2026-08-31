@@ -675,17 +675,21 @@ def summarise_regret(
     as "the difference came from WHAT was bought, not WHEN" only works while regret is purely
     a WHEN measure.
 
-    **Dark days are FORWARD-FILLED, and that is not a policy choice** — it is the price path
-    the arms actually faced. `fuel_signal.backtest.PriceHistory.station_price_at` returns "the
-    latest price on or before as_of" (its own docstring: "station_price_at forward-fills, so
-    None occurs only as a leading prefix in practice"), so the tank simulator bought at the
-    carried price on days the station reported nothing. `prices` must implement those same
-    semantics. Scoring regret against observed-only prices would compare each arm to a series
-    it never saw AND drop fills asymmetrically — on fps-6yi, 56 of 303 flips fall on dark days
-    (all station 414, folds 4-7; 42 candidate vs 14 baseline, 364 vs 207 litres), so dropping
-    them would reintroduce the disjoint-basket defect through the back door. The count is
-    reported as `dark_fill_days` because the outage is non-random (it thins and tilts specific
-    folds) even though it no longer biases the estimate.
+    **Dark days are FORWARD-FILLED (up to MAX_GAP_FILL_DAYS), and that is not a policy
+    choice** — it is the price path the arms actually faced. `fuel_signal.backtest.
+    PriceHistory.station_price_at` returns "the latest price on or before as_of", capped at
+    `MAX_GAP_FILL_DAYS` (fps-2i4 — a station dark longer than that reads as no price, not a
+    stale carried one), so the tank simulator bought at the carried price on short-gap days
+    the station reported nothing for. `prices` must implement those same semantics. Scoring
+    regret against observed-only prices would compare each arm to a series it never saw AND
+    drop fills asymmetrically — on fps-6yi (run BEFORE fps-2i4's cap existed), 56 of 303
+    flips fell on dark days (all station 414, folds 4-7; 42 candidate vs 14 baseline, 364 vs
+    207 litres), so dropping them would reintroduce the disjoint-basket defect through the
+    back door. The count is reported as `dark_fill_days` because the outage is non-random (it
+    thins and tilts specific folds) even though it no longer biases the estimate. Post fps-2i4
+    a fold-long closure like 414's no longer produces dark fills at all — the simulator skips
+    those station-days rather than transacting through them — so `dark_fill_days` on a fresh
+    run should only ever reflect short (≤MAX_GAP_FILL_DAYS) reporting gaps.
 
     `prices` is any object with `price_at(station_code, as_of) -> float | None` and
     `is_observed(station_code, as_of) -> bool`; the window is walked on the run's OWN
@@ -726,9 +730,12 @@ def summarise_regret(
                 reachable.append(float(price))
             offset += cadence_days
         if not reachable:
-            # station_price_at only returns None before a station's first ever price, so this
-            # is a fill dated ahead of its own station's series — a broken ledger, not an
-            # outage. Score nothing rather than guess.
+            # offset=0 is the fill's own recorded date, which always has a real price by
+            # construction (the tank simulator only fills on a date station_price_at itself
+            # resolved) — so an empty `reachable` here means the fill is dated OUTSIDE its own
+            # station's series entirely (before the first observation, or the whole ledger is
+            # stale relative to `prices`), not an ordinary dark-day gap. A broken ledger, not
+            # an outage. Score nothing rather than guess.
             regrets.append(None)
             continue
         # Explicitly the OFFSET-0 price, not reachable[0]: `reachable` skips None lookups, so

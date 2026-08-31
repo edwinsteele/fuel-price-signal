@@ -48,6 +48,7 @@ from fuel_signal.features import (
     _lga_phase_std_per_date,
     _network_px_std_per_date,
 )
+from fuel_signal.fill import MAX_GAP_FILL_DAYS
 from fuel_signal.lga_leadership import (
     LGA_FEATURE_COUNCILS,
     compute_pit_strict_days_since_trough,
@@ -117,14 +118,32 @@ class PriceHistory:
         idx = bisect.bisect_right(self._avg_dates, as_of) - 1
         return self.avg_series[idx][1] if idx >= 0 else None
 
-    def station_price_at(self, station_code: int, as_of: str) -> float | None:
-        """Latest E10 price (cents) at station on or before as_of."""
+    def station_price_at(
+        self, station_code: int, as_of: str, max_gap_days: int = MAX_GAP_FILL_DAYS
+    ) -> float | None:
+        """Latest E10 price (cents) at station on or before as_of.
+
+        Returns None once the nearest prior observation is more than
+        max_gap_days old, rather than forward-filling indefinitely — a
+        station dark that long is closed (or its source is out), not a
+        short reporting gap, and the tank simulator transacting at a
+        year-stale carried price through a real closure is a data bug, not
+        a signal (fps-2i4). Mirrors fill.py's MAX_GAP_FILL_DAYS: daily_prices
+        itself already leaves gaps wider than that unfilled, so within any
+        gap short enough to appear here at all, `dates` is already
+        day-contiguous and this check never trips.
+        """
         dates = self._station_dates.get(station_code)
         prices = self.station_prices.get(station_code)
         if not dates or not prices:
             return None
         idx = bisect.bisect_right(dates, as_of) - 1
-        return prices[idx][1] if idx >= 0 else None
+        if idx < 0:
+            return None
+        gap = (datetime.date.fromisoformat(as_of) - datetime.date.fromisoformat(dates[idx])).days
+        if gap > max_gap_days:
+            return None
+        return prices[idx][1]
 
     def station_gradient_at(self, station_code: int, as_of: str, window: int = 4) -> float | None:
         """Latest np.gradient of the last `window` daily prices at or before as_of."""
@@ -805,10 +824,13 @@ def _oracle_transitions(
     cadence (the range #262 and fps-fii used), so it's a strict ceiling there.
 
     A None price skips the date (the engine's ``continue``): no fill, no emergency
-    — but the same never-dry gate applies, so a leading no-data prefix long enough
-    to drain the tank yields no feasible plan (NaN CPL) rather than a spurious
-    clamped-depletion path. station_price_at forward-fills, so None occurs only as
-    a leading prefix in practice.
+    — but the same never-dry gate applies, so a no-data stretch long enough to
+    drain the tank yields no feasible plan (NaN CPL) rather than a spurious
+    clamped-depletion path. Before fps-2i4, station_price_at forward-filled
+    without limit, so None only occurred as a leading prefix (before a station's
+    first-ever price) in practice; it now also occurs mid-series whenever a
+    station goes dark for more than MAX_GAP_FILL_DAYS, and this DP handles that
+    the same way — skip, keep depleting, no fill/emergency for that date.
     """
     size = tank.tank_size_litres
     depletion = tank.depletion_litres
