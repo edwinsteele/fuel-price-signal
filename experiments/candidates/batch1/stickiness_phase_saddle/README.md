@@ -1,6 +1,7 @@
 # batch1 / stickiness_phase_saddle
 
-- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-27 / regime labels corrected 2026-08-30 (`fps-hnp`)
+- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-27 / regime labels corrected
+  2026-08-30 (`fps-hnp`) / flip table re-rendered 2026-08-31 (`fps-j6w`)
 - **Branch:** main
 - **SHA:** 9362d46d74f63ccc2a430e96379dfd8658f2036d
 - **Status:** done — **inconclusive**
@@ -158,34 +159,98 @@ threshold in project units); of that, `bar_draw_count_shift_cpl_held`
 is **1** (floor built at arity 3, run at arity 2).
 
 **Decision flips** (`facts["decision_flips"]`, diffs R0's and the
-candidate's `fills.parquet` directly on `(fold, station_code, date)`):
-**303 total flips**, present in every fold except fold 1. Per fold:
+candidate's `fills.parquet` directly on `(fold, station_code, date)` — not a
+`rowpreds` proba-threshold crossing): run-level **303 flips / 88
+decisions**, present in every fold except fold 1. `flips` overstates
+independent evidence — one real flip cascades into a run of later differing
+fills at the same station as the tank's state diverges, which `decns`
+collapses over this run's own `cascade_window_days` = 7. **Read `decns`, not
+`flips`, as this table's sample size**, and note it is not comparable across
+runs at different cadences.
 
-| fold | regime | n_baseline_only | n_candidate_only | flip_cpl_baseline | flip_cpl_candidate | flip_cpl_delta |
-|---|---|---|---|---|---|---|
-| 1 | shock | 0 | 0 | — | — | — |
-| 2 | normal | 12 | 38 | 181.63 | 183.37 | +1.74 |
-| 3 | shock | 21 | 16 | 200.36 | 193.98 | -6.38 |
-| 4 | shock | 15 | 39 | 184.34 | 185.22 | +0.88 |
-| 5 | normal | 6 | 22 | 198.14 | 190.77 | -7.37 |
-| 6 | normal | 18 | 8 | 185.47 | 185.32 | -0.15 |
-| 7 | normal | 6 | 10 | 186.22 | 176.95 | -9.27 |
-| 8 | normal | 20 | 16 | 205.37 | 207.96 | +2.58 |
-| 9 | normal | 0 | 3 | — (no baseline-only fills) | 179.65 | — |
-| 10 | normal | 10 | 20 | 208.66 | 198.32 | **-10.34** |
-| 11 | normal | 2 | 5 | 223.90 | 204.22 | **-19.68** |
-| 12 | normal | 3 | 2 | 191.33 | 181.80 | -9.52 |
-| 13 | normal | 5 | 1 | 205.63 | 172.90 | **-32.73** |
-| 14 | shock | 2 | 3 | 179.90 | 177.67 | -2.23 |
+**This table is the render the post-dossier review addendum below asked
+for** (§5, "the per-fold flip table cannot be read as written"). Every field
+it specified was already in `facts.json`; only the rendering was stale, and
+this section was re-rendered on 2026-08-31 (`fps-j6w`) with no new
+computation.
 
-Favourable (`flip_cpl_delta` < 0) flips dominate — 9 of the 12 folds with
-a computable delta — with the largest concentration in fold 13 (`normal`
-under the corrected regime split; was `shock` under the old fixed set) and
-fold 11 (`normal` under both); folds 2, 4, and 8 move the other way. `n_flips`
-(303) spread across 13 of the 14 folds is consistent with the predicted
-"spread across folds, not concentrated" shape, though `decision_flips`
-carries no station-level stickiness data, so it cannot confirm the more
-specific "flips concentrate on the stickiness-distribution tails" claim.
+Timing is rendered as **regret** (`decision_flips["regret"]`,
+`horizon_days` = 13, `cadence_days` = **1**): `price paid − the cheapest
+price that same station reached inside the tank's feasible wait`, so `0` is
+the attainable optimum and lower is better. Unlike the flip-CPL columns it
+is defined identically on both arms and cycle-normalised, so it pools. The
+horizon is a fixed ceiling no real fill attains, making regret levels
+conservative by construction; regret is comparable only WITHIN one cadence.
+`flip_cpl_delta` is retained in `facts.json` but **no longer rendered**
+(`fps-2js`) — `flip_cpl_baseline` and `flip_cpl_candidate` pool disjoint
+fills on different days at different points in the price cycle, so their
+difference has no stable denominator.
+
+| fold | regime | flips | decns | litres R0 | litres cand | regret R0 | regret cand | regret Δ | Δ interval (2·SE) | run_contribution_cpl |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | shock | 0 | 0 | 0.0 | 0.0 | — | — | — (`no flips`) | — | +0.0000 |
+| 2 | normal | 50 | 13 | 200.0 | 425.0 | 7.80 | 10.48 | +2.68 | [-7.44, +12.80] | +0.0558 |
+| 3 | shock | 37 | 10 | 396.4 | 360.7 | 6.55 | 4.97 | -1.58 | [-7.72, +4.56] | -0.0378 |
+| 4 | shock | 54 | 16 | 250.0 | 478.6 | 13.78 | 13.52 | -0.26 | [-10.94, +10.41] | +0.0437 |
+| 5 | normal | 28 | 9 | 114.3 | 285.7 | 12.40 | 10.10 | -2.30 | [-12.27, +7.68] | -0.0008 |
+| 6 | normal | 26 | 6 | 217.9 | 171.4 | 4.33 | 4.75 | +0.42 | [-8.90, +9.73] | -0.0183 |
+| 7 | normal | 16 | 7 | 67.9 | 157.1 | 7.05 | 12.63 | +5.57 | [-8.95, +20.10] | +0.0104 |
+| 8 | normal | 36 | 5 | 382.1 | 378.6 | 8.93 | 9.26 | +0.34 | [-10.45, +11.12] | +0.0014 |
+| 9 | normal | 3 | 2 | 0.0 | 78.6 | — | 5.20 | — (`one arm only`) | — | +0.0053 |
+| 10 | normal | 30 | 6 | 214.3 | 389.3 | 13.58 | 8.01 | -5.57 | [-18.39, +7.25] | -0.0378 |
+| 11 | normal | 7 | 3 | 35.7 | 89.3 | 32.00 | 16.84 | -15.16 | [-37.19, +6.87] | -0.0197 |
+| 12 | normal | 5 | 5 | 100.0 | 75.0 | 22.57 | 12.54 | -10.03 | [-24.20, +4.15] | +0.0038 |
+| 13 | normal | 6 | 3 | 53.6 | 42.9 | 5.73 | 0.00 | -5.73 | [-41.77, +30.31] | -0.0644 |
+| 14 | shock | 5 | 3 | 32.1 | 50.0 | 7.00 | 1.99 | -5.01 | [-13.10, +3.07] | -0.0022 |
+| **all** | — | **303** | **88** | **2064.3** | **2982.1** | **10.03** | **9.38** | **-0.64** | **[-4.89, +3.60]** | **-0.0606** |
+
+**Every resolvable regret delta sits inside its own 2·SE interval — 12 of
+12, plus the pooled `all` row.** Per `docs/routines/dossier.md`, an
+`inside_own_se` cell must never be cited as evidence in the Judgement
+section, so **no cell in this table may be cited, and no vote count over
+them is admissible.** The superseded rendering of this section claimed
+"favourable flips dominate — 9 of the 12 folds with a computable delta";
+that sentence is removed, and the addendum below (§5) explains why it was
+the wrong kind of statement. Fold 13's much-quoted -32.73 c/L flip delta is
+the clearest case: on regret it reads **-5.73 against `[-41.77, +30.31]`**,
+the widest interval in the run, on **3 decisions**.
+
+Two cells are not resolvable at all and their reasons are stated verbatim
+rather than blanked: fold 1 is `no flips` (both arms identical that fold),
+fold 9 is `one arm only` (3 candidate-only fills, zero baseline-only).
+Neither is the same as a resolved zero.
+
+The pooled row is the only run-level statement this table can make: **both
+arms buy about equally well relative to what they could have reached**
+(10.03 vs 9.38 c/L of regret, Δ -0.64 against a ±4.25 interval), consistent
+with a -0.0735 c/L headline — the same conclusion the addendum reached by
+its own route.
+
+**Litres:** flip-only volume is 2064.3 L on R0 against 2982.1 L on the
+candidate — a **44% gap**, the largest in batch1, on a spend-weighted
+metric. The two arms are not diverging on equal volume, which is why a flip
+COUNT and a flip CPL answer different questions. **Dark fills:**
+`dark_fill_days` = **56** of 303 scored, in folds **4–7** — the Blue
+Mountains preferred-station outage. Those fills ARE scored, at the
+forward-filled price the tank simulator itself bought at, so the outage does
+not bias the estimate, but it thins and tilts exactly those folds.
+
+**`run_contribution_cpl`** is what each fold's divergence is worth at the
+scale of the whole run — a litres-weighted shift-share of that fold's own
+`delta_cpl_own` (the whole fold, matching and flipped fills alike), not of
+the flip-only figures. It reconciles: `run_contribution_total_cpl`
+**-0.0606** + `composition_residual_cpl` **-0.0129** = **-0.0735**, the
+headline `delta_cpl_held` — the same reconciliation the addendum quotes.
+This run's `tau_diverges_any` is `None` (**unavailable, never read as
+"checked, agrees"**), so the residual is composition drift **and possibly
+tau drift**.
+
+Summed by regime: **normal -0.0642** (10 folds, 59 decns) against **shock
++0.0036** (4 folds, 29 decns). `n_flips` spread across 13 of 14 folds is
+consistent with the predicted "spread across folds, not concentrated"
+shape, but `decision_flips` carries no station-level stickiness data, so it
+cannot confirm the more specific "flips concentrate on the
+stickiness-distribution tails" claim.
 
 ![](per_fold_delta_bars.png)
 ![](seed_mean_vs_median.png)
@@ -373,3 +438,29 @@ dossier's verdict.
 - `fps-1l1` — **CLOSED 2026-08-27**, down the "don't capture" branch: no
   SHAP field will exist in `facts.json`. Listed here because the original
   version of this dossier recommended waiting on it.
+
+## Re-render note — 2026-08-31 (`fps-j6w`)
+
+**This re-render implements what this dossier's own post-dossier review addendum asked for**
+(§5, "the per-fold flip table cannot be read as written"). Every field the addendum
+specified was already present in `facts.json`; only the rendering was stale. No new
+computation; verified row-by-row against the committed artifact.
+
+- **`decns` alongside `flips`.** 303 flips are **88 decisions** — the addendum estimated
+  ~87 by its own route.
+- **Regret replaces `flip_cpl_delta`**, each delta beside its own 2·SE interval. **All 12
+  resolvable folds and the pooled `all` row are `inside_own_se`**, so no cell may be cited
+  and no vote count over them is admissible. **The Facts section's "favourable flips
+  dominate — 9 of the 12 folds" is removed**; that sentence is the exact error the addendum
+  identified, and `docs/routines/dossier.md` now cites this run as the worked example.
+- **Fold 13's much-quoted -32.73 c/L reads -5.73 on regret**, against `[-41.77, +30.31]` —
+  the widest interval in the run, on **3 decisions**.
+- **`run_contribution_cpl` added**, reconciling to the headline (-0.0606 + -0.0129 =
+  -0.0735), the same reconciliation the addendum quotes. By regime: **normal -0.0642 /
+  shock +0.0036**.
+- **Litres surfaced:** 2064.3 vs 2982.1 L flip-only, a **44% gap** — the largest in batch1,
+  and the addendum's point about flip counts and flip CPL answering different questions.
+  `dark_fill_days` = 56 in folds 4-7.
+
+The Judgement and the addendum's own conclusions are unchanged — this render supports them
+rather than revising them.

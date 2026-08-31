@@ -1,6 +1,7 @@
 # batch1 / station_descent_dynamics
 
-- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-25 / regime labels corrected 2026-08-30 (`fps-hnp`)
+- **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-25 / regime labels corrected
+  2026-08-30 (`fps-hnp`) / flip table re-rendered 2026-08-31 (`fps-j6w`)
 - **Branch:** main
 - **SHA:** f536e98b9c183e754620d46ee0a6ef13681e7c35
 - **Status:** done — **inconclusive**
@@ -123,31 +124,99 @@ single-candidate call is `z = -0.523` against a threshold of `t = 1.923`:
 well inside the band.
 
 **Decision flips** (`facts["decision_flips"]`, diffs R0's and the
-candidate's `fills.parquet` directly on `(fold, station_code, date)`;
-`flip_cpl_*` is `pooled_cpl` over ONLY the fills that differ in that fold,
-not the same quantity as `delta_cpl_own` above, which pools every fill):
-**439 total flips**. Per fold:
+candidate's `fills.parquet` directly on `(fold, station_code, date)` — not a
+`rowpreds` proba-threshold crossing, which is a different, uncalibrated fit
+from the one that drove the realised decision): run-level **439 flips / 106
+decisions**. `flips` overstates independent evidence — one real flip
+cascades into a run of later differing fills at the same station as the
+tank's state diverges, which `decns` collapses over this run's own
+`cascade_window_days` = 7. **Read `decns`, not `flips`, as this table's
+sample size**, and note it is not comparable across runs at different
+cadences.
 
-| fold | regime | n_baseline_only | n_candidate_only | flip_cpl_baseline | flip_cpl_candidate | flip_cpl_delta |
-|---|---|---|---|---|---|---|
-| 1 | shock | 21 | 0 | 166.83 | — (no candidate-only fills) | — |
-| 2 | normal | 39 | 46 | 181.28 | 182.37 | +1.09 |
-| 3 | shock | 14 | 23 | 205.56 | 200.98 | -4.57 |
-| 4 | shock | 23 | 30 | 183.29 | 183.18 | -0.12 |
-| 5 | normal | 32 | 26 | 188.61 | 189.24 | +0.63 |
-| 6 | normal | 17 | 12 | 187.36 | 186.34 | -1.02 |
-| 7 | normal | 16 | 12 | 178.31 | 177.15 | -1.16 |
-| 8 | normal | 6 | 9 | 183.85 | 182.31 | -1.54 |
-| 9 | normal | 6 | 6 | 198.55 | 195.06 | -3.48 |
-| 10 | normal | 20 | 19 | 205.93 | 204.78 | -1.15 |
-| 11 | normal | 4 | 5 | 212.03 | 197.57 | **-14.46** |
-| 12 | normal | 5 | 9 | 188.75 | 181.79 | **-6.96** |
-| 13 | normal | 8 | 18 | 199.81 | 186.16 | **-13.65** |
-| 14 | shock | 6 | 7 | 180.73 | 184.55 | +3.82 |
+Timing is rendered as **regret** (`decision_flips["regret"]`,
+`horizon_days` = 13, `cadence_days` = **1**): `price paid − the cheapest
+price that same station reached inside the tank's feasible wait`, so `0` is
+the attainable optimum and lower is better. Unlike the flip-CPL columns it
+is defined identically on both arms and cycle-normalised, so it pools. The
+horizon is a fixed ceiling no real fill attains, making regret levels
+conservative by construction; regret is comparable only WITHIN one cadence.
+`flip_cpl_delta` is retained in `facts.json` but **no longer rendered**
+(`fps-2js`) — `flip_cpl_baseline` and `flip_cpl_candidate` pool disjoint
+fills on different days at different points in the price cycle, so their
+difference has no stable denominator. **The `litres R0` / `litres cand`
+columns below are FLIP-ONLY litres, not fold totals** — the fold-total
+identity that the deferral analysis further down rests on is a different
+quantity.
 
-Fold 1's `flip_cpl_delta` is unavailable (`null`): R0 has 21 baseline-only
-fills there and the candidate has zero candidate-only fills to compare
-against, so `flip_cpl_candidate` is 0/0. The shape is **deferral, not
+| fold | regime | flips | decns | litres R0 | litres cand | regret R0 | regret cand | regret Δ | Δ interval (2·SE) | run_contribution_cpl |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | shock | 21 | 3 | 160.7 | 0.0 | 2.49 | — | — (`one arm only`) | — | -0.0164 |
+| 2 | normal | 85 | 15 | 378.6 | 403.6 | 6.76 | 14.38 | +7.61 | [-1.72, +16.95] | +0.0252 |
+| 3 | shock | 37 | 9 | 310.7 | 485.7 | 8.14 | 7.65 | -0.49 | [-7.35, +6.37] | -0.0113 |
+| 4 | shock | 53 | 10 | 325.0 | 407.1 | 5.13 | 8.08 | +2.95 | [-13.05, +18.95] | +0.0273 |
+| 5 | normal | 58 | 9 | 360.7 | 453.6 | 5.51 | 9.18 | +3.66 | [-5.89, +13.21] | +0.0296 |
+| 6 | normal | 29 | 7 | 264.3 | 278.6 | 4.32 | 7.05 | +2.73 | [-6.72, +12.18] | -0.0053 |
+| 7 | normal | 28 | 8 | 114.3 | 150.0 | 4.22 | 11.61 | +7.40 | [-6.94, +21.73] | +0.0132 |
+| 8 | normal | 15 | 7 | 67.9 | 121.4 | 1.53 | 1.45 | -0.08 | [-2.10, +1.94] | -0.0097 |
+| 9 | normal | 12 | 3 | 110.7 | 146.4 | 13.35 | 13.51 | +0.15 | [-11.90, +12.20] | +0.0094 |
+| 10 | normal | 39 | 7 | 417.9 | 453.6 | 12.03 | 10.87 | -1.16 | [-11.76, +9.43] | +0.0190 |
+| 11 | normal | 9 | 4 | 82.1 | 64.3 | 24.13 | 11.00 | -13.13 | [-31.00, +4.74] | -0.0376 |
+| 12 | normal | 14 | 9 | 139.3 | 200.0 | 23.18 | 14.56 | **-8.62** | **[-16.98, -0.26]** | -0.0205 |
+| 13 | normal | 26 | 8 | 153.6 | 310.7 | 12.42 | 12.43 | +0.01 | [-15.21, +15.23] | -0.0951 |
+| 14 | shock | 13 | 7 | 128.6 | 203.6 | 9.00 | 12.23 | +3.23 | [-3.72, +10.18] | +0.0275 |
+| **all** | — | **439** | **106** | **3014.3** | **3678.6** | **8.51** | **10.26** | **+1.75** | **[-1.84, +5.33]** | **-0.0445** |
+
+**Twelve of the thirteen resolvable regret deltas sit inside their own 2·SE
+interval, as does the pooled `all` row.** Per `docs/routines/dossier.md`, an
+`inside_own_se` cell must never be cited as evidence in the Judgement
+section. **Fold 12 is the single exception** — Δ -8.62 c/L against
+`[-16.98, -0.26]`, an interval that excludes zero — and it is the only cell
+in this dossier that may be cited as resolved. Fold 1 is not resolvable at
+all: `one arm only`, which is the regret-side expression of the same
+zero-candidate-fills shape analysed below.
+
+**The pooled row is the most informative line in this table, and it points
+the other way from the headline.** Regret is a WHEN measure, same station by
+construction. R0's pooled regret is **8.51 c/L** and the candidate's is
+**10.26 c/L** — Δ **+1.75**, i.e. the candidate times its purchases
+*worse* — while the realised headline is **-0.0272 c/L in the candidate's
+favour**. That is not a contradiction and it is the most useful thing this
+pair says: whatever this candidate gains, it does **not** gain by buying at
+better moments at the same station. It gains on **what** was bought —
+volume and composition. Flip-only litres corroborate: 3014.3 L on R0
+against 3678.6 L on the candidate, a **22% gap**, on a spend-weighted
+metric. (The pooled regret delta is itself `inside_own_se`, ±3.59, so this
+is a direction, not a resolved magnitude.)
+
+**Dark fills:** `dark_fill_days` = **102** of 439 scored, in folds **4–7** —
+the Blue Mountains preferred-station outage, the largest dark-fill count in
+batch1. Those fills ARE scored, at the forward-filled price the tank
+simulator itself bought at, so the outage does not bias the estimate, but it
+thins and tilts exactly those folds: their evidence weight is not what their
+row count suggests.
+
+**`run_contribution_cpl`** is what each fold's divergence is worth at the
+scale of the whole run — a litres-weighted shift-share of that fold's own
+`delta_cpl_own` (the whole fold, matching and flipped fills alike), not of
+the flip-only figures. It reconciles: `run_contribution_total_cpl`
+**-0.0445** + `composition_residual_cpl` **+0.0173** = **-0.0272**, the
+headline `delta_cpl_held`. **This run has the largest composition residual
+in batch1 — 64% of the size of the headline itself** — which is consistent
+with the regret reading above: a litres-weighted average of per-fold ratios
+diverges from the ratio of pooled totals precisely when the two arms' litres
+mix differs fold to fold, and here it does. This run's `tau_diverges_any` is
+`None` (**unavailable, never read as "checked, agrees"**), so that residual
+is composition drift **and possibly tau drift**.
+
+Summed by regime: **normal -0.0717** (10 folds, 77 decns) against **shock
++0.0272** (4 folds, 29 decns). Fold 13 alone supplies **-0.0951** of the
+normal total, so the other nine normal folds net **+0.0234** between them —
+the normal cell is one fold plus cancellation.
+
+**Fold 1, analysed** (`one arm only` above): R0 has 21 baseline-only fills
+there and the candidate has zero candidate-only fills to compare against, so
+neither the flip nor the regret delta can be formed. The shape is **deferral, not
 reduced buying**: total litres are identical (1539.286 L in both arms —
 consumption is fixed, so the arms always buy the same fuel), and the
 candidate's fill *dates* are a strict subset of R0's. Reconstructing tank
@@ -363,3 +432,29 @@ available and both arms skip it identically.
 
 Full analysis, including the per-fold decomposition and the `fps-ghr` implications:
 `experiments/candidates/batch1/lga_trough_propagation/README.md` § Review addendum.
+
+## Re-render note — 2026-08-31 (`fps-j6w`)
+
+The **Decision flips** section was rendering the pre-`fps-2js` table shape. Every field the
+current spec asks for was already in this run's `facts.json`. No new computation;
+re-rendered from the committed artifact and verified row-by-row. The fold-1 deferral
+analysis, the fold-13 mirror-image note and the `fps-gzz` instrument caveat are preserved
+unchanged.
+
+- **`decns` alongside `flips`.** 439 flips are **106 decisions**; folds carry 3-15 each.
+- **Regret replaces `flip_cpl_delta`**, each delta beside its own 2·SE interval. Twelve of
+  thirteen resolvable folds and the pooled `all` row are `inside_own_se`; **fold 12 alone
+  resolves** (-8.62, `[-16.98, -0.26]`).
+- **The pooled regret row is the most informative line added, and it points the other way
+  from the headline.** R0 8.51 vs candidate **10.26** c/L — the candidate times its
+  purchases *worse* — against a **-0.0272 c/L favourable** headline. Regret is a WHEN
+  measure at the same station, so this says the candidate's gain came from **what** was
+  bought, not when: flip-only litres are 3014.3 vs 3678.6 L, a 22% gap. This is consistent
+  with, and helps explain, this run having batch1's largest `composition_residual_cpl`
+  (+0.0173, 64% of the headline's own size).
+- **`run_contribution_cpl` added**, reconciling to the headline (-0.0445 + +0.0173 =
+  -0.0272). By regime: **normal -0.0717 / shock +0.0272**, with fold 13 supplying -0.0951
+  of the normal total.
+- **Dark fills surfaced:** `dark_fill_days` = **102** in folds 4-7, the largest in batch1.
+
+The Judgement is unchanged — it did not cite the flip table.
