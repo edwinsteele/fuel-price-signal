@@ -548,15 +548,22 @@ class _DbStationPrices:
     Loads each station's full `daily_prices` series once and answers from memory — regret
     walks ~`horizon_days` dates per flip, so a query per lookup would be thousands of
     round-trips for no benefit. `price_at` reproduces `fuel_signal.backtest.PriceHistory.
-    station_price_at` exactly (same `bisect_right(...) - 1` forward-fill, gap-capped at
-    `MAX_GAP_FILL_DAYS`, over the same `db.get_daily_prices` series — fps-2i4) — the point of
-    regret is to score each arm against the price path it actually faced, so this must not
-    drift from the accessor the simulator used.
+    station_price_at` exactly — same `bisect_right(...) - 1` forward-fill, same
+    all-or-nothing-per-ENCLOSING-gap rule at `max_gap_days`, over the same
+    `db.get_daily_prices` series (fps-2i4, review finding #2 for why it's the enclosing gap
+    and not days-since-last-observation) — the point of regret is to score each arm against
+    the price path it actually faced, so this must not drift from the accessor the simulator
+    used. `max_gap_days` is a constructor arg (not hardcoded to `MAX_GAP_FILL_DAYS`) for the
+    same reason: `station_price_at` exposes it too, and "reproduces exactly" has to hold for
+    every value the simulator could have been called with, not just the default.
     """
 
-    def __init__(self, conn, station_codes: list[int]) -> None:
+    def __init__(
+        self, conn, station_codes: list[int], max_gap_days: int = MAX_GAP_FILL_DAYS
+    ) -> None:
         self._dates: dict[int, list[str]] = {}
         self._prices: dict[int, list[float]] = {}
+        self._max_gap_days = max_gap_days
         for code in station_codes:
             series = _db.get_daily_prices(conn, code)
             self._dates[code] = [d for d, _ in series]
@@ -569,8 +576,15 @@ class _DbStationPrices:
         idx = bisect.bisect_right(dates, as_of) - 1
         if idx < 0:
             return None
-        gap = (date.fromisoformat(as_of) - date.fromisoformat(dates[idx])).days
-        if gap > MAX_GAP_FILL_DAYS:
+        last_date = date.fromisoformat(dates[idx])
+        as_of_date = date.fromisoformat(as_of)
+        if as_of_date == last_date:
+            return self._prices[int(station_code)][idx]
+        if idx + 1 < len(dates):
+            next_date = date.fromisoformat(dates[idx + 1])
+            if (next_date - last_date).days > self._max_gap_days:
+                return None
+        elif (as_of_date - last_date).days > self._max_gap_days:
             return None
         return self._prices[int(station_code)][idx]
 

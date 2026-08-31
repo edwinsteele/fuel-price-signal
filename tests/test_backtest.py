@@ -510,6 +510,37 @@ def test_station_dark_for_whole_val_window_yields_no_fills_not_stale_price():
     assert math.isnan(result.realised_cpl)
 
 
+def test_station_reopening_after_a_draining_dark_gap_does_not_raise():
+    """fps-2i4 review finding #1: a dark stretch long enough to drain the tank got
+    silently clamped to 0 on every no-price date (no raise, since price was None) —
+    but the FIRST priced date after the gap applied one more depletion on top of
+    that already-clamped floor and went negative again, and this time price was not
+    None, so the never-dry guard raised. Nothing the strategy did caused this (it
+    never had a decide point during the gap); this reproduces 414's real shape
+    (observations to 2022-08-25, reopening 2023-10-17, a tank that drains in ~14
+    days at 1-day cadence) and must complete without raising, buying on reopening."""
+    before = [("2022-08-25", 185.9)]
+    after = [("2023-10-17", 165.9), ("2023-10-18", 165.9)]
+    history = PriceHistory(avg_series=before, station_prices={414: before + after})
+    tank = TankParams(
+        tank_size_litres=50.0,
+        daily_consumption_litres=3.571,
+        evaluation_interval_days=1,
+        floor_fraction=0.10,
+    )
+    result = run_backtest(
+        history, AlwaysBuyStrategy(), 414, "2022-08-24", "2023-10-31", tank,
+        collect_fills=True,
+    )
+    assert result.fill_events > 0
+    assert not math.isnan(result.realised_cpl)
+    by_date = {f.date: f for f in result.fills}
+    # The tank buys on 2022-08-25 too (the one real pre-closure observation the
+    # window includes) — the point of this test is the REOPENING day specifically:
+    # it must transact at the resumed real price, not raise.
+    assert by_date["2023-10-17"].price == 165.9
+
+
 # ---------------------------------------------------------------------------
 # BacktestResult.set_baseline
 # ---------------------------------------------------------------------------
@@ -592,6 +623,47 @@ def test_price_history_station_price_at_respects_custom_max_gap_days():
     h = PriceHistory(avg_series=prices, station_prices={42: prices})
     assert h.station_price_at(42, "2020-01-06", max_gap_days=10) == 155.0
     assert h.station_price_at(42, "2020-01-06", max_gap_days=4) is None
+
+
+def test_price_history_station_price_at_uses_enclosing_gap_not_days_since_observation():
+    """fps-2i4 review finding #2: capping on "days since the LAST observation" still
+    forward-fills the first max_gap_days of an arbitrarily long closure, because
+    `dates[idx]` never moves as as_of advances into the gap — so that measurement
+    starts at 0 and only grows past the cap after max_gap_days. Once a later
+    observation exists (the station reopened), the ENCLOSING gap between the two
+    real observations is what fill.py actually evaluated (all-or-nothing per gap),
+    and that must govern every date strictly inside it — including day 1."""
+    from fuel_signal.fill import MAX_GAP_FILL_DAYS
+
+    before = [("2020-01-01", 185.9)]
+    reopen_day = datetime.date.fromisoformat("2020-01-01") + datetime.timedelta(
+        days=MAX_GAP_FILL_DAYS + 100
+    )
+    after = [(reopen_day.isoformat(), 165.9)]
+    h = PriceHistory(avg_series=before, station_prices={414: before + after})
+
+    # Even ONE day into a closure this long, the enclosing gap (100+ days over
+    # cap) already rules it unfillable — not just past day MAX_GAP_FILL_DAYS.
+    day_1 = (datetime.date.fromisoformat("2020-01-01") + datetime.timedelta(days=1)).isoformat()
+    within_old_cap = (
+        datetime.date.fromisoformat("2020-01-01") + datetime.timedelta(days=MAX_GAP_FILL_DAYS)
+    ).isoformat()
+    assert h.station_price_at(414, day_1) is None
+    assert h.station_price_at(414, within_old_cap) is None
+    # The boundary dates themselves are real observations, not gap dates.
+    assert h.station_price_at(414, "2020-01-01") == 185.9
+    assert h.station_price_at(414, reopen_day.isoformat()) == 165.9
+
+
+def test_price_history_station_price_at_still_forward_fills_a_short_enclosed_gap():
+    """A gap short enough for fill.py to have filled it (<= max_gap_days) is fine to
+    forward-fill in full — this is the ordinary case, not the closure fps-2i4 is about."""
+    before = [("2020-01-01", 100.0)]
+    after = [("2020-01-10", 110.0)]  # 9-day gap, well under MAX_GAP_FILL_DAYS
+    h = PriceHistory(avg_series=before, station_prices={1: before + after})
+    assert h.station_price_at(1, "2020-01-05") == 100.0
+    assert h.station_price_at(1, "2020-01-09") == 100.0
+    assert h.station_price_at(1, "2020-01-10") == 110.0
 
 
 def test_price_history_gradient_returns_none_when_insufficient_data():

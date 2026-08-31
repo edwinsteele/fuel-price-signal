@@ -123,15 +123,28 @@ class PriceHistory:
     ) -> float | None:
         """Latest E10 price (cents) at station on or before as_of.
 
-        Returns None once the nearest prior observation is more than
-        max_gap_days old, rather than forward-filling indefinitely — a
-        station dark that long is closed (or its source is out), not a
-        short reporting gap, and the tank simulator transacting at a
-        year-stale carried price through a real closure is a data bug, not
-        a signal (fps-2i4). Mirrors fill.py's MAX_GAP_FILL_DAYS: daily_prices
-        itself already leaves gaps wider than that unfilled, so within any
-        gap short enough to appear here at all, `dates` is already
-        day-contiguous and this check never trips.
+        Returns None once the observation before as_of sits inside a gap wider
+        than max_gap_days, rather than forward-filling indefinitely — a station
+        dark that long is closed (or its source is out), not a short reporting
+        gap, and the tank simulator transacting at a year-stale carried price
+        through a real closure is a data bug, not a signal (fps-2i4).
+
+        Mirrors fill.py's MAX_GAP_FILL_DAYS, and its ALL-OR-NOTHING-per-gap rule
+        exactly (fps-2i4 review finding #2): `find_daily_gaps` fills a whole gap
+        or none of it based on the gap's TOTAL width between its two bounding
+        observations, so the ENCLOSING gap — not "days since the prior
+        observation" — is what must be checked here. A naive
+        days-since-last-observation cap would still forward-fill the first
+        max_gap_days of an arbitrarily long closure (`dates[idx]` doesn't move
+        as as_of advances into the gap, so the gap measured that way starts at 0
+        and only grows), silently reintroducing max_gap_days worth of the exact
+        bug this fix exists to close. When a later observation exists
+        (`dates[idx + 1]`), its distance from `dates[idx]` is the gap fill.py
+        actually evaluated, and that decision governs every date strictly
+        between them. With no later observation yet (the open/trailing case —
+        the station may or may not still be dark), there's no future gap width
+        to consult, so this falls back to the same days-since-last-observation
+        cap as a conservative bound on an unresolved gap.
         """
         dates = self._station_dates.get(station_code)
         prices = self.station_prices.get(station_code)
@@ -140,8 +153,15 @@ class PriceHistory:
         idx = bisect.bisect_right(dates, as_of) - 1
         if idx < 0:
             return None
-        gap = (datetime.date.fromisoformat(as_of) - datetime.date.fromisoformat(dates[idx])).days
-        if gap > max_gap_days:
+        last_date = datetime.date.fromisoformat(dates[idx])
+        as_of_date = datetime.date.fromisoformat(as_of)
+        if as_of_date == last_date:
+            return prices[idx][1]
+        if idx + 1 < len(dates):
+            next_date = datetime.date.fromisoformat(dates[idx + 1])
+            if (next_date - last_date).days > max_gap_days:
+                return None
+        elif (as_of_date - last_date).days > max_gap_days:
             return None
         return prices[idx][1]
 
@@ -690,17 +710,30 @@ def run_backtest(
             )
 
     last_i = len(eval_dates) - 1
+    # True while the tank has passed through at least one no-price date since its
+    # last real decide point — forgives exactly the ONE transition step where data
+    # resumes (fps-2i4 review finding #1). Without this, a dark stretch long enough
+    # to drain the tank gets silently clamped to 0 every no-price day (no raise,
+    # since price is None), but the very first priced day back applies one MORE
+    # depletion on top of that already-clamped floor and goes negative again — at
+    # which point price is no longer None, so the check fires and raises, even
+    # though nothing the strategy did caused it (it never had a decide point during
+    # the gap). The check re-arms immediately after that one forgiven step: a
+    # genuine dry-out between two ADJACENT priced dates (no gap in between) still
+    # raises exactly as before.
+    gap_since_decide = False
     for i, as_of in enumerate(eval_dates):
         price = history.station_price_at(station_code, as_of)
 
         if i > 0:
             tank_level -= depletion
-            # Only check when there was a price to decide on. A station with no
-            # data for as_of never reached a decide point, so the emergency rule
-            # never had a chance to fire — that's a data-coverage gap, not the
-            # never-dry-guarantee failure this check exists to catch (a station
-            # with no data at all is silently skipped by aggregate_backtest).
-            if price is not None and tank_level < -1e-9:
+            # Only check when there was a price to decide on AND the tank didn't
+            # just cross a no-price gap. A station with no data for as_of never
+            # reached a decide point, so the emergency rule never had a chance to
+            # fire — that's a data-coverage gap, not the never-dry-guarantee
+            # failure this check exists to catch (a station with no data at all is
+            # silently skipped by aggregate_backtest).
+            if price is not None and not gap_since_decide and tank_level < -1e-9:
                 # Explicit exception, not `assert`: `python -O` strips asserts,
                 # which would let the clamp below silently mask this failure —
                 # exactly the bug this fix exists to stop happening quietly.
@@ -713,7 +746,9 @@ def run_backtest(
             tank_level = max(0.0, tank_level)
 
         if price is None:
+            gap_since_decide = True
             continue
+        gap_since_decide = False
 
         if strategy.decide(as_of, station_code, history):
             litres = tank.tank_size_litres - tank_level
