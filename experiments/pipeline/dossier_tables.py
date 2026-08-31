@@ -568,6 +568,12 @@ class _DbStationPrices:
             series = _db.get_daily_prices(conn, code)
             self._dates[code] = [d for d, _ in series]
             self._prices[code] = [p for _, p in series]
+        # Coverage-end proxy for the trailing/open-gap case (fps-2i4 review finding #2
+        # remnant) — mirrors PriceHistory.station_price_at's use of avg_series[-1],
+        # which is itself built from daily_prices, so MAX(price_date) over the whole
+        # table (not just these station_codes) is the same signal.
+        row = conn.execute("SELECT MAX(price_date) FROM daily_prices").fetchone()
+        self._coverage_end = date_from_int(row[0]) if row and row[0] is not None else None
 
     def price_at(self, station_code: int, as_of: str) -> float | None:
         dates = self._dates.get(int(station_code))
@@ -584,8 +590,12 @@ class _DbStationPrices:
             next_date = date.fromisoformat(dates[idx + 1])
             if (next_date - last_date).days > self._max_gap_days:
                 return None
-        elif (as_of_date - last_date).days > self._max_gap_days:
-            return None
+        else:
+            coverage_end = date.fromisoformat(self._coverage_end) if self._coverage_end else last_date
+            if (coverage_end - last_date).days > self._max_gap_days:
+                return None
+            if (as_of_date - last_date).days > self._max_gap_days:
+                return None
         return self._prices[int(station_code)][idx]
 
     def is_observed(self, station_code: int, as_of: str) -> bool:

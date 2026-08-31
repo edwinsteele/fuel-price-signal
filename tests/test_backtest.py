@@ -666,6 +666,41 @@ def test_price_history_station_price_at_still_forward_fills_a_short_enclosed_gap
     assert h.station_price_at(1, "2020-01-10") == 110.0
 
 
+def test_price_history_station_price_at_none_for_a_permanently_dark_station():
+    """PR #356 review finding #2 remnant: a station that goes dark and never
+    reports again anywhere in the loaded series (no dates[idx + 1] to consult)
+    previously fell back to a plain days-since-last-observation cap — still
+    granting up to MAX_GAP_FILL_DAYS of stale forward-fill, exactly the defect
+    fps-2i4 exists to close, just narrowed to permanently-dark stations. This is
+    a full historical load, not a live stream, so "no later observation" means
+    the station genuinely never reports again within the data's own coverage —
+    fill.py's trailing rule is ALSO all-or-nothing (measured against its
+    end_date, not a bounding observation), so if the data's coverage (proxied by
+    avg_series's last date) extends well past this station's last observation,
+    NONE of that trailing stretch was ever fillable — not even day 1."""
+    station = [("2020-01-01", 185.9)]
+    # avg_series extends to 2020-06-01 — the network kept reporting long after
+    # this station went dark, so the true trailing gap (2020-06-01 minus
+    # 2020-01-01) is 152 days, way past MAX_GAP_FILL_DAYS.
+    avg = [("2020-01-01", 185.9), ("2020-06-01", 170.0)]
+    h = PriceHistory(avg_series=avg, station_prices={414: station})
+    assert h.station_price_at(414, "2020-01-01") == 185.9  # the real observation itself
+    assert h.station_price_at(414, "2020-01-02") is None  # day 1 of the closure — no grace
+    assert h.station_price_at(414, "2020-01-20") is None
+
+
+def test_price_history_station_price_at_still_grants_grace_when_coverage_ends_near_the_station():
+    """The flip side: if the WHOLE data source's coverage ends close to this
+    station's last observation (everyone stopped reporting around the same
+    time — e.g. a live backtest run near "today"), that's a short, plausibly-
+    fillable trailing gap, not a closure, so the ordinary days-since-observation
+    grace still applies within max_gap_days."""
+    station = [("2020-01-01", 185.9)]
+    avg = [("2020-01-01", 185.9), ("2020-01-05", 180.0)]  # coverage ends 4 days later
+    h = PriceHistory(avg_series=avg, station_prices={414: station})
+    assert h.station_price_at(414, "2020-01-05") == 185.9
+
+
 def test_price_history_gradient_returns_none_when_insufficient_data():
     prices = [("2020-01-01", 155.0)]  # only 1 point
     h = PriceHistory(avg_series=prices, station_prices={1: prices})

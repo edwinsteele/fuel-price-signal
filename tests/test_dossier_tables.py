@@ -2764,6 +2764,7 @@ def test_attach_regret_success_path_writes_graded_db_not_source_db(tmp_path, mon
 def test_db_station_prices_matches_price_history_station_price_at(tmp_path):
     from fuel_signal.backtest import PriceHistory
     from fuel_signal.db import (
+        average_price_series,
         create_schema,
         get_daily_prices,
         open_db,
@@ -2784,8 +2785,13 @@ def test_db_station_prices_matches_price_history_station_price_at(tmp_path):
     # Station A: a short (5d < 28d) gap — fillable, both accessors should just
     # forward-fill it. Station B: mirrors 414's real shape — real data, then a
     # gap wider than MAX_GAP_FILL_DAYS, then real data again (the enclosing-gap
-    # case finding #2 was about). Station C: goes dark and never resumes within
-    # the loaded series (the open/trailing case with no dates[idx+1] to consult).
+    # case finding #2 was about). Station C: goes dark and NEVER resumes within
+    # the loaded series (the open/trailing case with no dates[idx+1] to consult)
+    # — station 2's 2020-06-01 observation is what makes the DB's overall
+    # coverage end (MAX(price_date)) sit ~150 days past station C's last real
+    # price, past MAX_GAP_FILL_DAYS, so per fill.py's own trailing rule NONE of
+    # that trailing stretch was ever fillable (fps-2i4 review finding #2 remnant
+    # — a permanently-dark station must not get a 28-day grace period either).
     rows = [
         (1, "E10", "2020-01-01", 180.0), (1, "E10", "2020-01-08", 182.0),
         (2, "E10", "2020-01-01", 185.9), (2, "E10", "2020-06-01", 165.9),
@@ -2797,8 +2803,19 @@ def test_db_station_prices_matches_price_history_station_price_at(tmp_path):
     station_prices = {}
     for code in (1, 2, 3):
         station_prices[code] = get_daily_prices(conn, code)
-    history = PriceHistory(avg_series=station_prices[1], station_prices=station_prices)
+    # average_price_series (not a hand-built avg_series) so PriceHistory sees the
+    # SAME network-wide coverage end _DbStationPrices' MAX(price_date) query does
+    # — load_history's own production path, and required for the two accessors to
+    # agree on station C below rather than just coincidentally matching.
+    history = PriceHistory(avg_series=average_price_series(conn), station_prices=station_prices)
     db_prices = dt._DbStationPrices(conn, [1, 2, 3])
+
+    # Station C is genuinely dark from day 1: pin the actual values, not just
+    # agreement between the two accessors (a drift test can't catch both being
+    # wrong the same way — PR #356 review finding #2 remnant).
+    assert history.station_price_at(3, "2020-01-01") == 170.0
+    assert history.station_price_at(3, "2020-01-02") is None
+    assert db_prices.price_at(3, "2020-01-02") is None
 
     as_of_dates = [
         "2020-01-01", "2020-01-04", "2020-01-08", "2020-01-09",  # station A, in/near its gap

@@ -141,10 +141,26 @@ class PriceHistory:
         bug this fix exists to close. When a later observation exists
         (`dates[idx + 1]`), its distance from `dates[idx]` is the gap fill.py
         actually evaluated, and that decision governs every date strictly
-        between them. With no later observation yet (the open/trailing case —
-        the station may or may not still be dark), there's no future gap width
-        to consult, so this falls back to the same days-since-last-observation
-        cap as a conservative bound on an unresolved gap.
+        between them.
+
+        With no later observation (the station's most recent one anywhere in the
+        LOADED series — this is a full historical load, not a live stream, so
+        "no dates[idx + 1]" means genuinely never-reports-again, not merely
+        unknown-so-far), fill.py's own trailing rule is ALSO all-or-nothing, just
+        measured against the data's coverage end rather than a bounding
+        observation (fps-2i4 review finding #2 remnant): `find_daily_gaps` only
+        trail-fills when the gap to its `end_date` is within max_gap_days, else
+        it writes nothing at all the way out to that end. avg_series's last date
+        is the best proxy PriceHistory has for that coverage end. If the
+        station's last observation sits further from it than max_gap_days, the
+        whole trailing stretch was left unfilled — nothing past last_date should
+        resolve, no matter how close as_of itself sits to it (a station dark for
+        the very first day of a permanent closure is exactly as dark as one a
+        year in). Otherwise the trailing stretch WAS fillable and daily_prices
+        should already carry it as real rows extending to that coverage end —
+        but the days-since-observation check still applies as a defensive bound
+        in case this PriceHistory was loaded from a table that hasn't been
+        rebuilt since the station went quiet.
         """
         dates = self._station_dates.get(station_code)
         prices = self.station_prices.get(station_code)
@@ -161,8 +177,14 @@ class PriceHistory:
             next_date = datetime.date.fromisoformat(dates[idx + 1])
             if (next_date - last_date).days > max_gap_days:
                 return None
-        elif (as_of_date - last_date).days > max_gap_days:
-            return None
+        else:
+            coverage_end = (
+                datetime.date.fromisoformat(self._avg_dates[-1]) if self._avg_dates else last_date
+            )
+            if (coverage_end - last_date).days > max_gap_days:
+                return None
+            if (as_of_date - last_date).days > max_gap_days:
+                return None
         return prices[idx][1]
 
     def station_gradient_at(self, station_code: int, as_of: str, window: int = 4) -> float | None:
