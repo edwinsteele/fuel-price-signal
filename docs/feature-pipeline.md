@@ -180,6 +180,57 @@ the judgement session can crash and resume without losing the facts.
   leaderboard doesn't silently promote a noise delta to a finding just because it was the
   best of several; `family_wise_percentile_threshold` is still computed too, purely as the
   descriptive-colour percentile equivalent.
+- **Arity is not capped; reuse is PRICED (`fps-3jj.25`, `fps-3jj.21`, `fps-3jj.14`).** A
+  candidate is one mechanism and may be any number of columns — the field's own precedent
+  (per-LGA candidates) needs wide groups, and a hard `MAX_RULER_ARITY` cap was tried and
+  reverted: it let the ruler dictate what the generator was allowed to propose, which cost a
+  wide candidate its verdict entirely rather than just a harder bar. Instead,
+  `placebo.effective_n_draws` prices column reuse: two draws sharing `s` of `arity` source
+  columns are charged `TEXTURE_ICC_BOUND × s / arity` correlation, not the full ICC, and
+  `family_wise_z_threshold` (`scipy.stats.t.ppf`, fractional `df` allowed) uses that effective
+  draw count in place of the nominal one. A wider candidate reuses more source columns per
+  draw, so its band is worth fewer effective draws, so its bar widens automatically — harder
+  as width grows, never refused. Both draw pools (source columns, block seeds) are unbounded;
+  pick `n_draws` for the certainty you want and pay the compute.
+- **`TEXTURE_ICC_BOUND = 0.274` is MEASURED, not assumed (`fps-3jj.23`, 2026-08-27) — a 95%
+  upper bound, not a point estimate.** One-way ANOVA of 32 pinned-source draws (8 source
+  columns × 4 block seeds, `noise_floor.py --same-source-column`) grouped by source column:
+  point estimate ~0 (`F(7,24)=0.735, p=0.65`), one-sided 95% upper bound 0.274. Read a point
+  estimate of ~0 as "could not see it," never "it is not there" — the constant deliberately
+  carries the pessimistic (upper-bound) end, and a cheaper design (one column × 10 seeds) was
+  tried first and rejected as worthless (its best possible bound was looser than the value it
+  would have replaced). Full derivation: `experiments/2026-08-27_texture_icc/`.
+- **A shared block SEED — not a shared source column — is what destroys a placebo bank's
+  independence (`fps-3jj.20`, fixed by `fps-3jj.21`).** Two placebos built from the same block
+  seed get the identical date-block rearrangement, so a near-duplicate pair of source columns
+  comes out of the shuffle still correlated with each other (measured up to |ρ|=0.97).
+  `placebo.block_seed`'s counter never restarts, closing this by construction. A floor
+  computed before 2026-08-26 may carry the old failure mode; floors after that date are clean.
+- **Recomputing a floor after a re-lock — the two paths differ.** A *column*-lock (a
+  graduation changing `LOCKED_FEATURE_COLUMNS`) recomputes in place:
+  `noise_floor.py <batch> --force`. A *cadence* re-lock does NOT — `check_freeze_cadence`
+  refuses `--force` outright when the batch's `freeze.json` cadence disagrees with the live
+  `TankParams()` default, because data frozen at the old cadence can't retroactively become a
+  new-cadence batch. Freeze a NEW batch at the new cadence instead.
+- **Promoting a wider-arity floor to be the grading ruler is a rename, not a compute** —
+  `_noise_band()` reads one hardcoded filename, `noise_floor.json`; nothing reads an
+  arity-suffixed side-file. Compute beside the current ruler at the SAME `n_draws`, then:
+  ```
+  mv <batch>/noise_floor.json    <batch>/noise_floor_k1.json
+  mv <batch>/noise_floor_k3.json <batch>/noise_floor.json
+  ```
+  Never `--force` over `noise_floor.json` directly — it's mechanically safe for grading
+  (one-sided: a wider ruler only raises the bar) but destroys the k=1 baseline and the ruler
+  already-written dossiers were graded against. Both are tracked in git and recoverable, but
+  recovery isn't a procedure — rename, keep both.
+- **A fresh batch freeze always produces an arity-1 floor**, because at freeze time no
+  candidates exist yet to know the real modal arity. Budget one extra floor run per batch
+  (~2h at k=3) to promote to the batch's actual grading ruler once the first candidates are
+  filed — this is the normal shape, not a surprise (`fps-3jj.19`).
+- **The bar is a detection threshold, not a target, and it is BATCH-SPECIFIC — never reuse a
+  number from one batch as a constant for another.** `batch1`'s own honest single-candidate
+  bar (10 draws, arity 3, 1d cadence): −0.17 c/L judged alone, −0.27 c/L at the batch level (5
+  candidates, Bonferroni-corrected). Recompute and cite each batch's own floor.
 
 ## Running it by hand
 

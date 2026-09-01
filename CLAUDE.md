@@ -7,6 +7,8 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
 - [AGENTS.md](AGENTS.md) — architecture, CLI pattern, data strategy, signal logic
 - [docs/STATUS.md](docs/STATUS.md) — current build state; what's shipped vs pending
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — code & workflow rules (the changeable how-we-do-things layer)
+- [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) — CLI reference for training/evaluating/diagnosing the ML model (dev reference, not day-to-day usage)
+- [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) — ML model design decisions; [docs/feature-pipeline.md](docs/feature-pipeline.md) — the AI-sourced candidate-feature pipeline's machinery
 - `PLAN_ml_signal.md` — active ML-signal plan. **Lives at repo root and is gitignored** (despite some docs saying `docs/PLAN_ml_signal.md` — that path is wrong).
 - Run `bd ready` for open work items (GitHub Issues retired in favour of Beads — see [AGENTS.md § Beads](AGENTS.md#beads)).
 - Run `bd memories` for this repo's atomic technical gotchas (git discipline, DB-write timing, environment traps). These are short, load-bearing, and cheap to read — several are rules you will otherwise break before noticing.

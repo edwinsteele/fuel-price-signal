@@ -100,7 +100,7 @@ The worker is a scheduled remote Claude Code routine. To pause it:
 
 ## Spend monitoring
 
-Each worker run (twice daily — `0 9,20 * * *` UTC) uses Sonnet. The WIP cap of 3 issues per batch limits spend. Each run that finds no work exits in seconds (cheap). Implement sessions with actual work are estimated at ~$0.10–0.30 per issue depending on complexity.
+Each worker run (twice daily — `0 9,20 * * *` UTC) uses Sonnet. The one-PR-at-a-time WIP cap (see above) limits spend. Each run that finds no work exits in seconds (cheap). Implement sessions with actual work are estimated at ~$0.10–0.30 per issue depending on complexity.
 
 Monitor spend in the Anthropic console. If costs are unexpectedly high, check whether the worker is getting stuck in retry loops (visible in the routine's run history).
 

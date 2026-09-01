@@ -12,6 +12,8 @@ WAIT | Day 12/46 of cycle | E10 @ Caltex Springwood: 179.2c | Trough est. ~34 da
 See [docs/STATUS.md](docs/STATUS.md) for current build status and pending phases.
 See [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) for ML model design decisions and results.
 See [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for code style, test patterns, definition-of-done, and git workflow rules.
+See [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) for the ML model training/evaluation CLI reference (README.md covers setup and day-to-day signal usage only).
+See [docs/feature-pipeline.md](docs/feature-pipeline.md) for the AI-sourced candidate-feature pipeline's machinery.
 
 ## Module structure
 
