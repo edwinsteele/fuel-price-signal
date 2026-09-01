@@ -850,15 +850,20 @@ def run_backtest(
 
 def _oracle_transitions(
     level: float, price: float | None, tank: TankParams, *, deplete: bool = True,
-) -> list[tuple[float, float, float, bool]]:
-    """Feasible (next_decide_level, spend_add, litres_add, emergency) from ``level``.
+) -> list[tuple[float, float, float, bool, float]]:
+    """Feasible (next_decide_level, spend_add, litres_add, emergency, loss_add) from ``level``.
 
     Mirrors run_backtest's per-date fill/emergency logic: depletion of D = daily ×
     interval is applied on the way to the *next* decide point. A transition that
     would run the tank dry (pre-clamp next level < 0) is infeasible and omitted —
-    uniformly across BUY / WAIT / skipped-date, so every surviving transition
-    depletes exactly D. That keeps litres pinned per arrival level (the invariant
-    run_oracle_backtest relies on to equate min-spend with min-CPL).
+    uniformly across BUY / WAIT — so every surviving PRICED-date transition
+    depletes exactly D, and ``loss_add`` (the amount of intended depletion that
+    was forgiven rather than applied) is always 0.0 for those. The skipped-date
+    branch is the one exception (see below): it can forgive PART of D, and
+    reports that amount as ``loss_add`` — see run_oracle_backtest's docstring
+    for why the DP needs this as a THIRD, explicit accumulator rather than
+    trusting arrival level to still pin litres (fps-32h: it doesn't, once any
+    loss has been forgiven).
 
     ``deplete=False`` is passed for the *final* eval date: the engine depletes at
     the top of the next date, so the last date has no subsequent step to survive
@@ -880,29 +885,56 @@ def _oracle_transitions(
     it flags. The default TankParams passes ``validate_never_dry()`` at 1–7 day
     cadence (the range #262 and fps-fii used), so it's a strict ceiling there.
 
-    A None price skips the date (the engine's ``continue``): no fill, no emergency
-    — but the same never-dry gate applies, so a no-data stretch long enough to
-    drain the tank yields no feasible plan (NaN CPL) rather than a spurious
-    clamped-depletion path. Before fps-2i4, station_price_at forward-filled
-    without limit, so None only occurred as a leading prefix (before a station's
-    first-ever price) in practice; it now also occurs mid-series whenever a
-    station goes dark for more than MAX_GAP_FILL_DAYS, and this DP handles that
-    the same way — skip, keep depleting, no fill/emergency for that date.
+    A None price skips the date (the engine's ``continue``): no fill, no
+    emergency, and — mirroring ``run_backtest``'s ``gap_since_decide`` clamp
+    (fps-2i4 review finding #1) — depletion through a no-price date is CLAMPED
+    at zero rather than pruned as infeasible. Before fps-32h, this branch went
+    through the same prune-on-negative ``_emit`` as a priced date, so a gap
+    long enough to drain the tank made every DP path infeasible and the whole
+    backtest returned NaN — while ``run_backtest`` replaying the identical
+    station-fold just clamps and carries on (a station going dark, e.g. a real
+    closure, is a data-coverage gap, not a strategy failure the never-dry
+    guarantee is meant to catch).
+
+    That clamp is a real forgiveness, not the ``max(0.0, ...)`` float-epsilon
+    tidy-up ``_emit`` does elsewhere (which only ever nudges an already-~0
+    value, since ``_emit`` refuses to emit anything that would go meaningfully
+    negative in the first place) — a no-price date can forgive an arbitrary
+    amount of depletion (``max(0.0, D − level)``) when the tank was already
+    emptier than one day's consumption. That breaks the "every surviving
+    transition depletes exactly D" property the priced-date branches still
+    have, so it's reported as ``loss_add`` for the caller to track explicitly
+    rather than silently baked into ``next_decide_level``. Once price resumes,
+    the DP's normal BUY/WAIT transitions handle a clamped (possibly zero)
+    arrival level exactly as any other level — no special-casing needed there,
+    unlike ``run_backtest``'s single-step raise-forgiveness, because the DP was
+    never at risk of raising in the first place, only of pruning. A genuine
+    drain between two ADJACENT priced dates (no gap) is unaffected — that path
+    still goes through ``_emit`` and is still pruned.
     """
     size = tank.tank_size_litres
     depletion = tank.depletion_litres
-    out: list[tuple[float, float, float, bool]] = []
+    out: list[tuple[float, float, float, bool, float]] = []
 
     def _emit(post: float, spend_add: float, litres_add: float, emergency: bool) -> None:
         if not deplete:
-            out.append((post, spend_add, litres_add, emergency))
+            out.append((post, spend_add, litres_add, emergency, 0.0))
             return
         nxt = post - depletion
         if nxt >= -1e-9:  # run-dry paths pruned uniformly
-            out.append((max(0.0, nxt), spend_add, litres_add, emergency))
+            out.append((max(0.0, nxt), spend_add, litres_add, emergency, 0.0))
 
     if price is None:
-        _emit(level, 0.0, 0.0, False)  # skipped date: no fill, no emergency
+        # Skipped date: no fill, no emergency, clamp instead of prune (see
+        # docstring) — depletion still applies unless this is the final date.
+        # loss_add is the amount of that depletion forgiven by the clamp.
+        if deplete:
+            clamped = max(0.0, level - depletion)
+            loss_add = max(0.0, depletion - level)
+        else:
+            clamped = level
+            loss_add = 0.0
+        out.append((clamped, 0.0, 0.0, False, loss_add))
         return out
 
     # BUY → fill to full (no-op fill if already full).
@@ -942,14 +974,42 @@ def run_oracle_backtest(
     recoverable headroom (see module note + _oracle_transitions for the
     leaky-ceiling and never-dry caveats).
 
-    Why minimising spend per arrival level yields min CPL: every feasible
-    transition depletes exactly D (run-dry paths are pruned, not clamped), so for
-    a fixed arrival level total litres is pinned by conservation (start 50% +
-    Σfills − Σdepletions = arrival − 0.5·size + N·D). Equal denominator ⇒ the
-    min-spend path is the min-CPL path at that level; the result is the min CPL
-    over arrival levels. ``collect_fills`` reconstructs the optimal plan's
-    FillRecord ledger. NaN CPL when no feasible plan exists (e.g. the tank cannot
-    cover one step, or a leading no-data prefix drains it).
+    Why minimising spend per (arrival level, cumulative forgiven-depletion
+    "loss") state yields min CPL: every transition depletes exactly D EXCEPT
+    a no-price date's clamp, which can forgive part of it (see
+    ``_oracle_transitions``). So litres is pinned not by arrival level alone,
+    but by (arrival level, loss so far) via conservation: start 50% + Σfills −
+    (N·D − loss) = arrival ⟹ litres = arrival − 0.5·size + N·D − loss. For any
+    state with loss == 0 (every fold with NO no-price dates at all — i.e. no
+    closure, of any length — never leaves this case) that reduces to the
+    original level-only invariant, so those folds pay no extra cost. Once loss
+    can differ, though, level alone stops pinning litres: two states can reach
+    the SAME arrival level having forgiven DIFFERENT amounts (one clamped from
+    empty for longer than another), carrying genuinely different litres for
+    that level — keying by level alone would let the DP silently discard
+    whichever one has more litres in favour of the one with less spend, even
+    when the discarded state is the one that leads to the true minimum CPL
+    (fps-32h found this empirically: a manually-constructed "top up cheap
+    before a known closure" strategy beat the level-only DP's reported
+    ceiling, by as much as 2.25 c/L on a 300-fold synthetic sweep — a real
+    high-frequency failure mode on real closures, not a tail case). Keying by
+    (level, loss) makes the pinning explicit again — min-spend-per-key is
+    trivially also min-CPL-per-key, with no assumption needed. Cost is a step
+    function of whether the fold contains a closure at all, not of whether the
+    closure would have drained the tank from its start level: the DP explores
+    states all the way down to the emergency floor regardless, and those
+    drain even from a gap far shorter than a full one. Bounded at roughly
+    ``2 · size / D`` distinct losses per closure, saturating within the first
+    ~one tank's worth of dark days regardless of how much longer the closure
+    runs, and multiplying (not adding) across separate closures in the same
+    window — measured directly (not just asymptotically) on station 414's
+    real closure below, so this isn't a purely theoretical bound.
+    ``collect_fills`` reconstructs the optimal plan's FillRecord
+    ledger. NaN CPL when no feasible plan exists — a genuine run-dry between
+    two ADJACENT priced dates (the tank cannot cover one step even with an
+    emergency fill). A no-price gap (leading, mid-series, or trailing) no
+    longer causes this on its own: depletion through it is clamped at zero,
+    mirroring run_backtest's gap forgiveness (see _oracle_transitions).
     """
     if tank is None:
         tank = TankParams()
@@ -970,34 +1030,47 @@ def run_oracle_backtest(
 
     prices = [history.station_price_at(station_code, d) for d in eval_dates]
 
-    # DP, one layer per decide point. A state is a rounded decide-level mapping to
-    # (min_spend, litres, back), where back = (prev_level_key, fill_litres,
-    # fill_price, emergency) records the transition INTO this state for ledger
-    # reconstruction. Levels are rounded so float drift doesn't fragment
-    # otherwise-identical states. All layers are retained so the optimal plan can
-    # be walked back from the terminal argmin.
-    def _key(level: float) -> float:
-        return round(level, 6)
+    # DP, one layer per decide point. A state is keyed by (rounded decide-level,
+    # rounded cumulative loss) — NOT level alone, see the docstring's fps-32h
+    # note — mapping to (min_spend, litres, back), where back = (prev_state_key,
+    # fill_litres, fill_price, emergency) records the transition INTO this state
+    # for ledger reconstruction. Litres lives in the VALUE (needed for the
+    # terminal CPL and ledger), loss lives in the KEY (needed to keep states
+    # with genuinely different litres from colliding) — they are related by a
+    # per-layer-constant offset (see docstring), so keying on one vs. the other
+    # partitions states identically; loss is preferred because it is exactly
+    # 0.0 whenever the fold has no no-price dates at all, making "this fold
+    # pays no extra state-space cost" checkable in the key itself rather than
+    # inferred. A fold WITH a closure pays a bounded ~2·size/D multiplier
+    # regardless of closure length (see docstring) — not free, but bounded and
+    # measured. Values are rounded so float drift doesn't fragment otherwise-
+    # identical states. All layers are retained so the optimal plan can be
+    # walked back from the terminal argmin.
+    def _key(level: float, loss: float) -> tuple[float, float]:
+        return (round(level, 6), round(loss, 6))
 
-    # back = (prev_level_key, fill_litres, fill_price, emergency); None at the start.
-    BackPtr = tuple[float, float, float | None, bool] | None
+    # back = (prev_state_key, fill_litres, fill_price, emergency); None at the start.
+    StateKey = tuple[float, float]
+    BackPtr = tuple[StateKey, float, float | None, bool] | None
     start_level = 0.5 * tank.tank_size_litres
-    layers: list[dict[float, tuple[float, float, BackPtr]]] = [
-        {_key(start_level): (0.0, 0.0, None)}
+    layers: list[dict[StateKey, tuple[float, float, BackPtr]]] = [
+        {_key(start_level, 0.0): (0.0, 0.0, None)}
     ]
     last_i = len(prices) - 1
     for i, price in enumerate(prices):
         prev = layers[-1]
-        nxt_layer: dict[float, tuple[float, float, BackPtr]] = {}
-        for level_key, (spend, litres, _back) in prev.items():
-            for next_level, sa, la, emergency in _oracle_transitions(
-                level_key, price, tank, deplete=(i != last_i)
+        nxt_layer: dict[StateKey, tuple[float, float, BackPtr]] = {}
+        for state_key, (spend, litres, _back) in prev.items():
+            level, loss = state_key
+            for next_level, sa, la, emergency, loss_add in _oracle_transitions(
+                level, price, tank, deplete=(i != last_i)
             ):
                 cand_spend = spend + sa
-                key = _key(next_level)
+                cand_litres = litres + la
+                key = _key(next_level, loss + loss_add)
                 cur = nxt_layer.get(key)
                 if cur is None or cand_spend < cur[0]:
-                    nxt_layer[key] = (cand_spend, litres + la, (level_key, la, price, emergency))
+                    nxt_layer[key] = (cand_spend, cand_litres, (state_key, la, price, emergency))
         if not nxt_layer:
             # Every path ran dry (tank too small for the consumption) → no plan.
             return nan_result
