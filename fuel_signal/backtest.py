@@ -980,11 +980,11 @@ def run_oracle_backtest(
     ``_oracle_transitions``). So litres is pinned not by arrival level alone,
     but by (arrival level, loss so far) via conservation: start 50% + Σfills −
     (N·D − loss) = arrival ⟹ litres = arrival − 0.5·size + N·D − loss. For any
-    state with loss == 0 (the overwhelming majority — every fold with no
-    draining gap never leaves this case) that reduces to the original
-    level-only invariant, so those folds pay no extra cost. Once loss can
-    differ, though, level alone stops pinning litres: two states can reach the
-    SAME arrival level having forgiven DIFFERENT amounts (one clamped from
+    state with loss == 0 (every fold with NO no-price dates at all — i.e. no
+    closure, of any length — never leaves this case) that reduces to the
+    original level-only invariant, so those folds pay no extra cost. Once loss
+    can differ, though, level alone stops pinning litres: two states can reach
+    the SAME arrival level having forgiven DIFFERENT amounts (one clamped from
     empty for longer than another), carrying genuinely different litres for
     that level — keying by level alone would let the DP silently discard
     whichever one has more litres in favour of the one with less spend, even
@@ -994,9 +994,17 @@ def run_oracle_backtest(
     ceiling, by as much as 2.25 c/L on a 300-fold synthetic sweep — a real
     high-frequency failure mode on real closures, not a tail case). Keying by
     (level, loss) makes the pinning explicit again — min-spend-per-key is
-    trivially also min-CPL-per-key, with no assumption needed, and it is
-    provably free (state count identical to before) whenever no draining gap
-    exists. ``collect_fills`` reconstructs the optimal plan's FillRecord
+    trivially also min-CPL-per-key, with no assumption needed. Cost is a step
+    function of whether the fold contains a closure at all, not of whether the
+    closure would have drained the tank from its start level: the DP explores
+    states all the way down to the emergency floor regardless, and those
+    drain even from a gap far shorter than a full one. Bounded at roughly
+    ``2 · size / D`` distinct losses per closure, saturating within the first
+    ~one tank's worth of dark days regardless of how much longer the closure
+    runs, and multiplying (not adding) across separate closures in the same
+    window — measured directly (not just asymptotically) on station 414's
+    real closure below, so this isn't a purely theoretical bound.
+    ``collect_fills`` reconstructs the optimal plan's FillRecord
     ledger. NaN CPL when no feasible plan exists — a genuine run-dry between
     two ADJACENT priced dates (the tank cannot cover one step even with an
     emergency fill). A no-price gap (leading, mid-series, or trailing) no
@@ -1031,9 +1039,11 @@ def run_oracle_backtest(
     # with genuinely different litres from colliding) — they are related by a
     # per-layer-constant offset (see docstring), so keying on one vs. the other
     # partitions states identically; loss is preferred because it is exactly
-    # 0.0 whenever no draining gap has occurred, making the "this fold pays no
-    # extra state-space cost" claim checkable in the key itself rather than
-    # inferred. Values are rounded so float drift doesn't fragment otherwise-
+    # 0.0 whenever the fold has no no-price dates at all, making "this fold
+    # pays no extra state-space cost" checkable in the key itself rather than
+    # inferred. A fold WITH a closure pays a bounded ~2·size/D multiplier
+    # regardless of closure length (see docstring) — not free, but bounded and
+    # measured. Values are rounded so float drift doesn't fragment otherwise-
     # identical states. All layers are retained so the optimal plan can be
     # walked back from the terminal argmin.
     def _key(level: float, loss: float) -> tuple[float, float]:
