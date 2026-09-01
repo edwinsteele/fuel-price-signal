@@ -936,12 +936,27 @@ def test_oracle_survives_a_draining_dark_gap_without_nan():
     so a gap long enough to drain the tank made every DP path infeasible and the
     whole backtest returned NaN. That silently dropped the station from the
     oracle side of a model_cpl-vs-oracle_cpl headroom comparison while the model
-    side (run_backtest) kept it, a population mismatch. Same 414-shaped scenario
-    as the run_backtest test (deliberately NOT the gentle tank the other oracle
-    gap tests use — this one must actually drain), and the oracle must produce a
-    real plan, not NaN."""
-    before = [("2022-08-25", 185.9)]
-    after = [("2023-10-17", 165.9), ("2023-10-18", 165.9)]
+    side (run_backtest) kept it, a population mismatch.
+
+    Price ordering matters here, and is DELIBERATELY the reverse of 414's real
+    numbers: cheap (165.9) BEFORE the closure, expensive (185.9) after. With the
+    real ordering (expensive before, cheap after) waiting out the gap is already
+    optimal, so a level-only DP that merely avoids NaN passes this test whether
+    or not its per-key merge is sound — it never has to choose between two
+    genuinely different pre-gap histories. Cheap-before/expensive-after forces
+    that choice: topping up in full before the gap is the only way to beat
+    always-buy, so a DP that discards the topped-up state in favour of a
+    lower-spend-but-lower-litres one (fps-32h's second, deeper finding: level
+    alone doesn't pin litres once a gap has been clamped through) will silently
+    report a WORSE ceiling than actually achievable, passing every assertion
+    below except the ceiling one. The ceiling assertion is therefore the one
+    that actually guards against that regression, not the not-NaN one.
+
+    Same 414-shaped closure duration as the run_backtest test (deliberately NOT
+    the gentle tank the other oracle gap tests use — this one must actually
+    drain)."""
+    before = [("2022-08-25", 165.9)]
+    after = [("2023-10-17", 185.9), ("2023-10-18", 185.9)]
     history = PriceHistory(avg_series=before, station_prices={414: before + after})
     tank = TankParams(
         tank_size_litres=50.0,
@@ -951,8 +966,10 @@ def test_oracle_survives_a_draining_dark_gap_without_nan():
     )
     args = (414, "2022-08-24", "2023-10-31", tank)
     oracle = run_oracle_backtest(history, *args, collect_fills=True)
+    always = run_backtest(history, AlwaysBuyStrategy(), *args)
     assert not math.isnan(oracle.realised_cpl)
     assert oracle.fill_events > 0
+    assert oracle.realised_cpl <= always.realised_cpl + 1e-9
     chosen = {f.date for f in oracle.fills if not f.emergency}
     replay = run_backtest(history, _ReplayStrategy(chosen), *args)
     assert math.isclose(replay.total_spend_cents, oracle.total_spend_cents, rel_tol=1e-9)
