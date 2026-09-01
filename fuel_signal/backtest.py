@@ -880,14 +880,26 @@ def _oracle_transitions(
     it flags. The default TankParams passes ``validate_never_dry()`` at 1–7 day
     cadence (the range #262 and fps-fii used), so it's a strict ceiling there.
 
-    A None price skips the date (the engine's ``continue``): no fill, no emergency
-    — but the same never-dry gate applies, so a no-data stretch long enough to
-    drain the tank yields no feasible plan (NaN CPL) rather than a spurious
-    clamped-depletion path. Before fps-2i4, station_price_at forward-filled
-    without limit, so None only occurred as a leading prefix (before a station's
-    first-ever price) in practice; it now also occurs mid-series whenever a
-    station goes dark for more than MAX_GAP_FILL_DAYS, and this DP handles that
-    the same way — skip, keep depleting, no fill/emergency for that date.
+    A None price skips the date (the engine's ``continue``): no fill, no
+    emergency, and — mirroring ``run_backtest``'s ``gap_since_decide`` clamp
+    (fps-2i4 review finding #1) — depletion through a no-price date is CLAMPED
+    at zero rather than pruned as infeasible. Before fps-32h, this branch went
+    through the same prune-on-negative ``_emit`` as a priced date, so a gap
+    long enough to drain the tank made every DP path infeasible and the whole
+    backtest returned NaN — while ``run_backtest`` replaying the identical
+    station-fold just clamps and carries on (a station going dark, e.g. a real
+    closure, is a data-coverage gap, not a strategy failure the never-dry
+    guarantee is meant to catch). That asymmetry meant a real closure (like
+    station 414's) silently dropped the station from the oracle side of any
+    ``model_cpl − oracle_cpl`` headroom comparison while the model side kept
+    it — comparing two different station-fold populations without either side
+    noticing. Once price resumes, the DP's normal BUY/WAIT transitions handle
+    a clamped (possibly zero) arrival level exactly as any other level — no
+    special-casing needed there, unlike ``run_backtest``'s single-step
+    raise-forgiveness, because the DP was never at risk of raising in the
+    first place, only of pruning. A genuine drain between two ADJACENT priced
+    dates (no gap) is unaffected — that path still goes through ``_emit`` and
+    is still pruned.
     """
     size = tank.tank_size_litres
     depletion = tank.depletion_litres
@@ -902,7 +914,10 @@ def _oracle_transitions(
             out.append((max(0.0, nxt), spend_add, litres_add, emergency))
 
     if price is None:
-        _emit(level, 0.0, 0.0, False)  # skipped date: no fill, no emergency
+        # Skipped date: no fill, no emergency, clamp instead of prune (see
+        # docstring) — depletion still applies unless this is the final date.
+        clamped = max(0.0, level - depletion) if deplete else level
+        out.append((clamped, 0.0, 0.0, False))
         return out
 
     # BUY → fill to full (no-op fill if already full).
@@ -948,8 +963,11 @@ def run_oracle_backtest(
     Σfills − Σdepletions = arrival − 0.5·size + N·D). Equal denominator ⇒ the
     min-spend path is the min-CPL path at that level; the result is the min CPL
     over arrival levels. ``collect_fills`` reconstructs the optimal plan's
-    FillRecord ledger. NaN CPL when no feasible plan exists (e.g. the tank cannot
-    cover one step, or a leading no-data prefix drains it).
+    FillRecord ledger. NaN CPL when no feasible plan exists — a genuine run-dry
+    between two ADJACENT priced dates (the tank cannot cover one step even with
+    an emergency fill). A no-price gap (leading, mid-series, or trailing) no
+    longer causes this on its own: depletion through it is clamped at zero,
+    mirroring run_backtest's gap forgiveness (see _oracle_transitions, fps-32h).
     """
     if tank is None:
         tank = TankParams()

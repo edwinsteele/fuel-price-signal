@@ -929,6 +929,37 @@ def test_oracle_handles_mid_series_dark_gap():
     assert math.isclose(replay.realised_cpl, oracle.realised_cpl, rel_tol=1e-9)
 
 
+def test_oracle_survives_a_draining_dark_gap_without_nan():
+    """fps-32h (fps-2i4 review finding #2): unlike run_backtest (fixed by fps-2i4,
+    see test_station_reopening_after_a_draining_dark_gap_does_not_raise), the
+    oracle DP pruned any transition that went negative through a no-price date —
+    so a gap long enough to drain the tank made every DP path infeasible and the
+    whole backtest returned NaN. That silently dropped the station from the
+    oracle side of a model_cpl-vs-oracle_cpl headroom comparison while the model
+    side (run_backtest) kept it, a population mismatch. Same 414-shaped scenario
+    as the run_backtest test (deliberately NOT the gentle tank the other oracle
+    gap tests use — this one must actually drain), and the oracle must produce a
+    real plan, not NaN."""
+    before = [("2022-08-25", 185.9)]
+    after = [("2023-10-17", 165.9), ("2023-10-18", 165.9)]
+    history = PriceHistory(avg_series=before, station_prices={414: before + after})
+    tank = TankParams(
+        tank_size_litres=50.0,
+        daily_consumption_litres=3.571,
+        evaluation_interval_days=1,
+        floor_fraction=0.10,
+    )
+    args = (414, "2022-08-24", "2023-10-31", tank)
+    oracle = run_oracle_backtest(history, *args, collect_fills=True)
+    assert not math.isnan(oracle.realised_cpl)
+    assert oracle.fill_events > 0
+    chosen = {f.date for f in oracle.fills if not f.emergency}
+    replay = run_backtest(history, _ReplayStrategy(chosen), *args)
+    assert math.isclose(replay.total_spend_cents, oracle.total_spend_cents, rel_tol=1e-9)
+    assert math.isclose(replay.total_litres, oracle.total_litres, rel_tol=1e-9)
+    assert math.isclose(replay.realised_cpl, oracle.realised_cpl, rel_tol=1e-9)
+
+
 def test_oracle_prefers_deferring_to_a_known_cheaper_day():
     """With a gentle tank (long deferral horizon) the oracle reaches the global
     minimum price, so its CPL tracks the cheap days, not the path mean."""
