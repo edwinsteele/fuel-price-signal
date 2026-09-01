@@ -292,51 +292,37 @@ def regret_horizon_days(tank_params: str, *, exact_fields: Mapping[str, float] |
     compare regret across dossiers at different cadences. Same defect class as
     `cascade_window_days`' `n_decisions` quantisation caveat, reached by a different route.
 
-    **Rounding-tie limitation (fps-o0h), and what `exact_fields` does and does not fix.**
-    Without `exact_fields`, this reads the stamp, which is a DISPLAY format —
-    `format_tank_params` renders daily consumption `:.3f`, so the default 3.5714285714285716
-    arrives here as 3.571 and the feasible wait computes as 12.6015 rather than 12.6. Both
-    round to 13, so neither committed stamp (`50/3.571/1d/10%`, `50/3.571/7d/10%`) is affected
-    in this function or in `cascade_window_days`. Swept over the same 560-config grid
-    `tests/test_exp_lib_flips.py` uses, **12** configs disagree with the same quantity computed
-    from `TankParams` directly (e.g. `40/2.857/1d/25%` gives 11 here against 10 from the
-    dataclass) — always on an exact rounding tie, never general float drift.
+    **`math.ceil()`, not `round()` (fps-2th, resolved 2026-09-02).** This function is
+    documented as a hard ceiling, so it uses `math.ceil()` — `round()` on an exact `.5` uses
+    round-half-to-even and can round DOWN, understating a value that claims to be an upper
+    bound; `math.ceil()` resolves every tie upward instead, by definition rather than float
+    parity. This predates `exact_fields` (the function used `round()` from the start) and the
+    switch moves MANY non-tie fractional values up by one day too — anything `round()`
+    previously rounded down now ceils up — not just exact ties. Neither of this project's two
+    committed `tank_params` stamps is affected: `50/3.571/1d/10%` and `50/3.571/7d/10%` both
+    compute 12.6015 -> **13** either way, and every `horizon_days` figure in this project's
+    committed dossiers reads 13, so no published regret number moved when this switched.
 
-    **`exact_fields` does NOT remove rounding ties in general — it only removes the specific
-    one caused by re-parsing the 3dp stamp** (PR #355 review finding #2, correcting this
-    docstring's earlier claim that it "removes the tie entirely"; see finding #4 too — an
-    earlier draft here also said "52 configs", which was `cascade_window_days`' count,
-    transplanted). All 12 of THIS 560-config sweep's disagreements happen to resolve correctly
-    with `exact_fields` (matching round-half-to-even on the true, exact ceiling) — but a wider
-    sweep (`size` 20-120, `tank_life` 6-39, `floor` 1-50%) finds `exact_fields` landing on the
-    WRONG side of the tie for roughly 11% of exact-.5 ceilings, for the same reason
-    `cascade_window_days`' docstring documents: `max_feasible_wait_days` is `(1 - floor) * size
-    / daily`, and when `daily` was itself constructed as `size / tank_life`, the round-trip
-    `size / (size / tank_life)` is not always exactly `tank_life` in double precision — an
-    unavoidable floating-point property of the STORED values, not something `TankParams` or
-    `exact_fields` can correct after the fact. Passing `exact_fields` (`fuel_signal.backtest.
-    tank_params_fields(tank)`'s dict, persisted alongside the stamp) still routes the
-    computation through `TankParams.max_feasible_wait_days` — the single owner of this
-    quantity, so at least both callers computing it agree with EACH OTHER — but "single owner"
-    is not the same claim as "exact", and this docstring no longer conflates the two. Prefer
-    `exact_fields` whenever the caller's meta carries it (it fixes the one well-understood,
-    avoidable failure mode); fall back to the stamp only for results.json predating fps-o0h.
-
-    **Separately, `round()` vs. `math.ceil()` (PR #355 review finding #5, pre-existing, out of
-    scope here).** This function is documented as a "ceiling", but `round()` on an exact `.5`
-    can round DOWN (banker's rounding), understating the ceiling it claims to be — `math.ceil`
-    would resolve every tie upward instead, by definition rather than float parity. That
-    question predates fps-o0h (this function used `round()` before `exact_fields` existed) and
-    changing it would move MANY non-tie values too (any fractional ceiling `round()` currently
-    rounds down), not just the tie cases — a real behaviour change to a locked function,
-    needing its own decision and sign-off, not something to fold into a refactor whose own
-    acceptance criterion is that the locked config's answer (13) must not move. Filed
-    separately; not fixed here.
+    **What `exact_fields` does and does not fix, under `math.ceil()`.** Without
+    `exact_fields`, this reads the stamp, which is a DISPLAY format — `format_tank_params`
+    renders daily consumption `:.3f`, so the default 3.5714285714285716 arrives here as 3.571
+    and the feasible wait computes as 12.6015 rather than 12.6. Both ceiling to 13, so neither
+    committed stamp is affected in this function. Swept over the same 560-config grid
+    `tests/test_exp_lib_flips.py` uses, **6** configs disagree with the same quantity computed
+    from `TankParams` directly (e.g. `40/3.333/1d/25%` gives 10 here against 9 from the
+    dataclass: the true ceiling is exactly 9.0, but the 3dp-truncated stamp computes 9.0009 —
+    fractionally ABOVE the integer — which `math.ceil` then bumps a whole day higher) — always
+    right at an integer boundary the display truncation nudges across, never general float
+    drift. Passing `exact_fields` (`fuel_signal.backtest.tank_params_fields(tank)`'s dict,
+    persisted alongside the stamp) routes the computation through
+    `TankParams.max_feasible_wait_days` directly — the single owner of this quantity, so at
+    least both callers computing it agree with EACH OTHER. Prefer `exact_fields` whenever the
+    caller's meta carries it; fall back to the stamp only for results.json predating fps-o0h.
     """
     if exact_fields is not None:
-        return round(_tank_from_exact_fields(exact_fields, tank_params).max_feasible_wait_days)
+        return math.ceil(_tank_from_exact_fields(exact_fields, tank_params).max_feasible_wait_days)
     size, daily, _cadence, floor = parse_tank_params(tank_params)
-    return round((1.0 - floor) * size / daily)
+    return math.ceil((1.0 - floor) * size / daily)
 
 
 def _finite_positive_spread(values: pd.Series, std: float) -> bool:
