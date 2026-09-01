@@ -2,6 +2,8 @@
 summarise_regret (fps-2js)."""
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import pytest
 
@@ -98,24 +100,25 @@ def test_cascade_window_days_scales_with_a_different_tank():
 # exact-rational value), and pins the real disagreement counts (90 for cascade, 12
 # for regret — not the 12/52 the two docstrings had transplanted from each other).
 
-def test_regret_horizon_days_exact_fields_resolves_this_specific_known_tie():
-    """`40/2.857/1d/25%` is fps-o0h's own worked example: the exact ceiling
-    30/(40/14) = 10.5, exactly a rounding tie (round-half-to-even -> 10), but the
-    display-rounded stamp `30/2.857` = 10.500525... rounds to 11 instead. Passing
-    `exact_fields` routes through `TankParams.max_feasible_wait_days` and gets THIS
-    tie right; the stamp-only path is left exactly as it was (no silent behaviour
-    change for old results.json that predate this field). This is one worked example,
-    not a general guarantee — see the counterexample test below."""
+def test_regret_horizon_days_exact_fields_resolves_a_display_truncation_boundary_case():
+    """`40/3.333/1d/25%` (fps-2th, after `regret_horizon_days` switched from `round()` to
+    `math.ceil()`): the exact ceiling 0.75 * 40 / (40/12) is exactly 9.0, but the
+    display-rounded stamp `40/3.333` computes 0.75 * 40 / 3.333 = 9.0009..., fractionally
+    ABOVE 9 — `math.ceil` bumps THAT up to 10, one day higher than the true ceiling. Passing
+    `exact_fields` routes through `TankParams.max_feasible_wait_days` and avoids the display
+    truncation, landing on the true 9; the stamp-only path is left exactly as it was (no
+    silent behaviour change for old results.json that predate this field). This is one
+    worked example, not a general guarantee."""
     tank = TankParams(
-        tank_size_litres=40.0, daily_consumption_litres=40.0 / 14,
+        tank_size_litres=40.0, daily_consumption_litres=40.0 / 12,
         evaluation_interval_days=1, floor_fraction=0.25,
     )
     stamp = format_tank_params(tank)
-    assert stamp == "40/2.857/1d/25%"
+    assert stamp == "40/3.333/1d/25%"
 
-    assert regret_horizon_days(stamp) == 11  # unchanged legacy (lossy) behaviour
-    assert regret_horizon_days(stamp, exact_fields=tank_params_fields(tank)) == 10
-    assert round(tank.max_feasible_wait_days) == 10
+    assert regret_horizon_days(stamp) == 10  # display-truncated stamp overshoots by one day
+    assert regret_horizon_days(stamp, exact_fields=tank_params_fields(tank)) == 9
+    assert math.ceil(tank.max_feasible_wait_days) == 9
 
 
 def test_cascade_window_days_exact_fields_can_be_less_accurate_than_the_stamp():
@@ -145,9 +148,9 @@ def test_cascade_window_days_and_regret_horizon_days_exact_fields_reach_tankpara
     cadence) and confirm passing `exact_fields` always routes through the SAME `TankParams`
     properties a caller would get by constructing the dataclass directly — i.e. `exact_fields`
     isn't silently ignored or partially applied. Also pins the real disagreement counts
-    against the legacy stamp-only path at exactly 90 (cascade) and 12 (regret) — the two
-    docstrings previously had these numbers TRANSPLANTED from each other (PR #355 review
-    finding #1 / #4)."""
+    against the legacy stamp-only path at exactly 90 (cascade) and 6 (regret, after fps-2th's
+    `round()` -> `math.ceil()` switch; was 12 under `round()`) — the two docstrings previously
+    had these numbers TRANSPLANTED from each other (PR #355 review finding #1 / #4)."""
     n_cascade_disagree = 0
     n_regret_disagree = 0
     for size in (40, 50, 60, 70):
@@ -165,7 +168,7 @@ def test_cascade_window_days_and_regret_horizon_days_exact_fields_reach_tankpara
                     # Wiring: exact_fields reaches TankParams's own properties exactly.
                     expected_cascade = max(round(tank.full_to_empty_days / 2), cadence + 1)
                     assert cascade_window_days(stamp, exact_fields=fields) == expected_cascade
-                    expected_regret = round(tank.max_feasible_wait_days)
+                    expected_regret = math.ceil(tank.max_feasible_wait_days)
                     assert regret_horizon_days(stamp, exact_fields=fields) == expected_regret
 
                     if cascade_window_days(stamp) != expected_cascade:
@@ -174,7 +177,7 @@ def test_cascade_window_days_and_regret_horizon_days_exact_fields_reach_tankpara
                         n_regret_disagree += 1
 
     assert n_cascade_disagree == 90
-    assert n_regret_disagree == 12
+    assert n_regret_disagree == 6
 
 
 def test_exact_fields_mismatched_with_tank_params_raises():
@@ -521,7 +524,8 @@ def test_regret_horizon_is_the_tanks_own_feasible_wait():
     # being a REACHABLE wait (see regret_horizon_days' sweep table).
     assert regret_horizon_days("50/3.571/1d/10%") == 13
     # A bigger floor leaves less usable range, so the horizon must SHRINK, never grow.
-    assert regret_horizon_days("50/3.571/1d/50%") == 7
+    # (8, not 7: 0.5 * 50 / 3.571 = 7.00084 -> math.ceil rounds up, fps-2th.)
+    assert regret_horizon_days("50/3.571/1d/50%") == 8
     # Independent of cadence — cadence sets the step within the window, not its length.
     assert regret_horizon_days("50/3.571/7d/10%") == 13
 
