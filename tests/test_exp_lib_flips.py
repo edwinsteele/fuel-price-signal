@@ -97,8 +97,9 @@ def test_cascade_window_days_scales_with_a_different_tank():
 # rather than an independent true value — a tautology that could not have caught
 # either bug. It now checks WIRING (does `exact_fields` reach `TankParams`'s
 # properties at all) separately from ACCURACY (does the answer match the true,
-# exact-rational value), and pins the real disagreement counts (90 for cascade, 12
-# for regret — not the 12/52 the two docstrings had transplanted from each other).
+# exact-rational value), and pins the real disagreement counts (90 for cascade, 6 for
+# regret as of fps-2th's round()->math.ceil() switch (was 12 under round()) — not the
+# 12/52 the two docstrings had transplanted from each other before that).
 
 def test_regret_horizon_days_exact_fields_resolves_a_display_truncation_boundary_case():
     """`40/3.333/1d/25%` (fps-2th, after `regret_horizon_days` switched from `round()` to
