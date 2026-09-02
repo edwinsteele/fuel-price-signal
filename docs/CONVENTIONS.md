@@ -116,7 +116,7 @@ One rule is worth stating twice because it's easy to get wrong from memory: **th
 
 ### The decision cadence is a lock parameter, declared — not a default
 
-`TankParams.evaluation_interval_days` looks like a knob and behaves like part of the model contract — it moves realised economics by more than most feature decisions do (`experiments/2026-08-20_cadence_ceiling/`, bd `fps-fii`: same model/folds/seed/columns at 7 / 2 / 1 day gave headroom 1.54 / 2.69 / 2.97 c/L and realised CPL 189.67 / 187.85 / 187.82).
+`TankParams.evaluation_interval_days` looks like a knob and behaves like part of the model contract — it moves realised economics by more than most feature decisions do (`experiments/2026-08-20_cadence_ceiling/`, bd `fps-fii`: same model/folds/seed/columns at 7 / 2 / 1 day gave headroom 1.60 / 2.94 / 3.06 c/L and realised CPL 190.06 / 188.28 / 188.04, re-measured 2026-09-02 — see the re-lock table below for the pre-#358 figures).
 
 **The canonical cadence is 1 day** (re-locked 2026-08-22, `fps-oqz`). `TankParams.evaluation_interval_days` defaults to it and `score_phase2.py` constructs a bare `TankParams()`, so every row from here on inherits it. Do not change it because a finer grid scores better — that's discovering the lock rather than declaring it, the same failure class as resolving R0 from a frame header.
 
@@ -132,9 +132,27 @@ Moving it is a deliberate re-lock: a recorded rationale, a stated before/after, 
 | chosen fills / fills-per-station-yr | 244 / 44 | 1832 / 135 |
 | emergency (forced) fills | 67.6% | 21.4% |
 
+**Those CPL and headroom figures are the ones the re-lock was decided on, and they stay as
+the record.** They were measured with the pre-fps-2i4 price accessor, which forward-filled
+a closed station's last price indefinitely. Re-running `model_cadence.py` on 2026-09-02
+against the fixed accessor (fps-2i4) and the fixed oracle DP (PR #358) gives realised CPL
+**190.06 → 188.04** and headroom **1.60 → 3.06 c/L** — the same direction and roughly the
+same size, so the re-lock decision is unaffected (it rested on the owner's rationale, not
+the economics, in any case). Quote the 2026-09-02 figures for anything forward-looking and
+these for anything describing the 2026-08-22 decision.
+
+**Caveat, outstanding as of 2026-09-02:** `model_cadence.py` currently reports
+`ceiling_valid = False` at *every* cadence, because its run-dry gate tests
+`dry_events == 0` — a proxy for "the oracle pruned run-dry paths and the model didn't",
+which PR #358 made obsolete by having the oracle clamp and account for forgiven depletion
+too. The dry litres are ~1000 L at every cadence and divide exactly into whole depletion
+periods, i.e. one contiguous no-price span (station 414's closure), not cadence stranding.
+Re-aiming that gate is tracked on `fps-32h`; until it lands, treat the headroom figures
+above as measured-but-ungated.
+
 The decision rests on the owner's rationale (uniformity with daily price cadence, max decision resolution, a choice every day as the intended product experience), not on the economics — `fps-929` found re-picking τ at daily cadence is worth only 0.062 c/L, so τ stays 0.25. It is **not a retrain** (the fit takes no `TankParams`) and **not a production code change** (`evaluation_interval_days` is consumed only by the backtest engines; the live daily signal in `fuel_signal/signal.py` is rule-based and already emits daily).
 
-**Quote realised CPL and headroom with the cadence attached.** "1.54 c/L of headroom" is a fact about a specific cadence, not about the model.
+**Quote realised CPL and headroom with the cadence attached.** "1.60 c/L of headroom" is a fact about a specific cadence, not about the model.
 
 **Every artifact that records a realised CPL must carry the `TankParams` it was produced at, and the writer must raise rather than silently omit it** (`fps-15c`). `fuel_signal.backtest.require_tank_stamp(tank, what=...)` is the one shared path — every writer routes through it:
 
@@ -194,7 +212,7 @@ The convention spread is a **bias** term: it does not shrink with more stations,
 
 **The specific trap this generalises:** allocating a **path-coupled total cost** to sub-periods has no unique answer. In a tank-based backtest the oracle buys cheaply just *before* an expensive stretch and coasts through it; which period gets the credit is a choice. So `model_cpl − oracle_cpl` is well defined at **window level, per station** — the granularity `run_oracle_backtest` optimises — and **not identified at any sub-window zone**. Quantities natively stamped at a moment (per-row log-loss, per-decision accuracy, prices, predictions) are safe to bucket.
 
-**Why:** the #262 headroom map's per-zone rows drove real decisions — "regime axis FLAT" retired the late-descent thread, and a 12–16c volatility "hump" was treated as a target. `experiments/2026-08-20_headroom_attribution/` recomputed them under six conventions: every zone moved 2.5–5.1 c/L while the zones differed by 0.5–3.4, no contrast separated on either axis, and the impossible negatives that motivated the fix reappeared under two of the six. Every per-zone row was withdrawn; the window-level number survives *as a window-level quantity* — but it is not a constant, and is itself conditional on cadence (1.54 c/L at 7-day, 2.97 c/L at daily — `fps-fii`).
+**Why:** the #262 headroom map's per-zone rows drove real decisions — "regime axis FLAT" retired the late-descent thread, and a 12–16c volatility "hump" was treated as a target. `experiments/2026-08-20_headroom_attribution/` recomputed them under six conventions: every zone moved 2.5–5.1 c/L while the zones differed by 0.5–3.4, no contrast separated on either axis, and the impossible negatives that motivated the fix reappeared under two of the six. Every per-zone row was withdrawn; the window-level number survives *as a window-level quantity* — but it is not a constant, and is itself conditional on cadence (1.60 c/L at 7-day, 3.06 c/L at daily — `fps-fii`).
 
 **The mechanical corollary: cut economics on folds, not on row labels.** A fold is not a sub-period — `experiments/lib/realised.py` calls `aggregate_backtest` once per fold and `aggregate_backtest` calls `run_backtest` once per station with a fresh tank, so each (fold, station) is an **independent simulation** and any per-fold, per-station or per-fold-group figure is a sum of complete windows. A row-level label (cycle regime, day-of-week, volatility band, a candidate's `add_axis`) slices *through* a window instead, so a cost cut on one is unidentified no matter how many fills back it. Express a zone claim as a set of folds where you can; where the mechanism really is row-level, make the claim on a quantity stamped at a moment (per-row log-loss, per-decision accuracy) rather than on pooled CPL. `experiments/pipeline/` enforces this by attaching `ROW_AXIS_ECONOMICS_CAVEAT` to any `per_axis` delta or `CONFIDENCE_ZONE` grade that used a row label.
 
