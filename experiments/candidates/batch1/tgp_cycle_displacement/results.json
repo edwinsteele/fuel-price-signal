@@ -28,13 +28,13 @@
     }
   },
   "effect_resolved": true,
-  "effect_delta_cpl_held": -0.20151511340438333,
+  "effect_delta_cpl_held": -0.20770099514740537,
   "zone": {
     "resolved": false,
-    "target_delta_cpl_own": -0.16032223499306042,
-    "other_delta_cpl_own": -0.2883507567119352,
-    "n_target_candidate_fills": 1493,
-    "n_other_candidate_fills": 684
+    "target_delta_cpl_own": -0.16126000564679543,
+    "other_delta_cpl_own": -0.30785515320332024,
+    "n_target_candidate_fills": 1389,
+    "n_other_candidate_fills": 674
   },
   "grading_error": null,
   "aggregate": [
@@ -43,22 +43,22 @@
       "n_windows": 14,
       "own_tau_median": 0.25,
       "held_tau_median": 0.25,
-      "always_cpl": 192.99364583333386,
-      "cpl_own": 187.8211302592766,
-      "saving_own_pct": 2.68014812183203,
-      "cpl_held": 187.8211302592766,
-      "saving_held_pct": 2.68014812183203
+      "always_cpl": 193.4497580771037,
+      "cpl_own": 188.0375609756099,
+      "saving_own_pct": 2.797727510900609,
+      "cpl_held": 188.0375609756099,
+      "saving_held_pct": 2.797727510900609
     },
     {
       "arm": "candidate",
       "n_windows": 14,
       "own_tau_median": 0.25,
       "held_tau_median": 0.25,
-      "always_cpl": 192.99364583333386,
-      "cpl_own": 187.61961514587222,
-      "saving_own_pct": 2.7845635353728513,
-      "cpl_held": 187.61961514587222,
-      "saving_held_pct": 2.7845635353728513
+      "always_cpl": 193.4497580771037,
+      "cpl_own": 187.8298599804625,
+      "saving_own_pct": 2.905094404099111,
+      "cpl_held": 187.8298599804625,
+      "saving_held_pct": 2.905094404099111
     }
   ],
   "fold_run_deltas": [
@@ -92,14 +92,14 @@
     },
     {
       "fold": 3,
-      "regime": "normal",
+      "regime": "shock",
       "run": "R0",
       "delta_ll_all_median": 0.0,
       "delta_ll_hard25_median": 0.0
     },
     {
       "fold": 3,
-      "regime": "normal",
+      "regime": "shock",
       "run": "candidate",
       "delta_ll_all_median": -0.0171052913184504,
       "delta_ll_hard25_median": -0.1080137486947863
@@ -176,14 +176,14 @@
     },
     {
       "fold": 9,
-      "regime": "shock",
+      "regime": "normal",
       "run": "R0",
       "delta_ll_all_median": 0.0,
       "delta_ll_hard25_median": 0.0
     },
     {
       "fold": 9,
-      "regime": "shock",
+      "regime": "normal",
       "run": "candidate",
       "delta_ll_all_median": -0.01583717636689891,
       "delta_ll_hard25_median": -0.06414972543301034
@@ -232,31 +232,131 @@
     },
     {
       "fold": 13,
-      "regime": "shock",
+      "regime": "normal",
       "run": "R0",
       "delta_ll_all_median": 0.0,
       "delta_ll_hard25_median": 0.0
     },
     {
       "fold": 13,
-      "regime": "shock",
+      "regime": "normal",
       "run": "candidate",
       "delta_ll_all_median": -0.002670432414359103,
       "delta_ll_hard25_median": -0.008463934224631209
     },
     {
       "fold": 14,
-      "regime": "normal",
+      "regime": "shock",
       "run": "R0",
       "delta_ll_all_median": 0.0,
       "delta_ll_hard25_median": 0.0
     },
     {
       "fold": 14,
-      "regime": "normal",
+      "regime": "shock",
       "run": "candidate",
       "delta_ll_all_median": 0.011070808625650685,
       "delta_ll_hard25_median": 0.033856218803307137
+    }
+  ],
+  "realised_deltas": [
+    {
+      "fold": 1,
+      "arm": "candidate",
+      "delta_cpl_held": 0.988399071925727,
+      "delta_cpl_own": 0.988399071925727,
+      "tau_diverges": false
+    },
+    {
+      "fold": 2,
+      "arm": "candidate",
+      "delta_cpl_held": 0.630692971894149,
+      "delta_cpl_own": 0.630692971894149,
+      "tau_diverges": false
+    },
+    {
+      "fold": 3,
+      "arm": "candidate",
+      "delta_cpl_held": -1.089166666666756,
+      "delta_cpl_own": -1.089166666666756,
+      "tau_diverges": false
+    },
+    {
+      "fold": 4,
+      "arm": "candidate",
+      "delta_cpl_held": -1.2103194103194141,
+      "delta_cpl_own": -1.2103194103194141,
+      "tau_diverges": false
+    },
+    {
+      "fold": 5,
+      "arm": "candidate",
+      "delta_cpl_held": -0.47604166666670267,
+      "delta_cpl_own": -0.47604166666670267,
+      "tau_diverges": false
+    },
+    {
+      "fold": 6,
+      "arm": "candidate",
+      "delta_cpl_held": 0.17798175977549135,
+      "delta_cpl_own": 0.17798175977549135,
+      "tau_diverges": false
+    },
+    {
+      "fold": 7,
+      "arm": "candidate",
+      "delta_cpl_held": -0.1340482573726831,
+      "delta_cpl_own": -0.1340482573726831,
+      "tau_diverges": false
+    },
+    {
+      "fold": 8,
+      "arm": "candidate",
+      "delta_cpl_held": 0.9725158562367824,
+      "delta_cpl_own": 0.9725158562367824,
+      "tau_diverges": false
+    },
+    {
+      "fold": 9,
+      "arm": "candidate",
+      "delta_cpl_held": 0.38789144050107893,
+      "delta_cpl_own": 0.38789144050107893,
+      "tau_diverges": false
+    },
+    {
+      "fold": 10,
+      "arm": "candidate",
+      "delta_cpl_held": -0.6290909090909054,
+      "delta_cpl_own": -0.6290909090909054,
+      "tau_diverges": false
+    },
+    {
+      "fold": 11,
+      "arm": "candidate",
+      "delta_cpl_held": -0.5,
+      "delta_cpl_own": -0.5,
+      "tau_diverges": false
+    },
+    {
+      "fold": 12,
+      "arm": "candidate",
+      "delta_cpl_held": -0.532467532467507,
+      "delta_cpl_own": -0.532467532467507,
+      "tau_diverges": false
+    },
+    {
+      "fold": 13,
+      "arm": "candidate",
+      "delta_cpl_held": -1.6020833333333258,
+      "delta_cpl_own": -1.6020833333333258,
+      "tau_diverges": false
+    },
+    {
+      "fold": 14,
+      "arm": "candidate",
+      "delta_cpl_held": 0.07714884696019908,
+      "delta_cpl_own": 0.07714884696019908,
+      "tau_diverges": false
     }
   ],
   "seed_variance": {
@@ -305,7 +405,7 @@
   },
   "error": null,
   "meta": {
-    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1",
+    "batch_dir": "experiments/batches/batch1",
     "seeds": [
       42,
       43,
@@ -316,7 +416,13 @@
     "realised_seed": 42,
     "n_windows": 14,
     "tank_params": "50/3.571/1d/10%",
-    "realised_wall_seconds": 602.680712500005,
+    "tank_params_fields": {
+      "tank_size_litres": 50.0,
+      "daily_consumption_litres": 3.5714285714285716,
+      "evaluation_interval_days": 1,
+      "floor_fraction": 0.1
+    },
+    "realised_wall_seconds": 608.3718658339931,
     "baseline_cache_used": true,
     "baseline_cache_hit_folds": [
       1,
@@ -334,12 +440,12 @@
       13,
       14
     ],
-    "wall_seconds": 1027.129114082898,
+    "wall_seconds": 1053.1584936250001,
     "pass_criterion": null,
     "extra_feature_provider_hits": 5693,
-    "extra_feature_provider_misses": 607,
-    "git_sha": "4a2016dc8b5cad4dab661801bc789336e10b5e65",
-    "bead_id": "fps-2sf",
+    "extra_feature_provider_misses": 278,
+    "git_sha": "12dc7629f1f440bbf71fa7f50304e6adb781d048",
+    "bead_id": null,
     "n_baseline_columns": 54,
     "baseline_fingerprint": "54:1a6ec2d84a69",
     "shock_folds": [

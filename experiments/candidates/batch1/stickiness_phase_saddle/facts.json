@@ -24,9 +24,9 @@
   "provenance": {
     "candidate": "stickiness_phase_saddle",
     "batch": "batch1",
-    "batch_dir": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1",
+    "batch_dir": "experiments/batches/batch1",
     "snapshot_date": "2026-08-15",
-    "git_sha": "9362d46d74f63ccc2a430e96379dfd8658f2036d",
+    "git_sha": "12dc7629f1f440bbf71fa7f50304e6adb781d048",
     "git_sha_is_run_time": true,
     "seeds": [
       42,
@@ -36,10 +36,10 @@
       46
     ],
     "realised_seed": 42,
-    "wall_seconds": 1010.6273794580484,
+    "wall_seconds": 1037.7929684170522,
     "status": "graded",
     "abort_reason": null,
-    "bead_id": "fps-6yi",
+    "bead_id": null,
     "n_baseline_columns": 54,
     "baseline_fingerprint": "54:1a6ec2d84a69",
     "shock_folds": [
@@ -49,17 +49,22 @@
       14
     ],
     "tank_params": "50/3.571/1d/10%",
-    "tank_params_fields": null
+    "tank_params_fields": {
+      "tank_size_litres": 50.0,
+      "daily_consumption_litres": 3.5714285714285716,
+      "evaluation_interval_days": 1,
+      "floor_fraction": 0.1
+    }
   },
   "headline": {
     "realised": {
       "arbiter": "realised CPL (cost per litre), held tau \u2014 clean attribution, isolated from the operating point",
-      "r0_cpl_held": 187.8211302592766,
-      "candidate_cpl_held": 187.7476338246704,
-      "delta_cpl_held": -0.07349643460619859,
+      "r0_cpl_held": 188.0375609756099,
+      "candidate_cpl_held": 187.96145342220785,
+      "delta_cpl_held": -0.07610755340203923,
       "effect_resolved": true,
-      "r0_cpl_own": 187.8211302592766,
-      "candidate_cpl_own": 187.7476338246704
+      "r0_cpl_own": 188.0375609756099,
+      "candidate_cpl_own": 187.96145342220785
     },
     "wfcv_log_loss": {
       "label": "descriptive colour, NOT the arbiter (docs/CONVENTIONS.md \u2014 #250/#254 both showed flat WFCV log-loss with opposite realised outcomes)",
@@ -80,7 +85,7 @@
         "n_fills": 190,
         "suppressed": false,
         "delta_cpl_own": 0.0,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.0031010407454575284,
         "delta_ll_hard25_median": 0.006695770343825513
       },
@@ -90,7 +95,7 @@
         "n_fills": 200,
         "suppressed": false,
         "delta_cpl_own": 0.7729195510512739,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.021520077347437855,
         "delta_ll_hard25_median": -0.05522450975510551
       },
@@ -100,47 +105,47 @@
         "n_fills": 186,
         "suppressed": false,
         "delta_cpl_own": -0.5079166666666595,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": -0.004390570300175922,
         "delta_ll_hard25_median": -0.06903385056243327
       },
       {
         "fold": 4,
         "regime": "shock",
-        "n_fills": 239,
+        "n_fills": 226,
         "suppressed": false,
-        "delta_cpl_own": 0.60689193896755,
-        "tau_diverges": null,
+        "delta_cpl_own": 0.536379448755639,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.006064168166070527,
         "delta_ll_hard25_median": -0.0014626790377230137
       },
       {
         "fold": 5,
         "regime": "normal",
-        "n_fills": 185,
+        "n_fills": 144,
         "suppressed": false,
-        "delta_cpl_own": -0.01066098081025757,
-        "tau_diverges": null,
+        "delta_cpl_own": -0.013020833333314386,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.004199213581193351,
         "delta_ll_hard25_median": 0.014260159706954711
       },
       {
         "fold": 6,
         "regime": "normal",
-        "n_fills": 125,
+        "n_fills": 107,
         "suppressed": false,
-        "delta_cpl_own": -0.2566906098372783,
-        "tau_diverges": null,
+        "delta_cpl_own": -0.33019669264953677,
+        "tau_diverges": false,
         "delta_ll_all_median": -0.0015735725210728468,
         "delta_ll_hard25_median": -0.01475393784076151
       },
       {
         "fold": 7,
         "regime": "normal",
-        "n_fills": 235,
+        "n_fills": 177,
         "suppressed": false,
-        "delta_cpl_own": 0.1543778801843132,
-        "tau_diverges": null,
+        "delta_cpl_own": 0.179624664879384,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.006542784685053538,
         "delta_ll_hard25_median": 0.009804858060013855
       },
@@ -150,7 +155,7 @@
         "n_fills": 84,
         "suppressed": false,
         "delta_cpl_own": 0.019027484143833817,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.014542123940611856,
         "delta_ll_hard25_median": 0.03347367408087265
       },
@@ -160,7 +165,7 @@
         "n_fills": 112,
         "suppressed": false,
         "delta_cpl_own": 0.0718162839248464,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": -0.002392829755770265,
         "delta_ll_hard25_median": -0.01381190532870824
       },
@@ -170,7 +175,7 @@
         "n_fills": 96,
         "suppressed": false,
         "delta_cpl_own": -0.5536363636363717,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": -0.0015642441141629215,
         "delta_ll_hard25_median": -0.0052105327214732045
       },
@@ -180,7 +185,7 @@
         "n_fills": 161,
         "suppressed": false,
         "delta_cpl_own": -0.2953488372093318,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.004579325469976581,
         "delta_ll_hard25_median": 0.021431953093289158
       },
@@ -190,7 +195,7 @@
         "n_fills": 184,
         "suppressed": false,
         "delta_cpl_own": 0.052813852813869744,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": -0.003408713553103182,
         "delta_ll_hard25_median": -0.024255870487649656
       },
@@ -200,7 +205,7 @@
         "n_fills": 142,
         "suppressed": false,
         "delta_cpl_own": -0.8645833333333144,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": -0.0008997615801677461,
         "delta_ll_hard25_median": -0.0006628737556868547
       },
@@ -210,7 +215,7 @@
         "n_fills": 169,
         "suppressed": false,
         "delta_cpl_own": -0.030188679245270578,
-        "tau_diverges": null,
+        "tau_diverges": false,
         "delta_ll_all_median": 0.0033312074578903395,
         "delta_ll_hard25_median": 0.007549705762637471
       }
@@ -218,15 +223,15 @@
     "per_regime": [
       {
         "regime": "shock",
-        "n_fills": 789,
+        "n_fills": 776,
         "suppressed": false,
-        "delta_cpl_own": 0.004670627711647057
+        "delta_cpl_own": -0.007754675686413748
       },
       {
         "regime": "normal",
-        "n_fills": 1543,
+        "n_fills": 1424,
         "suppressed": false,
-        "delta_cpl_own": -0.10338905209781046
+        "delta_cpl_own": -0.11135613161894753
       }
     ],
     "per_axis": null,
@@ -236,8 +241,8 @@
     "min_row_cell_n": 30
   },
   "decision_flips": {
-    "n_flips": 303,
-    "n_decisions": 88,
+    "n_flips": 247,
+    "n_decisions": 77,
     "cascade_window_days": 7,
     "per_fold": [
       {
@@ -279,7 +284,7 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": 0.055842627815360535
+        "run_contribution_cpl": 0.0584983417631685
       },
       {
         "fold": 3,
@@ -301,95 +306,95 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": -0.037839515753530416
+        "run_contribution_cpl": -0.03963905373546809
       },
       {
         "fold": 4,
         "regime": "shock",
-        "n_baseline_only": 15,
-        "n_candidate_only": 39,
-        "n_flips": 54,
-        "n_decisions": 16,
-        "litres_baseline": 249.99999999999994,
-        "litres_candidate": 478.57142857142844,
-        "flip_cpl_baseline": 184.34,
-        "flip_cpl_candidate": 185.22388059701498,
-        "flip_cpl_delta": 0.8838805970149792,
+        "n_baseline_only": 13,
+        "n_candidate_only": 21,
+        "n_flips": 34,
+        "n_decisions": 13,
+        "litres_baseline": 207.1428571428571,
+        "litres_candidate": 353.57142857142856,
+        "flip_cpl_baseline": 184.01724137931035,
+        "flip_cpl_candidate": 184.98484848484847,
+        "flip_cpl_delta": 0.9676071055381215,
         "flip_cpl_delta_reason": null,
-        "flip_cpl_delta_se": 4.218769938480099,
+        "flip_cpl_delta_se": 5.699590990693423,
         "flip_cpl_delta_interval": [
-          -7.553659279945219,
-          9.321420473975177
+          -10.431574875848725,
+          12.366789086924967
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": 0.043706015781614635
+        "run_contribution_cpl": 0.035363282086076184
       },
       {
         "fold": 5,
         "regime": "normal",
         "n_baseline_only": 6,
-        "n_candidate_only": 22,
-        "n_flips": 28,
-        "n_decisions": 9,
+        "n_candidate_only": 10,
+        "n_flips": 16,
+        "n_decisions": 6,
         "litres_baseline": 114.28571428571428,
-        "litres_candidate": 285.71428571428567,
+        "litres_candidate": 207.14285714285717,
         "flip_cpl_baseline": 198.13750000000002,
-        "flip_cpl_candidate": 190.77000000000004,
-        "flip_cpl_delta": -7.367499999999978,
+        "flip_cpl_candidate": 192.61724137931034,
+        "flip_cpl_delta": -5.520258620689674,
         "flip_cpl_delta_reason": null,
-        "flip_cpl_delta_se": 5.636382060167197,
+        "flip_cpl_delta_se": 6.673741854271702,
         "flip_cpl_delta_interval": [
-          -18.640264120334372,
-          3.905264120334415
+          -18.867742329233078,
+          7.82722508785373
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": -0.0007760360080724506
+        "run_contribution_cpl": -0.0008129420372315622
       },
       {
         "fold": 6,
         "regime": "normal",
-        "n_baseline_only": 18,
-        "n_candidate_only": 8,
-        "n_flips": 26,
-        "n_decisions": 6,
-        "litres_baseline": 217.85714285714283,
-        "litres_candidate": 171.42857142857142,
-        "flip_cpl_baseline": 185.4704918032787,
-        "flip_cpl_candidate": 185.31666666666666,
-        "flip_cpl_delta": -0.1538251366120278,
+        "n_baseline_only": 10,
+        "n_candidate_only": 2,
+        "n_flips": 12,
+        "n_decisions": 4,
+        "litres_baseline": 92.85714285714283,
+        "litres_candidate": 57.142857142857146,
+        "flip_cpl_baseline": 184.8923076923077,
+        "flip_cpl_candidate": 184.15,
+        "flip_cpl_delta": -0.7423076923076906,
         "flip_cpl_delta_reason": null,
-        "flip_cpl_delta_se": 3.5572517507630543,
+        "flip_cpl_delta_se": 4.62432120325882,
         "flip_cpl_delta_interval": [
-          -7.2683286381381365,
-          6.960678364914081
+          -9.99095009882533,
+          8.506334714209949
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": -0.01826674602054821
+        "run_contribution_cpl": -0.019890720205943152
       },
       {
         "fold": 7,
         "regime": "normal",
-        "n_baseline_only": 6,
-        "n_candidate_only": 10,
-        "n_flips": 16,
-        "n_decisions": 7,
-        "litres_baseline": 67.85714285714285,
-        "litres_candidate": 157.1428571428571,
-        "flip_cpl_baseline": 186.21578947368423,
-        "flip_cpl_candidate": 176.9454545454546,
-        "flip_cpl_delta": -9.27033492822963,
+        "n_baseline_only": 2,
+        "n_candidate_only": 4,
+        "n_flips": 6,
+        "n_decisions": 4,
+        "litres_baseline": 28.57142857142857,
+        "litres_candidate": 110.71428571428571,
+        "flip_cpl_baseline": 186.64999999999998,
+        "flip_cpl_candidate": 181.57741935483872,
+        "flip_cpl_delta": -5.072580645161253,
         "flip_cpl_delta_reason": null,
-        "flip_cpl_delta_se": 8.072727833757938,
+        "flip_cpl_delta_se": 6.255575605275069,
         "flip_cpl_delta_interval": [
-          -25.415790595745506,
-          6.8751207392862455
+          -17.58373185571139,
+          7.4385705653888845
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": 0.010398882508147125
+        "run_contribution_cpl": 0.010893423298920448
       },
       {
         "fold": 8,
@@ -411,7 +416,7 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": 0.0013968648145325775
+        "run_contribution_cpl": 0.0014632956670243714
       },
       {
         "fold": 9,
@@ -430,7 +435,7 @@
         "flip_cpl_delta_interval": null,
         "flip_cpl_delta_inside_own_se": null,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": 0.005339127735527151
+        "run_contribution_cpl": 0.005593041216161521
       },
       {
         "fold": 10,
@@ -452,7 +457,7 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": -0.03780847431320868
+        "run_contribution_cpl": -0.03960653605397992
       },
       {
         "fold": 11,
@@ -474,7 +479,7 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": -0.019711314604999634
+        "run_contribution_cpl": -0.020648727745713788
       },
       {
         "fold": 12,
@@ -496,7 +501,7 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": 0.003787055719386593
+        "run_contribution_cpl": 0.003967157141697068
       },
       {
         "fold": 13,
@@ -518,7 +523,7 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": -0.06441098866987288
+        "run_contribution_cpl": -0.06747418909031638
       },
       {
         "fold": 14,
@@ -540,7 +545,7 @@
         ],
         "flip_cpl_delta_inside_own_se": true,
         "flip_cpl_delta_interval_reason": null,
-        "run_contribution_cpl": -0.0022349837032429095
+        "run_contribution_cpl": -0.0023412730672293415
       }
     ],
     "rows": [
@@ -861,24 +866,6 @@
       },
       {
         "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-01",
-        "price": 185.9,
-        "litres": 21.428571428571423,
-        "spend_cents": 3983.5714285714275,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-25",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 4,
         "station_code": 18517,
         "date": "2022-08-17",
         "price": 193.9,
@@ -1032,78 +1019,6 @@
       },
       {
         "fold": 6,
-        "station_code": 414,
-        "date": "2023-03-14",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-03-21",
-        "price": 185.9,
-        "litres": 10.714285714285708,
-        "spend_cents": 1991.7857142857133,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-03-22",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-04",
-        "price": 185.9,
-        "litres": 21.428571428571423,
-        "spend_cents": 3983.5714285714275,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-10",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-16",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-22",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-28",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 6,
         "station_code": 18517,
         "date": "2023-04-25",
         "price": 193.9,
@@ -1190,42 +1105,6 @@
         "price": 177.9,
         "litres": 3.5714285714285694,
         "spend_cents": 635.3571428571425,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-05-06",
-        "price": 185.9,
-        "litres": 28.571428571428573,
-        "spend_cents": 5311.428571428572,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-05-07",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-05-08",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "baseline"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-05-09",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
         "bought_by": "baseline"
       },
       {
@@ -2121,168 +2000,6 @@
       },
       {
         "fold": 4,
-        "station_code": 414,
-        "date": "2022-09-08",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-09-19",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-09-20",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-03",
-        "price": 185.9,
-        "litres": 21.428571428571423,
-        "spend_cents": 3983.5714285714275,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-04",
-        "price": 185.9,
-        "litres": 28.571428571428573,
-        "spend_cents": 5311.428571428572,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-05",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-06",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-08",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-09",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-10",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-11",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-12",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-14",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-15",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-16",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-17",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-18",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
-        "station_code": 414,
-        "date": "2022-10-20",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 4,
         "station_code": 18517,
         "date": "2022-08-26",
         "price": 193.9,
@@ -2463,114 +2180,6 @@
       },
       {
         "fold": 5,
-        "station_code": 414,
-        "date": "2022-11-23",
-        "price": 185.9,
-        "litres": 28.571428571428566,
-        "spend_cents": 5311.428571428571,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-11-24",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-11-25",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-11-26",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-11-27",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-12-13",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-12-28",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-12-29",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2022-12-31",
-        "price": 185.9,
-        "litres": 7.142857142857139,
-        "spend_cents": 1327.8571428571422,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2023-01-01",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2023-01-05",
-        "price": 185.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 663.9285714285711,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
-        "station_code": 414,
-        "date": "2023-01-08",
-        "price": 185.9,
-        "litres": 10.714285714285708,
-        "spend_cents": 1991.7857142857133,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 5,
         "station_code": 18517,
         "date": "2022-11-12",
         "price": 205.9,
@@ -2661,60 +2270,6 @@
       },
       {
         "fold": 6,
-        "station_code": 414,
-        "date": "2023-03-20",
-        "price": 185.9,
-        "litres": 7.142857142857139,
-        "spend_cents": 1327.8571428571422,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-02",
-        "price": 185.9,
-        "litres": 21.428571428571423,
-        "spend_cents": 3983.5714285714275,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-08",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-14",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-20",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 6,
-        "station_code": 414,
-        "date": "2023-04-26",
-        "price": 185.9,
-        "litres": 21.42857142857143,
-        "spend_cents": 3983.571428571429,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 6,
         "station_code": 18517,
         "date": "2023-04-28",
         "price": 186.9,
@@ -2729,60 +2284,6 @@
         "price": 182.5,
         "litres": 35.714285714285715,
         "spend_cents": 6517.857142857143,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-06-06",
-        "price": 165.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 592.4999999999997,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-06-07",
-        "price": 165.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 592.4999999999997,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-06-08",
-        "price": 165.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 592.4999999999997,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-06-09",
-        "price": 165.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 592.4999999999997,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-06-20",
-        "price": 165.9,
-        "litres": 28.571428571428566,
-        "spend_cents": 4739.999999999999,
-        "bought_by": "candidate"
-      },
-      {
-        "fold": 7,
-        "station_code": 414,
-        "date": "2023-06-21",
-        "price": 165.9,
-        "litres": 3.5714285714285694,
-        "spend_cents": 592.4999999999997,
         "bought_by": "candidate"
       },
       {
@@ -3273,21 +2774,16 @@
       }
     ],
     "computed": true,
-    "run_contribution_total_cpl": -0.060577484698906565,
-    "composition_residual_cpl": -0.012918949907292025,
-    "tau_diverges_any": null,
+    "run_contribution_total_cpl": -0.07463490076283415,
+    "composition_residual_cpl": -0.0014726526392050826,
+    "tau_diverges_any": false,
     "regret": {
       "horizon_days": 13,
       "cadence_days": 1,
-      "n_scored": 303,
+      "n_scored": 247,
       "n_unscored": 0,
-      "dark_fill_days": 56,
-      "dark_fill_folds": [
-        4,
-        5,
-        6,
-        7
-      ],
+      "dark_fill_days": 0,
+      "dark_fill_folds": [],
       "n_price_mismatch": 0,
       "per_fold": [
         {
@@ -3333,87 +2829,87 @@
           "n_unscored": 0
         },
         {
-          "n_baseline": 15,
-          "n_candidate": 39,
-          "litres_baseline": 249.99999999999994,
-          "litres_candidate": 478.57142857142844,
-          "regret_cpl_baseline": 13.782857142857143,
-          "regret_cpl_candidate": 13.51940298507463,
-          "regret_cpl_delta": -0.2634541577825136,
+          "n_baseline": 13,
+          "n_candidate": 21,
+          "litres_baseline": 207.1428571428571,
+          "litres_candidate": 353.57142857142856,
+          "regret_cpl_baseline": 16.63448275862069,
+          "regret_cpl_candidate": 18.298989898989902,
+          "regret_cpl_delta": 1.6645071403692135,
           "regret_cpl_delta_reason": null,
-          "regret_cpl_delta_se": 5.338241293932415,
+          "regret_cpl_delta_se": 5.071190847394517,
           "regret_cpl_delta_interval": [
-            -10.939936745647344,
-            10.413028430082317
+            -8.47787455441982,
+            11.806888835158247
           ],
           "regret_cpl_delta_inside_own_se": true,
           "regret_cpl_delta_interval_reason": null,
           "fold": 4,
           "regime": "shock",
-          "n_decisions": 16,
-          "n_unscored": 0
-        },
-        {
-          "n_baseline": 6,
-          "n_candidate": 22,
-          "litres_baseline": 114.28571428571428,
-          "litres_candidate": 285.71428571428567,
-          "regret_cpl_baseline": 12.400000000000002,
-          "regret_cpl_candidate": 10.103750000000002,
-          "regret_cpl_delta": -2.2962500000000006,
-          "regret_cpl_delta_reason": null,
-          "regret_cpl_delta_se": 4.9872870213009906,
-          "regret_cpl_delta_interval": [
-            -12.270824042601982,
-            7.6783240426019805
-          ],
-          "regret_cpl_delta_inside_own_se": true,
-          "regret_cpl_delta_interval_reason": null,
-          "fold": 5,
-          "regime": "normal",
-          "n_decisions": 9,
-          "n_unscored": 0
-        },
-        {
-          "n_baseline": 18,
-          "n_candidate": 8,
-          "litres_baseline": 217.85714285714283,
-          "litres_candidate": 171.42857142857142,
-          "regret_cpl_baseline": 4.331147540983608,
-          "regret_cpl_candidate": 4.75,
-          "regret_cpl_delta": 0.41885245901639223,
-          "regret_cpl_delta_reason": null,
-          "regret_cpl_delta_se": 4.658052385633048,
-          "regret_cpl_delta_interval": [
-            -8.897252312249703,
-            9.734957230282488
-          ],
-          "regret_cpl_delta_inside_own_se": true,
-          "regret_cpl_delta_interval_reason": null,
-          "fold": 6,
-          "regime": "normal",
-          "n_decisions": 6,
+          "n_decisions": 13,
           "n_unscored": 0
         },
         {
           "n_baseline": 6,
           "n_candidate": 10,
-          "litres_baseline": 67.85714285714285,
-          "litres_candidate": 157.1428571428571,
-          "regret_cpl_baseline": 7.052631578947369,
-          "regret_cpl_candidate": 12.627272727272729,
-          "regret_cpl_delta": 5.57464114832536,
+          "litres_baseline": 114.28571428571428,
+          "litres_candidate": 207.14285714285717,
+          "regret_cpl_baseline": 12.400000000000002,
+          "regret_cpl_candidate": 13.936206896551722,
+          "regret_cpl_delta": 1.53620689655172,
           "regret_cpl_delta_reason": null,
-          "regret_cpl_delta_se": 7.261937781040981,
+          "regret_cpl_delta_se": 2.789670701314107,
           "regret_cpl_delta_interval": [
-            -8.949234413756603,
-            20.09851671040732
+            -4.043134506076494,
+            7.115548299179934
+          ],
+          "regret_cpl_delta_inside_own_se": true,
+          "regret_cpl_delta_interval_reason": null,
+          "fold": 5,
+          "regime": "normal",
+          "n_decisions": 6,
+          "n_unscored": 0
+        },
+        {
+          "n_baseline": 10,
+          "n_candidate": 2,
+          "litres_baseline": 92.85714285714283,
+          "litres_candidate": 57.142857142857146,
+          "regret_cpl_baseline": 10.161538461538465,
+          "regret_cpl_candidate": 14.249999999999998,
+          "regret_cpl_delta": 4.088461538461534,
+          "regret_cpl_delta_reason": null,
+          "regret_cpl_delta_se": 5.078761868347897,
+          "regret_cpl_delta_interval": [
+            -6.06906219823426,
+            14.245985275157327
+          ],
+          "regret_cpl_delta_inside_own_se": true,
+          "regret_cpl_delta_interval_reason": null,
+          "fold": 6,
+          "regime": "normal",
+          "n_decisions": 4,
+          "n_unscored": 0
+        },
+        {
+          "n_baseline": 2,
+          "n_candidate": 4,
+          "litres_baseline": 28.57142857142857,
+          "litres_candidate": 110.71428571428571,
+          "regret_cpl_baseline": 16.75,
+          "regret_cpl_candidate": 17.92258064516129,
+          "regret_cpl_delta": 1.1725806451612897,
+          "regret_cpl_delta_reason": null,
+          "regret_cpl_delta_se": 2.7740730156361177,
+          "regret_cpl_delta_interval": [
+            -4.375565386110946,
+            6.720726676433525
           ],
           "regret_cpl_delta_inside_own_se": true,
           "regret_cpl_delta_interval_reason": null,
           "fold": 7,
           "regime": "normal",
-          "n_decisions": 7,
+          "n_decisions": 4,
           "n_unscored": 0
         },
         {
@@ -3562,25 +3058,25 @@
         }
       ],
       "all": {
-        "n_baseline": 120,
-        "n_candidate": 183,
-        "litres_baseline": 2064.2857142857147,
-        "litres_candidate": 2982.142857142857,
-        "regret_cpl_baseline": 10.025951557093425,
-        "regret_cpl_candidate": 9.382275449101797,
-        "regret_cpl_delta": -0.6436761079916273,
+        "n_baseline": 106,
+        "n_candidate": 141,
+        "litres_baseline": 1857.1428571428576,
+        "litres_candidate": 2617.857142857143,
+        "regret_cpl_baseline": 11.144230769230766,
+        "regret_cpl_candidate": 10.687858117326057,
+        "regret_cpl_delta": -0.45637265190470977,
         "regret_cpl_delta_reason": null,
-        "regret_cpl_delta_se": 2.1206767747277775,
+        "regret_cpl_delta_se": 2.187477888613053,
         "regret_cpl_delta_interval": [
-          -4.885029657447182,
-          3.5976774414639277
+          -4.831328429130815,
+          3.918583125321396
         ],
         "regret_cpl_delta_inside_own_se": true,
         "regret_cpl_delta_interval_reason": null,
-        "n_decisions": 88
+        "n_decisions": 77
       },
       "computed": true,
-      "graded_db": "/Users/esteele/Code/fuel-price-signal/experiments/batches/batch1/fuel_signal.db"
+      "graded_db": "/Users/esteele/Code/fuel-price-signal/.claude/worktrees/fps-32h-fold-regen-ffc13f/experiments/batches/batch1/fuel_signal.db"
     }
   },
   "seed_flags": [
@@ -3614,8 +3110,8 @@
       "abs_sticky_x_phase": 0.0
     },
     "extra_feature_provider_hits": 5693,
-    "extra_feature_provider_misses": 607,
-    "extra_feature_provider_miss_rate": 0.09634920634920635
+    "extra_feature_provider_misses": 278,
+    "extra_feature_provider_miss_rate": 0.04655836543292581
   },
   "grading": {
     "predicted_signature": "Decision-timing: for stations with near-zero stickiness the decisions should be essentially unchanged (the product is ~0 there, so the columns add nothing), and the flips should be concentrated on the tails of the stickiness distribution \u2014 buying EARLIER on high-|stickiness| stations at late phase, because the network clock is over-promising a trough those stations will not fully follow. The distinctive signature to look for is that the SIGNED and ABSOLUTE columns are both used and disagree in orientation somewhere in the SHAP surface; if only abs_sticky_x_phase is used, the real content is 'outlier stations are decoupled' rather than a saddle, which is a weaker and different claim. Expect it to spread across folds rather than concentrate, because station composition is a cross-sectional property with no particular fold affinity.",
@@ -3633,9 +3129,9 @@
     "floor_arity_exceeds_run": true,
     "band_mean_delta_cpl_held": 0.025101995567317202,
     "band_std_delta_cpl_held": 0.09993498251895033,
-    "candidate_delta_cpl_held": -0.07349643460619859,
+    "candidate_delta_cpl_held": -0.07610755340203923,
     "candidate_percentile_better_than_noise": 80.0,
-    "candidate_z_vs_band": -0.9866257809653283,
+    "candidate_z_vs_band": -1.0127539568055102,
     "single_candidate_z_threshold": 1.9225850634649964,
     "single_candidate_z_threshold_nominal": 1.9225850634649964,
     "single_candidate_bar_cpl_held": -0.16703150914125223,
@@ -3653,7 +3149,7 @@
         "effective_n_draws": 14.726184997699033,
         "band_mean_delta_cpl_held": 0.027782354731596293,
         "band_std_delta_cpl_held": 0.11523005677867718,
-        "candidate_z_vs_band": -0.8789268370519113,
+        "candidate_z_vs_band": -0.9015868865983229,
         "single_candidate_z_threshold": 1.8226989867727963
       },
       {
@@ -3666,7 +3162,7 @@
         "effective_n_draws": 20.0,
         "band_mean_delta_cpl_held": -0.008892112136169316,
         "band_std_delta_cpl_held": 0.07998080506665135,
-        "candidate_z_vs_band": -0.8077478391995653,
+        "candidate_z_vs_band": -0.8403946573162957,
         "single_candidate_z_threshold": 1.7718338787464765
       }
     ]

@@ -75,8 +75,10 @@ for the rationale and the full before/after. Three consequences for reading this
 - **Every realised-CPL figure in the historical tables below was measured at 7 days**
   and has not been restated. They remain correct as lock records; they are not
   comparable to a number produced after 2026-08-22 without re-running at 1d. On the
-  cadence-ceiling folds the same model reads 189.67 at 7d and 187.82 at 1d, and
-  headroom vs the perfect-foresight oracle goes 1.54 → 2.97 c/L.
+  cadence-ceiling folds the same model reads 190.06 at 7d and 188.04 at 1d, and
+  headroom vs the perfect-foresight oracle goes 1.60 → 3.06 c/L (re-measured
+  2026-09-02 after PR #358; see docs/CONVENTIONS.md § The decision cadence is a lock
+  parameter for the superseded pre-#358 figures).
 - **At 1d the same on-disk artifact scores 182.18 c/L (4.90% vs always-buy 191.56) on
   this file's test window**, re-scored 2026-08-22 by `score_phase2` after the re-lock
   (`experiments/results.csv`, stamped `50/3.571/1d/10%`). This is a re-score, **not a
@@ -84,7 +86,7 @@ for the rationale and the full before/after. Three consequences for reading this
   records below stay as they are, at 7d. Note always-buy moves with cadence too
   (191.78 → 191.56): it fills daily in small amounts rather than weekly in large ones,
   so the volume weighting across dates changes. Do not compare this 182.18 against the
-  cadence-ceiling oracle floor of 184.85 — different window and station set, so the
+  cadence-ceiling oracle floor of 184.98 — different window and station set, so the
   model has not "beaten perfect foresight".
 
 **Why `score_phase2` still chooses τ=0.25 after the re-lock.** Its τ selector is

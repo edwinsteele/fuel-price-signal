@@ -20,14 +20,27 @@ economics come from the production engine.
 
 RUN-DRY AUDIT: cadence is not a free knob. ``run_backtest`` clamps a tank that
 would go negative to 0 and carries on (the emergency rule tests the CURRENT level,
-not the post-depletion overshoot), whereas ``run_oracle_backtest`` prunes run-dry
-paths outright — so the oracle is only a ceiling over NEVER-DRY strategies. Which
-decide-levels are reachable depends on D = daily x interval, so changing the
-cadence can put a reachable level inside the (floor*size, D) gap where the model
-can silently strand the tank and buy fewer litres. Every cadence is therefore
-audited by replaying the engine's own level arithmetic over each arm's ledger;
-a cadence with non-zero dry events has an INVALID ceiling and its headroom must
-not be quoted.
+not the post-depletion overshoot). Which decide-levels are reachable depends on
+D = daily x interval, so changing the cadence can put a reachable level inside
+the (floor*size, D) gap where the model can silently strand the tank and buy
+fewer litres — that is a real cadence artefact and must invalidate the ceiling.
+
+Before PR #358, ``run_oracle_backtest`` pruned run-dry paths outright, so
+"either arm has a dry event" was a correct, if blunt, proxy for that failure: the
+oracle could never legitimately have one, so any dry event anywhere meant the two
+arms had stopped solving the same problem. PR #358 made the oracle clamp-and-
+account through a no-price date exactly like ``run_backtest`` does (fps-32h), so
+a real station closure now produces dry events in BOTH arms even though nothing
+about the cadence choice is unsafe — the blunt proxy fires on every cadence a
+closure falls in. The gate below re-aims at the invariant it was actually
+protecting rather than loosening it: every dry event must be (1) attributable to
+darkness — the station had no resolvable price at that date, mirroring
+``run_backtest``'s own gap-forgiveness exactly, including its one-step grace on
+the date price resumes (see ``_dry_audit``) — and (2) symmetric between arms,
+since two arms entering the same closure at different tank levels can only
+diverge in forgiven litres by a bounded, physical amount (see
+``SYMMETRY_TOL_PER_GAP``). A dry event that fails either check is genuine cadence
+stranding, and the ceiling stays invalid.
 
 WINDOW LEVEL ONLY — do not slice any of this by cycle zone (fps-1785999730023-4-264564ac).
 
@@ -48,6 +61,7 @@ from fuel_signal import db as _db
 from fuel_signal.backtest import (
     AlwaysBuyStrategy,
     ModelStrategy,
+    PriceHistory,
     TankParams,
     _evaluation_dates,
     load_history,
@@ -84,6 +98,20 @@ FIT_CADENCE = 7  # the cadence the harness pass runs at; the others reuse its fi
 # either), so its counts are exact regardless.
 DRY_TOL = 1e-3
 
+# Symmetry tolerance for the darkness invariant, in litres — a PHYSICAL bound,
+# picked the same way as DRY_TOL rather than as a fitted epsilon: the model and
+# oracle arms buy on different schedules, so they can enter any one no-price gap
+# at different tank levels, but each arm's level lives in [0, tank_size_litres]
+# independently of what the other arm did — so the two arms' forgiven litres for
+# that ONE gap can differ by at most one tank size (whichever arm entered fuller
+# forgives less; entering at 0 vs entering full is the largest possible spread).
+# Multiplied by a (fold, station) key's gap count below since separate closures
+# each contribute their own independent tank-size's worth of possible divergence.
+# Observed on real data (dry_audit.csv, pre-this-change): every cadence's
+# model/oracle forgiven-litres gap is <15L against a single closure (one gap per
+# key), well inside the one-tank-size bound this constant encodes.
+SYMMETRY_TOL_PER_GAP = TankParams().tank_size_litres
+
 # Same inner-OOF gotcha as #262/#259: fold 1's outer train is ~1825d, so the inner
 # default (also 1825d) yields 0 folds. Kept identical so 7d reproduces 189.79.
 INNER_FOLDS = {"train_min_days": 1095, "val_days": 90, "step_days": 90}
@@ -99,15 +127,36 @@ OUT = HERE / "smoke" if FOLD_SUBSET else HERE
 
 
 def _dry_audit(
-    fills: pd.DataFrame, plans: list, cadence: int, tank: TankParams, station_codes: list[int],
+    fills: pd.DataFrame,
+    plans: list,
+    cadence: int,
+    tank: TankParams,
+    station_codes: list[int],
+    history: PriceHistory,
 ) -> dict:
-    """Replay run_backtest's own level arithmetic over a ledger, counting run-dry events.
+    """Replay run_backtest's own level arithmetic over a ledger, classifying every
+    run-dry event as darkness (forgiven — matches run_backtest's own behaviour, the
+    ceiling stays valid) or stranding (a real cadence failure, the ceiling is not).
 
     A "dry" event is a depletion step whose PRE-CLAMP level is negative: the engine
-    silently does ``max(0.0, ...)`` there, so the driver covered less distance than
-    the litres bought pay for. The oracle prunes exactly these paths, so any dry
-    event in the model arm makes ``model_cpl - oracle_cpl`` meaningless at that
-    cadence (the arms are no longer solving the same problem).
+    silently does ``max(0.0, ...)`` there, so the driver covered more distance than
+    the litres bought pay for. Post-#358 ``run_backtest`` and ``run_oracle_backtest``
+    forgive a dry event caused by a no-price date identically (clamp-and-account, not
+    prune), so a dry event no longer by itself implies the two arms disagree.
+
+    A dry event is DARKNESS when the station has no resolvable price at that date,
+    OR — mirroring ``run_backtest``'s ``gap_since_decide`` one-step grace exactly —
+    no resolvable price at the immediately PRECEDING eval date: depletion is applied
+    before the day's decide point, so the first day price resumes after a gap still
+    absorbs one step of the gap's forgiveness even though a price is available that
+    day (``run_backtest`` doesn't raise there either, for the same reason). Any other
+    dry event has a price both today and yesterday — ``run_backtest`` would raise on
+    it — so it's STRANDING.
+
+    Also tracks each (fold, station) key's total forgiven litres and how many
+    distinct no-price gaps it saw, so the caller can check the two arms' forgiven
+    litres agree within the physical bound (``SYMMETRY_TOL_PER_GAP``) rather than
+    assuming exact equality.
 
     Reconstruction is exact rather than approximate: on a BUY the engine sets the
     level to full and charges ``size - level`` litres, and on an emergency it sets
@@ -120,13 +169,22 @@ def _dry_audit(
     dry_litres = 0.0
     worst = 0.0
     steps = 0
+    stranded_events = 0
+    stranded_litres = 0.0
+    litres_by_key: dict[tuple[int, int], float] = {}
+    gaps_by_key: dict[tuple[int, int], int] = {}
     for p in plans:
         eval_dates = _evaluation_dates(p.val_start, p.val_end, cadence)
         for sc in station_codes:
             sub = fills[(fills["fold"] == p.fold) & (fills["station_code"] == sc)]
             by_date = dict(zip(sub["date"], sub["litres"], strict=True))
             level = 0.5 * size
+            prev_price_none = False
+            key = (p.fold, sc)
             for i, d in enumerate(eval_dates):
+                price_now = history.station_price_at(sc, d)
+                if price_now is None and not prev_price_none:
+                    gaps_by_key[key] = gaps_by_key.get(key, 0) + 1
                 if i > 0:
                     steps += 1
                     raw = level - depletion
@@ -134,19 +192,45 @@ def _dry_audit(
                         dry_events += 1
                         dry_litres += -raw
                         worst = max(worst, -raw)
+                        litres_by_key[key] = litres_by_key.get(key, 0.0) + (-raw)
+                        if price_now is None or prev_price_none:
+                            pass  # darkness: forgiven, exactly as run_backtest forgives it
+                        else:
+                            stranded_events += 1
+                            stranded_litres += -raw
                     level = max(0.0, raw)
                 if d in by_date:
                     level += by_date[d]
+                prev_price_none = price_now is None
     return {
         "dry_events": dry_events,
         "dry_litres": dry_litres,
         "worst_dry_litres": worst,
         "depletion_steps": steps,
+        "stranded_events": stranded_events,
+        "stranded_litres": stranded_litres,
+        "litres_by_key": litres_by_key,
+        "gaps_by_key": gaps_by_key,
         # The a-priori condition: a reachable decide-level inside this open interval
         # is above the emergency floor yet cannot survive one interval.
         "gap_lo": tank.floor_fraction * size,
         "gap_hi": depletion,
     }
+
+
+def _symmetry_excess_litres(model_audit: dict, oracle_audit: dict, tank_size: float) -> float:
+    """Max, over (fold, station) keys, of how far the two arms' forgiven litres
+    exceed the physical bound (see ``SYMMETRY_TOL_PER_GAP``). <= 0.0 means every
+    key is within bound; a positive value names the worst violation in litres.
+    """
+    keys = set(model_audit["litres_by_key"]) | set(oracle_audit["litres_by_key"])
+    worst = 0.0
+    for k in keys:
+        n_gaps = max(model_audit["gaps_by_key"].get(k, 0), oracle_audit["gaps_by_key"].get(k, 0), 1)
+        bound = tank_size * n_gaps
+        diff = abs(model_audit["litres_by_key"].get(k, 0.0) - oracle_audit["litres_by_key"].get(k, 0.0))
+        worst = max(worst, diff - bound)
+    return worst
 
 
 def main() -> None:
@@ -248,12 +332,23 @@ def main() -> None:
         mf = cad_fills[cad_fills["arm"] == "model"]
         audit = {
             arm: _dry_audit(cad_fills[cad_fills["arm"] == arm], plans, cadence, tank,
-                            station_codes)
+                            station_codes, history)
             for arm in ("model", "oracle")
         }
-        audits.append({"cadence_days": cadence,
-                       **{f"{arm}_{k}": v for arm, a in audit.items() for k, v in a.items()}})
-        ceiling_valid = audit["model"]["dry_events"] == 0 and audit["oracle"]["dry_events"] == 0
+        symmetry_excess = _symmetry_excess_litres(
+            audit["model"], audit["oracle"], tank.tank_size_litres
+        )
+        audits.append({
+            "cadence_days": cadence,
+            "symmetry_excess_litres": symmetry_excess,
+            **{f"{arm}_{k}": v for arm, a in audit.items() for k, v in a.items()
+               if k not in ("litres_by_key", "gaps_by_key")},
+        })
+        ceiling_valid = (
+            audit["model"]["stranded_events"] == 0
+            and audit["oracle"]["stranded_events"] == 0
+            and symmetry_excess <= 0.0
+        )
         rows.append({
             "cadence_days": cadence,
             "always_cpl": always_cpl, "model_cpl": model_cpl, "oracle_cpl": oracle_cpl,
@@ -291,8 +386,8 @@ def main() -> None:
 
     print("\n=== all three arms vs decision cadence (window level, pooled) ===", flush=True)
     print(summary.to_string(index=False, float_format=lambda x: f"{x:.2f}"), flush=True)
-    print("\n=== run-dry audit (a cadence with dry events has an INVALID ceiling) ===",
-          flush=True)
+    print("\n=== run-dry audit (a cadence with stranded events or symmetry_excess_litres > 0 "
+          "has an INVALID ceiling) ===", flush=True)
     print(audit_df.to_string(index=False, float_format=lambda x: f"{x:.2f}"), flush=True)
     print("\nReference (#262, 7d): always 193.41 / model 189.79 / oracle 188.14.", flush=True)
 

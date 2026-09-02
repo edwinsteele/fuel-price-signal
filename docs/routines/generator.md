@@ -83,7 +83,7 @@ Read all of the following before proposing anything:
    **those numbers are withdrawn and must not steer a candidate.** What is left:
    - **Window-level headroom stands, with its cadence attached.** The production
      decision grid is **daily** since the 2026-08-22 re-lock (bd `fps-oqz`), so the
-     headroom a candidate aims at is **2.97 c/L at 1-day cadence** — not the 1.54
+     headroom a candidate aims at is **3.06 c/L at 1-day cadence** — not the 1.60
      c/L that the same measurement gives on the retired 7-day grid
      (`experiments/2026-08-20_cadence_ceiling/`, bd `fps-fii`). At 1d the model
      captures ~64% of the always-buy → perfect-foresight distance, down from ~71%
