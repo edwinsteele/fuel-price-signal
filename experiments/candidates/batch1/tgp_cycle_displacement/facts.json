@@ -4162,9 +4162,9 @@
   },
   "grading": {
     "predicted_signature": "Decision-timing: on rows where the floor has fallen a long way since the peak, the model should WAIT past the point the lock would buy, because the trough it is approaching is deeper than the network clock implies; where the floor has been flat or has risen since the peak, it should buy earlier. Expect the effect to concentrate on NON-SHOCK folds \u2014 the mechanism is about the floor setting trough depth in an ordinary cycle, and the shock folds are exactly where the previous TGP gap candidate was measured to HURT (+0.011 log-loss). A shock-concentrated win here would therefore be evidence against the stated mechanism rather than for it, and should be read as such. Magnitude expectation is small: results.csv history puts single-column features at 0.03-0.26 c/L and both prior TGP expressions landed inside the noise band.",
-    "verdict": null,
-    "explanation": null,
-    "pending": true
+    "verdict": "contradicted",
+    "explanation": "The realised headline is the strongest in batch1 and is the one candidate to clear the single-candidate noise band on the good-direction side (-0.2077 c/L held-tau, z=-2.33 past t=1.92) -- stronger than either prior TGP expression, both of which sat inside their bands. But the WHERE of the effect is the opposite of what was predicted: the signature named concentration on NORMAL folds and explicitly pre-registered a SHOCK-concentrated win as evidence AGAINST its wholesale-lead mechanism, and that is exactly what was measured -- shock (-0.3079 c/L) is larger in magnitude than normal (-0.1613 c/L), with zone.resolved=false for the same reason. The shock aggregate is not a clean shock story on its own terms either (2 of 4 shock folds hurt the candidate, and fold 3 alone drives most of the favourable shock number), but as measured, the pattern the candidate itself nominated as falsifying is the pattern that showed up. Unchanged by the 2026-08-30 shock-fold correction, though the fold responsible moved.",
+    "pending": false
   },
   "noise_band": {
     "available": true,

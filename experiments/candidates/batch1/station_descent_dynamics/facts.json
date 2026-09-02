@@ -3951,9 +3951,9 @@
   },
   "grading": {
     "predicted_signature": "Decision-timing, not accuracy: the model should stop waiting earlier on rows where station_descent_decel has gone positive (recent pace slower than the trailing pace) at moderate cycle_pct_through, and should keep waiting longer on rows where it is negative (the cuts are still accelerating). Expect a MODEST number of buy/wait flips concentrated in elongated cycles, where the network clock and the station's own pace diverge most \u2014 i.e. exactly the shallow-vs-steep-within-elongated distinction the #214 oracle diagnostic found invisible in network_px_std until phase > 1.4. If the mechanism is real, the per-fold contributions should be largest in folds 3 and 7 (the two folds the ledger names on the elongation axis) and near-zero elsewhere; a uniform improvement across all 14 folds would be evidence the columns are working as generic momentum rather than as a descent-shape reading.",
-    "verdict": null,
-    "explanation": null,
-    "pending": true
+    "verdict": "contradicted",
+    "explanation": "The candidate pre-registered concentration in folds 3 and 7 (elongated normal-regime descents) with near-zero effect elsewhere and a MODEST flip count. The pipeline's own zone test contradicts this directly on the candidate's declared axis: zone.resolved=false, with the declared target zone slightly WORSE for the candidate (+0.0148 c/L) while the rest of the run carries the improvement (-0.0298 c/L), and the flip count is large and diffuse (337 flips spread across the folds) rather than modest and concentrated. Corrected 2026-08-30 (fps-hnp): against the corrected empirical shock-fold set what aggregate improvement exists now traces mostly to normal-regime folds, which read literally is closer to the candidate's framing than the original 2026-08-25 reading was -- but the candidate's declared axis was elongation (folds 3/7) specifically, not the regime label, and the zone test still reads false against that declared axis regardless of the reattribution.",
+    "pending": false
   },
   "noise_band": {
     "available": true,

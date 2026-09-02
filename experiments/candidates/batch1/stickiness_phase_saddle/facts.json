@@ -3115,9 +3115,9 @@
   },
   "grading": {
     "predicted_signature": "Decision-timing: for stations with near-zero stickiness the decisions should be essentially unchanged (the product is ~0 there, so the columns add nothing), and the flips should be concentrated on the tails of the stickiness distribution \u2014 buying EARLIER on high-|stickiness| stations at late phase, because the network clock is over-promising a trough those stations will not fully follow. The distinctive signature to look for is that the SIGNED and ABSOLUTE columns are both used and disagree in orientation somewhere in the SHAP surface; if only abs_sticky_x_phase is used, the real content is 'outlier stations are decoupled' rather than a saddle, which is a weaker and different claim. Expect it to spread across folds rather than concentrate, because station composition is a cross-sectional property with no particular fold affinity.",
-    "verdict": null,
-    "explanation": null,
-    "pending": true
+    "verdict": "inconclusive",
+    "explanation": "Two distinct things carry this label and should not be conflated. The ledger outcome is mechanical (-t < z < t): z=-1.01 against t=1.92 puts the run inside the band. Separately, the candidate's PREDICTED_SIGNATURE was phrased in terms of SHAP importance/orientation, which docs/routines/dossier.md grades `inconclusive` ALWAYS (fps-1l1: no SHAP field will ever exist in facts.json) -- so the signature grade is a property of how the claim was phrased, not a measurement of it. The run itself showed -0.0761 c/L held-tau in the favourable direction across 247 decision flips spread over almost every fold. This dossier's original recommendation was replaced (2026-08-29): both routes it named for a second look were already closed, and a flip-level review found the mechanism REAL but mispriced -- it helps at cycle turns and mildly hurts elsewhere, and turns are too small a share of volume for the trade to pay. Verdict: reject this construction, graduate the mechanism to fps-3jj.10 lead 6 (turn-gated).",
+    "pending": false
   },
   "noise_band": {
     "available": true,
