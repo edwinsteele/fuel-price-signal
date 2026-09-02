@@ -377,7 +377,25 @@ See [docs/automation.md](docs/automation.md) for the full state machine and oper
 | `polish` | Small contained features, test additions, minor refactors | Automated worker |
 | `design` | Cycle detection, signal logic, ML work, architecture decisions | Owner only — never automated |
 | `claude-authored` | PR was opened by the automated worker | Identifies worker-opened PRs |
+| `experiment` | One candidate feature, run unattended by the local nightly runner | Local runner (`bd ready --label experiment`) — never the remote worker |
 | `auto-merge-ok` | Safe to auto-merge once CI passes | Applied by worker to `chore` PRs |
+
+The labels above are the **routing** axis: they decide *who* picks an issue up. They say nothing about what it is about, which is why a backlog of ~35 was unreadable by 2026-09-02 (every item `design` or `chore`, 20 of 38 at P2, and `bd ready` opening with eight never-scoped wishlist items).
+
+**Topic labels — the second, orthogonal axis.** Every issue carries exactly one, alongside its routing label:
+
+| Label | Scope |
+|-------|-------|
+| `batch1` | The batch1 close-out chain, and only that. Empty it and retire the label; do not repurpose it for batch2 — file `batch2` |
+| `pipeline` | Experiment-pipeline machinery: `experiments/pipeline/**`, `experiments/lib/**`, dossier/retrospective/noise-floor defects and hoists |
+| `research` | Feature and analysis tracks — candidate features, the phase axis, arbiter design, anything whose deliverable is a finding rather than code |
+| `data` | Ingest and frame quality: FuelCheck/TGP sources, `fill.py`, panel membership |
+| `product` | The end-user signal itself — delivery, CLI, what the owner actually acts on |
+| `infra` | CI, scheduled tasks, the worker Routine, `.github/**` |
+
+`bd list --label research` is now the way to read one thread; `bd ready` is the way to read across them.
+
+**Priority is a queue position, not a severity.** P1 is reserved for the current focus's critical path and should hold under ~6 issues — if everything is P1, nothing is. P2 is real work with a near-term claim, P3 is real work that is not now, P4 is a parking lot that should be periodically emptied by closing rather than by demoting further.
 
 **Classification examples:**
 - `chore`: add a missing type hint, bump a dev dependency, fix a typo in a docstring, delete unused import
