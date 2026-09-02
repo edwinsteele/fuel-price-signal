@@ -86,7 +86,7 @@ for the rationale and the full before/after. Three consequences for reading this
   records below stay as they are, at 7d. Note always-buy moves with cadence too
   (191.78 → 191.56): it fills daily in small amounts rather than weekly in large ones,
   so the volume weighting across dates changes. Do not compare this 182.18 against the
-  cadence-ceiling oracle floor of 184.85 — different window and station set, so the
+  cadence-ceiling oracle floor of 184.98 — different window and station set, so the
   model has not "beaten perfect foresight".
 
 **Why `score_phase2` still chooses τ=0.25 after the re-lock.** Its τ selector is
