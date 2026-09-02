@@ -78,7 +78,7 @@ for the rationale and the full before/after. Three consequences for reading this
   cadence-ceiling folds the same model reads 190.06 at 7d and 188.04 at 1d, and
   headroom vs the perfect-foresight oracle goes 1.60 → 3.06 c/L (re-measured
   2026-09-02 after PR #358; see docs/CONVENTIONS.md § The decision cadence is a lock
-  parameter for the superseded pre-#358 figures and the outstanding validity caveat).
+  parameter for the superseded pre-#358 figures).
 - **At 1d the same on-disk artifact scores 182.18 c/L (4.90% vs always-buy 191.56) on
   this file's test window**, re-scored 2026-08-22 by `score_phase2` after the re-lock
   (`experiments/results.csv`, stamped `50/3.571/1d/10%`). This is a re-score, **not a

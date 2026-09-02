@@ -1,6 +1,6 @@
 {
   "stage": "2_model_arm",
-  "git_sha": "12dc7629f1f440bbf71fa7f50304e6adb781d048",
+  "git_sha": "62cffe5d9d9fa4f0c64e5dbbbbf732e7876f72d8",
   "cadences": [
     7,
     3,
@@ -171,7 +171,7 @@
     "n_windows": 14,
     "calibration": "isotonic",
     "collect_fills": true,
-    "total_wall_seconds": 543.4058318330208,
+    "total_wall_seconds": 616.2610632500146,
     "baseline_cache_used": false,
     "baseline_cache_hit_folds": []
   },
@@ -191,8 +191,8 @@
       "model_litres": 20575.0,
       "model_dry_events": 40,
       "oracle_dry_events": 40,
-      "ceiling_valid": false,
-      "wall_s": 28.72856150008738
+      "ceiling_valid": true,
+      "wall_s": 29.528817874961533
     },
     {
       "cadence_days": 3,
@@ -209,8 +209,8 @@
       "model_litres": 21253.57142857143,
       "model_dry_events": 94,
       "oracle_dry_events": 95,
-      "ceiling_valid": false,
-      "wall_s": 29.16484149999451
+      "ceiling_valid": true,
+      "wall_s": 30.17665583291091
     },
     {
       "cadence_days": 2,
@@ -227,8 +227,8 @@
       "model_litres": 21500.000000000004,
       "model_dry_events": 149,
       "oracle_dry_events": 149,
-      "ceiling_valid": false,
-      "wall_s": 30.835591666051187
+      "ceiling_valid": true,
+      "wall_s": 31.925205625011586
     },
     {
       "cadence_days": 1,
@@ -245,73 +245,93 @@
       "model_litres": 21964.285714285703,
       "model_dry_events": 279,
       "oracle_dry_events": 283,
-      "ceiling_valid": false,
-      "wall_s": 35.5845986250788
+      "ceiling_valid": true,
+      "wall_s": 36.59589158301242
     }
   ],
   "dry_audit": [
     {
       "cadence_days": 7,
+      "symmetry_excess_litres": 0.0,
       "model_dry_events": 40,
       "model_dry_litres": 1000.0,
       "model_worst_dry_litres": 25.0,
       "model_depletion_steps": 840,
+      "model_stranded_events": 0,
+      "model_stranded_litres": 0.0,
       "model_gap_lo": 5.0,
       "model_gap_hi": 25.0,
       "oracle_dry_events": 40,
       "oracle_dry_litres": 1000.0,
       "oracle_worst_dry_litres": 25.0,
       "oracle_depletion_steps": 840,
+      "oracle_stranded_events": 0,
+      "oracle_stranded_litres": 0.0,
       "oracle_gap_lo": 5.0,
       "oracle_gap_hi": 25.0
     },
     {
       "cadence_days": 3,
+      "symmetry_excess_litres": 0.0,
       "model_dry_events": 94,
       "model_dry_litres": 985.7142857142838,
       "model_worst_dry_litres": 10.714285714285715,
       "model_depletion_steps": 2030,
+      "model_stranded_events": 0,
+      "model_stranded_litres": 0.0,
       "model_gap_lo": 5.0,
       "model_gap_hi": 10.714285714285715,
       "oracle_dry_events": 95,
       "oracle_dry_litres": 996.4285691428553,
       "oracle_worst_dry_litres": 10.714285714285715,
       "oracle_depletion_steps": 2030,
+      "oracle_stranded_events": 0,
+      "oracle_stranded_litres": 0.0,
       "oracle_gap_lo": 5.0,
       "oracle_gap_hi": 10.714285714285715
     },
     {
       "cadence_days": 2,
+      "symmetry_excess_litres": 0.0,
       "model_dry_events": 149,
       "model_dry_litres": 1049.9999999999984,
       "model_worst_dry_litres": 7.142857142857143,
       "model_depletion_steps": 3080,
+      "model_stranded_events": 0,
+      "model_stranded_litres": 0.0,
       "model_gap_lo": 5.0,
       "model_gap_hi": 7.142857142857143,
       "oracle_dry_events": 149,
       "oracle_dry_litres": 1053.5714285714268,
       "oracle_worst_dry_litres": 7.142857142857143,
       "oracle_depletion_steps": 3080,
+      "oracle_stranded_events": 0,
+      "oracle_stranded_litres": 0.0,
       "oracle_gap_lo": 5.0,
       "oracle_gap_hi": 7.142857142857143
     },
     {
       "cadence_days": 1,
+      "symmetry_excess_litres": 0.0,
       "model_dry_events": 279,
       "model_dry_litres": 996.4285714285685,
       "model_worst_dry_litres": 3.5714285714285716,
       "model_depletion_steps": 6230,
+      "model_stranded_events": 0,
+      "model_stranded_litres": 0.0,
       "model_gap_lo": 5.0,
       "model_gap_hi": 3.5714285714285716,
       "oracle_dry_events": 283,
       "oracle_dry_litres": 1010.7142784285684,
       "oracle_worst_dry_litres": 3.5714285714285716,
       "oracle_depletion_steps": 6230,
+      "oracle_stranded_events": 0,
+      "oracle_stranded_litres": 0.0,
       "oracle_gap_lo": 5.0,
       "oracle_gap_hi": 3.5714285714285716
     }
   ],
-  "wall_seconds": 671.4849285839591,
+  "wall_seconds": 749.0183256670134,
   "baseline": {
     "n_columns": 54,
     "fingerprint": "54:1a6ec2d84a69",

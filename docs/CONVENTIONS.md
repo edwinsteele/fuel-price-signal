@@ -141,15 +141,6 @@ same size, so the re-lock decision is unaffected (it rested on the owner's ratio
 the economics, in any case). Quote the 2026-09-02 figures for anything forward-looking and
 these for anything describing the 2026-08-22 decision.
 
-**Caveat, outstanding as of 2026-09-02:** `model_cadence.py` currently reports
-`ceiling_valid = False` at *every* cadence, because its run-dry gate tests
-`dry_events == 0` — a proxy for "the oracle pruned run-dry paths and the model didn't",
-which PR #358 made obsolete by having the oracle clamp and account for forgiven depletion
-too. The dry litres are ~1000 L at every cadence and divide exactly into whole depletion
-periods, i.e. one contiguous no-price span (station 414's closure), not cadence stranding.
-Re-aiming that gate is tracked on `fps-32h`; until it lands, treat the headroom figures
-above as measured-but-ungated.
-
 The decision rests on the owner's rationale (uniformity with daily price cadence, max decision resolution, a choice every day as the intended product experience), not on the economics — `fps-929` found re-picking τ at daily cadence is worth only 0.062 c/L, so τ stays 0.25. It is **not a retrain** (the fit takes no `TankParams`) and **not a production code change** (`evaluation_interval_days` is consumed only by the backtest engines; the live daily signal in `fuel_signal/signal.py` is rule-based and already emits daily).
 
 **Quote realised CPL and headroom with the cadence attached.** "1.60 c/L of headroom" is a fact about a specific cadence, not about the model.
