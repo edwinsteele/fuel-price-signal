@@ -24,6 +24,16 @@ its leaderboard could not differentiate and its calibration read was a single po
 > grades quoted under Judgement are read from the candidates' `facts.json`, not from this
 > payload.
 
+> **Status of the dossiers this rests on (`fps-3ug`).** Every figure below traces to
+> `retrospective_facts.json` or the post-#359 `facts.json`; all were verified against those
+> payloads before this was committed. The candidate `README.md` files beside them still
+> quote PRE-#359 figures and are the stale side — one number in `not_tested` below is taken
+> from a README and is labelled as pre-regen where it appears. PR #359 measured every batch1
+> effect as moving less than 0.008 c/L with no verdict flipped, so the signature grades and
+> the judgement below are not expected to move when `fps-3ug` refreshes those READMEs. If
+> that refresh does change any candidate's Judgement conclusion, the signature-grade table
+> and the decoupling finding here must be revisited before this document is cited.
+
 ---
 
 # Facts
