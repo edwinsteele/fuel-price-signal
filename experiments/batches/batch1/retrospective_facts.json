@@ -1,0 +1,161 @@
+{
+  "batch": "batch1",
+  "computed_at": "2026-09-02T20:59:36.927377+00:00",
+  "git_sha": "61ffe5f7666c0ede00733b6dfd65ea68a4d2c252",
+  "noise_floor": {
+    "available": true,
+    "n_draws": 10,
+    "effective_n_draws": 10.0,
+    "n_placebo_columns": 3,
+    "tank_params": "50/3.571/1d/10%",
+    "band_mean_delta_cpl_held": 0.025101995567317202,
+    "band_std_delta_cpl_held": 0.09993498251895033
+  },
+  "family_wise_percentile_threshold": 99.0,
+  "family_wise_z_threshold": 2.9591490603299007,
+  "leaderboard": [
+    {
+      "candidate": "tgp_cycle_displacement",
+      "mechanism_family": "wholesale-lead",
+      "status": "graded",
+      "tank_params": "50/3.571/1d/10%",
+      "delta_cpl_held": -0.20770099514740537,
+      "effect_resolved": true,
+      "zone_resolved": false,
+      "confidence_effect": 0.3,
+      "confidence_zone": 0.55,
+      "noise_band_available": true,
+      "noise_band_percentile": 100.0,
+      "noise_band_z": -2.3295445183129635,
+      "clears_family_wise_threshold": false
+    },
+    {
+      "candidate": "network_move_breadth",
+      "mechanism_family": "directional-network-breadth",
+      "status": "graded",
+      "tank_params": "50/3.571/1d/10%",
+      "delta_cpl_held": -0.16271534675050248,
+      "effect_resolved": true,
+      "zone_resolved": true,
+      "confidence_effect": 0.6,
+      "confidence_zone": 0.35,
+      "noise_band_available": true,
+      "noise_band_percentile": 100.0,
+      "noise_band_z": -1.8793953586993875,
+      "clears_family_wise_threshold": false
+    },
+    {
+      "candidate": "stickiness_phase_saddle",
+      "mechanism_family": "station-heterogeneity-interaction",
+      "status": "graded",
+      "tank_params": "50/3.571/1d/10%",
+      "delta_cpl_held": -0.07610755340203923,
+      "effect_resolved": true,
+      "zone_resolved": null,
+      "confidence_effect": 0.35,
+      "confidence_zone": 0.15,
+      "noise_band_available": true,
+      "noise_band_percentile": 80.0,
+      "noise_band_z": -1.0127539568055102,
+      "clears_family_wise_threshold": false
+    },
+    {
+      "candidate": "lga_trough_propagation",
+      "mechanism_family": "lead-lag-propagation",
+      "status": "graded",
+      "tank_params": "50/3.571/1d/10%",
+      "delta_cpl_held": -0.06716719826414419,
+      "effect_resolved": true,
+      "zone_resolved": true,
+      "confidence_effect": 0.45,
+      "confidence_zone": 0.45,
+      "noise_band_available": true,
+      "noise_band_percentile": 80.0,
+      "noise_band_z": -0.9232922396715755,
+      "clears_family_wise_threshold": false
+    },
+    {
+      "candidate": "station_descent_dynamics",
+      "mechanism_family": "station-own-price-dynamics",
+      "status": "graded",
+      "tank_params": "50/3.571/1d/10%",
+      "delta_cpl_held": -0.02372255899723541,
+      "effect_resolved": true,
+      "zone_resolved": false,
+      "confidence_effect": 0.45,
+      "confidence_zone": 0.3,
+      "noise_band_available": true,
+      "noise_band_percentile": 60.0,
+      "noise_band_z": -0.48856319712963553,
+      "clears_family_wise_threshold": false
+    }
+  ],
+  "outcome_tally": {
+    "total_candidates_filed": 5,
+    "dossiered_by_status": {
+      "graded": 5
+    },
+    "never_run": 0,
+    "retryable_incomplete": 0,
+    "pending_dossier": 0
+  },
+  "confidence_calibration": {
+    "scope": "cumulative across every dossiered candidate under experiments/candidates/, not just this batch",
+    "min_calibration_n": 10,
+    "n_dossiered_with_resolved_effect": 6,
+    "n_usable_for_calibration": 6,
+    "insufficient_data": true,
+    "pairs": [
+      {
+        "candidate": "tgp_delta_7d",
+        "batch": "batch0",
+        "confidence_effect": 0.5,
+        "effect_resolved": false,
+        "confidence_zone": 0.5,
+        "zone_resolved": null
+      },
+      {
+        "candidate": "lga_trough_propagation",
+        "batch": "batch1",
+        "confidence_effect": 0.45,
+        "effect_resolved": true,
+        "confidence_zone": 0.45,
+        "zone_resolved": true
+      },
+      {
+        "candidate": "network_move_breadth",
+        "batch": "batch1",
+        "confidence_effect": 0.6,
+        "effect_resolved": true,
+        "confidence_zone": 0.35,
+        "zone_resolved": true
+      },
+      {
+        "candidate": "station_descent_dynamics",
+        "batch": "batch1",
+        "confidence_effect": 0.45,
+        "effect_resolved": true,
+        "confidence_zone": 0.3,
+        "zone_resolved": false
+      },
+      {
+        "candidate": "stickiness_phase_saddle",
+        "batch": "batch1",
+        "confidence_effect": 0.35,
+        "effect_resolved": true,
+        "confidence_zone": 0.15,
+        "zone_resolved": null
+      },
+      {
+        "candidate": "tgp_cycle_displacement",
+        "batch": "batch1",
+        "confidence_effect": 0.3,
+        "effect_resolved": true,
+        "confidence_zone": 0.55,
+        "zone_resolved": false
+      }
+    ],
+    "mean_confidence_effect_when_resolved_true": null,
+    "mean_confidence_effect_when_resolved_false": null
+  }
+}
