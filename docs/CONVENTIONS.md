@@ -55,6 +55,10 @@ Experiments follow the same preference order, not an exemption. Reach for `load_
 
 Pass `df[feature_columns]` (a DataFrame) to `.fit()` and `.predict_proba()` at the model boundary — avoids sklearn's feature-name mismatch warning (`X does not have valid feature names, but LGBMClassifier was fitted with feature names`).
 
+### Reading a nested block out of parsed JSON — `isinstance`, not `or {}`
+
+`facts.get("grading") or {}` looks defensive and isn't: a truthy non-dict (`{"grading": "matched"}` in a hand-edited or truncated file) passes the `or` and raises `AttributeError` on the next `.get`. Use an `isinstance` guard — `experiments/pipeline/dossier_tables.py`'s `_dict_at` is the shape. This bit twice in one PR (fps-jrl / #360, review rounds 1 and 2), and it matters most in the unattended pipeline: a scan loop that catches only `OSError` and builds its list eagerly turns one malformed file into "no run in the batch is processed at all". Note `read_text()` on undecodable bytes raises `UnicodeDecodeError` — a `ValueError`, not an `OSError` — so a guard meant to isolate one bad run has to catch both.
+
 ### Comments document intent, not behaviour
 
 Add a one-line comment when an invariant is non-obvious (e.g. why the YYYY-DD-MM date-swap condition skips the equality case in `history.py`). Don't restate what the code already says.
