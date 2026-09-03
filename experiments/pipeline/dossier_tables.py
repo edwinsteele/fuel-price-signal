@@ -2196,14 +2196,20 @@ def _field_losses(new_facts: dict, old_facts: dict) -> list[str]:
     `_is_same_run` meant that path overwrote all three fields in silence: fps-d4g's exact loss,
     on the one path the guard didn't cover.
 
-    It is skipped when the REGENERATED run isn't graded, and that is not a hole. Every field
-    here needs the run's own scored output to exist at all — `_noise_band` returns
-    `available: false` for an unresolved `effect_delta_cpl_held`, which is every non-graded run,
-    and per_regime/decision_flips need folds and fills. So a graded run re-run to
-    `aborted_candidate` loses these to the ABORT, not to the environment, and refusing there
-    would deadlock the write-up: the nightly scan would refuse, log, and leave the run pending
-    to refuse again the next night, forever. The abort is the run's real outcome and gets
-    dossiered as such.
+    It is skipped when the REGENERATED run isn't graded, and that gate is structurally
+    necessary, not a pragmatic carve-out (PR #360 review round 2). All three fields go False for
+    a non-graded run BY CONSTRUCTION, in any environment: `runner._finish` writes a status-only
+    results.json whose meta is `wall_seconds` (+ provider stats) and carries no `batch_dir` at
+    all, so `_noise_band` returns unavailable on its FIRST line — "no batch_dir recorded" —
+    before it ever looks for `noise_floor.json`; and `build_facts` early-returns at its
+    `status != STATUS_GRADED` guard, so breakdowns and decision_flips are never populated.
+
+    So a graded run re-run to `aborted_candidate` loses these to the ABORT, not to the
+    environment, and comparing them would refuse EVERY such re-run in a perfectly healthy
+    environment: the nightly scan would refuse, log, and leave the run pending to refuse again
+    the next night, forever, with the abort never dossiered. It opens no hole either — the only
+    way to lose these to the environment rather than to the abort is with a graded new run,
+    which is exactly what is checked.
     """
     if _dict_at(new_facts, "provenance").get("status") != STATUS_GRADED:
         return []

@@ -105,6 +105,13 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    rejected with `--scan` on purpose: scan-wide it would downgrade every refusing run in the
    pass, on one line of stdout each, in an unattended overnight log.
 
+   One refusal that reads like a regression and isn't: a batch **re-freeze** changes
+   `baseline_fingerprint`, which makes the existing `noise_floor.json` inadmissible, so a
+   re-run candidate gets `noise_band.available: false` from the admissibility check and every
+   regeneration refuses until the floor is recomputed. That is the guard working — the
+   alternative is writing an unavailable band over a real one — and the refusal message already
+   names recomputing the floor as the remedy.
+
    **A `PREDICTED_SIGNATURE` making a claim about SHAP importance/sign/orientation grades
    `"inconclusive"`, always** (decided `fps-1l1` — no SHAP field will exist in `facts.json`,
    see `docs/routines/generator.md` item 8 in "What this session must be handed"). Don't

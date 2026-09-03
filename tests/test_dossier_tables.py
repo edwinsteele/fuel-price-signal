@@ -2088,11 +2088,15 @@ def test_process_run_refuses_field_loss_even_when_the_claim_changed(tmp_path):
 
 def test_process_run_writes_an_abort_whose_derived_fields_legitimately_vanish(tmp_path):
     """What stops finding 1's fix over-firing. EVERY field in UNREPRODUCIBLE_FIELDS needs the
-    run's own scored output to exist — `_noise_band` reports `available: false` for an
-    unresolved effect_delta_cpl_held, which is every non-graded run — so a graded run re-run to
-    `aborted_candidate` loses them to the ABORT, not to the environment. Refusing there would
-    deadlock the write-up: the nightly scan would refuse, log, and leave the run pending to
-    refuse again the next night, forever."""
+    run's own scored output to exist, so a graded run re-run to `aborted_candidate` loses them to
+    the ABORT, not to the environment. Refusing there would deadlock the write-up: the nightly
+    scan would refuse, log, and leave the run pending to refuse again the next night, forever.
+
+    Note this fixture is STRICTER than reality: `_make_results` still stamps `meta.batch_dir` on
+    the abort, where `runner._finish` writes a status-only results.json with no `batch_dir` at
+    all — which makes `_noise_band` unavailable on its first line, before it ever looks for the
+    floor. Pinning the harder case on purpose: it must hold even for an abort that kept its
+    batch pointer."""
     run_dir, batch_dir = _write_run(tmp_path, batch_extras=_add_noise_floor)
     facts_path = dt.process_run(run_dir)
     assert isinstance(json.loads(facts_path.read_text())["breakdowns"]["per_regime"], list)
