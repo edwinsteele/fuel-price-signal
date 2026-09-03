@@ -60,6 +60,7 @@
   },
   "provenance": {
     "candidate": "lga_trough_propagation",
+    "results_fingerprint": "ed8455df7cb29847674b29632e3e1ade6e119f471cd906d15facb6d56499f34b",
     "batch": "batch1",
     "batch_dir": "experiments/batches/batch1",
     "snapshot_date": "2026-08-15",

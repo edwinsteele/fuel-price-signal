@@ -299,10 +299,11 @@ def default_out_dir(candidate_path: pathlib.Path) -> pathlib.Path:
     time keyed on "results.json present, README.md absent" — would then treat
     the directory as already-dossiered and never surface the overwriting
     candidate (fps-icv). Stripping .py gives each candidate its own
-    subdirectory instead. (find_pending_runs' queue rule has since moved to an
-    mtime comparison, fps-0yd, which would also catch this case — but this
-    fix is the one that actually prevents candidates sharing a directory at
-    all, so it stays regardless.)
+    subdirectory instead. (find_pending_runs' queue rule has since moved twice —
+    to an mtime comparison, fps-0yd, and then to a results.json fingerprint
+    recorded in facts.json, fps-jrl — either of which would also catch this
+    case, but this fix is the one that actually prevents candidates sharing a
+    directory at all, so it stays regardless.)
     """
     return candidate_path.with_suffix("")
 

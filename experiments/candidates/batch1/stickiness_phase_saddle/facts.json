@@ -23,6 +23,7 @@
   },
   "provenance": {
     "candidate": "stickiness_phase_saddle",
+    "results_fingerprint": "4522ba7299ee8a0c007b7c623f1ea93cf3c1f483bb5ec5a757e011129d3637ff",
     "batch": "batch1",
     "batch_dir": "experiments/batches/batch1",
     "snapshot_date": "2026-08-15",

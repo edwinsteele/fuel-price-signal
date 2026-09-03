@@ -20,6 +20,7 @@
   },
   "provenance": {
     "candidate": "tgp_delta_7d",
+    "results_fingerprint": "1f93ae363129dde21698a2ddc4dee630686491a961d35a0ba8e4199cc732a507",
     "batch": "batch0",
     "batch_dir": "experiments/batches/batch0",
     "snapshot_date": "2026-08-10",

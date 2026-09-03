@@ -27,6 +27,7 @@
   },
   "provenance": {
     "candidate": "network_move_breadth",
+    "results_fingerprint": "66d3062c0cdb4d5b5d3beb2f5c70633d133b36d3954ec28797bbeef18dbd2114",
     "batch": "batch1",
     "batch_dir": "experiments/batches/batch1",
     "snapshot_date": "2026-08-15",

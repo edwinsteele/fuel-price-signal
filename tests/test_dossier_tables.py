@@ -9,6 +9,7 @@ run_candidate() end to end.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import json
 import os
 import pathlib
@@ -201,12 +202,10 @@ def test_find_pending_runs_skips_in_progress_and_already_dossiered(tmp_path):
     done_dir.mkdir()
     done_results = done_dir / dt.RESULTS_FILENAME
     done_results.write_text("{}")
-    done_readme = done_dir / dt.README_FILENAME
-    done_readme.write_text("# done")
-    # Force an unambiguous mtime ordering regardless of filesystem timestamp resolution —
-    # see test_find_pending_runs_surfaces_deliberate_rerun for why this matters.
-    newer = done_results.stat().st_mtime + 10
-    os.utime(done_readme, (newer, newer))
+    (done_dir / dt.README_FILENAME).write_text("# done")
+    (done_dir / dt.FACTS_FILENAME).write_text(
+        json.dumps({"provenance": {"results_fingerprint": _fingerprint(done_results)}})
+    )
 
     pending = dt.find_pending_runs(tmp_path)
 
@@ -219,8 +218,10 @@ def test_find_pending_runs_surfaces_deliberate_rerun(tmp_path):
     Mirror image of fps-g31's abort-then-succeed case: here the run dir already has a
     README from an earlier dossiering, and a human deliberately re-runs the candidate
     (e.g. after a contract fix), overwriting results.json with a fresh verdict. Requiring
-    "no README.md" alone would hide that re-run forever; the results.json being NEWER than
-    the stale README is what should make it pending again.
+    "no README.md" alone would hide that re-run forever. What makes it pending is that no
+    facts.json on disk claims to have been built from this results.json (fps-jrl replaced
+    fps-0yd's mtime comparison, which a plain checkout tripped on every already-dossiered
+    run — see test_find_pending_runs_skips_a_current_dossier_a_checkout_made_look_newer).
     """
     run_dir = tmp_path / "rerun"
     run_dir.mkdir()
@@ -235,59 +236,126 @@ def test_find_pending_runs_surfaces_deliberate_rerun(tmp_path):
     assert dt.find_pending_runs(tmp_path) == [run_dir]
 
 
-def test_find_pending_runs_skips_readme_newer_than_results(tmp_path):
-    """A README written AFTER the current results.json (the ordinary post-dossier state)
-    stays out of the queue — only a results.json newer than its README counts as pending."""
-    run_dir = tmp_path / "dossiered"
+def _write_dossiered_run(
+    tmp_path, *, readme_text: str = "# written up", facts: dict | None,
+    mtime_order: str = "results_newer", name: str = "run",
+) -> pathlib.Path:
+    """A run dir with a README (and usually a facts.json), whose file mtimes are forced into a
+    chosen order. `results_newer` is what a plain `git checkout` produces for EVERY run — git
+    writes a directory's files in name order, so README.md lands milliseconds before
+    results.json (measured 2-4.5 ms across all six dossiered runs in experiments/candidates).
+    That is the condition behind fps-jrl, and no ordering here may change the verdict.
+    """
+    run_dir = tmp_path / name
     run_dir.mkdir()
     results = run_dir / dt.RESULTS_FILENAME
     results.write_text(json.dumps({"status": "graded"}))
     readme = run_dir / dt.README_FILENAME
-    readme.write_text("# done")
-    # Force an unambiguous mtime ordering — see test_find_pending_runs_surfaces_deliberate_rerun.
-    newer = results.stat().st_mtime + 10
-    os.utime(readme, (newer, newer))
+    readme.write_text(readme_text)
+    if facts is not None:
+        (run_dir / dt.FACTS_FILENAME).write_text(json.dumps(facts))
+    base = results.stat().st_mtime
+    offsets = {"results_newer": (base - 10, base), "tie": (base, base), "readme_newer": (base + 10, base)}
+    readme_mtime, results_mtime = offsets[mtime_order]
+    os.utime(readme, (readme_mtime, readme_mtime))
+    os.utime(results, (results_mtime, results_mtime))
+    return run_dir
+
+
+def _fingerprint(path: pathlib.Path) -> str:
+    """sha256 of the file's bytes, computed independently of dt._file_fingerprint so the test
+    pins the value rather than restating the implementation."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _current_facts(run_dir: pathlib.Path) -> dict:
+    return {"provenance": {"results_fingerprint": _fingerprint(run_dir / dt.RESULTS_FILENAME)}}
+
+
+@pytest.mark.parametrize("mtime_order", ["results_newer", "tie", "readme_newer"])
+def test_find_pending_runs_skips_a_current_dossier_a_checkout_made_look_newer(tmp_path, mtime_order):
+    """fps-jrl — the regression this issue exists for. The queue used to ask "is results.json
+    newer than (or the same age as) README.md?", which is true of every run in a fresh checkout:
+    git writes README.md before results.json, so the six dossiered runs in
+    experiments/candidates all looked like deliberate re-runs on a tree where nothing had been
+    re-run. That reprocessing wiped batch1's five recorded grading verdicts in PR #351 and fired
+    again on batch0/tgp_delta_7d. A dossier built from THIS results.json is current whatever the
+    timestamps say."""
+    run_dir = _write_dossiered_run(tmp_path, facts=None, mtime_order=mtime_order)
+    (run_dir / dt.FACTS_FILENAME).write_text(json.dumps(_current_facts(run_dir)))
 
     assert dt.find_pending_runs(tmp_path) == []
 
 
-def test_find_pending_runs_treats_equal_mtimes_as_pending(tmp_path):
-    """fps-0yd review (Sourcery): coarse filesystem timestamp resolution can give a genuine
-    re-run's results.json the SAME mtime as the stale README it's meant to supersede. Ties
-    must resolve to pending, not skipped — re-dossiering an already-current run is a harmless
-    no-op, while silently dropping a real re-run on a tie is the exact bug this function
-    exists to fix."""
-    run_dir = tmp_path / "tied"
-    run_dir.mkdir()
-    results = run_dir / dt.RESULTS_FILENAME
-    results.write_text(json.dumps({"status": "graded"}))
-    readme = run_dir / dt.README_FILENAME
-    readme.write_text("# stale")
-    tied = results.stat().st_mtime
-    os.utime(readme, (tied, tied))
+def test_find_pending_runs_skips_a_legacy_dossier_with_a_written_readme(tmp_path):
+    """Every facts.json written before fps-jrl predates `results_fingerprint`, and its mtimes
+    are not a usable substitute (see above), so a written-up legacy run is treated as current.
+    Forcing a rebuild is still available by naming the run_dir directly, which never consults
+    this queue."""
+    _write_dossiered_run(tmp_path, facts={"provenance": {"candidate": "cand"}})
+
+    assert dt.find_pending_runs(tmp_path) == []
+
+
+@pytest.mark.parametrize("mtime_order", ["results_newer", "tie", "readme_newer"])
+def test_find_pending_runs_surfaces_a_run_whose_results_json_changed(tmp_path, mtime_order):
+    """fps-0yd's real case, now decided on content: a candidate deliberately re-run after a
+    contract fix must be re-dossiered — including when the README.md left behind by the previous
+    write-up is NEWER than the fresh results.json, which the old mtime rule read as 'done'."""
+    run_dir = _write_dossiered_run(
+        tmp_path, readme_text="# stale",
+        facts={"provenance": {"results_fingerprint": "0" * 64}}, mtime_order=mtime_order,
+    )
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_surfaces_a_run_with_no_dossier_written(tmp_path):
+    """A README that is only whitespace is not a write-up. Keeping such a run pending is
+    load-bearing, not incidental: docs/routines/dossier.md tells the session to write NO README
+    for a `floor_arity_below_run` run precisely so the queue picks it up on a later night."""
+    run_dir = _write_dossiered_run(tmp_path, readme_text="   \n", facts=None)
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_surfaces_a_run_with_a_readme_but_no_facts_json(tmp_path):
+    """The reverse of the order this pipeline writes in (Step 0 writes facts.json, the session
+    then writes README.md). Nothing recorded is at risk, so rebuild rather than guess."""
+    run_dir = _write_dossiered_run(tmp_path, facts=None)
+
+    assert dt.find_pending_runs(tmp_path) == [run_dir]
+
+
+def test_find_pending_runs_surfaces_a_run_whose_facts_json_is_corrupt(tmp_path):
+    """An unparseable facts.json is not evidence of a current dossier — leave the run pending
+    so a rebuild gets the chance to replace it."""
+    run_dir = _write_dossiered_run(tmp_path, facts=None)
+    (run_dir / dt.FACTS_FILENAME).write_text("{not json")
 
     assert dt.find_pending_runs(tmp_path) == [run_dir]
 
 
 def test_find_pending_runs_skips_run_whose_readme_vanishes_mid_scan(tmp_path, monkeypatch):
     """fps-0yd review (Sourcery): a concurrent launch/rerun can remove or replace a run's
-    files between the `rglob` listing and the `stat()` calls this function now makes. The
-    resulting OSError must be swallowed for that one run, not propagate and abort the whole
-    `--scan` before every other run dir gets a chance."""
+    files between the `rglob` listing and the reads this function makes of them. The resulting
+    OSError must be swallowed for that one run, not propagate and abort the whole `--scan`
+    before every other run dir gets a chance. (fps-jrl moved those reads from `stat()` to the
+    file contents — same race, same requirement.)"""
     run_dir = tmp_path / "raced"
     run_dir.mkdir()
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
     readme = run_dir / dt.README_FILENAME
     readme.write_text("# stale")
 
-    real_stat = pathlib.Path.stat
+    real_read_text = pathlib.Path.read_text
 
-    def flaky_stat(self, *args, **kwargs):
+    def flaky_read_text(self, *args, **kwargs):
         if self == readme:
             raise FileNotFoundError(self)
-        return real_stat(self, *args, **kwargs)
+        return real_read_text(self, *args, **kwargs)
 
-    monkeypatch.setattr(pathlib.Path, "stat", flaky_stat)
+    monkeypatch.setattr(pathlib.Path, "read_text", flaky_read_text)
 
     assert dt.find_pending_runs(tmp_path) == []
 
@@ -295,7 +363,7 @@ def test_find_pending_runs_skips_run_whose_readme_vanishes_mid_scan(tmp_path, mo
 def test_find_pending_runs_survives_a_non_missing_stat_error(tmp_path, monkeypatch, capsys):
     """fps-0yd review round 2 (peer session pr-347-code-review-127a7f-56): an earlier version
     of this fix narrowed the guard to `except FileNotFoundError`, which meant any OTHER
-    OSError (a permissions error, an NFS staleness error) on one run's stat() call propagated
+    OSError (a permissions error, an NFS staleness error) on one run's read propagated
     OUT of find_pending_runs() uncaught — aborting the ENTIRE `--scan` before a single run_dir
     reached main()'s per-run try/except, including every unrelated healthy run_dir. That is a
     wider blast radius than the original "no README.md" bug. This pins the fix: a PermissionError
@@ -311,14 +379,14 @@ def test_find_pending_runs_survives_a_non_missing_stat_error(tmp_path, monkeypat
     broken_readme = broken_dir / dt.README_FILENAME
     broken_readme.write_text("# stale")
 
-    real_stat = pathlib.Path.stat
+    real_read_text = pathlib.Path.read_text
 
-    def flaky_stat(self, *args, **kwargs):
+    def flaky_read_text(self, *args, **kwargs):
         if self == broken_readme:
             raise PermissionError(self)
-        return real_stat(self, *args, **kwargs)
+        return real_read_text(self, *args, **kwargs)
 
-    monkeypatch.setattr(pathlib.Path, "stat", flaky_stat)
+    monkeypatch.setattr(pathlib.Path, "read_text", flaky_read_text)
 
     assert dt.find_pending_runs(tmp_path) == [healthy_dir]
     assert "broken" in capsys.readouterr().out
@@ -1808,6 +1876,162 @@ def test_process_run_writes_facts_json_with_plots_list(tmp_path):
     assert facts_path == run_dir / dt.FACTS_FILENAME
     facts = json.loads(facts_path.read_text())
     assert "per_fold_delta_bars.png" in facts["plots"]
+
+
+def _record_verdict(run_dir: pathlib.Path, *, verdict="matched", explanation="a real judgement") -> dict:
+    """Do what the dossier session does by hand in Step 1.2 of docs/routines/dossier.md: write a
+    verdict back into the facts.json already on disk, leaving every other field untouched."""
+    facts_path = run_dir / dt.FACTS_FILENAME
+    facts = json.loads(facts_path.read_text())
+    facts["grading"].update({"verdict": verdict, "explanation": explanation, "pending": False})
+    facts_path.write_text(json.dumps(facts, indent=2))
+    return facts
+
+
+def test_build_facts_records_the_results_json_fingerprint(tmp_path):
+    """fps-jrl: facts.json says which results.json it was built from, so find_pending_runs can
+    answer "is this dossier current?" on an mtime tie without trusting the timestamps."""
+    run_dir, _ = _write_run(tmp_path)
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["provenance"]["results_fingerprint"] == _fingerprint(run_dir / dt.RESULTS_FILENAME)
+
+
+def test_process_run_preserves_a_recorded_grading_verdict(tmp_path):
+    """fps-jrl — the wipe itself. `grading` is the ONE field in facts.json that is not derived
+    from the run's artifacts: the dossier session writes it by hand and nothing can rebuild it.
+    process_run used to overwrite facts.json with a blank `verdict: null, pending: true` block on
+    every regeneration, which is how PR #351 silently reset all five batch1 verdicts."""
+    run_dir, _ = _write_run(tmp_path)
+    dt.process_run(run_dir)
+    _record_verdict(run_dir, verdict="contradicted", explanation="helped shock, not normal")
+
+    dt.process_run(run_dir)
+
+    grading = json.loads((run_dir / dt.FACTS_FILENAME).read_text())["grading"]
+    assert grading["verdict"] == "contradicted"
+    assert grading["explanation"] == "helped shock, not normal"
+    assert grading["pending"] is False
+
+
+def test_process_run_drops_a_verdict_loudly_when_the_predicted_signature_changed(tmp_path, capsys):
+    """The one case where blanking the verdict is right: the candidate was re-authored, so the
+    recorded judgement no longer answers the question asked. It still has to be SAID — a silent
+    reset is indistinguishable from the bug (fps-jrl)."""
+    run_dir, batch_dir = _write_run(tmp_path)
+    dt.process_run(run_dir)
+    _record_verdict(run_dir)
+    results = json.loads((run_dir / dt.RESULTS_FILENAME).read_text())
+    results["candidate"]["predicted_signature"] = "a different claim entirely"
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
+
+    dt.process_run(run_dir)
+
+    grading = json.loads((run_dir / dt.FACTS_FILENAME).read_text())["grading"]
+    assert grading["verdict"] is None
+    assert grading["pending"] is True
+    assert "dropping the recorded grading verdict" in capsys.readouterr().out
+
+
+def test_process_run_drops_a_verdict_loudly_when_the_run_status_changed(tmp_path, capsys):
+    """Same rule from the other side: a re-run that ends `aborted_candidate` where the last one
+    ended `graded` never reached the scoring stages, so a carried-forward "matched" would attach
+    a verdict to a run that produced no numbers."""
+    run_dir, batch_dir = _write_run(tmp_path)
+    dt.process_run(run_dir)
+    _record_verdict(run_dir)
+    (run_dir / dt.RESULTS_FILENAME).write_text(
+        json.dumps(_make_results(batch_dir, status="aborted_candidate", error="no signal"))
+    )
+
+    dt.process_run(run_dir)
+
+    facts = json.loads((run_dir / dt.FACTS_FILENAME).read_text())
+    assert facts["grading"]["verdict"] is None
+    assert "dropping the recorded grading verdict" in capsys.readouterr().out
+
+
+def test_process_run_refuses_to_drop_a_noise_band_it_can_no_longer_compute(tmp_path):
+    """fps-jrl (absorbing fps-d4g): the batch's noise_floor.json is gitignored and ephemeral —
+    batch0's is already gone. Regenerating a dossier without it flips
+    noise_band.available true -> false, which docs/routines/dossier.md maps straight to
+    `outcome: rejected`. Refuse and leave the dossier alone rather than write the downgrade."""
+    def add_noise_floor(batch_dir):
+        (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+            "deltas_cpl_held": [0.01, -0.02, 0.03, 0.00, -0.01],
+            "baseline_fingerprint": "54:deadbeef1234",
+            "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+        }))
+
+    run_dir, batch_dir = _write_run(tmp_path, batch_extras=add_noise_floor)
+    facts_path = dt.process_run(run_dir)
+    assert json.loads(facts_path.read_text())["noise_band"]["available"] is True
+    before = facts_path.read_bytes()
+    (batch_dir / dt.NOISE_FLOOR_FILENAME).unlink()
+
+    with pytest.raises(dt.FactsFieldLossError, match="noise_band"):
+        dt.process_run(run_dir)
+
+    assert facts_path.read_bytes() == before  # nothing written
+
+
+def test_process_run_refuses_to_drop_per_fold_regime_labels(tmp_path):
+    """The other unreproducible field: a results.json predating fps-3tu's empirical shock-fold
+    set has no meta.shock_folds, so per_fold[].regime and per_regime degrade to an explicit
+    refusal. That refusal must not overwrite a dossier that still carries the real labels."""
+    run_dir, batch_dir = _write_run(tmp_path)
+    facts_path = dt.process_run(run_dir)
+    assert isinstance(json.loads(facts_path.read_text())["breakdowns"]["per_regime"], list)
+    before = facts_path.read_bytes()
+    (run_dir / dt.RESULTS_FILENAME).write_text(
+        json.dumps(_make_results(batch_dir, omit_shock_folds=True))
+    )
+
+    with pytest.raises(dt.FactsFieldLossError, match="per_regime"):
+        dt.process_run(run_dir)
+
+    assert facts_path.read_bytes() == before
+
+
+def test_process_run_allow_field_loss_overrides_the_refusal(tmp_path, capsys):
+    """The escape hatch a human can mean: overwrite anyway, but say what was overwritten. The
+    grading verdict is still carried forward — losing a derived field is a decision, losing the
+    session's own judgement never is."""
+    run_dir, batch_dir = _write_run(tmp_path)
+    facts_path = dt.process_run(run_dir)
+    _record_verdict(run_dir, verdict="partially_matched")
+    (run_dir / dt.RESULTS_FILENAME).write_text(
+        json.dumps(_make_results(batch_dir, omit_shock_folds=True))
+    )
+
+    dt.process_run(run_dir, allow_field_loss=True)
+
+    facts = json.loads(facts_path.read_text())
+    assert facts["breakdowns"]["per_regime"] == {
+        "computed": False, "reason": facts["breakdowns"]["per_fold_regime_unavailable_reason"]
+    }
+    assert facts["grading"]["verdict"] == "partially_matched"
+    assert "--allow-field-loss" in capsys.readouterr().out
+
+
+def test_main_scan_leaves_a_dossier_intact_when_the_rebuild_would_downgrade_it(tmp_path):
+    """End to end, the way the nightly routine hits it: --scan logs the refusal and moves on,
+    and the run's facts.json is byte-identical afterwards. This is the unattended path that
+    silently destroyed batch1's verdicts once already."""
+    run_dir, batch_dir = _write_run(tmp_path)
+    facts_path = dt.process_run(run_dir)
+    _record_verdict(run_dir)
+    (run_dir / dt.RESULTS_FILENAME).write_text(
+        json.dumps(_make_results(batch_dir, omit_shock_folds=True))
+    )
+    before = facts_path.read_bytes()
+
+    result = CliRunner().invoke(dt.main, ["--scan", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "failed, skipping" in result.output
+    assert facts_path.read_bytes() == before
 
 
 def _strict_json_loads(text: str):

@@ -28,6 +28,7 @@
   },
   "provenance": {
     "candidate": "tgp_cycle_displacement",
+    "results_fingerprint": "e74937eb5d6f3d348c6752d62c0a610f77f2c41e8f2106f44ff6b557c2111659",
     "batch": "batch1",
     "batch_dir": "experiments/batches/batch1",
     "snapshot_date": "2026-08-15",
