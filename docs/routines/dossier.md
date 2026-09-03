@@ -17,8 +17,10 @@ PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables --scan experim
 ```
 
 This does one thing, mechanically (`experiments/pipeline/dossier_tables.py`, fps-3jj.6): **facts.json
-+ PNGs for every completed, undossiered run.** For every directory with a `results.json` newer than
-its `README.md` — or no `README.md` yet (see `find_pending_runs`, fps-0yd) — it writes `facts.json`
++ PNGs for every completed, undossiered run.** For every directory whose dossier isn't current —
+no `README.md` yet, or a `facts.json` that wasn't built from the `results.json` sitting there now
+(see `find_pending_runs`; fps-jrl replaced fps-0yd's mtime comparison, which called every run in a
+fresh checkout stale) — it writes `facts.json`
 (the only source of numbers you are allowed to use below)
 and the applicable plots (always: `per_fold_delta_bars.png`, `seed_mean_vs_median.png`,
 `realised_cpl_by_fold.png`, `tau_sweep.png`, `candidate_over_time.png`; conditional:
@@ -46,8 +48,8 @@ once launch.py's real implementation was confirmed to already cover this correct
 reintroduce it here.
 
 **FIXED — run-directory convention (fps-icv).** This routine's queue model (`find_pending_runs`: a
-directory with a `results.json` newer than its `README.md`, or no `README.md` at all — see fps-0yd)
-assumes one subdirectory per candidate. That now holds: launch.py's `launch_detached` and runner.py's `run_candidate` both default a candidate's
+directory with no `README.md`, or a `facts.json` not built from the `results.json` on disk — see
+fps-jrl) assumes one subdirectory per candidate. That now holds: launch.py's `launch_detached` and runner.py's `run_candidate` both default a candidate's
 `out_dir` to `runner.default_out_dir(candidate_path)` (candidate_path with its `.py` suffix
 stripped), not `candidate_path.parent` (the whole **batch** directory shared by every candidate
 module filed against it). Before this fix, candidate 2+ in any batch would overwrite candidate 1's
@@ -79,6 +81,36 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    This is the only field in `facts.json` this session ever edits — everything else stays exactly
    as `dossier_tables.py` wrote it, so the file stays traceable to its deterministic source plus
    this one recorded judgement.
+
+   **A later regeneration keeps what you write here (fps-jrl).** `process_run` reads the
+   `facts.json` already on disk and carries its `grading` block forward verbatim, because nothing
+   can rebuild it — it is judgement, not a derived fact. It is dropped only when the run itself
+   changed (a different `predicted_signature` or a different `status`), and it says so out loud
+   when it does. This was NOT true until fps-jrl: every regeneration reset `verdict` to `null`,
+   which is how PR #351 silently wiped all five of batch1's verdicts.
+
+   A verdict carried across a regeneration whose NUMBERS moved (a pipeline fix re-running the
+   candidate, as #359 did to batch1) keeps answering the question asked — the verdict grades
+   `predicted_signature`, a claim about the SHAPE of the result — but the file is then
+   mixed-vintage, so it says so: `grading.carried_from_fingerprint` records the `results.json`
+   the verdict was actually formed against. Compare it to `provenance.results_fingerprint`; if
+   they differ, the judgement predates the numbers printed beside it. Absent means never carried.
+
+   In the same spirit, a regeneration that would replace `noise_band`,
+   `per_fold[].regime`/`per_regime` or `decision_flips` with an "unavailable" value the current
+   environment can no longer compute (a missing `noise_floor.json`, a `results.json` predating
+   `meta.shock_folds`) refuses and writes nothing — it shows up in `--scan`'s output as a
+   `failed, skipping` line naming the fields. Restore the missing input, or re-run **that one
+   run_dir** with `--allow-field-loss` if the downgrade is what you actually want. The flag is
+   rejected with `--scan` on purpose: scan-wide it would downgrade every refusing run in the
+   pass, on one line of stdout each, in an unattended overnight log.
+
+   One refusal that reads like a regression and isn't: a batch **re-freeze** changes
+   `baseline_fingerprint`, which makes the existing `noise_floor.json` inadmissible, so a
+   re-run candidate gets `noise_band.available: false` from the admissibility check and every
+   regeneration refuses until the floor is recomputed. That is the guard working — the
+   alternative is writing an unavailable band over a real one — and the refusal message already
+   names recomputing the floor as the remedy.
 
    **A `PREDICTED_SIGNATURE` making a claim about SHAP importance/sign/orientation grades
    `"inconclusive"`, always** (decided `fps-1l1` — no SHAP field will exist in `facts.json`,
@@ -415,9 +447,9 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          to the `rejected` rule below would stamp DEAD GROUND — what the next generator reads as
          "don't re-propose this" — onto a claim nothing has measured, which is precisely the harm
          `fps-3jj.17` exists to prevent. Writing no README.md is deliberate and load-bearing:
-         `find_pending_runs` treats an absent README.md as pending (same as a README.md older
-         than the run's results.json — fps-0yd), so staying silent leaves the run to be picked
-         up correctly on a later night. Check this
+         `find_pending_runs` treats an absent (or empty) README.md as pending — it is the marker
+         that a session actually wrote the run up (fps-jrl) — so staying silent leaves the run to
+         be picked up correctly on a later night. Check this
          BEFORE the `available` test below — the arity case sets `available: false` too, so
          ordering is what keeps it out of the `rejected` branch.
 

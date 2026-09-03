@@ -28,6 +28,7 @@
   },
   "provenance": {
     "candidate": "station_descent_dynamics",
+    "results_fingerprint": "d7b4496b794fbb5514dc46c3015a6ff872f9c5af499487f91e6855e047e22cf6",
     "batch": "batch1",
     "batch_dir": "experiments/batches/batch1",
     "snapshot_date": "2026-08-15",

@@ -51,6 +51,7 @@ Usage:
 from __future__ import annotations
 
 import bisect
+import hashlib
 import json
 import math
 import pathlib
@@ -214,9 +215,80 @@ CYCLE_PHASE_COLUMNS = {"cycle_pct_through", "cycle_days_since_peak"}
 
 # ── work queue ────────────────────────────────────────────────────────────────
 
+def _bytes_fingerprint(data: bytes) -> str:
+    """sha256 of raw bytes. Bytes, not a parsed-and-redumped dict: this has to answer "is this
+    the same file the dossier was built from", and a re-serialised dict would call a key-order
+    or float-formatting change identical when the file on disk is not."""
+    return hashlib.sha256(data).hexdigest()
+
+
+def _file_fingerprint(path: pathlib.Path) -> str:
+    """sha256 of a file's current bytes. Callers that also PARSE the file must hash the same
+    snapshot they parsed (see build_facts) rather than calling this — two reads of a file a
+    concurrent re-run may be overwriting can disagree."""
+    return _bytes_fingerprint(pathlib.Path(path).read_bytes())
+
+
+def _dossier_is_current(
+    run_dir: pathlib.Path, results_path: pathlib.Path, readme_path: pathlib.Path
+) -> bool:
+    """Is this run already written up FROM THIS results.json? (fps-jrl)
+
+    Two conditions, in order:
+
+    * A non-empty `README.md` — the marker that a dossier session actually wrote the run up.
+      Its absence staying "pending" is load-bearing, not incidental: `docs/routines/dossier.md`
+      tells the session to write NO README for a `floor_arity_below_run` run precisely so the
+      queue picks it up again on a later night.
+    * A `facts.json` whose `provenance.results_fingerprint` matches the current bytes of
+      `results.json` — i.e. the dossier on disk was built from exactly these run artifacts.
+
+    A `facts.json` predating that field (every dossier written before fps-jrl) can't be checked
+    this way, and its mtimes are not a usable substitute — see `find_pending_runs`. A written-up
+    legacy run is therefore treated as current; naming its run_dir directly (this module's
+    positional argument, which never consults this queue) still forces a rebuild.
+    """
+    if not readme_path.exists():
+        return False
+    # Deliberately NOT wrapped: a README that exists but cannot be READ (vanished between these
+    # two calls as a concurrent re-queue `rm`s it, a permissions error, NFS staleness, or bytes
+    # that aren't valid UTF-8 — a UnicodeDecodeError, i.e. a ValueError, not an OSError) is a
+    # fault, not an answer. It propagates to find_pending_runs, which excludes that one run from
+    # this pass with a warning rather than guessing at its state (fps-0yd review round 2).
+    if not readme_path.read_text().strip():
+        return False
+    facts_path = run_dir / FACTS_FILENAME
+    if not facts_path.exists():
+        # README but no facts.json — the reverse of the order this pipeline writes them in
+        # (Step 0 writes facts.json, the session then writes README.md). Nothing recorded is at
+        # risk, so rebuild rather than guess.
+        return False
+    try:
+        facts = json.loads(facts_path.read_text())
+    except (OSError, ValueError):
+        # A corrupt/unreadable facts.json is not evidence of a current dossier — leave the run
+        # pending so a rebuild has the chance to replace it.
+        return False
+    # isinstance, not `.get(...) or {}`: a facts.json that is valid JSON but not an object
+    # (`[]`, `null`, a bare string — a truncated or hand-mangled file) would raise
+    # AttributeError here, and find_pending_runs only catches OSError, so ONE malformed dossier
+    # would abort the entire --scan before any other run was offered to process_run. That is the
+    # exact blast radius fps-0yd review round 2 rejected. Any shape that isn't a dict is not
+    # evidence of a current dossier, so it stays pending.
+    if not isinstance(facts, dict):
+        return False
+    provenance = facts.get("provenance")
+    if not isinstance(provenance, dict):
+        return False
+    recorded = provenance.get("results_fingerprint")
+    if recorded is None:
+        return True
+    return recorded == _file_fingerprint(results_path)
+
+
 def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
-    """Any directory under `root` with a results.json newer than its README.md (or no
-    README.md at all), and a non-retryable status.
+    """Any directory under `root` whose dossier isn't current — no README.md, or a README.md
+    written from a different results.json than the one on disk now — and a non-retryable status.
 
     Matches the parent design's "work queue is self-describing" rule. A run still in progress
     has neither file and is silently skipped.
@@ -229,31 +301,40 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
       night 2  launch releases the claim, candidate re-runs and SUCCEEDS, overwriting results.json
       night 2  this scan sees the README from night 1 -> run is not pending -> never dossiered
 
-    The mtime comparison (fps-0yd) covers the mirror image: a candidate DELIBERATELY re-run
-    after a contract fix, whose prior dossiering already left a README behind. Requiring "no
-    README.md" alone made that re-run permanently invisible even though its results.json was
-    overwritten with a fresh verdict — the same "silently invisible forever" failure the
-    RETRYABLE_STATUSES guard above exists to prevent, just triggered by a human re-queuing
-    rather than an automatic retry. Comparing mtimes rather than adding a second provenance
-    field to facts.json: results.json and README.md are already the two files this function
-    reads, and runner.py always writes results.json fresh on every run (never touches an
-    existing README), so a newer results.json is exactly "dossiered content is stale".
+    "Is the dossier current?" was decided on MTIMES until fps-jrl: a results.json newer than (or
+    the same age as) its README.md meant stale. That rule fired on every fresh checkout. `git`
+    writes a directory's files in name order and stamps each with the wall-clock time of the
+    write, so `README.md` lands a few milliseconds BEFORE `results.json` — measured at 2-4.5 ms
+    across all six dossiered runs in `experiments/candidates` on a fresh worktree. Every one of
+    them therefore looked like a deliberate re-run to this function, on a clean checkout of a
+    tree where nothing had been re-run at all. (Equal mtimes were separately treated as pending
+    on the same premise; at one-second display resolution the two cases are indistinguishable,
+    which is why the incident reports called it a tie.)
 
-    Ties (equal mtimes — a real possibility on filesystems with coarse timestamp resolution)
-    are treated as PENDING, not dossiered: re-dossiering a run that was actually already
-    written up is a harmless no-op (facts.json is deterministic from the same run artifacts),
-    while the reverse — silently dropping a genuine re-run because its mtime happened to
-    collide with the stale README's — is exactly the failure this function exists to close.
+    That premise — re-dossiering an already-written-up run is a harmless no-op, since facts.json
+    is deterministic from the same artifacts — is false, and `process_run` documents both halves
+    of why: `grading` is session-written judgement no rebuild can reconstruct, and
+    `noise_band`/`per_fold[].regime` depend on inputs a later environment may no longer have. It
+    cost batch1 its five recorded verdicts in PR #351, and fired again on
+    batch0/tgp_delta_7d on 2026-08-31 and 2026-09-01.
 
-    A results.json or README.md whose `stat()` fails here — vanished mid-race (a concurrent
-    launch/rerun deleting it, e.g. via `rm` as part of a re-queue), a permissions error, an NFS
-    staleness error — is excluded for this pass rather than raised (fps-0yd review round 2). A
-    narrower `except FileNotFoundError` was tried first and rejected: this function builds its
-    whole return list eagerly (it is not a generator), and `main()`'s `--scan` loop only wraps
-    `process_run` in a per-run try/except, not this call — so ANY exception escaping here
-    aborts the entire scan before a single run_dir is even offered to `process_run`, including
-    every unrelated, healthy run_dir. That is a wider blast radius than the original "no
-    README.md" bug this function exists to fix, and it also contradicts the totality
+    So the queue asks the content question directly (`_dossier_is_current`): a non-empty
+    README.md, plus a facts.json whose `provenance.results_fingerprint` matches this
+    results.json. That keeps fps-0yd's real case — a candidate deliberately re-run after a
+    contract fix, whose fresh results.json must supersede a stale dossier — while being
+    immune to when the files happened to be written.
+
+    A results.json, README.md or facts.json whose read here fails — vanished mid-race (a
+    concurrent launch/rerun deleting it, e.g. via `rm` as part of a re-queue), a permissions
+    error, an NFS staleness error, or a file whose bytes aren't valid UTF-8 (a
+    UnicodeDecodeError is a ValueError, not an OSError, which is why both are caught) — is
+    excluded for this pass rather than raised (fps-0yd review
+    round 2). A narrower `except FileNotFoundError` was tried first and rejected: this function
+    builds its whole return list eagerly (it is not a generator), and `main()`'s `--scan` loop
+    only wraps `process_run` in a per-run try/except, not this call — so ANY exception escaping
+    here aborts the entire scan before a single run_dir is even offered to `process_run`,
+    including every unrelated, healthy run_dir. That is a wider blast radius than the original
+    "no README.md" bug this function exists to fix, and it also contradicts the totality
     `runner.read_run_status` (called two lines below) already commits to for the exact same
     unattended-overnight reason. So: catch broadly, like `read_run_status` does, but — unlike a
     bare `continue` — print a line first (the same `print(..., flush=True)` warning pattern
@@ -267,12 +348,12 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
         run_dir = p.parent
         readme = run_dir / README_FILENAME
         try:
-            if readme.exists() and readme.stat().st_mtime > p.stat().st_mtime:
+            if _dossier_is_current(run_dir, p, readme):
                 continue
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             print(
-                f"[dossier_tables] {run_dir}: could not compare results.json/README.md "
-                f"timestamps ({exc!r}) — excluding from this scan.",
+                f"[dossier_tables] {run_dir}: could not check whether its dossier is current "
+                f"({exc!r}) — excluding from this scan.",
                 flush=True,
             )
             continue
@@ -287,7 +368,14 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
 def build_facts(run_dir: pathlib.Path) -> dict:
     """Read one run's artifacts and return the facts.json dict (does not write it)."""
     run_dir = pathlib.Path(run_dir)
-    results = json.loads((run_dir / RESULTS_FILENAME).read_text())
+    results_path = run_dir / RESULTS_FILENAME
+    # One read, hashed and parsed: a second read for the fingerprint could land on the other
+    # side of a concurrent re-run overwriting results.json, and the dossier would then carry the
+    # OLD run's numbers stamped with the NEW file's fingerprint — which find_pending_runs would
+    # read as "current" and never regenerate.
+    results_bytes = results_path.read_bytes()
+    results_fingerprint = _bytes_fingerprint(results_bytes)
+    results = json.loads(results_bytes)
     status = results["status"]
     meta = results.get("meta", {})
     candidate = results.get("candidate", {})
@@ -323,7 +411,7 @@ def build_facts(run_dir: pathlib.Path) -> dict:
             "mechanism_family": candidate.get("mechanism_family"),
             "target": candidate.get("target"),
         },
-        "provenance": _provenance(results, batch_dir),
+        "provenance": _provenance(results, batch_dir, results_fingerprint=results_fingerprint),
         "headline": None,
         "breakdowns": None,
         "decision_flips": None,
@@ -693,7 +781,9 @@ def _attach_run_contributions(
     )
 
 
-def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
+def _provenance(
+    results: dict, batch_dir: pathlib.Path | None, *, results_fingerprint: str | None = None
+) -> dict:
     meta = results.get("meta", {})
     batch_name, snapshot_date = None, None
     if batch_dir is not None:
@@ -709,6 +799,11 @@ def _provenance(results: dict, batch_dir: pathlib.Path | None) -> dict:
         git_sha = current_git_sha()
     return {
         "candidate": results.get("candidate", {}).get("name"),
+        # sha256 of the results.json these facts were built from (fps-jrl). Read back by
+        # find_pending_runs to answer "is the dossier on disk current?" on an mtime tie, which
+        # a plain git checkout produces routinely. None only when build_facts was handed a
+        # results dict rather than a run_dir (tests); every dossier written by process_run has it.
+        "results_fingerprint": results_fingerprint,
         "batch": batch_name,
         "batch_dir": str(batch_dir) if batch_dir is not None else None,
         "snapshot_date": snapshot_date,
@@ -1972,10 +2067,202 @@ def _plot_external_overlay(run_dir: pathlib.Path, facts: dict, batch_dir: pathli
 
 # ── orchestration / CLI ─────────────────────────────────────────────────────
 
-def process_run(run_dir: pathlib.Path) -> pathlib.Path:
-    """Build facts.json + plots for one run directory. Returns the facts.json path."""
+class FactsFieldLossError(RuntimeError):
+    """Regenerating facts.json would replace a previously-recorded field with a value the
+    current environment can no longer produce (fps-jrl)."""
+
+
+def _load_existing_facts(run_dir: pathlib.Path) -> dict | None:
+    """The facts.json already on disk for this run, or None if there isn't a usable one."""
+    facts_path = run_dir / FACTS_FILENAME
+    if not facts_path.exists():
+        return None
+    try:
+        existing = json.loads(facts_path.read_text())
+    except (OSError, ValueError) as exc:
+        # Not fatal: a corrupt facts.json is exactly what a rebuild is for. But say so — the
+        # grading verdict it may have held is being lost here, and silence is how that went
+        # unnoticed the first two times (PR #351, then batch0/tgp_delta_7d).
+        print(
+            f"[dossier_tables] {run_dir}: existing {FACTS_FILENAME} is unreadable ({exc!r}) — "
+            "rebuilding from scratch; any grading verdict it held is not recoverable from it.",
+            flush=True,
+        )
+        return None
+    return existing if isinstance(existing, dict) else None
+
+
+def _dict_at(facts: dict, key: str) -> dict:
+    """`facts[key]` when it is an object, `{}` otherwise.
+
+    `x.get(key) or {}` is NOT enough and this is the second time that shape has bitten this
+    module (PR #360 review): a truthy non-dict — `{"grading": "matched"}` from a hand-edited or
+    truncated facts.json — passes the `or` and then raises AttributeError on `.get`. Under
+    `--scan` the blanket per-run handler contains that, but the single-run CLI gives a raw
+    traceback in place of `_load_existing_facts`' clear message.
+    """
+    value = facts.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _is_same_run(new_facts: dict, old_facts: dict) -> bool:
+    """Do the new and existing facts describe the same run of the same candidate claim?
+
+    Two gates, both cheap and both load-bearing:
+
+    * `predicted_signature` — the text the recorded verdict was formed AGAINST
+      (docs/routines/dossier.md Step 1.2). A candidate re-authored with a different prediction
+      has a verdict that no longer answers the question asked.
+    * `status` — a re-run that ends `aborted_candidate` where the last one ended `graded` is a
+      different outcome; carrying "matched" onto it would attach a verdict to a run that never
+      reached the scoring stages.
+    """
+    return (
+        _dict_at(old_facts, "grading").get("predicted_signature")
+        == _dict_at(new_facts, "grading").get("predicted_signature")
+        and _dict_at(old_facts, "provenance").get("status")
+        == _dict_at(new_facts, "provenance").get("status")
+    )
+
+
+def _carry_forward_grading(new_facts: dict, old_facts: dict) -> None:
+    """Carry a recorded `grading` block forward onto a regenerated facts.json, in place.
+
+    `grading` is the one field in facts.json that is NOT derived from the run's artifacts — it
+    is the dossier session's own judgement, written back by hand (docs/routines/dossier.md Step
+    1.2). build_facts therefore cannot reconstruct it, and rebuilding it blank is data loss, not
+    a refresh. Assumes `_is_same_run` already held.
+
+    Carrying it across a regeneration whose NUMBERS moved is deliberate — the verdict is formed
+    against `predicted_signature`, a claim about the shape of the result, so a numbers move that
+    flips no signature leaves it still answering the question asked (this is what fps-3ug did by
+    hand for batch1 after #359). But it does make the file mixed-vintage, so the file says so:
+    `grading.carried_from_fingerprint` records the results.json the verdict was actually formed
+    against, and a reader comparing it to `provenance.results_fingerprint` can see at a glance
+    whether the judgement and the numbers beneath it come from the same run artifacts (PR #360
+    review). It records the EARLIEST such fingerprint, not the previous one — an already-stamped
+    block keeps its stamp across further regenerations, or the chain would walk forward and
+    always claim the verdict was one regeneration old.
+    """
+    old_grading = _dict_at(old_facts, "grading")
+    if old_grading.get("verdict") is None:
+        return  # nothing recorded yet — the blank/pending block build_facts made is correct
+    carried = dict(old_grading)
+    carried.setdefault(
+        "carried_from_fingerprint", _dict_at(old_facts, "provenance").get("results_fingerprint")
+    )
+    new_facts["grading"] = carried
+
+
+def _has_noise_band(facts: dict) -> bool:
+    return bool(_dict_at(facts, "noise_band").get("available"))
+
+
+def _has_regime_labels(facts: dict) -> bool:
+    breakdowns = _dict_at(facts, "breakdowns")
+    if isinstance(breakdowns.get("per_regime"), list):
+        return True
+    per_fold = breakdowns.get("per_fold")
+    if not isinstance(per_fold, list):
+        return False
+    return any(isinstance(row, dict) and row.get("regime") is not None for row in per_fold)
+
+
+def _has_decision_flips(facts: dict) -> bool:
+    return bool(_dict_at(facts, "decision_flips").get("computed"))
+
+
+#: facts.json fields a regeneration can silently DOWNGRADE rather than recompute, because they
+#: depend on an input a later environment may no longer have: the batch's noise_floor.json
+#: (gitignored, ephemeral — batch0's is already gone) and results.json's `meta.shock_folds`
+#: (absent from every run predating fps-3tu, which takes per_fold[].regime, per_regime and the
+#: whole decision_flips/regret block down with it). Each entry is (label, predicate), the
+#: predicate answering "does this facts dict carry the field for real". A True -> False
+#: transition across a regeneration is refused (fps-jrl, absorbing fps-d4g) rather than written:
+#: the historical run behind it can no longer be re-run to restore the value.
+UNREPRODUCIBLE_FIELDS = (
+    ("noise_band", _has_noise_band),
+    ("breakdowns.per_fold[].regime / breakdowns.per_regime", _has_regime_labels),
+    ("decision_flips", _has_decision_flips),
+)
+
+
+def _field_losses(new_facts: dict, old_facts: dict) -> list[str]:
+    """Fields the existing facts.json carries for real and the regenerated one no longer does.
+
+    Checked whatever the CLAIM did — NOT only when `_is_same_run` holds (PR #360 review). A
+    candidate re-authored with a new `predicted_signature` and re-run still produces a graded
+    run whose noise band depends on the same `noise_floor.json`, and gating this on
+    `_is_same_run` meant that path overwrote all three fields in silence: fps-d4g's exact loss,
+    on the one path the guard didn't cover.
+
+    It is skipped when the REGENERATED run isn't graded, and that gate is structurally
+    necessary, not a pragmatic carve-out (PR #360 review round 2). All three fields go False for
+    a non-graded run BY CONSTRUCTION, in any environment: `runner._finish` writes a status-only
+    results.json whose meta is `wall_seconds` (+ provider stats) and carries no `batch_dir` at
+    all, so `_noise_band` returns unavailable on its FIRST line — "no batch_dir recorded" —
+    before it ever looks for `noise_floor.json`; and `build_facts` early-returns at its
+    `status != STATUS_GRADED` guard, so breakdowns and decision_flips are never populated.
+
+    So a graded run re-run to `aborted_candidate` loses these to the ABORT, not to the
+    environment, and comparing them would refuse EVERY such re-run in a perfectly healthy
+    environment: the nightly scan would refuse, log, and leave the run pending to refuse again
+    the next night, forever, with the abort never dossiered. It opens no hole either — the only
+    way to lose these to the environment rather than to the abort is with a graded new run,
+    which is exactly what is checked.
+    """
+    if _dict_at(new_facts, "provenance").get("status") != STATUS_GRADED:
+        return []
+    return [
+        label for label, present in UNREPRODUCIBLE_FIELDS
+        if present(old_facts) and not present(new_facts)
+    ]
+
+
+def process_run(run_dir: pathlib.Path, *, allow_field_loss: bool = False) -> pathlib.Path:
+    """Build facts.json + plots for one run directory. Returns the facts.json path.
+
+    Re-running this over an already-dossiered run is a REFRESH, not a rebuild from zero
+    (fps-jrl): a recorded `grading` verdict is carried forward, and a regeneration that would
+    drop a previously-recorded field the current environment can no longer produce refuses
+    outright rather than writing the degraded version. `allow_field_loss=True` (CLI:
+    `--allow-field-loss`) overrides the refusal for a human who means it.
+    """
     run_dir = pathlib.Path(run_dir)
     facts = build_facts(run_dir)
+    existing = _load_existing_facts(run_dir)
+    if existing is not None:
+        if _is_same_run(facts, existing):
+            _carry_forward_grading(facts, existing)
+        elif _dict_at(existing, "grading").get("verdict") is not None:
+            # Loud, not silent: this IS the wipe the issue is about, just the one case where
+            # it's correct — the run or the claim changed, so the old verdict no longer applies.
+            print(
+                f"[dossier_tables] {run_dir}: dropping the recorded grading verdict "
+                f"{_dict_at(existing, 'grading').get('verdict')!r} — this run's "
+                "predicted_signature or status changed, so the verdict no longer answers the "
+                "question asked. Re-grade it (docs/routines/dossier.md Step 1.2).",
+                flush=True,
+            )
+        # Outside the branch above on purpose — see _field_losses. These fields survive a re-run
+        # of the candidate; the environment's ability to produce them is what's at stake.
+        losses = _field_losses(facts, existing)
+        if losses and not allow_field_loss:
+            raise FactsFieldLossError(
+                f"{run_dir}: regenerating {FACTS_FILENAME} would drop "
+                f"{', '.join(losses)} — the existing dossier carries "
+                "these and this environment can no longer produce them, so the rebuild "
+                "would be a silent downgrade (fps-jrl). Nothing was written. Restore the "
+                "missing input (the batch's noise_floor.json, or re-run the candidate to "
+                "backfill results.json's meta.shock_folds), or re-run this ONE run_dir with "
+                "--allow-field-loss to overwrite the dossier with the degraded values anyway."
+            )
+        if losses:
+            print(
+                f"[dossier_tables] {run_dir}: --allow-field-loss — overwriting "
+                f"{', '.join(losses)} with degraded values.",
+                flush=True,
+            )
     batch_dir_str = facts["provenance"].get("batch_dir")
     batch_dir = pathlib.Path(batch_dir_str) if batch_dir_str else None
     facts["plots"] = make_plots(run_dir, facts, batch_dir)
@@ -1995,19 +2282,34 @@ def process_run(run_dir: pathlib.Path) -> pathlib.Path:
     "--scan", "scan_root", default=None,
     help="Process every pending run under this root instead of one run_dir.",
 )
-def main(target: str | None, scan_root: str | None) -> None:
+@click.option(
+    "--allow-field-loss", is_flag=True, default=False,
+    help="Overwrite a dossier even when the rebuild would drop previously-recorded fields "
+         "this environment can no longer produce (noise_band, per-fold regimes, decision "
+         "flips). Single run_dir only — rejected with --scan, which would downgrade every "
+         "refusing run in the pass. Off by default — see fps-jrl.",
+)
+def main(target: str | None, scan_root: str | None, allow_field_loss: bool) -> None:
     """Build facts.json + PNGs for a completed run, or every pending run under --scan.
 
     Stale-claim recovery is NOT this module's job — launch.py's own `recover_stale_claims`
     (bd `in_progress` + a required traceback in run.log) already runs at the start of every
     nightly launch cycle. See the module docstring.
     """
+    if scan_root and allow_field_loss:
+        # The flag exists to unstick ONE run a human has looked at. Scan-wide it would downgrade
+        # every refusing run in the pass, each on one line of stdout in an unattended overnight
+        # log — the blast radius this whole issue is about (PR #360 review).
+        raise click.UsageError(
+            "--allow-field-loss cannot be combined with --scan: it would silently downgrade "
+            "every refusing run in the pass. Re-run the single run_dir you mean instead."
+        )
     if scan_root:
         root = pathlib.Path(scan_root)
         for run_dir in find_pending_runs(root):
             click.echo(f"[dossier_tables] processing {run_dir}")
             try:
-                process_run(run_dir)
+                process_run(run_dir, allow_field_loss=allow_field_loss)
             except Exception as exc:  # noqa: BLE001 — one malformed/partial run must not stop the queue
                 # A run killed mid-write (e.g. between results.json and rowpreds.parquet landing)
                 # is exactly the unattended-pipeline case this scan runs unsupervised overnight —
@@ -2016,7 +2318,7 @@ def main(target: str | None, scan_root: str | None) -> None:
         return
     if not target:
         raise click.UsageError("pass a run_dir, or --scan <root>")
-    facts_path = process_run(pathlib.Path(target))
+    facts_path = process_run(pathlib.Path(target), allow_field_loss=allow_field_loss)
     click.echo(f"Wrote {facts_path}")
 
 
