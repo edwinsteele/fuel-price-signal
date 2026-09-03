@@ -327,11 +327,27 @@ def test_find_pending_runs_surfaces_a_run_with_a_readme_but_no_facts_json(tmp_pa
     assert dt.find_pending_runs(tmp_path) == [run_dir]
 
 
-def test_find_pending_runs_surfaces_a_run_whose_facts_json_is_corrupt(tmp_path):
-    """An unparseable facts.json is not evidence of a current dossier — leave the run pending
-    so a rebuild gets the chance to replace it."""
+@pytest.mark.parametrize(
+    "facts_text",
+    [
+        "{not json",           # unparseable
+        "[]",                  # valid JSON, wrong root type
+        "null",
+        '"a string"',
+        '{"provenance": []}',  # valid object, wrong type one level down
+    ],
+)
+def test_find_pending_runs_surfaces_a_run_whose_facts_json_is_malformed(tmp_path, facts_text):
+    """A facts.json that isn't a well-shaped object is not evidence of a current dossier — the
+    run stays pending so a rebuild gets the chance to replace it.
+
+    The non-object cases are a Sourcery finding on this PR, and the blast radius is what makes
+    them worth pinning: `.get()` on a list/None/str raises AttributeError, find_pending_runs
+    catches only OSError, and it builds its return list eagerly — so ONE malformed dossier would
+    abort the ENTIRE --scan before any other run reached process_run. Same failure fps-0yd
+    review round 2 rejected."""
     run_dir = _write_dossiered_run(tmp_path, facts=None)
-    (run_dir / dt.FACTS_FILENAME).write_text("{not json")
+    (run_dir / dt.FACTS_FILENAME).write_text(facts_text)
 
     assert dt.find_pending_runs(tmp_path) == [run_dir]
 
@@ -387,6 +403,24 @@ def test_find_pending_runs_survives_a_non_missing_stat_error(tmp_path, monkeypat
         return real_read_text(self, *args, **kwargs)
 
     monkeypatch.setattr(pathlib.Path, "read_text", flaky_read_text)
+
+    assert dt.find_pending_runs(tmp_path) == [healthy_dir]
+    assert "broken" in capsys.readouterr().out
+
+
+def test_find_pending_runs_survives_an_undecodable_readme(tmp_path, capsys):
+    """Raised by the PR #360 reviewer: `read_text()` on bytes that aren't valid UTF-8 raises
+    UnicodeDecodeError — a ValueError, NOT an OSError — so it escaped the guard that exists to
+    keep one bad run from aborting the whole `--scan`, exactly like a non-object facts.json did.
+    Same requirement as the permissions case: exclude that run, print, keep the queue."""
+    healthy_dir = tmp_path / "healthy"
+    healthy_dir.mkdir()
+    (healthy_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+
+    broken_dir = tmp_path / "broken"
+    broken_dir.mkdir()
+    (broken_dir / dt.RESULTS_FILENAME).write_text(json.dumps({"status": "graded"}))
+    (broken_dir / dt.README_FILENAME).write_bytes(b"# written up \xff\xfe\x80")
 
     assert dt.find_pending_runs(tmp_path) == [healthy_dir]
     assert "broken" in capsys.readouterr().out
@@ -1896,6 +1930,34 @@ def test_build_facts_records_the_results_json_fingerprint(tmp_path):
     facts = dt.build_facts(run_dir)
 
     assert facts["provenance"]["results_fingerprint"] == _fingerprint(run_dir / dt.RESULTS_FILENAME)
+
+
+def test_build_facts_hashes_the_same_bytes_it_parsed(tmp_path, monkeypatch):
+    """Sourcery finding on this PR: build_facts must not read results.json twice — once to parse
+    and once to hash. A candidate re-run overwriting the file between those two reads would
+    produce a dossier carrying the OLD run's numbers stamped with the NEW file's fingerprint,
+    which find_pending_runs then reads as current and never regenerates: a mixed-vintage
+    facts.json, permanently invisible to the queue.
+
+    Simulated by making the two read paths disagree — read_text returns a DIFFERENT results.json
+    than the bytes on disk. Whatever build_facts parsed is what its fingerprint must describe."""
+    run_dir, batch_dir = _write_run(tmp_path)
+    results_path = run_dir / dt.RESULTS_FILENAME
+    superseded = _make_results(batch_dir)
+    superseded["candidate"]["name"] = "a_concurrent_rerun"
+    real_read_text = pathlib.Path.read_text
+
+    def racing_read_text(self, *args, **kwargs):
+        if self == results_path:
+            return json.dumps(superseded)
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", racing_read_text)
+
+    facts = dt.build_facts(run_dir)
+
+    assert facts["candidate"]["name"] == "cand"  # the bytes on disk, not the racing read
+    assert facts["provenance"]["results_fingerprint"] == _fingerprint(results_path)
 
 
 def test_process_run_preserves_a_recorded_grading_verdict(tmp_path):

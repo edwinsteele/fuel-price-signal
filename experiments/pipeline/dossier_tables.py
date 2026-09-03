@@ -215,11 +215,18 @@ CYCLE_PHASE_COLUMNS = {"cycle_pct_through", "cycle_days_since_peak"}
 
 # ── work queue ────────────────────────────────────────────────────────────────
 
+def _bytes_fingerprint(data: bytes) -> str:
+    """sha256 of raw bytes. Bytes, not a parsed-and-redumped dict: this has to answer "is this
+    the same file the dossier was built from", and a re-serialised dict would call a key-order
+    or float-formatting change identical when the file on disk is not."""
+    return hashlib.sha256(data).hexdigest()
+
+
 def _file_fingerprint(path: pathlib.Path) -> str:
-    """sha256 of a file's bytes. Bytes, not a parsed-and-redumped dict: this has to answer
-    "is this the same file the dossier was built from", and a re-serialised dict would call a
-    key-order or float-formatting change identical when the file on disk is not."""
-    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+    """sha256 of a file's current bytes. Callers that also PARSE the file must hash the same
+    snapshot they parsed (see build_facts) rather than calling this — two reads of a file a
+    concurrent re-run may be overwriting can disagree."""
+    return _bytes_fingerprint(pathlib.Path(path).read_bytes())
 
 
 def _dossier_is_current(
@@ -244,7 +251,8 @@ def _dossier_is_current(
     if not readme_path.exists():
         return False
     # Deliberately NOT wrapped: a README that exists but cannot be READ (vanished between these
-    # two calls as a concurrent re-queue `rm`s it, a permissions error, NFS staleness) is an I/O
+    # two calls as a concurrent re-queue `rm`s it, a permissions error, NFS staleness, or bytes
+    # that aren't valid UTF-8 — a UnicodeDecodeError, i.e. a ValueError, not an OSError) is a
     # fault, not an answer. It propagates to find_pending_runs, which excludes that one run from
     # this pass with a warning rather than guessing at its state (fps-0yd review round 2).
     if not readme_path.read_text().strip():
@@ -261,7 +269,18 @@ def _dossier_is_current(
         # A corrupt/unreadable facts.json is not evidence of a current dossier — leave the run
         # pending so a rebuild has the chance to replace it.
         return False
-    recorded = (facts.get("provenance") or {}).get("results_fingerprint")
+    # isinstance, not `.get(...) or {}`: a facts.json that is valid JSON but not an object
+    # (`[]`, `null`, a bare string — a truncated or hand-mangled file) would raise
+    # AttributeError here, and find_pending_runs only catches OSError, so ONE malformed dossier
+    # would abort the entire --scan before any other run was offered to process_run. That is the
+    # exact blast radius fps-0yd review round 2 rejected. Any shape that isn't a dict is not
+    # evidence of a current dossier, so it stays pending.
+    if not isinstance(facts, dict):
+        return False
+    provenance = facts.get("provenance")
+    if not isinstance(provenance, dict):
+        return False
+    recorded = provenance.get("results_fingerprint")
     if recorded is None:
         return True
     return recorded == _file_fingerprint(results_path)
@@ -307,7 +326,9 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
 
     A results.json, README.md or facts.json whose read here fails — vanished mid-race (a
     concurrent launch/rerun deleting it, e.g. via `rm` as part of a re-queue), a permissions
-    error, an NFS staleness error — is excluded for this pass rather than raised (fps-0yd review
+    error, an NFS staleness error, or a file whose bytes aren't valid UTF-8 (a
+    UnicodeDecodeError is a ValueError, not an OSError, which is why both are caught) — is
+    excluded for this pass rather than raised (fps-0yd review
     round 2). A narrower `except FileNotFoundError` was tried first and rejected: this function
     builds its whole return list eagerly (it is not a generator), and `main()`'s `--scan` loop
     only wraps `process_run` in a per-run try/except, not this call — so ANY exception escaping
@@ -329,7 +350,7 @@ def find_pending_runs(root: pathlib.Path) -> list[pathlib.Path]:
         try:
             if _dossier_is_current(run_dir, p, readme):
                 continue
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             print(
                 f"[dossier_tables] {run_dir}: could not check whether its dossier is current "
                 f"({exc!r}) — excluding from this scan.",
@@ -348,8 +369,13 @@ def build_facts(run_dir: pathlib.Path) -> dict:
     """Read one run's artifacts and return the facts.json dict (does not write it)."""
     run_dir = pathlib.Path(run_dir)
     results_path = run_dir / RESULTS_FILENAME
-    results = json.loads(results_path.read_text())
-    results_fingerprint = _file_fingerprint(results_path)
+    # One read, hashed and parsed: a second read for the fingerprint could land on the other
+    # side of a concurrent re-run overwriting results.json, and the dossier would then carry the
+    # OLD run's numbers stamped with the NEW file's fingerprint — which find_pending_runs would
+    # read as "current" and never regenerate.
+    results_bytes = results_path.read_bytes()
+    results_fingerprint = _bytes_fingerprint(results_bytes)
+    results = json.loads(results_bytes)
     status = results["status"]
     meta = results.get("meta", {})
     candidate = results.get("candidate", {})
