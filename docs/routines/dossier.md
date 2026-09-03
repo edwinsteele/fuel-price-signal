@@ -87,13 +87,23 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    can rebuild it — it is judgement, not a derived fact. It is dropped only when the run itself
    changed (a different `predicted_signature` or a different `status`), and it says so out loud
    when it does. This was NOT true until fps-jrl: every regeneration reset `verdict` to `null`,
-   which is how PR #351 silently wiped all five of batch1's verdicts. In the same spirit, a
-   regeneration that would replace `noise_band`, `per_fold[].regime`/`per_regime` or
-   `decision_flips` with an "unavailable" value the current environment can no longer compute
-   (a missing `noise_floor.json`, a `results.json` predating `meta.shock_folds`) refuses and
-   writes nothing — it shows up in `--scan`'s output as a `failed, skipping` line naming the
-   fields. Restore the missing input, or re-run with `--allow-field-loss` if the downgrade is
-   what you actually want.
+   which is how PR #351 silently wiped all five of batch1's verdicts.
+
+   A verdict carried across a regeneration whose NUMBERS moved (a pipeline fix re-running the
+   candidate, as #359 did to batch1) keeps answering the question asked — the verdict grades
+   `predicted_signature`, a claim about the SHAPE of the result — but the file is then
+   mixed-vintage, so it says so: `grading.carried_from_fingerprint` records the `results.json`
+   the verdict was actually formed against. Compare it to `provenance.results_fingerprint`; if
+   they differ, the judgement predates the numbers printed beside it. Absent means never carried.
+
+   In the same spirit, a regeneration that would replace `noise_band`,
+   `per_fold[].regime`/`per_regime` or `decision_flips` with an "unavailable" value the current
+   environment can no longer compute (a missing `noise_floor.json`, a `results.json` predating
+   `meta.shock_folds`) refuses and writes nothing — it shows up in `--scan`'s output as a
+   `failed, skipping` line naming the fields. Restore the missing input, or re-run **that one
+   run_dir** with `--allow-field-loss` if the downgrade is what you actually want. The flag is
+   rejected with `--scan` on purpose: scan-wide it would downgrade every refusing run in the
+   pass, on one line of stdout each, in an unattended overnight log.
 
    **A `PREDICTED_SIGNATURE` making a claim about SHAP importance/sign/orientation grades
    `"inconclusive"`, always** (decided `fps-1l1` — no SHAP field will exist in `facts.json`,

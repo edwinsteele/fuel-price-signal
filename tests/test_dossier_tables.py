@@ -2056,6 +2056,134 @@ def test_process_run_refuses_to_drop_per_fold_regime_labels(tmp_path):
     assert facts_path.read_bytes() == before
 
 
+def _add_noise_floor(batch_dir):
+    (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps({
+        "deltas_cpl_held": [0.01, -0.02, 0.03, 0.00, -0.01],
+        "baseline_fingerprint": "54:deadbeef1234",
+        "null_method": dt.NULL_METHOD_PLACEBO_COLUMN, "tank_params": "50/3.571/7d/10%",
+    }))
+
+
+def test_process_run_refuses_field_loss_even_when_the_claim_changed(tmp_path):
+    """PR #360 review, finding 1. The field-loss check used to sit inside `if _is_same_run(...)`,
+    so a candidate re-authored with a new predicted_signature and re-run skipped it entirely and
+    overwrote the unreproducible fields in silence — fps-d4g's exact loss, on the one path the
+    guard didn't cover. The grading argument does not transfer: a verdict is a judgement about
+    THIS run, so re-authoring invalidates it, but the noise band depends on the batch's
+    noise_floor.json, which is gone or present regardless of what the candidate now claims."""
+    run_dir, batch_dir = _write_run(tmp_path, batch_extras=_add_noise_floor)
+    facts_path = dt.process_run(run_dir)
+    assert json.loads(facts_path.read_text())["noise_band"]["available"] is True
+    before = facts_path.read_bytes()
+    (batch_dir / dt.NOISE_FLOOR_FILENAME).unlink()
+    results = _make_results(batch_dir)
+    results["candidate"]["predicted_signature"] = "a different claim entirely"
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
+
+    with pytest.raises(dt.FactsFieldLossError, match="noise_band"):
+        dt.process_run(run_dir)
+
+    assert facts_path.read_bytes() == before
+
+
+def test_process_run_writes_an_abort_whose_derived_fields_legitimately_vanish(tmp_path):
+    """What stops finding 1's fix over-firing. EVERY field in UNREPRODUCIBLE_FIELDS needs the
+    run's own scored output to exist — `_noise_band` reports `available: false` for an
+    unresolved effect_delta_cpl_held, which is every non-graded run — so a graded run re-run to
+    `aborted_candidate` loses them to the ABORT, not to the environment. Refusing there would
+    deadlock the write-up: the nightly scan would refuse, log, and leave the run pending to
+    refuse again the next night, forever."""
+    run_dir, batch_dir = _write_run(tmp_path, batch_extras=_add_noise_floor)
+    facts_path = dt.process_run(run_dir)
+    assert isinstance(json.loads(facts_path.read_text())["breakdowns"]["per_regime"], list)
+    (run_dir / dt.RESULTS_FILENAME).write_text(
+        json.dumps(_make_results(batch_dir, status="aborted_candidate", error="no signal"))
+    )
+
+    dt.process_run(run_dir)  # must not raise
+
+    facts = json.loads(facts_path.read_text())
+    assert facts["breakdowns"] is None
+    assert facts["noise_band"]["available"] is False
+
+
+def test_process_run_refuses_to_drop_decision_flips(tmp_path):
+    """The third member of UNREPRODUCIBLE_FIELDS, which had no refusal test of its own (PR #360
+    review). decision_flips is graded per (fold, regime), so a results.json predating fps-3tu's
+    meta.shock_folds takes it down along with the regime labels."""
+    run_dir, batch_dir = _write_run(
+        tmp_path, columns=["cand_col", "cand_col_b"], batch_extras=_floor_with(arity=2)
+    )
+    facts_path = dt.process_run(run_dir)
+    assert json.loads(facts_path.read_text())["decision_flips"]["computed"] is True
+    before = facts_path.read_bytes()
+    (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(_make_results(
+        batch_dir, columns=["cand_col", "cand_col_b"], omit_shock_folds=True
+    )))
+
+    with pytest.raises(dt.FactsFieldLossError, match="decision_flips"):
+        dt.process_run(run_dir)
+
+    assert facts_path.read_bytes() == before
+
+
+def test_process_run_survives_a_facts_json_whose_grading_is_not_an_object(tmp_path):
+    """PR #360 review, finding 3: `x.get(k) or {}` passes a truthy non-dict straight through to
+    `.get`, raising AttributeError. `--scan`'s blanket handler would contain it, but the
+    single-run CLI gives a raw traceback instead of a clear message — and this is the same shape
+    already hardened one level up in _dossier_is_current."""
+    run_dir, _ = _write_run(tmp_path)
+    facts_path = dt.process_run(run_dir)
+    mangled = json.loads(facts_path.read_text())
+    mangled["grading"] = "matched"       # hand-edited / truncated file
+    mangled["provenance"] = "abc1234"
+    facts_path.write_text(json.dumps(mangled))
+
+    dt.process_run(run_dir)  # must not raise AttributeError
+
+    assert json.loads(facts_path.read_text())["grading"]["pending"] is True
+
+
+def test_process_run_stamps_the_vintage_a_carried_verdict_was_formed_against(tmp_path):
+    """PR #360 review: carrying a verdict across a regeneration whose NUMBERS moved is
+    deliberate (the verdict answers `predicted_signature`, a claim about shape), but it makes the
+    file mixed-vintage — so the file says so. `grading.carried_from_fingerprint` records the
+    results.json the verdict was actually formed against, and it must record the EARLIEST one:
+    re-stamping on every regeneration would walk the chain forward and always claim the verdict
+    was exactly one regeneration old."""
+    run_dir, batch_dir = _write_run(tmp_path)
+    facts_path = dt.process_run(run_dir)
+    formed_against = json.loads(facts_path.read_text())["provenance"]["results_fingerprint"]
+    _record_verdict(run_dir)
+    (run_dir / dt.RESULTS_FILENAME).write_text(
+        json.dumps(_make_results(batch_dir, effect_delta_cpl_held=-0.06))
+    )
+
+    dt.process_run(run_dir)
+    facts = json.loads(facts_path.read_text())
+
+    assert facts["grading"]["verdict"] == "matched"
+    assert facts["grading"]["carried_from_fingerprint"] == formed_against
+    assert facts["provenance"]["results_fingerprint"] != formed_against
+
+    (run_dir / dt.RESULTS_FILENAME).write_text(
+        json.dumps(_make_results(batch_dir, effect_delta_cpl_held=-0.07))
+    )
+    dt.process_run(run_dir)
+
+    assert json.loads(facts_path.read_text())["grading"]["carried_from_fingerprint"] == formed_against
+
+
+def test_main_rejects_allow_field_loss_with_scan(tmp_path):
+    """PR #360 review, finding 2: the flag exists to unstick ONE run a human has looked at.
+    Scan-wide it would downgrade every refusing run in the pass, each on one line of stdout in an
+    unattended overnight log."""
+    result = CliRunner().invoke(dt.main, ["--scan", str(tmp_path), "--allow-field-loss"])
+
+    assert result.exit_code != 0
+    assert "cannot be combined with --scan" in result.output
+
+
 def test_process_run_allow_field_loss_overrides_the_refusal(tmp_path, capsys):
     """The escape hatch a human can mean: overwrite anyway, but say what was overwritten. The
     grading verdict is still carried forward — losing a derived field is a decision, losing the

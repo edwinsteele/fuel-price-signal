@@ -2092,6 +2092,19 @@ def _load_existing_facts(run_dir: pathlib.Path) -> dict | None:
     return existing if isinstance(existing, dict) else None
 
 
+def _dict_at(facts: dict, key: str) -> dict:
+    """`facts[key]` when it is an object, `{}` otherwise.
+
+    `x.get(key) or {}` is NOT enough and this is the second time that shape has bitten this
+    module (PR #360 review): a truthy non-dict — `{"grading": "matched"}` from a hand-edited or
+    truncated facts.json — passes the `or` and then raises AttributeError on `.get`. Under
+    `--scan` the blanket per-run handler contains that, but the single-run CLI gives a raw
+    traceback in place of `_load_existing_facts`' clear message.
+    """
+    value = facts.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def _is_same_run(new_facts: dict, old_facts: dict) -> bool:
     """Do the new and existing facts describe the same run of the same candidate claim?
 
@@ -2105,10 +2118,10 @@ def _is_same_run(new_facts: dict, old_facts: dict) -> bool:
       reached the scoring stages.
     """
     return (
-        (old_facts.get("grading") or {}).get("predicted_signature")
-        == (new_facts.get("grading") or {}).get("predicted_signature")
-        and (old_facts.get("provenance") or {}).get("status")
-        == (new_facts.get("provenance") or {}).get("status")
+        _dict_at(old_facts, "grading").get("predicted_signature")
+        == _dict_at(new_facts, "grading").get("predicted_signature")
+        and _dict_at(old_facts, "provenance").get("status")
+        == _dict_at(new_facts, "provenance").get("status")
     )
 
 
@@ -2119,26 +2132,44 @@ def _carry_forward_grading(new_facts: dict, old_facts: dict) -> None:
     is the dossier session's own judgement, written back by hand (docs/routines/dossier.md Step
     1.2). build_facts therefore cannot reconstruct it, and rebuilding it blank is data loss, not
     a refresh. Assumes `_is_same_run` already held.
+
+    Carrying it across a regeneration whose NUMBERS moved is deliberate — the verdict is formed
+    against `predicted_signature`, a claim about the shape of the result, so a numbers move that
+    flips no signature leaves it still answering the question asked (this is what fps-3ug did by
+    hand for batch1 after #359). But it does make the file mixed-vintage, so the file says so:
+    `grading.carried_from_fingerprint` records the results.json the verdict was actually formed
+    against, and a reader comparing it to `provenance.results_fingerprint` can see at a glance
+    whether the judgement and the numbers beneath it come from the same run artifacts (PR #360
+    review). It records the EARLIEST such fingerprint, not the previous one — an already-stamped
+    block keeps its stamp across further regenerations, or the chain would walk forward and
+    always claim the verdict was one regeneration old.
     """
-    old_grading = old_facts.get("grading")
-    if not isinstance(old_grading, dict) or old_grading.get("verdict") is None:
+    old_grading = _dict_at(old_facts, "grading")
+    if old_grading.get("verdict") is None:
         return  # nothing recorded yet — the blank/pending block build_facts made is correct
-    new_facts["grading"] = old_grading
+    carried = dict(old_grading)
+    carried.setdefault(
+        "carried_from_fingerprint", _dict_at(old_facts, "provenance").get("results_fingerprint")
+    )
+    new_facts["grading"] = carried
 
 
 def _has_noise_band(facts: dict) -> bool:
-    return bool((facts.get("noise_band") or {}).get("available"))
+    return bool(_dict_at(facts, "noise_band").get("available"))
 
 
 def _has_regime_labels(facts: dict) -> bool:
-    breakdowns = facts.get("breakdowns") or {}
+    breakdowns = _dict_at(facts, "breakdowns")
     if isinstance(breakdowns.get("per_regime"), list):
         return True
-    return any((row or {}).get("regime") is not None for row in breakdowns.get("per_fold") or [])
+    per_fold = breakdowns.get("per_fold")
+    if not isinstance(per_fold, list):
+        return False
+    return any(isinstance(row, dict) and row.get("regime") is not None for row in per_fold)
 
 
 def _has_decision_flips(facts: dict) -> bool:
-    return bool((facts.get("decision_flips") or {}).get("computed"))
+    return bool(_dict_at(facts, "decision_flips").get("computed"))
 
 
 #: facts.json fields a regeneration can silently DOWNGRADE rather than recompute, because they
@@ -2157,12 +2188,29 @@ UNREPRODUCIBLE_FIELDS = (
 
 
 def _field_losses(new_facts: dict, old_facts: dict) -> list[str]:
-    """Fields the existing facts.json carries for real and the regenerated one no longer does."""
-    losses = []
-    for label, present in UNREPRODUCIBLE_FIELDS:
-        if present(old_facts) and not present(new_facts):
-            losses.append(label)
-    return losses
+    """Fields the existing facts.json carries for real and the regenerated one no longer does.
+
+    Checked whatever the CLAIM did — NOT only when `_is_same_run` holds (PR #360 review). A
+    candidate re-authored with a new `predicted_signature` and re-run still produces a graded
+    run whose noise band depends on the same `noise_floor.json`, and gating this on
+    `_is_same_run` meant that path overwrote all three fields in silence: fps-d4g's exact loss,
+    on the one path the guard didn't cover.
+
+    It is skipped when the REGENERATED run isn't graded, and that is not a hole. Every field
+    here needs the run's own scored output to exist at all — `_noise_band` returns
+    `available: false` for an unresolved `effect_delta_cpl_held`, which is every non-graded run,
+    and per_regime/decision_flips need folds and fills. So a graded run re-run to
+    `aborted_candidate` loses these to the ABORT, not to the environment, and refusing there
+    would deadlock the write-up: the nightly scan would refuse, log, and leave the run pending
+    to refuse again the next night, forever. The abort is the run's real outcome and gets
+    dossiered as such.
+    """
+    if _dict_at(new_facts, "provenance").get("status") != STATUS_GRADED:
+        return []
+    return [
+        label for label, present in UNREPRODUCIBLE_FIELDS
+        if present(old_facts) and not present(new_facts)
+    ]
 
 
 def process_run(run_dir: pathlib.Path, *, allow_field_loss: bool = False) -> pathlib.Path:
@@ -2180,31 +2228,33 @@ def process_run(run_dir: pathlib.Path, *, allow_field_loss: bool = False) -> pat
     if existing is not None:
         if _is_same_run(facts, existing):
             _carry_forward_grading(facts, existing)
-            losses = _field_losses(facts, existing)
-            if losses and not allow_field_loss:
-                raise FactsFieldLossError(
-                    f"{run_dir}: regenerating {FACTS_FILENAME} would drop "
-                    f"{', '.join(losses)} — the existing dossier carries "
-                    "these and this environment can no longer produce them, so the rebuild "
-                    "would be a silent downgrade (fps-jrl). Nothing was written. Restore the "
-                    "missing input (the batch's noise_floor.json, or re-run the candidate to "
-                    "backfill results.json's meta.shock_folds), or pass --allow-field-loss to "
-                    "overwrite the dossier with the degraded values anyway."
-                )
-            if losses:
-                print(
-                    f"[dossier_tables] {run_dir}: --allow-field-loss — overwriting "
-                    f"{', '.join(losses)} with degraded values.",
-                    flush=True,
-                )
-        elif (existing.get("grading") or {}).get("verdict") is not None:
+        elif _dict_at(existing, "grading").get("verdict") is not None:
             # Loud, not silent: this IS the wipe the issue is about, just the one case where
             # it's correct — the run or the claim changed, so the old verdict no longer applies.
             print(
                 f"[dossier_tables] {run_dir}: dropping the recorded grading verdict "
-                f"{(existing.get('grading') or {}).get('verdict')!r} — this run's "
+                f"{_dict_at(existing, 'grading').get('verdict')!r} — this run's "
                 "predicted_signature or status changed, so the verdict no longer answers the "
                 "question asked. Re-grade it (docs/routines/dossier.md Step 1.2).",
+                flush=True,
+            )
+        # Outside the branch above on purpose — see _field_losses. These fields survive a re-run
+        # of the candidate; the environment's ability to produce them is what's at stake.
+        losses = _field_losses(facts, existing)
+        if losses and not allow_field_loss:
+            raise FactsFieldLossError(
+                f"{run_dir}: regenerating {FACTS_FILENAME} would drop "
+                f"{', '.join(losses)} — the existing dossier carries "
+                "these and this environment can no longer produce them, so the rebuild "
+                "would be a silent downgrade (fps-jrl). Nothing was written. Restore the "
+                "missing input (the batch's noise_floor.json, or re-run the candidate to "
+                "backfill results.json's meta.shock_folds), or re-run this ONE run_dir with "
+                "--allow-field-loss to overwrite the dossier with the degraded values anyway."
+            )
+        if losses:
+            print(
+                f"[dossier_tables] {run_dir}: --allow-field-loss — overwriting "
+                f"{', '.join(losses)} with degraded values.",
                 flush=True,
             )
     batch_dir_str = facts["provenance"].get("batch_dir")
@@ -2230,7 +2280,8 @@ def process_run(run_dir: pathlib.Path, *, allow_field_loss: bool = False) -> pat
     "--allow-field-loss", is_flag=True, default=False,
     help="Overwrite a dossier even when the rebuild would drop previously-recorded fields "
          "this environment can no longer produce (noise_band, per-fold regimes, decision "
-         "flips). Off by default — see fps-jrl.",
+         "flips). Single run_dir only — rejected with --scan, which would downgrade every "
+         "refusing run in the pass. Off by default — see fps-jrl.",
 )
 def main(target: str | None, scan_root: str | None, allow_field_loss: bool) -> None:
     """Build facts.json + PNGs for a completed run, or every pending run under --scan.
@@ -2239,6 +2290,14 @@ def main(target: str | None, scan_root: str | None, allow_field_loss: bool) -> N
     (bd `in_progress` + a required traceback in run.log) already runs at the start of every
     nightly launch cycle. See the module docstring.
     """
+    if scan_root and allow_field_loss:
+        # The flag exists to unstick ONE run a human has looked at. Scan-wide it would downgrade
+        # every refusing run in the pass, each on one line of stdout in an unattended overnight
+        # log — the blast radius this whole issue is about (PR #360 review).
+        raise click.UsageError(
+            "--allow-field-loss cannot be combined with --scan: it would silently downgrade "
+            "every refusing run in the pass. Re-run the single run_dir you mean instead."
+        )
     if scan_root:
         root = pathlib.Path(scan_root)
         for run_dir in find_pending_runs(root):
