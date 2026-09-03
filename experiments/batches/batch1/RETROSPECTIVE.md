@@ -24,15 +24,21 @@ its leaderboard could not differentiate and its calibration read was a single po
 > grades quoted under Judgement are read from the candidates' `facts.json`, not from this
 > payload.
 
-> **Status of the dossiers this rests on (`fps-3ug`).** Every figure below traces to
-> `retrospective_facts.json` or the post-#359 `facts.json`; all were verified against those
-> payloads before this was committed. The candidate `README.md` files beside them still
-> quote PRE-#359 figures and are the stale side — one number in `not_tested` below is taken
-> from a README and is labelled as pre-regen where it appears. PR #359 measured every batch1
-> effect as moving less than 0.008 c/L with no verdict flipped, so the signature grades and
-> the judgement below are not expected to move when `fps-3ug` refreshes those READMEs. If
-> that refresh does change any candidate's Judgement conclusion, the signature-grade table
-> and the decoupling finding here must be revisited before this document is cited.
+> **Status of the dossiers this rests on (`fps-3ug` — RESOLVED 2026-09-03).** Every figure
+> below traces to `retrospective_facts.json` or the post-#359 `facts.json`; all were verified
+> against those payloads before this was committed. The five candidate `README.md` files
+> beside them quoted PRE-#359 figures when this was written; they have since been refreshed,
+> and **every figure in this document was re-verified against the refreshed dossiers.**
+>
+> **No candidate's Judgement conclusion changed**, so the signature-grade table and the
+> decoupling finding stand as written. Two supporting claims inside dossiers did move, and
+> neither touches anything asserted here: `tgp_cycle_displacement`'s fold-3 exclusion is no
+> longer a near sign flip (restated in `not_tested` below), and
+> `stickiness_phase_saddle`'s descriptive per-regime shock cell changed sign at a negligible
+> magnitude — that candidate declared no zone TARGET, so nothing is graded on it. The one
+> qualitative change the regen made across all five dossiers is that `dark_fill_days` went to
+> zero and `extra_feature_provider_misses` fell 607 → 278: the closed-station days are no
+> longer visited at a stale frozen price. No number in this document reads either field.
 
 ---
 
@@ -243,12 +249,16 @@ combined run — but that is a **new measurement**, not an inference available f
 - Whether the confidence priors are calibrated. Not tested — pooled n is 6 against a
   required 10; genuinely cross-batch-pending, not a null result.
 - Whether `tgp_cycle_displacement`'s shock-concentrated effect is a real regime mechanism or
-  fold-3-specific. Its own dossier flags that excluding fold 3 takes the shock-zone delta to
-  roughly zero — a near sign flip — and that 2 of the 4 shock folds actually hurt the
-  candidate, so the regime aggregate is not a uniform shock story. (Those exclusion figures
-  are the dossier's own, computed before the PR #359 regen, which moved the shock-zone
-  aggregate itself from −0.29 to −0.3079 c/L @ 1d without re-deriving the per-fold
-  exclusions.) Not settled here.
+  fold-3-led. Its own dossier flags that 2 of the 4 shock folds actually hurt the candidate,
+  so the regime aggregate is not a uniform shock story, and that fold 3 carries most of the
+  rest. **How much it carries moved in the #359 regen** and the dossier was restated for it
+  under `fps-3ug`: the pre-regen leave-one-out took the shock zone to roughly zero — a near
+  sign flip — while post-regen, recomputed fill-count-weighted on both sides, excluding fold
+  3 leaves −0.0878 c/L @ 1d against a −0.2458 fill-weighted shock zone. Fold 3's share falls
+  from 95% to 64%, because fold 4's own cell grew to −1.2103. Still most of the effect, no
+  longer nearly all of it, and no longer a sign flip. Not settled here — and note this is a
+  caveat *against* the candidate weakening, so the contradicted signature grade above is if
+  anything better supported than when this batch was first graded.
 - Whether a turn-gated `stickiness_phase_saddle` pays. The mechanism was found real but
   mispriced; the gated construction is unbuilt (`fps-3jj.10` lead 6).
 - Whether the batch would look different at another cadence. Everything here is 1d;

@@ -1,9 +1,12 @@
 # batch1 / stickiness_phase_saddle
 
 - **Date:** 2026-08-15 (snapshot) / dossiered 2026-08-27 / regime labels corrected
-  2026-08-30 (`fps-hnp`) / flip table re-rendered 2026-08-31 (`fps-j6w`)
+  2026-08-30 (`fps-hnp`) / flip table re-rendered 2026-08-31 (`fps-j6w`) / realised
+  figures refreshed to the post-#359 regen 2026-09-03 (`fps-3ug`)
 - **Branch:** main
-- **SHA:** 9362d46d74f63ccc2a430e96379dfd8658f2036d
+- **SHA:** 12dc7629f1f440bbf71fa7f50304e6adb781d048 (the #359 regen run; the original
+  2026-08-26 run was 9362d46d74f63ccc2a430e96379dfd8658f2036d — the model fits are
+  byte-identical between the two, only the realised backtest was re-run)
 - **Status:** done — **inconclusive**
 - **Bead:** fps-6yi
 - **Cadence:** `50/3.571/1d/10%` (batch1's canonical daily cadence)
@@ -45,13 +48,13 @@ PYTHONPATH=. uv run python -m experiments.pipeline.runner \
 Transcribed from `facts.json` — no new arithmetic.
 
 **Provenance:** batch `batch1`, snapshot 2026-08-15, seeds [42, 43, 44, 45,
-46], wall 1010.6s, status `graded`, 54-column baseline (`54:1a6ec2d84a69`).
+46], wall 1037.8s, status `graded`, 54-column baseline (`54:1a6ec2d84a69`).
 
 **Headline (realised CPL, held τ — the arbiter):**
 
 | | R0 | candidate | delta |
 |---|---|---|---|
-| CPL held | 187.8211 | 187.7476 | **-0.0735** |
+| CPL held | 188.0376 | 187.9615 | **-0.0761** |
 
 `effect_resolved`: **true**. Note the seeds above are the WFCV screen
 only — the realised arbiter ran on a single seed
@@ -85,10 +88,10 @@ split below is not):
 | 1 | shock | 190 | 0.0000 |
 | 2 | normal | 200 | +0.7729 |
 | 3 | shock | 186 | -0.5079 |
-| 4 | shock | 239 | +0.6069 |
-| 5 | normal | 185 | -0.0107 |
-| 6 | normal | 125 | -0.2567 |
-| 7 | normal | 235 | +0.1544 |
+| 4 | shock | 226 | +0.5364 |
+| 5 | normal | 144 | -0.0130 |
+| 6 | normal | 107 | -0.3302 |
+| 7 | normal | 177 | +0.1796 |
 | 8 | normal | 84 | +0.0190 |
 | 9 | normal | 112 | +0.0718 |
 | 10 | normal | 96 | -0.5536 |
@@ -99,14 +102,18 @@ split below is not):
 
 No cell is suppressed (`min_row_cell_n` = 30, smallest cell here is 84).
 
-**Per-regime:** shock **+0.0047** c/L (n=789), normal **-0.1034** c/L
-(n=1543) — **corrected 2026-08-30:** this no longer reads as "both favour
-the candidate." Under the old fixed shock set both regimes were favourable
-(shock -0.0614, normal -0.0768); under the corrected set, fold 13 (this
-run's single largest favourable cell) moves from shock to normal, leaving
-shock essentially flat/negligibly unfavourable and normal more clearly
-favourable. This candidate joins, rather than stands apart from, the
-batch1 siblings where the two regimes disagree in sign.
+**Per-regime:** shock **-0.0078** c/L (n=776), normal **-0.1114** c/L
+(n=1424). The reading is that **shock is flat and normal carries whatever
+there is** — fold 13 (this run's single largest favourable cell) sits in
+normal under the corrected shock-fold set, having sat in shock under the old
+fixed one. The shock cell's *sign* is not a fact about this run: it has been
+-0.0614 (old fixed set), +0.0047 (corrected set, pre-#359) and -0.0078
+(corrected set, post-#359), all of them an order of magnitude below the
+normal cell and well inside a band whose std is 0.0999. **A previous version
+of this line read the pre-#359 +0.0047 as "the two regimes disagree in sign",
+which the regen has already undone; a negligible cell has no readable sign,
+and neither reading should be leaned on.** The candidate declared no zone
+TARGET, so nothing is graded on this axis either way.
 
 `per_axis` is `null` — this candidate declared no `add_axis` beyond the
 (unresolved) zone check above.
@@ -143,10 +150,10 @@ at arity 3 — this candidate is only arity 2, so `floor_arity_exceeds_run`:
 columns than it has; allowed, since a wider ruler only raises the bar,
 never lowers it, but it means a candidate that failed here has not been
 shown to fail against its own arity's band): band mean +0.0251 c/L, band
-std 0.0999 c/L. The candidate's -0.0735 c/L held-τ sits at the **80th
+std 0.0999 c/L. The candidate's -0.0761 c/L held-τ sits at the **80th
 percentile** of the 10 observed noise draws
 (`candidate_percentile_better_than_noise` = 80.0), and the parametric
-single-candidate call is `z = -0.987` against `t = 1.923`
+single-candidate call is `z = -1.013` against `t = 1.923`
 (`single_candidate_z_threshold`, the authoritative threshold — not the
 nominal one) — inside the band on both sides
 (`abs(z) < t`), so this is a two-sided pass into "inconclusive," not a
@@ -160,7 +167,7 @@ is **1** (floor built at arity 3, run at arity 2).
 
 **Decision flips** (`facts["decision_flips"]`, diffs R0's and the
 candidate's `fills.parquet` directly on `(fold, station_code, date)` — not a
-`rowpreds` proba-threshold crossing): run-level **303 flips / 88
+`rowpreds` proba-threshold crossing): run-level **247 flips / 77
 decisions**, present in every fold except fold 1. `flips` overstates
 independent evidence — one real flip cascades into a run of later differing
 fills at the same station as the tank's state diverges, which `decns`
@@ -189,20 +196,20 @@ difference has no stable denominator.
 | fold | regime | flips | decns | litres R0 | litres cand | regret R0 | regret cand | regret Δ | Δ interval (2·SE) | run_contribution_cpl |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 1 | shock | 0 | 0 | 0.0 | 0.0 | — | — | — (`no flips`) | — | +0.0000 |
-| 2 | normal | 50 | 13 | 200.0 | 425.0 | 7.80 | 10.48 | +2.68 | [-7.44, +12.80] | +0.0558 |
-| 3 | shock | 37 | 10 | 396.4 | 360.7 | 6.55 | 4.97 | -1.58 | [-7.72, +4.56] | -0.0378 |
-| 4 | shock | 54 | 16 | 250.0 | 478.6 | 13.78 | 13.52 | -0.26 | [-10.94, +10.41] | +0.0437 |
-| 5 | normal | 28 | 9 | 114.3 | 285.7 | 12.40 | 10.10 | -2.30 | [-12.27, +7.68] | -0.0008 |
-| 6 | normal | 26 | 6 | 217.9 | 171.4 | 4.33 | 4.75 | +0.42 | [-8.90, +9.73] | -0.0183 |
-| 7 | normal | 16 | 7 | 67.9 | 157.1 | 7.05 | 12.63 | +5.57 | [-8.95, +20.10] | +0.0104 |
-| 8 | normal | 36 | 5 | 382.1 | 378.6 | 8.93 | 9.26 | +0.34 | [-10.45, +11.12] | +0.0014 |
-| 9 | normal | 3 | 2 | 0.0 | 78.6 | — | 5.20 | — (`one arm only`) | — | +0.0053 |
-| 10 | normal | 30 | 6 | 214.3 | 389.3 | 13.58 | 8.01 | -5.57 | [-18.39, +7.25] | -0.0378 |
-| 11 | normal | 7 | 3 | 35.7 | 89.3 | 32.00 | 16.84 | -15.16 | [-37.19, +6.87] | -0.0197 |
-| 12 | normal | 5 | 5 | 100.0 | 75.0 | 22.57 | 12.54 | -10.03 | [-24.20, +4.15] | +0.0038 |
-| 13 | normal | 6 | 3 | 53.6 | 42.9 | 5.73 | 0.00 | -5.73 | [-41.77, +30.31] | -0.0644 |
-| 14 | shock | 5 | 3 | 32.1 | 50.0 | 7.00 | 1.99 | -5.01 | [-13.10, +3.07] | -0.0022 |
-| **all** | — | **303** | **88** | **2064.3** | **2982.1** | **10.03** | **9.38** | **-0.64** | **[-4.89, +3.60]** | **-0.0606** |
+| 2 | normal | 50 | 13 | 200.0 | 425.0 | 7.80 | 10.48 | +2.68 | [-7.44, +12.80] | +0.0585 |
+| 3 | shock | 37 | 10 | 396.4 | 360.7 | 6.55 | 4.97 | -1.58 | [-7.72, +4.56] | -0.0396 |
+| 4 | shock | 34 | 13 | 207.1 | 353.6 | 16.63 | 18.30 | +1.66 | [-8.48, +11.81] | +0.0354 |
+| 5 | normal | 16 | 6 | 114.3 | 207.1 | 12.40 | 13.94 | +1.54 | [-4.04, +7.12] | -0.0008 |
+| 6 | normal | 12 | 4 | 92.9 | 57.1 | 10.16 | 14.25 | +4.09 | [-6.07, +14.25] | -0.0199 |
+| 7 | normal | 6 | 4 | 28.6 | 110.7 | 16.75 | 17.92 | +1.17 | [-4.38, +6.72] | +0.0109 |
+| 8 | normal | 36 | 5 | 382.1 | 378.6 | 8.93 | 9.26 | +0.34 | [-10.45, +11.12] | +0.0015 |
+| 9 | normal | 3 | 2 | 0.0 | 78.6 | — | 5.20 | — (`one arm only`) | — | +0.0056 |
+| 10 | normal | 30 | 6 | 214.3 | 389.3 | 13.58 | 8.01 | -5.57 | [-18.39, +7.25] | -0.0396 |
+| 11 | normal | 7 | 3 | 35.7 | 89.3 | 32.00 | 16.84 | -15.16 | [-37.19, +6.87] | -0.0206 |
+| 12 | normal | 5 | 5 | 100.0 | 75.0 | 22.57 | 12.54 | -10.03 | [-24.20, +4.15] | +0.0040 |
+| 13 | normal | 6 | 3 | 53.6 | 42.9 | 5.73 | 0.00 | -5.73 | [-41.77, +30.31] | -0.0675 |
+| 14 | shock | 5 | 3 | 32.1 | 50.0 | 7.00 | 1.99 | -5.01 | [-13.10, +3.07] | -0.0023 |
+| **all** | — | **247** | **77** | **1857.1** | **2617.9** | **11.14** | **10.69** | **-0.46** | **[-4.83, +3.92]** | **-0.0746** |
 
 **Every resolvable regret delta sits inside its own 2·SE interval — 12 of
 12, plus the pooled `all` row.** Per `docs/routines/dossier.md`, an
@@ -222,31 +229,36 @@ Neither is the same as a resolved zero.
 
 The pooled row is the only run-level statement this table can make: **both
 arms buy about equally well relative to what they could have reached**
-(10.03 vs 9.38 c/L of regret, Δ -0.64 against a ±4.25 interval), consistent
-with a -0.0735 c/L headline — the same conclusion the addendum reached by
+(11.14 vs 10.69 c/L of regret, Δ -0.46 against a ±4.37 interval), consistent
+with a -0.0761 c/L headline — the same conclusion the addendum reached by
 its own route.
 
-**Litres:** flip-only volume is 2064.3 L on R0 against 2982.1 L on the
-candidate — a **44% gap**, the largest in batch1, on a spend-weighted
+**Litres:** flip-only volume is 1857.1 L on R0 against 2617.9 L on the
+candidate — a **41% gap**, still the largest in batch1, on a spend-weighted
 metric. The two arms are not diverging on equal volume, which is why a flip
 COUNT and a flip CPL answer different questions. **Dark fills:**
-`dark_fill_days` = **56** of 303 scored, in folds **4–7** — the Blue
-Mountains preferred-station outage. Those fills ARE scored, at the
-forward-filled price the tank simulator itself bought at, so the outage does
-not bias the estimate, but it thins and tilts exactly those folds.
+`dark_fill_days` = **0** of 247 scored. Pre-#359 this run recorded **56**
+dark fills in folds **4–7** (the Blue Mountains preferred-station outage),
+scored at the forward-filled price the tank simulator had bought at.
+`fps-2i4`/#356 stopped the realised backtest transacting at a station's stale
+frozen price through a closure, so those station-days are no longer bought at
+all. Folds 4–7 are exactly the folds whose cells moved in the regen, and only
+those.
 
 **`run_contribution_cpl`** is what each fold's divergence is worth at the
 scale of the whole run — a litres-weighted shift-share of that fold's own
 `delta_cpl_own` (the whole fold, matching and flipped fills alike), not of
 the flip-only figures. It reconciles: `run_contribution_total_cpl`
-**-0.0606** + `composition_residual_cpl` **-0.0129** = **-0.0735**, the
-headline `delta_cpl_held` — the same reconciliation the addendum quotes.
+**-0.0746** + `composition_residual_cpl` **-0.0015** = **-0.0761**, the
+headline `delta_cpl_held`. (The addendum below quotes the pre-#359
+reconciliation, -0.0606 + -0.0129 = -0.0735; the residual has shrunk to
+almost nothing, which is the smallest in batch1 either way.)
 This run's `tau_diverges_any` is `None` (**unavailable, never read as
 "checked, agrees"**), so the residual is composition drift **and possibly
 tau drift**.
 
-Summed by regime: **normal -0.0642** (10 folds, 59 decns) against **shock
-+0.0036** (4 folds, 29 decns). `n_flips` spread across 13 of 14 folds is
+Summed by regime: **normal -0.0680** (10 folds, 51 decns) against **shock
+-0.0066** (4 folds, 26 decns). `n_flips` spread across 13 of 14 folds is
 consistent with the predicted "spread across folds, not concentrated"
 shape, but `decision_flips` carries no station-level stickiness data, so it
 cannot confirm the more specific "flips concentrate on the
@@ -264,7 +276,7 @@ stickiness-distribution tails" claim.
 **Signature grading: inconclusive.** Two separate things carry that label
 and they should not be confused. The ledger `outcome` is mechanical
 (`docs/routines/dossier.md` step 3: `-t < z < t` -> `inconclusive`), and
-z=-0.99 against t=1.92 puts this run inside the band — that field is
+z=-1.01 against t=1.92 puts this run inside the band — that field is
 correct and stays. Separately, the candidate's own `PREDICTED_SIGNATURE`
 was written in terms of SHAP importance/orientation, which
 `docs/routines/dossier.md` (decided `fps-1l1`) grades `inconclusive`
@@ -272,12 +284,12 @@ was written in terms of SHAP importance/orientation, which
 signature grade here is a property of how the claim was phrased, not a
 measurement of the claim.
 
-What the run itself showed: realised delta -0.0735 c/L in the favourable
-direction, 303 decision flips across 13 of 14 folds. Inside the noise band
-on the ruler used. (Under the corrected empirical shock-fold set — see the
-Correction note near the end of this dossier — the per-regime split no
-longer has both regimes favouring the candidate; that was true only under
-the old fixed shock set and is superseded.)
+What the run itself showed: realised delta -0.0761 c/L in the favourable
+direction, 247 decision flips across 13 of 14 folds. Inside the noise band
+on the ruler used. (On the per-regime split — descriptive only, since this
+candidate declared no zone TARGET — the shock cell is negligible and has
+changed sign twice across the shock-set correction and the #359 regen; see
+the Facts section, which now declines to read a sign off it at all.)
 
 **This dossier's original recommendation was wrong and has been replaced**
 — see the post-dossier review addendum below. Both routes it named for a
@@ -296,8 +308,8 @@ mechanism question it declared uncheckable was checkable from
   lead 6 and `fps-i2o` below.
 - ~~Whether a floor matching this candidate's own 2-column arity would
   move the call.~~ **Answered — it would not.** Already resolvable from
-  banks committed in the batch directory (see addendum): z=-0.81 against
-  the arity-1 bank, -0.88 against the ICC bank, -0.99 against the arity-3
+  banks committed in the batch directory (see addendum): z=-0.84 against
+  the arity-1 bank, -0.90 against the ICC bank, -1.01 against the arity-3
   bank the run was graded on. No comparable ruler brings |z| near t=1.92.
 - Whether flips concentrate on the tails of the **stickiness**
   distribution specifically. Still open — `decision_flips` carries no
@@ -328,6 +340,17 @@ stays a transcription of `facts.json`). Sources: `facts.json`'s
 `experiments/batches/batch1/fuel_signal.db` daily prices. All of it was
 available when the dossier was written.
 
+**Provenance flag added 2026-09-03 (`fps-3ug`): every figure in this addendum
+is measured on the PRE-#359 run.** Its `fills.parquet` input is gitignored and
+the on-disk copy predates the regen, so none of §§2-5 can be restated exactly;
+they are kept as measured. Where a figure is also in `facts.json` and has
+moved, the current value is given inline below. None of the addendum's
+conclusions changes: the mechanism localisation at cycle turns, the
+"turn-adjacent volume is too small a share to pay" reading, the withdrawn §4
+result, and §5's "0 of 12 folds resolve their own flip delta" all hold against
+the post-#359 `facts.json` (§1's bank table is the one place where the
+numbers themselves are refreshed, since those z values live in `facts.json`).
+
 **1. The arity question was already answerable.** `_noise_band()` reads
 `noise_floor.json` by fixed filename. Two further banks sit in the same
 directory with matching `baseline_fingerprint` (`54:1a6ec2d84a69`), tank
@@ -335,9 +358,9 @@ params (`50/3.571/1d/10%`) and 14 windows:
 
 | bank | draws | arity | null_method | band mean / std | candidate z |
 |---|---|---|---|---|---|
-| `noise_floor.json` (graded on) | 10 | 3 | `placebo_column` | +0.0251 / 0.0999 | **-0.99** |
-| `noise_floor_k1.json` | 20 | 1 | `placebo_column` | -0.0089 / 0.0800 | **-0.81** |
-| `noise_floor_icc.json` | 32 (eff. 14.7) | 1 | `placebo_column_pinned_source` | +0.0278 / 0.1152 | **-0.88** |
+| `noise_floor.json` (graded on) | 10 | 3 | `placebo_column` | +0.0251 / 0.0999 | **-1.01** |
+| `noise_floor_k1.json` | 20 | 1 | `placebo_column` | -0.0089 / 0.0800 | **-0.84** |
+| `noise_floor_icc.json` | 32 (eff. 14.7) | 1 | `placebo_column_pinned_source` | +0.0278 / 0.1152 | **-0.90** |
 
 An arity-2 band sits between the arity-1 and arity-3 banks by
 construction. None approaches t=1.92. Filed as `fps-30p`: make the dossier
@@ -367,7 +390,11 @@ dead heat — which is exactly why the realised delta is ~0. Fold 13's
 much-quoted -32.73 c/L flip delta contributes **-0.0644 c/L** to the run;
 folds 2 and 4 hand back **+0.0995** between them (litres-weighted
 shift-share off `fills.parquet`, reconciling to the headline -0.0735 via
-a -0.0129 composition residual).
+a -0.0129 composition residual). *Post-#359 the three `facts.json` figures
+in that last sentence read -0.0675, +0.0939 and -0.0761 / -0.0015; the flip
+delta itself (-32.73) and the ~5% litres share are pre-regen and unchanged
+here. The argument — a near-optimal 5% against a slightly worse 95% — is
+untouched.*
 
 **4. Withdrawn during this review.** An apparent "the candidate never
 buys before a sharp fall" result (0/183 vs the baseline's 4/120, Fisher
@@ -379,8 +406,8 @@ across 14 tests. Not evidence; recorded here so it is not rediscovered.
 cell's own standard error (per-fill flip price dispersion 13.7 c/L,
 litres-weighted effective n of 1.0-19.5 per arm), **0 of 12 folds print a
 `flip_cpl_delta` larger than twice its own SE** — fold 13's -32.73 sits
-inside a 2*SE of 36.77. The Facts section's "favourable flips dominate —
-9 of the 12 folds" is a vote count over cells that cannot resolve their
+inside a 2*SE of 36.77 (41.05 post-#359; still inside, and still 0 of 12).
+The Facts section's "favourable flips dominate — 9 of the 12 folds" is a vote count over cells that cannot resolve their
 own numbers, and should not be read as corroboration. A redesign of the
 flip table (counts + cascade-collapsed decisions + litres + a
 headline-reconciling contribution column + each delta beside its own
@@ -389,7 +416,7 @@ headline-reconciling contribution column + each delta beside its own
 **Power caveat on all of the above:** the turn cells are n=11 and n=8, the
 two arms' flips fall on different days (two decision sets, not a paired
 test), and 303 flips are ~87 independent decisions once cascades are
-collapsed. The effect-size conclusion is solid; the mechanism
+collapsed (247 and 77 post-#359 — a smaller sample making the same point). The effect-size conclusion is solid; the mechanism
 localisation is suggestive and under-powered.
 
 ## Correction note — 2026-08-30 (`fps-hnp`, backfill of PR #350 / `fps-3tu`)
@@ -405,17 +432,23 @@ entirely unaffected. What does change is the descriptive per-regime split
 used as colour in the Facts and Judgement sections: fold 13 (this run's
 single largest favourable cell) moves from shock to normal, which flips
 the "both regimes favour the candidate" reading (shock -0.0614/normal
--0.0768 → shock +0.0047/normal -0.1034) — both sections above have been
-rewritten in place. This backfill reused the run's already-persisted
+-0.0768 → shock +0.0047/normal -0.1034; all four figures pre-#359 — post-regen
+the corrected-set pair is shock -0.0078/normal -0.1114, i.e. the negligible
+shock cell has changed sign again, which is why the Facts section now declines
+to read a sign off it) — both sections above have been rewritten in place. This backfill reused the run's already-persisted
 `fills.parquet` and `rowpreds.parquet`; no re-run of the realised backtest
 was needed.
 
 ## Addendum — batch-wide coverage caveat
 
 This run's `results.json` `meta` records `extra_feature_provider_hits`
-5693 / `extra_feature_provider_misses` 607 — the same split every batch1
+5693 / `extra_feature_provider_misses` **278** — the same split every batch1
 candidate carries, since all of them replay the same 5-preferred-station,
-14-fold grid. Full analysis (per-fold decomposition, which stations/folds
+14-fold grid. It was **607** before the #359 regen; the hits are unchanged and
+329 of the misses are gone, because `fps-2i4`/#356 stopped the arms visiting a
+closed station's days at a stale frozen price at all. The per-fold
+decomposition linked below is the pre-#359 one and is labelled as such there.
+Full analysis (per-fold decomposition, which stations/folds
 are affected, and why it's reduced-not-corrupted sample):
 `experiments/candidates/batch1/lga_trough_propagation/README.md` §
 Review addendum. Not specific to this candidate and does not change this
@@ -441,6 +474,10 @@ dossier's verdict.
 
 ## Re-render note — 2026-08-31 (`fps-j6w`)
 
+**The figures in this section are as they stood on 2026-08-31 and are superseded by the
+Facts section above** — kept as the record of what that pass rendered. All of them were
+re-measured in the #359 regen; see the Refresh note below for the current values.
+
 **This re-render implements what this dossier's own post-dossier review addendum asked for**
 (§5, "the per-fold flip table cannot be read as written"). Every field the addendum
 specified was already present in `facts.json`; only the rendering was stale. No new
@@ -464,3 +501,51 @@ computation; verified row-by-row against the committed artifact.
 
 The Judgement and the addendum's own conclusions are unchanged — this render supports them
 rather than revising them.
+
+## Refresh note — 2026-09-03 (`fps-3ug`)
+
+Every realised-backtest figure in the Facts section was refreshed from this run's
+committed `facts.json` as regenerated by PR #359 (`fps-32h`), which re-ran the
+realised backtest under the `fps-2i4`/#356 price-accessor fix and the #358
+oracle-DP fix. No re-grading: the **inconclusive** verdict and the Recommendation
+("reject this construction, graduate the mechanism to a redesign lead") survive
+unchanged — both rest on `|z| < t`, which still holds on all three banks.
+
+**Every CPL figure in this note is at this run's cadence, `50/3.571/1d/10%`**
+(`fps-15c`) — the same cadence on both sides of every → below, since the regen
+re-ran the identical tank config.
+
+What moved:
+
+- **Headline** -0.0735 → **-0.0761** c/L; R0 187.8211 → 188.0376, candidate
+  187.7476 → 187.9615. `z` -0.987 → **-1.013** against the same 1.923, same 80th
+  percentile; on the two comparable banks -0.81 → **-0.84** and -0.88 → **-0.90**.
+  Nothing approaches the threshold.
+- **Zone** still `resolved: null` — this candidate declared no TARGET, so the one
+  grading input the regen could have moved does not exist here.
+- **Per-fold: only folds 4–7 moved**, which is where the 56 pre-regen dark fills
+  sat. Fold 13's -0.8646 is byte-identical. Fold 6 moved most, -0.2567 → -0.3302.
+- **The per-regime shock cell changed sign** (+0.0047 → **-0.0078**) at a
+  magnitude an order below the normal cell (-0.1034 → **-0.1114**). The Facts and
+  Judgement sections previously read that sign as "the two regimes disagree",
+  which is no longer true; both now restate it as a cell with no readable sign,
+  having been -0.0614 / +0.0047 / -0.0078 across three successive measurements.
+  **Nothing is graded on it** — no zone TARGET was declared — so this is a
+  wording correction, not a verdict change.
+- **`dark_fill_days` 56 → 0**, and `extra_feature_provider_misses` 607 → 278.
+- **Flips 303 → 247 / decns 88 → 77.** Still 13 of 14 folds carrying flips, still
+  12 of 12 resolvable regret deltas `inside_own_se` plus the pooled row, still
+  `no flips` in fold 1 and `one arm only` in fold 9 — so the section's central
+  claim (no cell in the table may be cited) is unchanged. Fold 13's -32.73 flip
+  delta and -5.73 regret on 3 decisions are byte-identical.
+- **Reconciliation** -0.0606 + -0.0129 → **-0.0746 + -0.0015**; by regime,
+  normal -0.0642/shock +0.0036 → **normal -0.0680/shock -0.0066**.
+- **Pooled regret** 10.03/9.38 (Δ -0.64) → **11.14/10.69 (Δ -0.46)**, still
+  `inside_own_se`. Flip-only litres 2064.3/2982.1 (44%) → **1857.1/2617.9 (41%)**,
+  still batch1's largest gap.
+- **Not re-derived, and labelled in place:** the whole 2026-08-29 post-dossier
+  addendum, whose §§2-5 are measured on the pre-regen `fills.parquet`. Its §1 bank
+  table is refreshed (those z values live in `facts.json`); every conclusion in
+  §§2-5 was re-checked against the post-#359 `facts.json` and holds.
+- **Unchanged by the regen, and verified so:** every WFCV / log-loss / seed field,
+  including the fold-2 candidate-arm 8.96× seed flag the Facts section analyses.
