@@ -35,18 +35,29 @@ leaves longer ones unfilled (trail-fill to `end_date` is capped the same way), s
 presence count sees ONLY dark spans longer than 28 days. Everything shorter is a
 stale price the replay trades on as if live — up to 27 consecutive days, since the
 cap is on the interval between observations. This is the dominant regime, not an
-edge case: measured over batch1's 14-fold span, the forward-filled share of replayed
-days has median **0.663** at the five and **0.679** across the 599-station pool, and
-the longest filled run maxes at 26 days and 27 days respectively. Two consequences,
-and they point opposite ways. The gate is not overclaiming about darkness — it is
-simply silent about staleness, which is PRE-EXISTING and unchanged by this module:
-the arbiter has always replayed two-thirds forward-filled days. But a wider universe
-does shift the tail — 64.8% of the broad pool carries a >= 21-day filled run against
-40% of the five, even though the medians differ by only 1.02x. `describe_universe`
-therefore reports `observed_fraction_*` for BOTH populations, so a homogeneity read
-can see the difference rather than assume it away. Measured, reported, never filtered
-on — the same policy `flips.StationPriceSource.is_observed` already sets for the
-regret ledger ("used only to count and report the dark days, never to drop a fill").
+edge case: measured over batch1's 14-fold span, the OBSERVED share of replayed days
+(the complement — `observed_fraction_median` below) is 0.3365 at the five and 0.3212
+across the 599-station span-gated pool, i.e. roughly two-thirds of every replayed day
+is forward-filled in both. The longest filled run maxes at 26 and 27 days respectively.
+
+Quote those figures with the population attached, because "the broad pool" now names
+three different things and they do not agree: 0.3212 across the 599 stations the SPAN
+gate admits, 0.3325 across the 410 that survive the WINDOW gate, and 0.3341 for an
+n=200 draw from that 410. The spread is small (0.013) but it is not noise — it has a
+direction. The window gate removes the worst-covered stations, and those are
+disproportionately the stalest, so gating on coverage incidentally improves median
+staleness. The two axes are correlated in the helpful direction; neither is a proxy
+for the other.
+
+Two consequences, and they point opposite ways. The gate is not overclaiming about
+darkness — it is simply silent about staleness, which is PRE-EXISTING and unchanged by
+this module: the arbiter has always replayed two-thirds forward-filled days. But a
+wider universe does shift the tail — 64.8% of the broad pool carries a >= 21-day filled
+run against 40% of the five, even though the medians sit within 1.02x. `describe_universe`
+therefore reports `observed_fraction_*` for BOTH populations, so a homogeneity read can
+see the difference rather than assume it away. Measured, reported, never filtered on —
+the same policy `flips.StationPriceSource.is_observed` already sets for the regret
+ledger ("used only to count and report the dark days, never to drop a fill").
 
 Deliberate non-goals:
 
