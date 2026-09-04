@@ -75,6 +75,17 @@ DEFAULT_MIN_COVERAGE = 0.90
 #: gap between the two populations.
 DEFAULT_MAX_STICKY_FRACTION = 0.50
 
+#: The one fuel this module can speak about, and NOT a parameter. Two reasons, and
+#: the second is the load-bearing one. (a) The arbiter only ever replays E10:
+#: `load_history` pins `db.fuel_type_id(conn, "E10")` and `db.get_daily_prices`
+#: defaults to it, so a universe gated on another fuel would gate on prices no
+#: backtest reads. (b) `station_class` carries NO fuel dimension — it records
+#: whatever fuel `classify_range` last ran with (E10 by default) — so a per-spec
+#: fuel would have made the coverage gate and the Sticky gate silently describe
+#: different fuels for the same station. A knob that cannot be honoured by half the
+#: query it configures is worse than no knob (fps-nas, PR #361 review).
+ARBITER_FUEL_CODE = "E10"
+
 
 class UniverseTooSmall(ValueError):
     """Raised when fewer than `n` stations pass the eligibility gates.
@@ -116,7 +127,6 @@ class UniverseSpec:
     min_coverage: float = DEFAULT_MIN_COVERAGE
     max_sticky_fraction: float = DEFAULT_MAX_STICKY_FRACTION
     councils: tuple[str, ...] | None = None
-    fuel: str = "E10"
 
     def __post_init__(self) -> None:
         if self.n < 1:
@@ -164,7 +174,7 @@ class UniverseSpec:
             "min_coverage": self.min_coverage,
             "max_sticky_fraction": self.max_sticky_fraction,
             "councils": list(self.resolved_councils),
-            "fuel": self.fuel,
+            "fuel": ARBITER_FUEL_CODE,
             "stratify_by": "council",
             "allocation": "proportional (largest remainder), capped at stratum size",
         }
@@ -176,6 +186,13 @@ def _placeholders(values: Sequence) -> tuple[str, list]:
     Not `fuel_signal.db._in_clause`, which sorts its values — deliberately named
     differently so the two can't be mistaken for each other. Order matters here:
     `describe_universe` reports on the list it was handed.
+
+    The returned string is `?` characters and commas ONLY — it is derived from
+    `len(values)`, never from the values themselves — so f-string-ing it into a
+    query interpolates no data. Every value travels as a bound parameter, the same
+    shape `fuel_signal/db.py` and `fuel_signal/backtest.py` already use for IN
+    clauses. Static scanners flag the f-string regardless; that is a false positive
+    here, and this note is the answer to it.
     """
     return ", ".join(["?"] * len(values)), list(values)
 
@@ -186,7 +203,7 @@ def eligible_stations(conn: sqlite3.Connection, spec: UniverseSpec) -> list[Elig
     Gates, in the order a rejected station fails them:
 
     1. `stations.council` is non-NULL and in `spec.resolved_councils`.
-    2. Distinct `daily_prices` dates for `spec.fuel` inside the span >=
+    2. Distinct `daily_prices` dates for `ARBITER_FUEL_CODE` inside the span >=
        `min_coverage * span_days`.
     3. At least one `station_class` row inside the span, and the Sticky share of
        those rows <= `max_sticky_fraction`.
@@ -211,7 +228,7 @@ def eligible_stations(conn: sqlite3.Connection, spec: UniverseSpec) -> list[Elig
                AND s.council IN ({council_ph})
              GROUP BY s.station_code
             HAVING COUNT(DISTINCT dp.price_date) >= ?""",
-        [spec.fuel, start_int, end_int, *council_vals, min_days],
+        [ARBITER_FUEL_CODE, start_int, end_int, *council_vals, min_days],
     ).fetchall()
     if not coverage_rows:
         return []
@@ -275,6 +292,15 @@ def allocate_by_stratum(sizes: Mapping[str, int], n: int) -> dict[str, int]:
     """
     if n < 0:
         raise ValueError(f"allocate_by_stratum(): n must be >= 0; got {n}.")
+    negative = {k: v for k, v in sizes.items() if v < 0}
+    if negative:
+        # A negative size is not a stratum that "holds nothing" — it silently
+        # shrinks `total`, inflating every other stratum's quota past what it
+        # actually holds, which is exactly the over-allocation the docstring
+        # argues cannot happen. Reject it rather than let it falsify the proof.
+        raise ValueError(
+            f"allocate_by_stratum(): stratum sizes must be >= 0; got {negative!r}."
+        )
     total = sum(sizes.values())
     if n > total:
         raise ValueError(
@@ -388,7 +414,19 @@ def describe_universe(
     populations are characterised the same way. Stations absent from `stations`
     are reported under `unknown_station_codes` rather than dropped silently.
     """
-    codes = sorted(set(int(c) for c in station_codes))
+    codes = [int(c) for c in station_codes]
+    duplicates = sorted({c for c in codes if codes.count(c) > 1})
+    if duplicates:
+        # Silently de-duplicating would make `n_stations` and every per-council
+        # count describe a DIFFERENT population from the one the caller is about
+        # to replay — and `aggregate_backtest` really would replay a repeated
+        # station twice, double-weighting its litres in the pooled CPL.
+        raise ValueError(
+            f"describe_universe(): station_codes contains duplicates {duplicates}; "
+            "a repeated station is double-weighted by aggregate_backtest, so this "
+            "is a caller bug, not something to normalise away."
+        )
+    codes = sorted(codes)
     by_code = {s.station_code: s for s in eligible_stations(conn, spec)}
 
     code_ph, code_vals = _placeholders(codes)
@@ -409,7 +447,7 @@ def describe_universe(
                  WHERE f.code = ? AND dp.price_date BETWEEN ? AND ?
                    AND dp.station_code IN ({code_ph})
                  GROUP BY dp.station_code""",
-            [spec.fuel, start_int, end_int, *code_vals],
+            [ARBITER_FUEL_CODE, start_int, end_int, *code_vals],
         )
     }
 

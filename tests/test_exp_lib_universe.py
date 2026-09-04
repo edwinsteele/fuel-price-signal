@@ -10,6 +10,7 @@ from datetime import date, timedelta
 import pytest
 
 from experiments.lib.universe import (
+    ARBITER_FUEL_CODE,
     DEFAULT_MAX_STICKY_FRACTION,
     DEFAULT_MIN_COVERAGE,
     EligibleStation,
@@ -121,6 +122,15 @@ class TestUniverseSpec:
         assert stamp["stratify_by"] == "council"
         assert stamp["span_days"] == SPAN_DAYS
 
+    def test_fuel_is_stamped_but_is_not_a_knob(self):
+        """`station_class` has no fuel dimension, so a per-spec fuel could make the
+        coverage gate and the Sticky gate describe different fuels. The stamp still
+        records which fuel the gates mean.
+        """
+        assert _spec().as_dict()["fuel"] == ARBITER_FUEL_CODE == "E10"
+        with pytest.raises(TypeError):
+            UniverseSpec(n=1, seed=1, start_date=START, end_date=END, fuel="U91")
+
     @pytest.mark.parametrize(
         "kw",
         [
@@ -184,6 +194,14 @@ class TestAllocateByStratum:
     def test_n_equal_to_total_takes_everything(self):
         sizes = {"a": 3, "b": 4}
         assert allocate_by_stratum(sizes, 7) == sizes
+
+    def test_rejects_negative_stratum_sizes(self):
+        """A negative size shrinks `total`, inflating every other quota past what
+        that stratum holds — which would falsify the no-over-allocation argument
+        the function asserts on rather than repairs.
+        """
+        with pytest.raises(ValueError, match="sizes must be >= 0"):
+            allocate_by_stratum({"a": 5, "b": -1}, 2)
 
     def test_rejects_n_larger_than_the_pool(self):
         with pytest.raises(ValueError, match="strata holding"):
@@ -362,6 +380,16 @@ class TestDescribeUniverse:
         assert described["station_codes_failing_spec_gates"] == [2]
         assert described["n_failing_spec_gates"] == 1
         assert described["coverage_min"] == pytest.approx(10 / SPAN_DAYS)
+
+    def test_rejects_duplicate_station_codes(self, conn):
+        """aggregate_backtest really would replay a repeated station twice, so a
+        duplicate double-weights its litres in the pooled CPL. Silently
+        de-duplicating would describe a different population from the one about to
+        be replayed.
+        """
+        _seed_station(conn, 1, PC_PARRAMATTA)
+        with pytest.raises(ValueError, match=r"duplicates \[1\]"):
+            describe_universe(conn, [1, 1], _spec(n=1))
 
     def test_flags_a_station_absent_from_the_stations_table(self, conn):
         _seed_station(conn, 1, PC_PARRAMATTA)
