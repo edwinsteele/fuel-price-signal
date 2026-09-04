@@ -450,6 +450,60 @@ class TestWindowCoverageGate:
         assert described["spec_gates"]["coverage_gated_per_window"] is True
         assert described["gate_failures"] == {"1": [GATE_COVERAGE_WINDOW]}
 
+    @pytest.mark.parametrize(
+        "min_coverage,span,priced",
+        [
+            (0.90, 90, 81), (0.56, 25, 14), (0.55, 100, 55),
+            (0.68, 75, 51), (0.81, 300, 243), (0.67, 1500, 1005),
+        ],
+    )
+    @pytest.mark.parametrize("delta", [0, -1])
+    def test_the_documented_escape_hatch_agrees_with_the_span_gate(
+        self, tmp_path, min_coverage, span, priced, delta
+    ):
+        """`windows=((start, end),)` is documented as the span-only opt-out, so it must
+        DECIDE the same as span-only — including at finding 5's boundaries and one day
+        below each, where the two could most easily part company.
+
+        What this test does and does NOT do, stated because the distinction is the
+        whole point. The gate is now ONE mechanism (`_min_days` on integer counts) used
+        by both paths; that refactor, not this test, is what removes the hazard. It was
+        two mechanisms, and they agreed at every boundary here — verified ten for ten
+        during review — because `count / w_days` and `float(min_coverage)` are
+        correctly-rounded doubles of the same exact rational. So this test canNOT
+        distinguish the single-division form from `_min_days`: mutate the gate back to
+        `count / days < min_coverage` and it still passes, correctly, because that form
+        really does decide the same. What it catches is the break mode: give either side
+        an intermediate multiply (`count < min_coverage * days`) and three of these
+        cases fail. That is the tripwire worth having, since a multiply is what a future
+        edit would plausibly introduce, and it would silently take the documented escape
+        hatch with it.
+        """
+        start = date.fromisoformat("2024-01-01")
+        end = (start + timedelta(days=span - 1)).isoformat()
+        c = open_db(tmp_path / f"hatch{min_coverage}{delta}.db")
+        create_schema(c)
+        upsert_stations(c, [_station(1, PC_PARRAMATTA)])
+        upsert_daily_prices(
+            c,
+            [
+                (1, "E10", (start + timedelta(days=i)).isoformat(), 180.0)
+                for i in range(priced + delta)
+            ],
+        )
+        upsert_station_class_rows(c, [(1, start.isoformat(), "Competitive", 0)])
+        c.commit()
+        common = {
+            "n": 1, "seed": 1, "start_date": "2024-01-01", "end_date": end,
+            "min_coverage": min_coverage,
+        }
+        span_only = eligible_stations(c, UniverseSpec(**common))
+        hatch = eligible_stations(c, UniverseSpec(**common, windows=(("2024-01-01", end),)))
+        assert [s.station_code for s in span_only] == [s.station_code for s in hatch]
+        # delta 0 is exactly at the threshold (must pass); -1 is one day short.
+        assert bool(span_only) is (delta == 0)
+        c.close()
+
     def test_sampling_honours_the_window_gate(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 2})
         self._seed_dark_middle_window(conn, 99)

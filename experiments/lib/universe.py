@@ -354,17 +354,33 @@ GATE_STICKY = "sticky"
 
 def _window_coverage(
     conn: sqlite3.Connection, spec: UniverseSpec, codes: Sequence[int]
-) -> dict[int, list[float]]:
-    """Per-station coverage in each of `spec.windows`, in window order.
+) -> dict[int, list[tuple[int, int]]]:
+    """Per-station `(priced_days, window_days)` for each of `spec.windows`, in order.
+
+    Returns COUNTS, not ratios, because the gate must not invent a second way of
+    asking the same question. `_min_days` exists so the span gate compares integers
+    (`count >= ceil(Fraction(str(min_coverage)) * days)`) rather than a float product;
+    a window gate written as `count / w_days < min_coverage` would be a different
+    mechanism reaching the same decision, and the two could disagree at exactly the
+    boundary `_min_days` was introduced to fix. Empirically they did NOT — the review
+    checked ten boundary cases through both paths and got ten identical answers,
+    because `count / w_days` and `float(min_coverage)` are correctly-rounded doubles
+    of the same exact rational and land on the same value. But that equivalence holds
+    only while BOTH sides stay a single correctly-rounded operation: give either an
+    intermediate multiply and it breaks silently, taking the documented
+    `windows=((start, end),)` escape hatch with it. So there is one mechanism, and
+    callers divide only to REPORT (PR #361 review, sign-off round).
 
     One query per window rather than one clever grouped query: 14 windows is nothing,
-    and a station absent from a window's result set has coverage 0 there, which a
-    GROUP BY over a union would silently omit instead of reporting.
+    and a station absent from a window's result set has 0 days there, which a GROUP BY
+    over a union would silently omit instead of reporting — the same silent-skip class
+    as the bug the window gate exists to fix. Measured linear: 1.43s at one window to
+    1.61s at fourteen, flat ~0.02s marginal.
     """
     if not spec.windows or not codes:
         return {}
     code_ph, code_vals = _placeholders(list(codes))
-    out: dict[int, list[float]] = {int(c): [] for c in codes}
+    out: dict[int, list[tuple[int, int]]] = {int(c): [] for c in codes}
     for w_start, w_end in spec.windows:
         w_days = (date.fromisoformat(w_end) - date.fromisoformat(w_start)).days + 1
         counts = dict(
@@ -380,8 +396,18 @@ def _window_coverage(
             )
         )
         for code in out:
-            out[code].append(counts.get(code, 0) / w_days)
+            out[code].append((counts.get(code, 0), w_days))
     return out
+
+
+def _fails_any_window(spec: UniverseSpec, windows: Sequence[tuple[int, int]]) -> bool:
+    """True if any window falls below `min_coverage`, by the SPAN gate's own rule."""
+    return any(count < _min_days(spec.min_coverage, days) for count, days in windows)
+
+
+def _worst_window_coverage(windows: Sequence[tuple[int, int]]) -> float | None:
+    """Lowest per-window coverage ratio — reporting only, never a gate input."""
+    return min(count / days for count, days in windows) if windows else None
 
 
 def gate_failures(
@@ -438,7 +464,7 @@ def gate_failures(
             reasons.append(GATE_COUNCIL)
         if priced_days.get(code, 0) < min_days:
             reasons.append(GATE_COVERAGE_SPAN)
-        if spec.windows and any(c < spec.min_coverage for c in per_window.get(code, [])):
+        if spec.windows and _fails_any_window(spec, per_window.get(code, [])):
             reasons.append(GATE_COVERAGE_WINDOW)
         if code not in sticky:
             reasons.append(GATE_UNCLASSIFIED)
@@ -528,7 +554,7 @@ def eligible_stations(
         if sticky is None or sticky > spec.max_sticky_fraction:
             continue
         windows = per_window.get(code, [])
-        if spec.windows and any(c < spec.min_coverage for c in windows):
+        if spec.windows and _fails_any_window(spec, windows):
             continue
         out.append(
             EligibleStation(
@@ -537,7 +563,7 @@ def eligible_stations(
                 brand=brand,
                 coverage=n_days / spec.span_days,
                 sticky_fraction=float(sticky),
-                worst_window_coverage=min(windows) if windows else None,
+                worst_window_coverage=_worst_window_coverage(windows),
             )
         )
     # Sorted by station_code as a documented postcondition. `draw_universe` does
@@ -810,7 +836,9 @@ def describe_universe(
         brands[brand or "unknown"] = brands.get(brand or "unknown", 0) + 1
 
     coverages = [coverage.get(code, 0.0) for code in codes]
-    worst_window = [min(per_window[c]) for c in codes if per_window.get(c)]
+    worst_window = [
+        w for c in codes if (w := _worst_window_coverage(per_window.get(c, []))) is not None
+    ]
     # Denominator is the station's own replayed days, not the span: a station that is
     # dark for part of the span is not thereby "stale" on the days it does not appear.
     observed_fractions = [
