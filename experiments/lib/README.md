@@ -84,6 +84,42 @@ production-artifact or `results.csv` writes.
 Relies on two `fuel_signal/backtest.py` injection seams (added in #255):
 `PriceHistory(..., detector_factory=...)` and `ModelStrategy(pipeline=..., feature_columns=...)`.
 
+## universe.py — which stations the arbiter replays (fps-nas)
+
+Every caller of `run_paired_realised_backtest` so far has left `station_codes=None`, which
+`realised.py` resolves to `fuel_signal.config.PREFERRED_STATIONS` — the owner's five commute
+stations, ~92 independent decisions per run. `noise_floor.py` threads it the same way, so the
+band a candidate is graded against is five stations too. This module supplies a **declared,
+reproducible** rule for a wider replay universe so that "grade broad, report at the five" can
+be measured. It picks station codes and nothing else — no scoring behaviour changes.
+
+- `UniverseSpec(n, seed, start_date, end_date, ...)` — the whole recipe, frozen and
+  `as_dict()`-stampable. `seed` is required (no default) so it is always a recorded choice,
+  never silently confused with the run's fit seed.
+- `eligible_stations(conn, spec)` — stations passing three gates: council in
+  `SYDNEY_METRO_COUNCILS` (or `spec.councils`), `daily_prices` coverage over the span
+  ≥ `min_coverage`, and Sticky share of classified days ≤ `max_sticky_fraction`. Coverage is a
+  correctness gate, not tidiness: `aggregate_backtest` **silently skips** a station with no
+  data in a window and `run_backtest` clamps a dry tank, so a dark station reweights the pooled
+  CPL without announcing itself.
+- `sample_station_universe(conn, spec)` / `draw_universe(eligible, n=, seed=)` — stratified by
+  **council**, proportional (largest remainder), drawn from one seeded shuffle of a canonically
+  sorted pool. Council is the axis because the cycle propagates geographically (the whole
+  `lga_*` feature family) and because it is the axis the reference five are narrowest on (two
+  councils, both on the lagging edge). Raises `UniverseTooSmall` rather than returning a
+  quietly smaller universe.
+- `describe_universe(conn, station_codes, spec)` — characterises an **actual list** on the same
+  axes (councils, brands, coverage), so the five and a sampled universe can be compared like
+  for like. It reports gate failures instead of dropping them: station 414 sits at 0.718
+  coverage across batch1's span, so the reference population is not itself homogeneous on
+  coverage and that caveat has to travel with any homogeneity read.
+
+Two properties it deliberately does **not** have: universes at different `n` are not guaranteed
+nested (largest-remainder allocation is not monotone in `n`), and there is no hook to force the
+five into a broad sample — the homogeneity question is answered by measuring two separate
+populations and reading each delta against its own noise, never by differencing them
+(`feedback_disjoint_basket_comparison`).
+
 ## zones.py
 
 Helpers shared across realised-fill ledger experiments that tag fills by cycle zone.
