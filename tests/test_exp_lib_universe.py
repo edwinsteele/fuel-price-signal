@@ -470,14 +470,32 @@ class TestWindowCoverageGate:
         by both paths; that refactor, not this test, is what removes the hazard. It was
         two mechanisms, and they agreed at every boundary here — verified ten for ten
         during review — because `count / w_days` and `float(min_coverage)` are
-        correctly-rounded doubles of the same exact rational. So this test canNOT
-        distinguish the single-division form from `_min_days`: mutate the gate back to
-        `count / days < min_coverage` and it still passes, correctly, because that form
-        really does decide the same. What it catches is the break mode: give either side
-        an intermediate multiply (`count < min_coverage * days`) and three of these
-        cases fail. That is the tripwire worth having, since a multiply is what a future
-        edit would plausibly introduce, and it would silently take the documented escape
-        hatch with it.
+        correctly-rounded doubles of the same exact rational.
+
+        So this test canNOT distinguish the single-division form from `_min_days`.
+        Mutate `_fails_any_window` back to `count / days < min_coverage` and all 82
+        tests still pass, correctly, because that form really does decide the same.
+        What it catches is the BREAK MODE — an intermediate multiply — and re-derive
+        that rather than trusting this sentence:
+
+            # in experiments/lib/universe.py, _fails_any_window:
+            #   count < _min_days(spec.min_coverage, days)
+            # ->
+            #   count < spec.min_coverage * days
+            PYTHONPATH=. uv run pytest tests/test_exp_lib_universe.py -q
+
+        Expect **5 failures**, all `delta=0`: 0.56/25, 0.55/100, 0.68/75, 0.81/300,
+        0.67/1500. Only 0.90/90 survives, because `0.9 * 90 == 81.0` exactly — the same
+        reason finding 5 never showed up at the default `min_coverage`. Every
+        `delta=-1` case survives correctly: a day short is rejected by either form.
+
+        The command is here because the claim needs it. A statement about a test's
+        DISCRIMINATING POWER can only be established by running the mutation, never by
+        reading the code — and this docstring has now been wrong twice from reasoning
+        (it once claimed to catch the single-division form, which it does not, and once
+        said three failures when there are five). The code was right both times; the
+        prose about what the code proves was not. Re-run the command instead of
+        believing the number.
         """
         start = date.fromisoformat("2024-01-01")
         end = (start + timedelta(days=span - 1)).isoformat()
