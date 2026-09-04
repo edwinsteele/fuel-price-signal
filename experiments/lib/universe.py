@@ -176,11 +176,17 @@ class UniverseSpec:
     That is not a theoretical gap. Measured on batch1's real 14-fold geometry
     (2021-11-05 .. 2025-04-17), requiring `min_coverage` in EVERY window instead of
     across the span drops **189 of 599** stations — a third of the pool the span gate
-    admits has at least one badly-covered fold. The sharpest case is the reference
-    population itself: station 414's `worst_window_coverage` is **0.0**, i.e. it is
-    entirely dark for a whole val window, which is precisely the silent-skip the
-    module docstring describes. 410 stations still survive, ~82x the incumbent five,
-    so the resolution argument is untouched by the stricter gate.
+    admits has at least one badly-covered fold. 410 stations still survive, ~82x the
+    incumbent five, so the resolution argument is untouched by the stricter gate.
+
+    The sharpest case is the reference population itself. Station 414's per-fold
+    coverage vector is `[0.96, 1.00, 1.00, 0.33, 0.00, 0.00, 0.10, 1.00 x7]`: folds 5
+    and 6 are ENTIRELY dark and folds 4 and 7 are barely covered, so four of fourteen
+    folds are unusable and the five-station arbiter is a FOUR-station instrument across
+    two of them. `aggregate_backtest` skips those cells silently. This is a fact about
+    the incumbent arbiter, not about this module — but it is the reason the gate exists,
+    and it was invisible to the span figure (414 reads 0.742 there, which looks merely
+    thin rather than absent).
 
     Leaving `windows` as `None` keeps span-only behaviour and is only appropriate
     when no replay is involved — nothing in a span-gated result can rule out a dark
@@ -620,8 +626,30 @@ def sample_station_universe(conn: sqlite3.Connection, spec: UniverseSpec) -> lis
       close to the measured outcome (CPL) risks conditioning the estimate rather
       than describing the population.
 
-    Raises `UniverseTooSmall` when the gates admit fewer than `spec.n` stations.
+    Raises `UniverseTooSmall` when the gates admit fewer than `spec.n` stations, and
+    `ValueError` when `spec.windows` is None — see below.
+
+    **This function requires `spec.windows`.** `describe_universe` does not, because it
+    legitimately characterises populations that are never replayed; but a DRAWN universe
+    has exactly one consumer, a `station_codes` list handed to
+    `run_paired_realised_backtest`, so there is no honest span-only use of the draw. The
+    asymmetry is the point: rather than make the unsafe mode merely non-default, it is
+    unreachable from the path that feeds a replay (PR #361 review, question 2 — the
+    reviewer's call, and the right one; `windows` has no sensible default value, since it
+    depends on fold geometry this module cannot know, so "flip the default" was never
+    actually available). A caller who genuinely wants a span-only sample says so in one
+    line: `windows=((spec.start_date, spec.end_date),)`.
     """
+    if spec.windows is None:
+        raise ValueError(
+            "sample_station_universe() requires spec.windows — the val window of every "
+            "fold the universe will be replayed through. A span-level coverage gate "
+            "cannot see a station that is dark for a whole window (on batch1 that is 189 "
+            "of 599 stations, and station 414 is entirely dark for two consecutive "
+            "folds), and aggregate_backtest skips such a cell silently. To sample without "
+            "a replay in mind, say so explicitly: "
+            "windows=((spec.start_date, spec.end_date),)."
+        )
     eligible = eligible_stations(conn, spec)
     if len(eligible) < spec.n:
         raise UniverseTooSmall(

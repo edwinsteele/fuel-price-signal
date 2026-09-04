@@ -111,6 +111,15 @@ def _spec(**kw) -> UniverseSpec:
     return UniverseSpec(**{**base, **kw})
 
 
+def _draw_spec(**kw) -> UniverseSpec:
+    """A spec `sample_station_universe` will accept: the draw path requires `windows`.
+
+    Defaults to one window covering the whole span — the explicit "no replay geometry
+    in mind" opt-out the error message names, which is what most draw tests here want.
+    """
+    return _spec(**{"windows": ((START, END),), **kw})
+
+
 # ---------------------------------------------------------------------------
 # UniverseSpec
 # ---------------------------------------------------------------------------
@@ -503,15 +512,29 @@ def _seed_pool(conn, per_council: dict[str, int]) -> None:
 
 
 class TestSampling:
+    def test_refuses_a_spec_with_no_replay_windows(self, conn):
+        """The draw has exactly one consumer — a station_codes list handed to
+        run_paired_realised_backtest — so there is no honest span-only use of it, and
+        the unsafe mode is unreachable from the path that feeds a replay.
+        `describe_universe` is deliberately NOT constrained this way.
+        """
+        _seed_pool(conn, {PC_PARRAMATTA: 5})
+        with pytest.raises(ValueError, match="requires spec.windows"):
+            sample_station_universe(conn, _spec(n=2))
+        # The error names its own one-line opt-out; check the opt-out actually works.
+        assert len(sample_station_universe(conn, _draw_spec(n=2))) == 2
+        # describe_universe still accepts a span-only spec.
+        assert describe_universe(conn, [1], _spec(n=1))["n_stations"] == 1
+
     def test_is_deterministic_for_a_given_seed(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 20, PC_LIVERPOOL: 20})
-        spec = _spec(n=10, seed=7)
+        spec = _draw_spec(n=10, seed=7)
         assert sample_station_universe(conn, spec) == sample_station_universe(conn, spec)
 
     def test_a_different_seed_draws_a_different_universe(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 20, PC_LIVERPOOL: 20})
-        a = sample_station_universe(conn, _spec(n=10, seed=7))
-        b = sample_station_universe(conn, _spec(n=10, seed=8))
+        a = sample_station_universe(conn, _draw_spec(n=10, seed=7))
+        b = sample_station_universe(conn, _draw_spec(n=10, seed=8))
         assert a != b
 
     def test_is_independent_of_db_row_order(self, tmp_path):
@@ -530,7 +553,7 @@ class TestSampling:
             create_schema(c)
             for code, postcode in order:
                 _seed_station(c, code, postcode)
-            samples.append(sample_station_universe(c, _spec(n=8, seed=3)))
+            samples.append(sample_station_universe(c, _draw_spec(n=8, seed=3)))
             c.close()
         assert samples[0] == samples[1]
 
@@ -541,14 +564,14 @@ class TestSampling:
 
     def test_returns_exactly_n_sorted_unique_codes(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 10, PC_LIVERPOOL: 10, PC_SYDNEY: 10})
-        picked = sample_station_universe(conn, _spec(n=12, seed=5))
+        picked = sample_station_universe(conn, _draw_spec(n=12, seed=5))
         assert len(picked) == 12
         assert len(set(picked)) == 12
         assert picked == sorted(picked)
 
     def test_allocation_is_proportional_to_council_size(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 60, PC_LIVERPOOL: 30, PC_SYDNEY: 10})
-        picked = set(sample_station_universe(conn, _spec(n=10, seed=5)))
+        picked = set(sample_station_universe(conn, _draw_spec(n=10, seed=5)))
         by_council: dict[str, int] = {}
         for station in eligible_stations(conn, _spec()):
             if station.station_code in picked:
@@ -558,16 +581,16 @@ class TestSampling:
     def test_ineligible_stations_are_never_drawn(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 5})
         _seed_station(conn, 99, PC_PARRAMATTA, price_days=1)  # far below min_coverage
-        assert 99 not in sample_station_universe(conn, _spec(n=5, seed=1))
+        assert 99 not in sample_station_universe(conn, _draw_spec(n=5, seed=1))
 
     def test_raises_rather_than_silently_returning_a_smaller_universe(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 3})
         with pytest.raises(UniverseTooSmall, match="only 3 pass the gates"):
-            sample_station_universe(conn, _spec(n=4, seed=1))
+            sample_station_universe(conn, _draw_spec(n=4, seed=1))
 
     def test_n_equal_to_the_whole_pool_returns_the_whole_pool(self, conn):
         _seed_pool(conn, {PC_PARRAMATTA: 4, PC_LIVERPOOL: 3})
-        assert sample_station_universe(conn, _spec(n=7, seed=1)) == list(range(1, 8))
+        assert sample_station_universe(conn, _draw_spec(n=7, seed=1)) == list(range(1, 8))
 
 
 # ---------------------------------------------------------------------------

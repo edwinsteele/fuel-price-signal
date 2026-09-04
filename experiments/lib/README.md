@@ -109,7 +109,10 @@ be measured. It picks station codes and nothing else — no scoring behaviour ch
   The threshold itself is computed exactly (`_min_days`, via `Fraction(str(...))`): the float
   product `0.56 * 25` is `14.000000000000002` and silently made the inclusive boundary
   exclusive.
-- `sample_station_universe(conn, spec)` / `draw_universe(eligible, n=, seed=)` — stratified by
+- `sample_station_universe(conn, spec)` / `draw_universe(eligible, n=, seed=)` — **requires
+  `spec.windows`** (a drawn universe has exactly one consumer, a `station_codes` list handed
+  to `run_paired_realised_backtest`, so there is no honest span-only use of the draw; say
+  `windows=((start, end),)` to opt out explicitly). Stratified by
   **council**, proportional (largest remainder), drawn from one seeded shuffle of a canonically
   sorted pool. Council is the axis because the cycle propagates geographically (the whole
   `lga_*` feature family) and because it is the axis the reference five are narrowest on (two
