@@ -44,11 +44,14 @@ Deliberate non-goals:
 """
 from __future__ import annotations
 
+import hashlib
+import math
 import random
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from fractions import Fraction
 
 from fuel_signal.dates import date_to_int
 from fuel_signal.postcode_council import SYDNEY_METRO_COUNCILS
@@ -105,11 +108,33 @@ class EligibleStation:
     brand: str | None
     coverage: float
     sticky_fraction: float
+    #: Lowest per-window coverage across `spec.windows`, or None when the spec gates
+    #: on the span only. The number the span figure hides: a station can sit at 0.900
+    #: over 1150 days and still be entirely dark for one 90-day val window.
+    worst_window_coverage: float | None = None
 
 
 @dataclass(frozen=True)
 class UniverseSpec:
-    """Everything that determines a sampled universe. Stamp this into a run's meta.
+    """Every KNOB that shapes a sampled universe. Stamp this into a run's meta.
+
+    It is deliberately NOT "everything that determines the universe" (an earlier
+    draft of this docstring claimed that and was wrong — PR #361 review finding 2).
+    The universe is a function of this spec AND the vintage of `daily_prices`, which
+    is a rebuilt derived table: `fuel_signal/fill.py::fill_all` DELETEs and rebuilds
+    it, forward-filling gaps up to `max_gap_days` and trailing-filling to `end_date`.
+    So the eligible pool over a FIXED historical span moves when late raw prices make
+    an old gap fillable, when `--max-gap-days` changes, or simply when `fill` runs on
+    a later day. Two runs can stamp byte-identical specs and have drawn different
+    universes. Two mitigations, and you want both:
+
+    * Sample against a FROZEN batch DB (`experiments/pipeline/batch_freeze.py` copies
+      `fuel_signal.db` into the batch dir and stamps `source_db` / `snapshot_date` /
+      `frozen_at` in `freeze.json`). This is what an fps-nas run does, and it pins the
+      vintage properly.
+    * Stamp `eligible_pool_digest(conn, spec)` beside the spec. It hashes the pool the
+      gates actually admitted, so a moved DB shows up as a changed digest even if the
+      spec is identical.
 
     `seed` is required and has no default on purpose: it must be a recorded choice,
     and it must not silently collide with the FIT seed a run also carries (nothing
@@ -118,6 +143,28 @@ class UniverseSpec:
 
     `councils=None` means `SYDNEY_METRO_COUNCILS` — the "broad Sydney sample" the
     bead asks for. Pass an explicit tuple to sample within a narrower geography.
+
+    `windows` is the list of (start, end) validation windows the universe will
+    actually be replayed through — for an fps-nas run, the val window of every outer
+    fold. **Pass it.** The coverage gate's whole justification is per-window
+    (`aggregate_backtest` silently skips a station whose window CPL is NaN, and
+    `run_backtest` clamps a dry tank), but a span-level threshold cannot see a dark
+    run shorter than the span: over a 1250-day span a station can be dark for 125
+    consecutive days — longer than a whole 90-day val window — and still sit at
+    exactly 0.900.
+
+    That is not a theoretical gap. Measured on batch1's real 14-fold geometry
+    (2021-11-05 .. 2025-04-17), requiring `min_coverage` in EVERY window instead of
+    across the span drops **189 of 599** stations — a third of the pool the span gate
+    admits has at least one badly-covered fold. The sharpest case is the reference
+    population itself: station 414's `worst_window_coverage` is **0.0**, i.e. it is
+    entirely dark for a whole val window, which is precisely the silent-skip the
+    module docstring describes. 410 stations still survive, ~82x the incumbent five,
+    so the resolution argument is untouched by the stricter gate.
+
+    Leaving `windows` as `None` keeps span-only behaviour and is only appropriate
+    when no replay is involved — nothing in a span-gated result can rule out a dark
+    window (PR #361 review finding 1).
     """
 
     n: int
@@ -127,6 +174,7 @@ class UniverseSpec:
     min_coverage: float = DEFAULT_MIN_COVERAGE
     max_sticky_fraction: float = DEFAULT_MAX_STICKY_FRACTION
     councils: tuple[str, ...] | None = None
+    windows: tuple[tuple[str, str], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.n < 1:
@@ -152,6 +200,23 @@ class UniverseSpec:
                 "UniverseSpec.councils=() selects nothing; pass None for all Sydney metro "
                 "councils, or a non-empty tuple."
             )
+        if self.windows is not None:
+            if not self.windows:
+                raise ValueError(
+                    "UniverseSpec.windows=() gates on nothing; pass None for a span-only "
+                    "gate, or a non-empty tuple of (start, end) pairs."
+                )
+            for w_start, w_end in self.windows:
+                ws, we = date.fromisoformat(w_start), date.fromisoformat(w_end)
+                if ws > we:
+                    raise ValueError(f"UniverseSpec window {w_start}..{w_end} starts after it ends.")
+                if ws < start or we > end:
+                    # A window outside the span would be gated against dates the span
+                    # query never looked at, so the two gates would disagree silently.
+                    raise ValueError(
+                        f"UniverseSpec window {w_start}..{w_end} falls outside the span "
+                        f"{self.start_date}..{self.end_date}."
+                    )
 
     @property
     def resolved_councils(self) -> tuple[str, ...]:
@@ -163,21 +228,55 @@ class UniverseSpec:
         """Inclusive calendar length of the span — the coverage denominator."""
         return (date.fromisoformat(self.end_date) - date.fromisoformat(self.start_date)).days + 1
 
-    def as_dict(self) -> dict:
-        """JSON-safe stamp. `councils` is the RESOLVED list, not the `None` sentinel."""
+    def gates_dict(self) -> dict:
+        """JSON-safe stamp of the ELIGIBILITY half only — no `n`, no `seed`.
+
+        `describe_universe` stamps this rather than `as_dict()`: it characterises a
+        list it was handed, which may be an exogenous population (the five preferred
+        stations) that no draw produced. Stamping `n`/`seed` there would record a draw
+        that never happened, in exactly the block a later reader diffs (PR #361 review
+        finding 4).
+        """
         return {
-            "n": self.n,
-            "seed": self.seed,
             "start_date": self.start_date,
             "end_date": self.end_date,
             "span_days": self.span_days,
             "min_coverage": self.min_coverage,
+            "min_days": _min_days(self.min_coverage, self.span_days),
             "max_sticky_fraction": self.max_sticky_fraction,
             "councils": list(self.resolved_councils),
             "fuel": ARBITER_FUEL_CODE,
-            "stratify_by": "council",
-            "allocation": "proportional (largest remainder), capped at stratum size",
+            "windows": [list(w) for w in self.windows] if self.windows else None,
+            "coverage_gated_per_window": self.windows is not None,
         }
+
+    def as_dict(self) -> dict:
+        """JSON-safe stamp of the whole spec. `councils` is RESOLVED, not `None`."""
+        return {
+            **self.gates_dict(),
+            "n": self.n,
+            "seed": self.seed,
+            "stratify_by": "council",
+            # Stated as the PROPERTY, not as a mechanism: `allocate_by_stratum` has no
+            # cap step and argues one would be unreachable, so "capped at stratum size"
+            # (the earlier wording) described code that does not exist.
+            "allocation": "proportional (largest remainder); never exceeds a stratum's size",
+        }
+
+
+def _min_days(min_coverage: float, span_days: int) -> int:
+    """Smallest priced-day count that satisfies `coverage >= min_coverage`, exactly.
+
+    Via `Fraction(str(...))`, not float arithmetic. `min_coverage * span_days` is a
+    binary-float product and can land a hair ABOVE the exact decimal, which silently
+    turns the documented inclusive boundary into an exclusive one: `0.56 * 25` is
+    14.000000000000002, so a station with exactly 0.56 coverage over a 25-day span was
+    REJECTED. Affects 0.54, 0.55, 0.56, 0.67, 0.68 and 0.81 among two-decimal values;
+    the 0.90 default happens to be exact, which is why the boundary test did not catch
+    it (PR #361 review finding 5). `str()` on the float gives the shortest round-tripping
+    decimal, so a literal like 0.56 parses back to exactly 56/100.
+    """
+    return math.ceil(Fraction(str(min_coverage)) * span_days)
 
 
 def _placeholders(values: Sequence) -> tuple[str, list]:
@@ -197,26 +296,151 @@ def _placeholders(values: Sequence) -> tuple[str, list]:
     return ", ".join(["?"] * len(values)), list(values)
 
 
-def eligible_stations(conn: sqlite3.Connection, spec: UniverseSpec) -> list[EligibleStation]:
+#: Reasons a station can fail eligibility, in the order the gates are applied.
+GATE_COUNCIL = "council"
+GATE_COVERAGE_SPAN = "coverage_span"
+GATE_COVERAGE_WINDOW = "coverage_window"
+GATE_UNCLASSIFIED = "unclassified"
+GATE_STICKY = "sticky"
+
+
+def _window_coverage(
+    conn: sqlite3.Connection, spec: UniverseSpec, codes: Sequence[int]
+) -> dict[int, list[float]]:
+    """Per-station coverage in each of `spec.windows`, in window order.
+
+    One query per window rather than one clever grouped query: 14 windows is nothing,
+    and a station absent from a window's result set has coverage 0 there, which a
+    GROUP BY over a union would silently omit instead of reporting.
+    """
+    if not spec.windows or not codes:
+        return {}
+    code_ph, code_vals = _placeholders(list(codes))
+    out: dict[int, list[float]] = {int(c): [] for c in codes}
+    for w_start, w_end in spec.windows:
+        w_days = (date.fromisoformat(w_end) - date.fromisoformat(w_start)).days + 1
+        counts = dict(
+            conn.execute(
+                f"""SELECT dp.station_code, COUNT(DISTINCT dp.price_date)
+                      FROM daily_prices dp
+                      JOIN fuel_types f ON f.id = dp.fuel_type_id
+                     WHERE f.code = ?
+                       AND dp.price_date BETWEEN ? AND ?
+                       AND dp.station_code IN ({code_ph})
+                     GROUP BY dp.station_code""",
+                [ARBITER_FUEL_CODE, date_to_int(w_start), date_to_int(w_end), *code_vals],
+            )
+        )
+        for code in out:
+            out[code].append(counts.get(code, 0) / w_days)
+    return out
+
+
+def gate_failures(
+    conn: sqlite3.Connection, spec: UniverseSpec, station_codes: Sequence[int]
+) -> dict[int, list[str]]:
+    """Which of `spec`'s gates each supplied station fails, by name. {} entries omitted.
+
+    Named reasons, not a set-difference against the eligible pool: the field exists to
+    carry a specific caveat (station 414's 0.718 coverage) into a run's meta.json, and
+    a bare "failed the gates" cannot be told apart from a station that merely sits
+    outside a narrowed `councils` list (PR #361 review finding 3).
+    """
+    codes = [int(c) for c in station_codes]
+    if not codes:
+        return {}
+    code_ph, code_vals = _placeholders(codes)
+    start_int, end_int = date_to_int(spec.start_date), date_to_int(spec.end_date)
+    min_days = _min_days(spec.min_coverage, spec.span_days)
+    allowed = set(spec.resolved_councils)
+
+    councils = {
+        int(code): council
+        for code, council in conn.execute(
+            f"SELECT station_code, council FROM stations WHERE station_code IN ({code_ph})",
+            code_vals,
+        )
+    }
+    priced_days = dict(
+        conn.execute(
+            f"""SELECT dp.station_code, COUNT(DISTINCT dp.price_date)
+                  FROM daily_prices dp
+                  JOIN fuel_types f ON f.id = dp.fuel_type_id
+                 WHERE f.code = ? AND dp.price_date BETWEEN ? AND ?
+                   AND dp.station_code IN ({code_ph})
+                 GROUP BY dp.station_code""",
+            [ARBITER_FUEL_CODE, start_int, end_int, *code_vals],
+        )
+    )
+    sticky = dict(
+        conn.execute(
+            f"""SELECT station_code, AVG(CASE WHEN class = 'Sticky' THEN 1.0 ELSE 0.0 END)
+                  FROM station_class
+                 WHERE snapshot_date BETWEEN ? AND ? AND station_code IN ({code_ph})
+                 GROUP BY station_code""",
+            [start_int, end_int, *code_vals],
+        )
+    )
+    per_window = _window_coverage(conn, spec, codes)
+
+    failures: dict[int, list[str]] = {}
+    for code in codes:
+        reasons: list[str] = []
+        if councils.get(code) not in allowed:
+            reasons.append(GATE_COUNCIL)
+        if priced_days.get(code, 0) < min_days:
+            reasons.append(GATE_COVERAGE_SPAN)
+        if spec.windows and any(c < spec.min_coverage for c in per_window.get(code, [])):
+            reasons.append(GATE_COVERAGE_WINDOW)
+        if code not in sticky:
+            reasons.append(GATE_UNCLASSIFIED)
+        elif sticky[code] > spec.max_sticky_fraction:
+            reasons.append(GATE_STICKY)
+        if reasons:
+            failures[code] = reasons
+    return failures
+
+
+def eligible_stations(
+    conn: sqlite3.Connection,
+    spec: UniverseSpec,
+    *,
+    restrict_to: Sequence[int] | None = None,
+) -> list[EligibleStation]:
     """Every station passing `spec`'s gates, sorted by station_code.
 
     Gates, in the order a rejected station fails them:
 
     1. `stations.council` is non-NULL and in `spec.resolved_councils`.
     2. Distinct `daily_prices` dates for `ARBITER_FUEL_CODE` inside the span >=
-       `min_coverage * span_days`.
-    3. At least one `station_class` row inside the span, and the Sticky share of
+       `_min_days(min_coverage, span_days)` — an exact integer, not a float product.
+    3. When `spec.windows` is set, that same `min_coverage` in EVERY window. This is
+       the gate that matches the stated correctness property; see `UniverseSpec` on
+       why the span gate alone does not (it admits stations dark for longer than a
+       whole val window).
+    4. At least one `station_class` row inside the span, and the Sticky share of
        those rows <= `max_sticky_fraction`.
 
-    Gate 3's "at least one row" half is a real exclusion, not a formality: a station
+    Gate 4's "at least one row" half is a real exclusion, not a formality: a station
     the classifier never saw cannot be shown to be non-Sticky, and admitting it on
     the grounds that no evidence exists would put exactly the unmeasurable stations
     into a population whose whole purpose is to be measurable. On batch1's frozen DB
     this costs ~35 of 751 stations.
+
+    `restrict_to` narrows the scan to those station codes. Pure optimisation — the
+    result is exactly the eligible subset of that list — for callers describing a
+    known population instead of building a pool from the whole network.
     """
     council_ph, council_vals = _placeholders(spec.resolved_councils)
     start_int, end_int = date_to_int(spec.start_date), date_to_int(spec.end_date)
-    min_days = spec.min_coverage * spec.span_days
+    min_days = _min_days(spec.min_coverage, spec.span_days)
+
+    restrict_clause, restrict_vals = "", []
+    if restrict_to is not None:
+        if not restrict_to:
+            return []
+        restrict_ph, restrict_vals = _placeholders([int(c) for c in restrict_to])
+        restrict_clause = f" AND dp.station_code IN ({restrict_ph})"
 
     coverage_rows = conn.execute(
         f"""SELECT s.station_code, s.council, s.brand, COUNT(DISTINCT dp.price_date)
@@ -225,17 +449,18 @@ def eligible_stations(conn: sqlite3.Connection, spec: UniverseSpec) -> list[Elig
               JOIN fuel_types f ON f.id = dp.fuel_type_id
              WHERE f.code = ?
                AND dp.price_date BETWEEN ? AND ?
-               AND s.council IN ({council_ph})
+               AND s.council IN ({council_ph}){restrict_clause}
              GROUP BY s.station_code
             HAVING COUNT(DISTINCT dp.price_date) >= ?""",
-        [ARBITER_FUEL_CODE, start_int, end_int, *council_vals, min_days],
+        [ARBITER_FUEL_CODE, start_int, end_int, *council_vals, *restrict_vals, min_days],
     ).fetchall()
     if not coverage_rows:
         return []
 
-    code_ph, code_vals = _placeholders([r[0] for r in coverage_rows])
+    codes = [int(r[0]) for r in coverage_rows]
+    code_ph, code_vals = _placeholders(codes)
     sticky_by_code: dict[int, float] = {
-        code: sticky
+        int(code): sticky
         for code, sticky in conn.execute(
             f"""SELECT station_code,
                        AVG(CASE WHEN class = 'Sticky' THEN 1.0 ELSE 0.0 END)
@@ -246,19 +471,25 @@ def eligible_stations(conn: sqlite3.Connection, spec: UniverseSpec) -> list[Elig
             [start_int, end_int, *code_vals],
         )
     }
+    per_window = _window_coverage(conn, spec, codes)
 
     out: list[EligibleStation] = []
     for code, council, brand, n_days in coverage_rows:
+        code = int(code)
         sticky = sticky_by_code.get(code)
         if sticky is None or sticky > spec.max_sticky_fraction:
             continue
+        windows = per_window.get(code, [])
+        if spec.windows and any(c < spec.min_coverage for c in windows):
+            continue
         out.append(
             EligibleStation(
-                station_code=int(code),
+                station_code=code,
                 council=council,
                 brand=brand,
                 coverage=n_days / spec.span_days,
                 sticky_fraction=float(sticky),
+                worst_window_coverage=min(windows) if windows else None,
             )
         )
     # Sorted by station_code as a documented postcondition. `draw_universe` does
@@ -266,6 +497,19 @@ def eligible_stations(conn: sqlite3.Connection, spec: UniverseSpec) -> list[Elig
     # or persisting the eligible pool gets a stable, diffable order.
     out.sort(key=lambda s: s.station_code)
     return out
+
+
+def eligible_pool_digest(conn: sqlite3.Connection, spec: UniverseSpec) -> str:
+    """A short hash of the pool `spec` admits — the DB-vintage half of a run's stamp.
+
+    `UniverseSpec` records the knobs; this records what those knobs actually selected
+    out of THIS database. `daily_prices` is rebuilt by `fill.py`, so a spec alone does
+    not pin a universe (see `UniverseSpec`'s docstring). Stamp both, and two runs that
+    drew different pools cannot look identical in meta.json.
+    """
+    pool = eligible_stations(conn, spec)
+    payload = ";".join(f"{s.station_code}:{s.coverage:.6f}" for s in pool)
+    return f"{len(pool)}:{hashlib.sha256(payload.encode()).hexdigest()[:12]}"
 
 
 def allocate_by_stratum(sizes: Mapping[str, int], n: int) -> dict[str, int]:
@@ -410,9 +654,26 @@ def describe_universe(
 
     Takes the list rather than re-sampling, so it can describe the five preferred
     stations on exactly the same axes as a sampled universe — which is the whole
-    point: the homogeneity read in fps-nas is only interpretable if both
-    populations are characterised the same way. Stations absent from `stations`
-    are reported under `unknown_station_codes` rather than dropped silently.
+    point: the homogeneity read in fps-nas is only interpretable if both populations
+    are characterised the same way. Stations absent from `stations` are reported under
+    `unknown_station_codes` rather than dropped silently.
+
+    Stamps `spec.gates_dict()`, not `spec.as_dict()`: this function characterises a
+    supplied list, which may be a population no draw produced, so recording `n`/`seed`
+    here would stamp a draw that never happened. The caller that actually drew a
+    universe stamps the full spec itself.
+
+    The gates are REPORTED here, never enforced — the five preferred stations are an
+    exogenous population and station 414 fails `min_coverage`. Dropping it would
+    rewrite the very population being reported on. Failures are named per station
+    (`gate_failures`) so a coverage problem cannot be confused with a station that
+    merely sits outside a narrowed `councils` list.
+
+    Both council fields count the same way and can disagree only in what they are
+    counting: `stations_per_council` buckets a missing council under the literal key
+    `"unknown"` so the counts always sum to `n_stations`, while `n_councils` counts
+    real councils and excludes it. `n_unknown_council` is emitted so the two can be
+    reconciled without inferring the rule.
     """
     codes = [int(c) for c in station_codes]
     duplicates = sorted({c for c in codes if codes.count(c) > 1})
@@ -427,7 +688,10 @@ def describe_universe(
             "is a caller bug, not something to normalise away."
         )
     codes = sorted(codes)
-    by_code = {s.station_code: s for s in eligible_stations(conn, spec)}
+    # restrict_to keeps this to the supplied stations instead of rebuilding the whole
+    # network's pool for two summary fields (PR #361 review finding 6).
+    eligible = {s.station_code: s for s in eligible_stations(conn, spec, restrict_to=codes)}
+    failures = gate_failures(conn, spec, codes)
 
     code_ph, code_vals = _placeholders(codes)
     start_int, end_int = date_to_int(spec.start_date), date_to_int(spec.end_date)
@@ -450,6 +714,7 @@ def describe_universe(
             [ARBITER_FUEL_CODE, start_int, end_int, *code_vals],
         )
     }
+    per_window = _window_coverage(conn, spec, codes)
 
     councils: dict[str, int] = {}
     brands: dict[str, int] = {}
@@ -459,19 +724,22 @@ def describe_universe(
         brands[brand or "unknown"] = brands.get(brand or "unknown", 0) + 1
 
     coverages = [coverage.get(code, 0.0) for code in codes]
+    worst_window = [min(per_window[c]) for c in codes if per_window.get(c)]
     return {
-        "spec": spec.as_dict(),
+        "spec_gates": spec.gates_dict(),
         "n_stations": len(codes),
         "station_codes": codes,
         "unknown_station_codes": [c for c in codes if c not in meta],
-        "n_councils": len(set(meta.get(c, (None, None))[0] for c in codes) - {None}),
+        "n_councils": len({meta.get(c, (None, None))[0] for c in codes} - {None}),
+        "n_unknown_council": sum(1 for c in codes if meta.get(c, (None, None))[0] is None),
         "stations_per_council": dict(sorted(councils.items())),
         "stations_per_brand": dict(sorted(brands.items())),
         "coverage_min": min(coverages) if coverages else None,
         "coverage_mean": sum(coverages) / len(coverages) if coverages else None,
-        # The gates are reported, never enforced, here — the five preferred stations
-        # are an exogenous population and one of them (414) fails `min_coverage`.
-        # Silently dropping it would rewrite the very population being reported on.
-        "n_failing_spec_gates": sum(1 for c in codes if c not in by_code),
-        "station_codes_failing_spec_gates": [c for c in codes if c not in by_code],
+        # The span figure's blind spot, made visible: None when the spec gates on the
+        # span only, in which case nothing here can rule out a dark val window.
+        "worst_window_coverage": min(worst_window) if worst_window else None,
+        "n_eligible_of_supplied": len(eligible),
+        "n_failing_spec_gates": len(failures),
+        "gate_failures": {str(c): failures[c] for c in sorted(failures)},
     }
