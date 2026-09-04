@@ -29,6 +29,25 @@ with a long dark span does not announce itself — it just contributes fewer, an
 differently-timed, litres. Hence the `min_coverage` gate: a broad universe must not
 smuggle in a reweighting of the pool alongside its extra resolution.
 
+*Continuity is not liveness, and the gate only buys the first.* `fuel_signal/fill.py`
+forward-fills any gap of `MAX_GAP_FILL_DAYS = 28` or less into `daily_prices` and
+leaves longer ones unfilled (trail-fill to `end_date` is capped the same way), so a
+presence count sees ONLY dark spans longer than 28 days. Everything shorter is a
+stale price the replay trades on as if live — up to 27 consecutive days, since the
+cap is on the interval between observations. This is the dominant regime, not an
+edge case: measured over batch1's 14-fold span, the forward-filled share of replayed
+days has median **0.663** at the five and **0.679** across the 599-station pool, and
+the longest filled run maxes at 26 days and 27 days respectively. Two consequences,
+and they point opposite ways. The gate is not overclaiming about darkness — it is
+simply silent about staleness, which is PRE-EXISTING and unchanged by this module:
+the arbiter has always replayed two-thirds forward-filled days. But a wider universe
+does shift the tail — 64.8% of the broad pool carries a >= 21-day filled run against
+40% of the five, even though the medians differ by only 1.02x. `describe_universe`
+therefore reports `observed_fraction_*` for BOTH populations, so a homogeneity read
+can see the difference rather than assume it away. Measured, reported, never filtered
+on — the same policy `flips.StationPriceSource.is_observed` already sets for the
+regret ledger ("used only to count and report the dark days, never to drop a fill").
+
 Deliberate non-goals:
 
 * **Universes at different `n` are not nested.** Largest-remainder allocation is
@@ -48,6 +67,7 @@ import hashlib
 import math
 import random
 import sqlite3
+import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -283,8 +303,19 @@ def _placeholders(values: Sequence) -> tuple[str, list]:
     """('?,?,…', list) for a SQL IN clause, in the CALLER'S order.
 
     Not `fuel_signal.db._in_clause`, which sorts its values — deliberately named
-    differently so the two can't be mistaken for each other. Order matters here:
-    `describe_universe` reports on the list it was handed.
+    differently so the two can't be mistaken for each other.
+
+    An earlier version of this docstring justified the duplication by claiming "order
+    matters here: `describe_universe` reports on the list it was handed". That was
+    false, and is the exact pattern this repo has scar tissue for — a docstring
+    certifying behaviour the code does not have (PR #361 review finding 8).
+    `describe_universe` sorts its codes BEFORE calling this, every call site feeds a
+    dict comprehension keyed by station_code or an already-sorted council list, and
+    nothing downstream reads the bound-parameter order. `db._in_clause` would return
+    identical results at all of them. What this helper actually buys is not depending
+    on another module's private for a four-line builder, and somewhere to put the
+    note below; the order it happens to preserve is incidental, and no caller may
+    start relying on it without saying so here.
 
     The returned string is `?` characters and commas ONLY — it is derived from
     `len(values)`, never from the values themselves — so f-string-ing it into a
@@ -714,6 +745,22 @@ def describe_universe(
             [ARBITER_FUEL_CODE, start_int, end_int, *code_vals],
         )
     }
+    # `prices` is the RAW observation table; `daily_prices` is it plus fill.py's
+    # forward-filled gaps. The ratio is the share of replayed days on which the
+    # station actually reported — the staleness axis `coverage` cannot see. Counted
+    # and reported, never filtered on (see the module docstring).
+    observed = {
+        int(code): n
+        for code, n in conn.execute(
+            f"""SELECT p.station_code, COUNT(DISTINCT p.price_date)
+                  FROM prices p
+                  JOIN fuel_types f ON f.id = p.fuel_type_id
+                 WHERE f.code = ? AND p.price_date BETWEEN ? AND ?
+                   AND p.station_code IN ({code_ph})
+                 GROUP BY p.station_code""",
+            [ARBITER_FUEL_CODE, start_int, end_int, *code_vals],
+        )
+    }
     per_window = _window_coverage(conn, spec, codes)
 
     councils: dict[str, int] = {}
@@ -725,6 +772,13 @@ def describe_universe(
 
     coverages = [coverage.get(code, 0.0) for code in codes]
     worst_window = [min(per_window[c]) for c in codes if per_window.get(c)]
+    # Denominator is the station's own replayed days, not the span: a station that is
+    # dark for part of the span is not thereby "stale" on the days it does not appear.
+    observed_fractions = [
+        observed.get(code, 0) / days
+        for code in codes
+        if (days := round(coverage.get(code, 0.0) * spec.span_days))
+    ]
     return {
         "spec_gates": spec.gates_dict(),
         "n_stations": len(codes),
@@ -739,6 +793,14 @@ def describe_universe(
         # The span figure's blind spot, made visible: None when the spec gates on the
         # span only, in which case nothing here can rule out a dark val window.
         "worst_window_coverage": min(worst_window) if worst_window else None,
+        # Staleness, the axis `coverage` is blind to. ~2/3 of replayed days are
+        # forward-filled for EVERY population, so a low number here is normal and is
+        # not a defect in the station — it is there so a homogeneity read can compare
+        # two populations on it instead of assuming they match.
+        "observed_fraction_min": min(observed_fractions) if observed_fractions else None,
+        "observed_fraction_median": (
+            statistics.median(observed_fractions) if observed_fractions else None
+        ),
         "n_eligible_of_supplied": len(eligible),
         "n_failing_spec_gates": len(failures),
         "gate_failures": {str(c): failures[c] for c in sorted(failures)},

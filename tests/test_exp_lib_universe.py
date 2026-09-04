@@ -655,6 +655,48 @@ class TestDescribeUniverse:
         with pytest.raises(ValueError, match=r"duplicates \[1\]"):
             describe_universe(conn, [1, 1], _spec(n=1))
 
+    def test_reports_forward_fill_staleness_without_filtering_on_it(self, conn):
+        """`coverage` counts rows in `daily_prices`, which fill.py forward-fills for
+        gaps of up to MAX_GAP_FILL_DAYS. So a station can be at 1.0 coverage and still
+        be stale most days. Measured on batch1, ~2/3 of every replayed day is
+        forward-filled for BOTH populations — so this is reported, never gated on.
+        """
+        # Fully present in daily_prices, but only every 3rd day actually observed.
+        _seed_station(conn, 1, PC_PARRAMATTA)
+        start = date.fromisoformat(START)
+        conn.executemany(
+            "INSERT INTO prices (station_code, fuel_type_id, price_date, price_decicents,"
+            " source_id) VALUES (?, 1, ?, 1800, 1)",
+            [
+                (1, int((start + timedelta(days=i)).isoformat().replace("-", "")))
+                for i in range(0, SPAN_DAYS, 3)
+            ],
+        )
+        conn.commit()
+        described = describe_universe(conn, [1], _spec(n=1))
+        assert described["coverage_min"] == pytest.approx(1.0)
+        assert described["observed_fraction_min"] == pytest.approx(30 / SPAN_DAYS)
+        assert described["observed_fraction_median"] == pytest.approx(30 / SPAN_DAYS)
+        # Reported, not enforced: it is still eligible.
+        assert described["n_failing_spec_gates"] == 0
+
+    def test_observed_fraction_denominator_is_replayed_days_not_the_span(self, conn):
+        """A station dark for part of the span is not thereby "stale" on the days it
+        never appears — that is the coverage axis, and double-counting it here would
+        make the two fields say the same thing twice.
+        """
+        _seed_station(conn, 1, PC_PARRAMATTA, price_days=45)
+        start = date.fromisoformat(START)
+        conn.executemany(
+            "INSERT INTO prices (station_code, fuel_type_id, price_date, price_decicents,"
+            " source_id) VALUES (?, 1, ?, 1800, 1)",
+            [(1, int((start + timedelta(days=i)).isoformat().replace("-", ""))) for i in range(15)],
+        )
+        conn.commit()
+        described = describe_universe(conn, [1], _spec(n=1))
+        assert described["coverage_min"] == pytest.approx(45 / SPAN_DAYS)
+        assert described["observed_fraction_min"] == pytest.approx(15 / 45)
+
     def test_flags_a_station_absent_from_the_stations_table(self, conn):
         _seed_station(conn, 1, PC_PARRAMATTA)
         described = describe_universe(conn, [1, 4242], _spec(n=1))
