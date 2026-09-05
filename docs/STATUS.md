@@ -171,6 +171,44 @@ The late-descent / extended-shallow-descent investigation that drove the 50→54
 
 ## Pending work
 
+### The realised arbiter's grading population is changing (fps-nas, decided 2026-09-05)
+
+**Decision recorded, not yet implemented: grade candidates on a broad 410-station Sydney
+population; keep the five commute stations as the REPORTED outcome.**
+
+Today every realised-CPL figure in this document was measured by replaying five stations —
+`station_codes` threads through the batch pipeline as `None` and `experiments/lib/realised.py`
+resolves it to `PREFERRED_STATIONS`. That is **83 independent decisions** for a whole 14-fold
+run, and it is what sets the noise band's width.
+
+`fps-nas` measured whether widening is affordable and whether it is the same measurement.
+Both yes: 40x the stations costs +14% wall clock, and homogeneity holds
+(`tgp_cycle_displacement` pooled delta five −0.2077 vs broad(410) −0.1292, 12/14 folds agree
+on sign, r = 0.704, intervals overlap). Full write-up and the numbers behind every claim:
+`experiments/2026-09-05_arbiter_universe_width/README.md`.
+
+**Two things anyone touching candidate evaluation before this lands needs to know:**
+
+1. **The noise floor is still five-station, and `noise_floor.json` does not record that.**
+   Every identity axis is stamped and refused on by `dossier_tables._bank_admissibility`
+   — `baseline_fingerprint`, `tank_params`, `null_method`, arity, `partial` — except
+   population. Grading a broad-population delta against the extant five-station band flips
+   `tgp_cycle_displacement` from pass to fail (z −1.544 vs −2.330), silently. Sequence is
+   `fps-916` (stamp + refuse) → `fps-ajs` (recompute at 410, 40 draws, ~11h), blocking dep set.
+2. **Run those BEFORE any new pass/fail grading** — notably `fps-490` (locked-block ablation).
+   Block *rankings* survive a ruler change; pass/fail calls do not.
+
+**Do not read the widening as a large power gain.** It buys exactly **2.00x** on the
+fold-clustered interval, not sqrt(102)x: 102x the decisions halved the per-fold sd
+(0.7982 → 0.3992) and no further, because the fold is the independent replicate and widening
+the universe does not create folds. The fold count, not the station count, is the ceiling.
+
+**Related caveat, unresolved:** the placebo band and the fold-clustered t answer different
+questions, and `tgp_cycle_displacement` passes the first at both widths while failing the
+second at both (t = 0.98 at five, 1.27 at 410). No dossier reports the second. Whether it
+should gate anything is logged as `not_decided` in `experiments/ledger.yaml` — a design call,
+not a missing measurement.
+
 ### Phase 5 (macro model)
 - Separate longer-horizon model (~30/60/90 days)
 - Upstream commodity features dominate at this horizon
