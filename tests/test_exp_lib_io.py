@@ -78,6 +78,29 @@ def test_write_meta_does_not_mutate_the_caller_dict(tmp_path):
     assert meta_in == {"seeds": [42]}
 
 
+def test_write_meta_returns_the_stamped_payload_it_wrote(tmp_path):
+    """A script writing a SECOND artifact beside meta.json has to serialise the
+    RETURN, not the dict it passed in — the two differ by exactly the stamps.
+
+    fps-6rm: `2026-09-05_arbiter_universe_width/timing.py` did
+    `write_meta(HERE, meta, tank=tank)` then wrote `meta` to timing.json, shipping
+    three real realised CPLs with no cadence on them. Non-mutation (the test above)
+    is correct and deliberate, which is precisely what makes the input dict a trap:
+    it still looks like the thing that was stamped. Returning the payload gives the
+    caller something safe to write.
+    """
+    meta_in: dict = {"seeds": [42], "cpl": 190.0}
+    returned = write_meta(tmp_path, meta_in, tank=TankParams(evaluation_interval_days=7))
+
+    assert returned == json.loads((tmp_path / "meta.json").read_text())
+    assert returned["tank_params"] == "50/3.571/7d/10%"
+    assert returned["seeds"] == [42]
+    # The point of the return value: the input is still unstamped, so the scanner
+    # rejects it, while what write_meta handed back passes.
+    assert artifact_has_unstamped_cpl(meta_in) is True
+    assert artifact_has_unstamped_cpl(returned) is False
+
+
 # ── write_meta tank_params stamping (fps-15c) ──────────────────────────────────
 
 def test_write_meta_omits_tank_params_when_no_tank_passed(tmp_path):

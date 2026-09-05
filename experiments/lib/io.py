@@ -90,8 +90,22 @@ def write_meta(
     *,
     baseline_columns: Sequence[str] | None = None,
     tank: "TankParams | None" = None,
-) -> None:
+) -> dict:
     """Serialise `meta` to out_dir/meta.json, stamping the baseline's identity into it.
+
+    **Returns the stamped payload exactly as written**, and a script that writes a
+    SECOND artifact of its own beside meta.json must serialise that return value,
+    never the `meta` it passed in. The stamps go onto a copy (the caller's dict is
+    deliberately left unmutated — `test_write_meta_does_not_mutate_the_caller_dict`),
+    so the input dict is still unstamped after this call while looking identical to
+    the one that was: `write_meta(HERE, meta, tank=tank)` followed by
+    `(HERE / "x.json").write_text(json.dumps(meta))` silently writes an UNSTAMPED
+    x.json. That is fps-6rm — `2026-09-05_arbiter_universe_width/timing.json` shipped
+    three real realised CPLs with no cadence on them, and only the repo-wide scanner
+    `test_every_committed_experiment_json_artifact_carries_its_cadence_stamp` caught
+    it. Both callers that passed `tank=` were written that way; the sibling
+    `homogeneity.py` escaped only because its per-run rows carry `tank_params` from an
+    unrelated path, not because the pattern was safe.
 
     Every experiment result carries a `baseline` block — `n_columns`, an ordered
     `fingerprint`, and the column list itself — so that two runs' commensurability is
@@ -133,5 +147,7 @@ def write_meta(
         from fuel_signal.backtest import require_tank_stamp
 
         stamped["tank_params"] = require_tank_stamp(tank, what="write_meta")
-    (out_dir / "meta.json").write_text(json.dumps(to_jsonable(stamped), indent=2, default=str))
+    payload: dict = to_jsonable(stamped)  # type: ignore[assignment]
+    (out_dir / "meta.json").write_text(json.dumps(payload, indent=2, default=str))
     print(f"\nMeta: {out_dir / 'meta.json'}", flush=True)
+    return payload
