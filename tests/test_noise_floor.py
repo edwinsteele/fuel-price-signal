@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 import experiments.pipeline.noise_floor as noise_floor_module
+from experiments.lib import universe as universe_module
 from experiments.lib.universe import station_codes_digest
 from experiments.pipeline.batch_freeze import BaselineContractMismatch, resolve_baseline_columns
 from experiments.pipeline.dossier_tables import (
@@ -724,10 +725,10 @@ def test_cli_n_stations_draws_a_wide_population_and_stamps_it(tmp_path, monkeypa
         spec_seen["draw_seed"] = seed
         return drawn
 
-    monkeypatch.setattr(noise_floor_module, "eligible_stations", _fake_eligible)
-    monkeypatch.setattr(noise_floor_module, "draw_universe", _fake_draw)
+    monkeypatch.setattr(universe_module, "eligible_stations", _fake_eligible)
+    monkeypatch.setattr(universe_module, "draw_universe", _fake_draw)
     monkeypatch.setattr(
-        noise_floor_module, "station_pool_digest", lambda p: "7:cafef00dfeed"
+        universe_module, "station_pool_digest", lambda p: "7:cafef00dfeed"
     )
 
     result = CliRunner().invoke(
@@ -763,8 +764,8 @@ def test_cli_rejects_non_positive_n_stations(tmp_path, monkeypatch):
     def _boom(*args, **kwargs):
         raise AssertionError("must not be called for a rejected --n-stations")
 
-    monkeypatch.setattr(noise_floor_module, "eligible_stations", _boom)
-    monkeypatch.setattr(noise_floor_module, "draw_universe", _boom)
+    monkeypatch.setattr(universe_module, "eligible_stations", _boom)
+    monkeypatch.setattr(universe_module, "draw_universe", _boom)
 
     result = CliRunner().invoke(
         main, ["batch1", "--batches-dir", str(batches_dir), "--n-stations", "0"]
@@ -786,8 +787,8 @@ def test_cli_without_n_stations_leaves_station_codes_default(tmp_path, monkeypat
     def _boom(*args, **kwargs):
         raise AssertionError("must not be called without --n-stations")
 
-    monkeypatch.setattr(noise_floor_module, "eligible_stations", _boom)
-    monkeypatch.setattr(noise_floor_module, "draw_universe", _boom)
+    monkeypatch.setattr(universe_module, "eligible_stations", _boom)
+    monkeypatch.setattr(universe_module, "draw_universe", _boom)
 
     result = CliRunner().invoke(main, ["batch1", "--batches-dir", str(batches_dir)])
 

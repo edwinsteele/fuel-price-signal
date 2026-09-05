@@ -82,7 +82,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sqlite3
 import time
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -93,11 +92,9 @@ from experiments.lib.constants import SEEDS
 from experiments.lib.io import current_git_sha, to_jsonable
 from experiments.lib.realised import ArmSpec, BaselineCache, _plan_folds, run_paired_realised_backtest
 from experiments.lib.universe import (
-    UniverseSpec,
-    draw_universe,
-    eligible_stations,
+    UNIVERSE_SEED,
+    draw_batch_universe,
     station_codes_digest,
-    station_pool_digest,
 )
 from experiments.pipeline.batch_freeze import (
     BASELINE_COLUMNS_FILENAME,
@@ -144,12 +141,6 @@ DEFAULT_N_DRAWS = 20
 PLACEBO_SEED_DEFAULT: int = SEEDS[0]
 
 FIT_STABILITY_FILENAME = "fit_stability.json"
-
-# Same value experiments/2026-09-05_arbiter_universe_width/{timing,homogeneity}.py draw
-# with — not load-bearing to match (the digest reads the ACTUAL drawn codes, not the seed),
-# but keeping it in step means a --n-stations run here draws the identical universe those
-# scripts already measured, rather than a fresh, unvetted sample of the same width.
-UNIVERSE_SEED = 20260905
 
 # Enforced bound on each draw's self_correlation self-check (see the draw loop below): the
 # largest |correlation| a placebo may retain with the column it was built from.
@@ -862,32 +853,16 @@ def main(
     station_universe_spec: dict | None = None
     station_universe_pool_digest: str | None = None
     if n_stations is not None:
-        # Real val windows, not the span envelope: a span-level gate lets through a station
-        # that's dark for one whole fold (experiments.lib.universe.UniverseSpec's own
-        # docstring — 189/599 on batch1), and aggregate_backtest skips such a cell silently.
+        # Real val windows, not the span envelope — see draw_batch_universe's docstring for
+        # why, and for why `windows` is derived here rather than inside the helper.
         frame = load_features(batch_dir / "features.csv")
         windows = tuple((p.val_start, p.val_end) for p in _plan_folds(frame, {}, None))
-        spec = UniverseSpec(
-            n=n_stations, seed=UNIVERSE_SEED,
-            start_date=windows[0][0], end_date=windows[-1][1], windows=windows,
+        station_codes, station_universe_spec, station_universe_pool_digest = (
+            draw_batch_universe(
+                batch_dir / FROZEN_DB_FILENAME, n=n_stations, windows=windows,
+                seed=UNIVERSE_SEED,
+            )
         )
-        conn = sqlite3.connect(batch_dir / FROZEN_DB_FILENAME)
-        try:
-            # eligible_stations called ONCE and reused for both the draw and the pool
-            # digest (review of PR #362) — sample_station_universe + a separate
-            # eligible_pool_digest call each ran their own full gated-pool + per-window
-            # coverage scan against the same conn/spec.
-            eligible = eligible_stations(conn, spec)
-            station_codes = draw_universe(eligible, n=n_stations, seed=UNIVERSE_SEED)
-            # Provenance only (review of PR #362 finding 1a): this is the digest of the
-            # ELIGIBLE POOL the spec's gates admit, not of `station_codes` itself — it does
-            # NOT vary with n_stations, so it cannot serve as the grading identity (that's
-            # `station_population` below, from the actual drawn codes). It still answers "did
-            # the pool this was drawn from move under fill.py rebuilding daily_prices".
-            station_universe_pool_digest = station_pool_digest(eligible)
-        finally:
-            conn.close()
-        station_universe_spec = spec.as_dict()
 
     if fit_stability:
         compute_fit_stability_diagnostic(

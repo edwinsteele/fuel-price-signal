@@ -116,9 +116,15 @@ from experiments.lib.realised import (
     ArmSpec,
     BaselineCache,
     BaselineCacheMismatch,
+    _plan_folds,
     run_paired_realised_backtest,
 )
 from experiments.lib.rowpreds import RowPredCollector
+from experiments.lib.universe import (
+    UNIVERSE_SEED,
+    draw_batch_universe,
+    station_codes_digest,
+)
 from experiments.lib.zones import pooled_cpl
 from experiments.pipeline.batch_freeze import (
     BASELINE_COLUMNS_FILENAME,
@@ -138,6 +144,7 @@ from experiments.pipeline.validate import (
     validate_candidate,
 )
 from fuel_signal import evaluate as _ev
+from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.features import TARGET_COLUMNS, baseline_fingerprint, load_features
 
 STATUS_GRADED = "graded"
@@ -348,6 +355,8 @@ def run_candidate(
     inner_fold_params: dict | None = None,
     fold_subset=None,
     station_codes: list[int] | None = None,
+    station_universe_spec: dict | None = None,
+    station_universe_pool_digest: str | None = None,
     min_row_cell_n: int = DEFAULT_MIN_ROW_CELL_N,
     bead_id: str | None = None,
     verbose: bool = True,
@@ -711,6 +720,18 @@ def run_candidate(
             # order) were both silent precisely because this field did not exist.
             "n_baseline_columns": len(baseline_columns),
             "baseline_fingerprint": baseline_fingerprint(baseline_columns),
+            # fps-916's identity axis, on the RUN side (fps-ajs follow-up). Until this
+            # existed a run carried no population at all, so `_bank_admissibility` read
+            # it as DEFAULT_STATION_POPULATION — correct for the five-station default it
+            # was written against, and silently wrong the moment a run replayed a wider
+            # universe. Same `station_codes_digest` the floor stamps, over the codes
+            # ACTUALLY replayed, so a run and a floor drawn at the same --n-stations match
+            # by construction and a cross-population grade is refused rather than silent.
+            "station_population": station_codes_digest(station_codes or PREFERRED_STATIONS),
+            # Provenance, NOT identity — the eligible pool does not vary with n_stations,
+            # so it cannot distinguish two widths drawn from it. See draw_batch_universe.
+            "station_universe_spec": station_universe_spec,
+            "station_universe_pool_digest": station_universe_pool_digest,
             # The empirical shock-fold set this run actually graded the "regime" axis
             # against (fps-3tu) — a run-level fact, not a shared constant, since it's
             # derived from this run's own baseline fit. None for results.json predating
@@ -1198,6 +1219,19 @@ def _summarise_for_comment(results: dict) -> str:
     default=DEFAULT_INNER_FOLD_PARAMS["step_days"], show_default=True,
     help="Within-fold OOF walk-forward step_days.",
 )
+@click.option(
+    "--n-stations", "n_stations", default=None, type=click.IntRange(min=1),
+    help="Replay this many stations, drawn from the batch's eligible pool "
+    "(experiments.lib.universe, gated on every outer fold's real val window), instead of "
+    "the five-station PREFERRED_STATIONS default. Mirrors `noise_floor --n-stations` "
+    "EXACTLY — same helper, same UNIVERSE_SEED — so a run and the floor grading it draw "
+    "the identical population and `dossier_tables._bank_admissibility` matches rather "
+    "than refuses. Only the REPLAY widens: the model still trains on the whole frame, "
+    "so this changes what is scored, not what is fitted. Stamped into results.json as "
+    "`station_population`. NOTE the batch's r0_cache.joblib is one file fingerprinted on "
+    "station_codes, so alternating widths in one batch dir re-fits R0 each flip "
+    "(~17min/run at n=410) — group runs by width, or give a wide sweep its own batch dir.",
+)
 def main(
     batch_dir: pathlib.Path,
     candidate_path: pathlib.Path,
@@ -1208,6 +1242,7 @@ def main(
     inner_train_min_days: int,
     inner_val_days: int,
     inner_step_days: int,
+    n_stations: int | None,
 ) -> None:
     """Entry point for the launch routine (fps-3jj.5) to invoke this as a detached subprocess."""
     outer_fold_params = {
@@ -1219,14 +1254,48 @@ def main(
         )
         if v is not None
     }
+    inner_fold_params = {
+        "train_min_days": inner_train_min_days,
+        "val_days": inner_val_days,
+        "step_days": inner_step_days,
+    }
+    station_codes: list[int] | None = None
+    station_universe_spec: dict | None = None
+    station_universe_pool_digest: str | None = None
+    if n_stations is not None:
+        # Real val windows, not the span envelope — see draw_batch_universe's docstring
+        # for why, and for why `windows` is derived here rather than inside the helper.
+        # Derived from the OUTER fold plan this run will actually use, so overriding the
+        # outer geometry and --n-stations together still gates on the windows replayed.
+        # That deliberately differs from noise_floor's hardcoded `{}` (it has no outer
+        # options); the docstring covers why matching it would be worse, not better.
+        #
+        # This parses features.csv a second time — run_candidate loads it again below.
+        # Left as-is knowingly: folds depend only on price_date so both parses yield the
+        # same geometry, and this is the --n-stations path, where the run it precedes is
+        # ~34min at n=410. Threading the frame through run_candidate to save one parse
+        # would widen its signature for a saving lost in the noise. (PR #364, finding 7.)
+        frame = load_features(batch_dir / "features.csv")
+        windows = tuple(
+            (p.val_start, p.val_end) for p in _plan_folds(frame, outer_fold_params, None)
+        )
+        station_codes, station_universe_spec, station_universe_pool_digest = (
+            draw_batch_universe(
+                batch_dir / FROZEN_DB_FILENAME, n=n_stations, windows=windows,
+                seed=UNIVERSE_SEED,
+            )
+        )
+        click.echo(
+            f"[runner] replaying {len(station_codes)} stations "
+            f"(station_population={station_codes_digest(station_codes)})"
+        )
     result = run_candidate(
         batch_dir, candidate_path, bead_id=bead_id,
         outer_fold_params=outer_fold_params,
-        inner_fold_params={
-            "train_min_days": inner_train_min_days,
-            "val_days": inner_val_days,
-            "step_days": inner_step_days,
-        },
+        inner_fold_params=inner_fold_params,
+        station_codes=station_codes,
+        station_universe_spec=station_universe_spec,
+        station_universe_pool_digest=station_universe_pool_digest,
     )
     click.echo(f"{result.candidate_name}: {result.status} (wall={result.wall_seconds:.1f}s)")
 
