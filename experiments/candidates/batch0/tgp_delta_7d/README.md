@@ -104,6 +104,22 @@ shock folds. **Validation:** PIT passed, INPUTS passed, `tgp_delta_7d` NaN rate
 percentile** of that distribution (`candidate_z_vs_band` = +0.14) — squarely
 inside pure fit noise, not near either tail.
 
+> **GRANDFATHERED 2026-09-05 (`fps-sjk`) — this band is not a current-method
+> grading.** Those 5 draws are a **seed-swap** null; every batch1+ floor is a
+> **placebo-column** null (`fps-awz`, 2026-08-21), and `noise_floor.json` here
+> carries no `null_method` at all. `dossier_tables._noise_band()` therefore
+> refuses this floor, and **that refusal is correct, not a defect** — do not
+> file against it, and do not compare the 40th percentile above to a batch1+
+> percentile. The floor was deliberately **not** recomputed: the shipped CLI
+> cannot do it (`check_freeze_cadence` refuses `noise_floor batch0 --force`
+> because this batch declares 7d and `TankParams()` is now 1d, with no cadence
+> override on the CLI), and it would buy nothing if it could — +0.00585 c/L is
+> the *unfavourable* sign, so a narrower placebo band can only leave the verdict
+> `inconclusive` (where the ledger already has it) or push it to `rejected`.
+> Full reasoning: `experiments/batches/batch0/RETROSPECTIVE.md` § Grandfathered.
+> To put `tgp_delta_7d` on equal footing with batch1+, run it at 1d as a batch2
+> candidate (`fps-cde`) — batch0 cannot be re-frozen.
+
 ![](per_fold_delta_bars.png)
 ![](realised_cpl_by_fold.png)
 ![](seed_mean_vs_median.png)

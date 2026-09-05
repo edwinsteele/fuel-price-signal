@@ -741,7 +741,17 @@
     PR #311, run against batch0 2026-08-19: 5 R0-vs-R0 paired-seed draws, mean
     -0.0135 c/L, std 0.142 c/L), this candidate's +0.00585 c/L sits at the
     40th percentile (z=+0.14) — squarely inside pure fit noise, confirming
-    "inert" rather than just asserting it.
+    "inert" rather than just asserting it. [GRANDFATHERED 2026-09-05, fps-sjk:
+    that band is a pre-fps-awz SEED-SWAP null, not the placebo-column null every
+    batch1+ floor uses, and dossier_tables._noise_band() refuses it — correctly.
+    The floor was deliberately not recomputed and this outcome deliberately not
+    re-graded: the shipped CLI cannot recompute it (check_freeze_cadence refuses
+    batch0 at the now-canonical 1d), and +0.00585 is the unfavourable sign, so a
+    narrower placebo band could only hold this entry at inconclusive or move it
+    to rejected. Read the percentile as a historical seed-swap/7d record, not as
+    a current-method grading comparable to a batch1+ percentile. Equal-footing
+    route is fps-cde: re-measure at 1d in batch2. See
+    experiments/batches/batch0/RETROSPECTIVE.md § Grandfathered.]
   calibration: >-
     PASSED. The pipeline returned delta_cpl_held +0.005851 against an
     independent reference of +0.0059 from

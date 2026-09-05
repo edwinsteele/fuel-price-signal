@@ -11,6 +11,58 @@
   graded across the boundary.
 - **Candidates filed:** 1
 
+## Grandfathered — batch0's numbers are not comparable to batch1+ (2026-09-05, `fps-sjk`)
+
+**Decision: grandfather, do not recompute.** `noise_floor.json` here carries no
+`null_method`: it is a pre-`fps-awz` **seed-swap** null (5 R0-vs-R0 paired-seed
+draws, `fps-3jj.9`), not the **placebo-column** null every batch1+ floor uses.
+`dossier_tables._noise_band()` refuses it outright, so `batch0/tgp_delta_7d`
+cannot be graded against any noise floor under current tooling. **That refusal is
+correct behaviour, not a defect** — nothing should be filed against it.
+
+Four independent reasons, any one of which settles it:
+
+1. **Recompute is not available from the shipped CLI at any price.** The obvious
+   command — `noise_floor batch0 --force` — cannot run. `check_freeze_cadence`
+   (`fps-oqz`) refuses it: this batch's `freeze.json` declares `50/3.571/7d/10%`
+   while the CLI resolves `TankParams()` = `50/3.571/1d/10%` and exposes **no
+   cadence override** (`compute_noise_floor` takes `tank=`; `main` never passes
+   it). Already asserted against the committed artifact by
+   `tests/test_noise_floor.py::test_batch0s_real_freeze_manifest_refuses_the_current_default_cadence`,
+   and already written down in `docs/CONVENTIONS.md` § cadence. So option 1's
+   price is not "the placebo draws" (batch1's 10-draw floor cost 8,368 s wall;
+   `DEFAULT_N_DRAWS` is now 20) — it is **new code first**, then that compute, on
+   a batch nothing builds on.
+2. **The sign forecloses the only outcome worth paying for.** The candidate's
+   realised `delta_cpl_held` is **+0.00585 c/L** — the *unfavourable* direction
+   (higher CPL is higher cost). No floor of any width turns a positive delta into
+   a graduation. A recomputed placebo band (narrower than a seed-swap band, by
+   `fps-awz`'s own argument) could only leave it `inconclusive` or push it to
+   `rejected`. There is no upside branch.
+3. **Nothing downstream is riding on the answer.** The ledger's
+   `evidence: experiments/candidates/batch0/tgp_delta_7d` entry is
+   `outcome: inconclusive`, and was already `inconclusive` when `fps-sjk` was
+   filed (checked against `experiments/ledger.yaml` at commit `3cbf496`,
+   2026-09-02) — the bead's premise that it "currently lists that run as
+   graduated" was wrong. The only `graduated` label `tgp_delta_7d` ever carried
+   was June's, which its own ledger entry already records as SUPERSEDED and
+   `inconclusive`. Re-grading would be cosmetic in the strict sense: it cannot
+   move the recorded verdict anywhere the record does not already sit.
+4. **The reading is retired on a second, independent axis anyway.** batch0 is a
+   7-day batch and the canonical cadence has been 1d since 2026-08-22
+   (`fps-oqz`). A correctly-shaped ruler for a measurement that `fps-cde` has
+   already ruled out of the record does not make that measurement count.
+
+**Read every noise-band figure in this batch accordingly.** The 40th percentile,
+`z = +0.14`, and the band (mean −0.0135 c/L, std 0.142 c/L) are a historical
+record of what the **seed-swap** null said about a **7d** run. They are not a
+current-method grading and must not be compared against a batch1+ percentile.
+
+**If `tgp_delta_7d` is ever wanted on equal footing**, `fps-cde` is the only
+route: measure it at 1d as a batch2 candidate. That produces a current-method
+floor and a current-cadence run in one pass. batch0 stays untouched — it cannot
+be re-frozen (`batch_freeze` allows one freeze per batch) regardless.
+
 ## What this is
 
 The payoff artifact for aim (b) (gaining experience with an AI-sourced pipeline, not
