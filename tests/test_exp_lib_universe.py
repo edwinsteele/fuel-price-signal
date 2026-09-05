@@ -5,6 +5,7 @@ a universe must be a pure function of its recorded spec, must not vary with DB r
 order, and must never come back quietly smaller than it was asked for.
 """
 
+import hashlib
 import math
 from datetime import date, timedelta
 from fractions import Fraction
@@ -935,20 +936,32 @@ class TestDrawBatchUniverse:
     def _patched(monkeypatch):
         """Record the spec each call builds; return a draw that depends on its inputs.
 
-        A fake returning a FIXED list would make any two calls compare equal and the
-        tests below vacuous — the whole point is that a changed input changes the draw.
+        Two properties this fixture must have, both learned the hard way (PR #364 review,
+        finding A — the first version had neither and a test could not reach its name):
+
+        * **The pool must depend on the SPEC.** The real `eligible_stations(conn, spec)`
+          gates admission on the spec's windows, so a different window set genuinely
+          admits a different pool. A fixed pool makes the drawn population structurally
+          independent of `windows`, and any test claiming windows change the population
+          is then unfalsifiable — it passed while both calls returned the identical list.
+        * **The draw must be content-addressed and NOT use `hash()`.** `hash()` over
+          anything containing a `str` is randomised per process by `PYTHONHASHSEED`;
+          sha256 over an explicit key is stable, and a 10^6 modulus makes an accidental
+          collision between two arms of a test negligible rather than 1-in-1000.
         """
         seen: list = []
 
         def _fake_eligible(conn, spec):
             seen.append(spec)
-            return ["pool-standin"] * 9
+            # Contents carry the spec, so the draw below is sensitive to it — see above.
+            return [f"{spec.end_date}#{spec.n}#{i}" for i in range(9)]
+
+        def _fake_draw(eligible, *, n, seed):
+            key = f"{n}|{seed}|" + "|".join(sorted(eligible))
+            return [int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % 1_000_000]
 
         monkeypatch.setattr(universe_module, "eligible_stations", _fake_eligible)
-        monkeypatch.setattr(
-            universe_module, "draw_universe",
-            lambda eligible, *, n, seed: [hash((n, seed, len(eligible))) % 1000],
-        )
+        monkeypatch.setattr(universe_module, "draw_universe", _fake_draw)
         monkeypatch.setattr(universe_module, "station_pool_digest", lambda p: "9:deadbeef0000")
         return seen
 
@@ -970,23 +983,32 @@ class TestDrawBatchUniverse:
     def test_different_windows_can_give_a_different_population(self, tmp_path, monkeypatch):
         """The CONDITION on that guarantee, and why the docstring says the callers can
         legitimately disagree: noise_floor plans with `{}` and runner with its own
-        outer_fold_params, so the same --n-stations N is not automatically the same
-        population. The spec differs, which is what reaches the coverage gates."""
+        outer_fold_params, so the same --n-stations N is NOT automatically the same
+        population — which is exactly when `_bank_admissibility` refuses the grade.
+
+        Asserts the population itself, not merely that the spec changed: the earlier
+        version of this test could not have failed, because its fake pool ignored the
+        spec (PR #364 review, finding A).
+        """
         seen = self._patched(monkeypatch)
         db = tmp_path / "f.db"
         db.touch()
 
-        draw_batch_universe(
+        a, _, _ = draw_batch_universe(
             db, n=3, seed=20260905,
             windows=(("2024-01-01", "2024-03-30"), ("2024-03-31", "2024-06-28")),
         )
-        draw_batch_universe(
+        b, _, _ = draw_batch_universe(
             db, n=3, seed=20260905,
             windows=(("2024-01-01", "2024-03-30"), ("2024-03-31", "2024-05-29")),
         )
 
-        # Not just the per-window gate: the span envelope's end_date moves with it.
-        assert seen[0].windows != seen[1].windows
+        assert station_codes_digest(a) != station_codes_digest(b)
+        # `end_date` has content: it proves the span envelope is derived from
+        # windows[-1][1] rather than windows[0] or a constant. (An
+        # `assert seen[0].windows != seen[1].windows` stood here too and was dropped —
+        # spec.windows is just tuple(windows), so it only asserted a passed-through
+        # value came through unchanged. PR #364 review, finding A.)
         assert seen[0].end_date != seen[1].end_date
 
     def test_a_different_seed_gives_a_different_population(self, tmp_path, monkeypatch):
@@ -997,10 +1019,10 @@ class TestDrawBatchUniverse:
         db.touch()
         windows = (("2024-01-01", "2024-03-30"),)
 
-        a = draw_batch_universe(db, n=3, windows=windows, seed=20260905)
-        b = draw_batch_universe(db, n=3, windows=windows, seed=999999999)
+        a, _, _ = draw_batch_universe(db, n=3, windows=windows, seed=20260905)
+        b, _, _ = draw_batch_universe(db, n=3, windows=windows, seed=999999999)
 
-        assert a[0] != b[0]
+        assert station_codes_digest(a) != station_codes_digest(b)
 
     def test_empty_windows_names_the_fold_geometry_not_an_index_error(self, tmp_path):
         """`_plan_folds` returns () for a geometry admitting no window (e.g.

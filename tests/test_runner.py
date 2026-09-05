@@ -1592,8 +1592,9 @@ def test_runner_cli_n_stations_draws_at_the_shared_universe_seed(monkeypatch):
     axis is pinned from both sides.
 
     The cross-caller property is conditional anyway — see
-    test_draw_batch_universe_population_follows_the_windows_it_is_given, and
-    `draw_batch_universe`'s docstring on why the two callers plan different windows.
+    test_exp_lib_universe.py::TestDrawBatchUniverse::
+    test_different_windows_can_give_a_different_population, and `draw_batch_universe`'s
+    docstring on why the two callers legitimately plan different windows.
     """
     from click.testing import CliRunner
 
