@@ -31,6 +31,7 @@ from experiments.lib.universe import (
     eligible_stations,
     gate_failures,
     sample_station_universe,
+    station_codes_digest,
 )
 from fuel_signal.db import (
     create_schema,
@@ -568,6 +569,40 @@ class TestPoolDigest:
         after = eligible_pool_digest(conn, _spec())
         assert before != after
         assert before.startswith("1:") and after.startswith("1:")
+
+
+# ---------------------------------------------------------------------------
+# station_codes_digest (fps-916)
+# ---------------------------------------------------------------------------
+
+class TestStationCodesDigest:
+    """A pure function of the codes themselves — no DB access, no gates. Unlike
+    `eligible_pool_digest`, this is the right tool for a FIXED/declared population (the
+    five preferred stations) that may not itself pass a spec's eligibility gates.
+    """
+
+    def test_is_a_pure_function_of_the_codes(self):
+        assert station_codes_digest([3, 1, 2]) == station_codes_digest([1, 2, 3])
+
+    def test_moves_when_the_codes_move(self):
+        assert station_codes_digest([1, 2, 3]) != station_codes_digest([1, 2, 4])
+
+    def test_shape_matches_eligible_pool_digest(self):
+        digest = station_codes_digest([1, 2, 3])
+        count, _, hex_part = digest.partition(":")
+        assert count == "3"
+        assert len(hex_part) == 12
+        int(hex_part, 16)  # raises ValueError if not hex
+
+    def test_moves_with_count_alone(self):
+        """Two same-length station_codes digests can coincide only by hash collision, but
+        two DIFFERENT-length ones can never coincide — the count prefix alone separates
+        them, which is what makes '5:...' vs '410:...' distinguishable at a glance."""
+        five = station_codes_digest([1, 2, 3, 4, 5])
+        four = station_codes_digest([1, 2, 3, 4])
+        assert five.split(":")[0] == "5"
+        assert four.split(":")[0] == "4"
+        assert five != four
 
 
 # ---------------------------------------------------------------------------

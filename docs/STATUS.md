@@ -189,12 +189,18 @@ on sign, r = 0.704, intervals overlap). Full write-up and the numbers behind eve
 
 **Two things anyone touching candidate evaluation before this lands needs to know:**
 
-1. **The noise floor is still five-station, and `noise_floor.json` does not record that.**
-   Every identity axis is stamped and refused on by `dossier_tables._bank_admissibility`
-   — `baseline_fingerprint`, `tank_params`, `null_method`, arity, `partial` — except
-   population. Grading a broad-population delta against the extant five-station band flips
-   `tgp_cycle_displacement` from pass to fail (z −1.544 vs −2.330), silently. Sequence is
-   `fps-916` (stamp + refuse) → `fps-ajs` (recompute at 410, 40 draws, ~11h), blocking dep set.
+1. **`fps-916` landed: `station_population` is now stamped and refused on, same as every
+   other identity axis.** `noise_floor.py` stamps a `count:hash` population identity into
+   `noise_floor.json` (`experiments.lib.universe.station_codes_digest` for a fixed/declared
+   list — the five default, no DB access needed — or `eligible_pool_digest` for a
+   `--n-stations`-drawn one, since `daily_prices` is rebuilt by `fill.py` and a spec alone
+   doesn't pin a universe). `dossier_tables._bank_admissibility` refuses grading a run
+   against a floor whose population doesn't match, unconditionally on both the canonical
+   and sibling paths (no "wider is only harder" direction exists for population the way it
+   does for arity). An absent key on either side reads as the five-station default, so every
+   floor committed before this axis existed keeps grading exactly as it does today. **The
+   noise floor itself is still five-station** — this stamps and guards the axis, it does not
+   move it. Next: `fps-ajs` (recompute at 410, 40 draws, ~11h), blocking dep set.
 2. **Run those BEFORE any new pass/fail grading** — notably `fps-490` (locked-block ablation).
    Block *rankings* survive a ruler change; pass/fail calls do not.
 

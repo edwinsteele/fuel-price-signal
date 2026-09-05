@@ -586,6 +586,25 @@ def eligible_pool_digest(conn: sqlite3.Connection, spec: UniverseSpec) -> str:
     return f"{len(pool)}:{hashlib.sha256(payload.encode()).hexdigest()[:12]}"
 
 
+def station_codes_digest(station_codes: Sequence[int]) -> str:
+    """`count:hash` identity for an explicit, already-resolved station list — the same
+    shape `eligible_pool_digest` produces, but a pure function of the codes themselves,
+    no DB access (fps-916).
+
+    `eligible_pool_digest` exists because a `UniverseSpec`'s PARAMETERS (n, seed, gates)
+    do not pin which codes a re-run against a moved `daily_prices` would draw — the
+    digest has to read the live DB to know what the spec actually selected. A list that
+    was never drawn from a spec's pool has no such ambiguity: `fuel_signal.config
+    .PREFERRED_STATIONS` (or any other caller-supplied `station_codes` override) is a
+    fixed, versioned list of codes, not a query result that can drift under `fill.py`
+    rebuilding `daily_prices` — the codes themselves are the whole identity, so hashing
+    them directly is exact rather than an approximation of `eligible_pool_digest`'s job.
+    """
+    codes = sorted(int(c) for c in station_codes)
+    payload = ",".join(str(c) for c in codes)
+    return f"{len(codes)}:{hashlib.sha256(payload.encode()).hexdigest()[:12]}"
+
+
 def allocate_by_stratum(sizes: Mapping[str, int], n: int) -> dict[str, int]:
     """Split `n` across strata proportionally to `sizes` (largest remainder).
 

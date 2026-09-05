@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 import experiments.pipeline.noise_floor as noise_floor_module
+from experiments.lib.universe import station_codes_digest
 from experiments.pipeline.batch_freeze import BaselineContractMismatch, resolve_baseline_columns
 from experiments.pipeline.dossier_tables import (
     NOISE_FLOOR_FILENAME,
@@ -37,6 +38,7 @@ from experiments.pipeline.placebo import (
     PLACEBO_COLUMN_NAME,
 )
 from experiments.pipeline.runner import DEFAULT_INNER_FOLD_PARAMS
+from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.features import (
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
@@ -421,6 +423,60 @@ def test_compute_noise_floor_stamps_provenance(tmp_path, monkeypatch):
         assert isinstance(draw["self_correlation"], float)
 
 
+# ── station_population stamping (fps-916) ──────────────────────────────────────
+
+def test_compute_noise_floor_stamps_the_five_station_default_population(tmp_path, monkeypatch):
+    """station_codes was already threaded to run_paired_realised_backtest (None resolves
+    to PREFERRED_STATIONS there) but never stamped into the payload — every floor
+    computed so far was in fact five-station, and nothing recorded that."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [1.0])
+
+    payload = compute_noise_floor(batch_dir, n_draws=1, verbose=False)
+
+    assert payload["station_population"] == station_codes_digest(PREFERRED_STATIONS)
+
+
+def test_compute_noise_floor_stamps_a_digest_of_an_explicit_station_codes_list(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [1.0])
+
+    payload = compute_noise_floor(
+        batch_dir, n_draws=1, station_codes=[101, 102, 103], verbose=False,
+    )
+
+    assert payload["station_population"] == station_codes_digest([101, 102, 103])
+    assert payload["station_population"] != station_codes_digest(PREFERRED_STATIONS)
+
+
+def test_compute_noise_floor_stamps_an_explicit_station_population_verbatim(tmp_path, monkeypatch):
+    """The CLI's --n-stations path already has an open DB connection when it draws the
+    codes, so it computes eligible_pool_digest itself and passes the result straight
+    through — compute_noise_floor must not second-guess it with its own codes-only hash."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_draw(monkeypatch, [1.0])
+
+    payload = compute_noise_floor(
+        batch_dir, n_draws=1, station_codes=[101, 102, 103],
+        station_population="410:4a9920301726", verbose=False,
+    )
+
+    assert payload["station_population"] == "410:4a9920301726"
+
+
+def test_fit_stability_stamps_the_five_station_default_population(tmp_path, monkeypatch):
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _stub_realised_by_seed(monkeypatch, {1: 1.0, 2: 2.0})
+
+    payload = compute_fit_stability_diagnostic(batch_dir, seeds_a=(1,), seeds_b=(2,), verbose=False)
+
+    assert payload["station_population"] == station_codes_digest(PREFERRED_STATIONS)
+
+
 def test_compute_noise_floor_propagates_a_screen_draws_failure(tmp_path, monkeypatch):
     """The self_correlation screen is placebo.screen_draws's job (see test_placebo.py
     for its own substitute-don't-abort behaviour and its NaN/failure-exhaustion coverage);
@@ -615,6 +671,76 @@ def test_cli_writes_noise_floor_for_named_batch(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert (batch_dir / NOISE_FLOOR_FILENAME).exists()
+
+
+class _FakeFoldPlan:
+    def __init__(self, val_start: str, val_end: str) -> None:
+        self.val_start = val_start
+        self.val_end = val_end
+
+
+def test_cli_n_stations_draws_a_wide_population_and_stamps_it(tmp_path, monkeypatch):
+    """--n-stations builds a UniverseSpec off the real fold windows (stubbed here — the
+    fixture's price_date values aren't real dates, see _plan_folds' own tests for that
+    coverage), draws station_codes through sample_station_universe, and stamps
+    eligible_pool_digest's result (not a codes-only hash) as station_population."""
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    batch_dir = _write_batch_dir(batches_dir, df)
+    calls = _stub_realised_by_draw(monkeypatch, [0.0] * 20)
+    monkeypatch.setattr(
+        noise_floor_module, "_plan_folds",
+        lambda frame, params, subset: [_FakeFoldPlan("2024-01-01", "2024-03-30")],
+    )
+    drawn = [101, 102, 103]
+    spec_seen = {}
+
+    def _fake_sample(conn, spec):
+        spec_seen["spec"] = spec
+        return drawn
+
+    monkeypatch.setattr(noise_floor_module, "sample_station_universe", _fake_sample)
+    monkeypatch.setattr(
+        noise_floor_module, "eligible_pool_digest", lambda conn, spec: "3:cafef00dfeed"
+    )
+
+    result = CliRunner().invoke(
+        main, ["batch1", "--batches-dir", str(batches_dir), "--n-stations", "3"]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
+    assert payload["station_population"] == "3:cafef00dfeed"
+    assert all(c["station_codes"] == drawn for c in calls)
+    assert spec_seen["spec"].n == 3
+    assert spec_seen["spec"].seed == noise_floor_module.UNIVERSE_SEED
+    assert spec_seen["spec"].start_date == "2024-01-01"
+    assert spec_seen["spec"].end_date == "2024-03-30"
+    assert spec_seen["spec"].windows == (("2024-01-01", "2024-03-30"),)
+
+
+def test_cli_without_n_stations_leaves_station_codes_default(tmp_path, monkeypatch):
+    """The default path must not touch sample_station_universe/eligible_pool_digest at
+    all — no DB connection needed when nobody asked for a non-default population."""
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    batch_dir = _write_batch_dir(batches_dir, df)
+    calls = _stub_realised_by_draw(monkeypatch, [0.0] * 20)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("must not be called without --n-stations")
+
+    monkeypatch.setattr(noise_floor_module, "sample_station_universe", _boom)
+    monkeypatch.setattr(noise_floor_module, "eligible_pool_digest", _boom)
+
+    result = CliRunner().invoke(main, ["batch1", "--batches-dir", str(batches_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert all(c["station_codes"] is None for c in calls)
+    payload = json.loads((batch_dir / NOISE_FLOOR_FILENAME).read_text())
+    assert payload["station_population"] == station_codes_digest(PREFERRED_STATIONS)
 
 
 def test_cli_n_draws_override(tmp_path, monkeypatch):
