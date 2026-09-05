@@ -187,3 +187,4 @@
 {"id":"int-8db800ef22d499a9e9ff27fb9c0fd7f6","kind":"field_change","created_at":"2026-09-05T01:38:58.623266Z","actor":"Edwin Steele","issue_id":"fps-nas","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-d6cd3979718bb84679de66ca887605bf","kind":"field_change","created_at":"2026-09-05T02:53:47.294949Z","actor":"Edwin Steele","issue_id":"fps-916","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-bf52ba260d628c2aa18c284806f145df","kind":"field_change","created_at":"2026-09-05T09:14:45.179672Z","actor":"Edwin Steele","issue_id":"fps-sjk","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-c5121d225a95b6789fec30655ebed6a7","kind":"field_change","created_at":"2026-09-05T09:34:14.024104Z","actor":"Edwin Steele","issue_id":"fps-6rm","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
