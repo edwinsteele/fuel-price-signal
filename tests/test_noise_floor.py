@@ -720,6 +720,30 @@ def test_cli_n_stations_draws_a_wide_population_and_stamps_it(tmp_path, monkeypa
     assert spec_seen["spec"].windows == (("2024-01-01", "2024-03-30"),)
 
 
+def test_cli_rejects_non_positive_n_stations(tmp_path, monkeypatch):
+    """UniverseSpec itself refuses n < 1, but at the CLI layer that's a bare ValueError
+    traceback rather than a clean usage error — reject it at the option instead, before
+    any DB connection is opened."""
+    df = _baseline_features_df()
+    batches_dir = tmp_path / "batches"
+    batches_dir.mkdir()
+    _write_batch_dir(batches_dir, df)
+    _stub_realised_by_draw(monkeypatch, [])  # must never be called
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("must not be called for a rejected --n-stations")
+
+    monkeypatch.setattr(noise_floor_module, "sample_station_universe", _boom)
+    monkeypatch.setattr(noise_floor_module, "eligible_pool_digest", _boom)
+
+    result = CliRunner().invoke(
+        main, ["batch1", "--batches-dir", str(batches_dir), "--n-stations", "0"]
+    )
+
+    assert result.exit_code != 0
+    assert "is not in the range" in result.output
+
+
 def test_cli_without_n_stations_leaves_station_codes_default(tmp_path, monkeypatch):
     """The default path must not touch sample_station_universe/eligible_pool_digest at
     all — no DB connection needed when nobody asked for a non-default population."""

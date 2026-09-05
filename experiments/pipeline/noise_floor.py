@@ -810,7 +810,7 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     "ruler.",
 )
 @click.option(
-    "--n-stations", "n_stations", default=None, type=int,
+    "--n-stations", "n_stations", default=None, type=click.IntRange(min=1),
     help="Draw a station population of this width from the batch's eligible pool "
     "(experiments.lib.universe, gated on every outer fold's real val window) instead of "
     "grading at the five-station default (fps-916). Mirrors "
