@@ -189,12 +189,31 @@ on sign, r = 0.704, intervals overlap). Full write-up and the numbers behind eve
 
 **Two things anyone touching candidate evaluation before this lands needs to know:**
 
-1. **The noise floor is still five-station, and `noise_floor.json` does not record that.**
-   Every identity axis is stamped and refused on by `dossier_tables._bank_admissibility`
-   — `baseline_fingerprint`, `tank_params`, `null_method`, arity, `partial` — except
-   population. Grading a broad-population delta against the extant five-station band flips
-   `tgp_cycle_displacement` from pass to fail (z −1.544 vs −2.330), silently. Sequence is
-   `fps-916` (stamp + refuse) → `fps-ajs` (recompute at 410, 40 draws, ~11h), blocking dep set.
+1. **`fps-916` landed: `station_population` is now stamped and refused on, same as every
+   other identity axis.** `noise_floor.py` stamps a `count:hash` population identity into
+   `noise_floor.json` — `experiments.lib.universe.station_codes_digest` over the ACTUAL
+   station codes a run replayed, on BOTH the five-station default and a `--n-stations`-drawn
+   population (a single hash namespace is the point: an earlier draft used
+   `eligible_pool_digest` for the sampled case, but that hashes the SPEC'S GATED POOL, not the
+   drawn subset — it never reads `spec.n`/`spec.seed` at all, so two different `--n-stations`
+   widths drawn from an unchanged pool stamped the identical digest, defeating the axis;
+   caught in review before merge). `eligible_pool_digest` is still computed and stamped
+   alongside as a separate, PROVENANCE-only field (`station_universe_pool_digest`) — the
+   DB-vintage signal it was designed for, just no longer doing double duty as the grading
+   identity. `dossier_tables._bank_admissibility` refuses grading a run against a floor whose
+   population doesn't match, gated by the same `check_fingerprint` `refuse_narrow_arity`
+   already uses on the canonical path (unconditional on the sibling path) — no "wider is only
+   harder" direction exists for population the way it does for arity, so there's no strictness
+   level to relax within that gate. Carries its own `reason_code`
+   (`NOISE_BAND_REFUSAL_POPULATION`), mirroring arity's `dossier.md` carve-out: a
+   population-mismatched run is NOT a rejection, it completed and graded fine and becomes a
+   real measurement once the right floor exists — without the carve-out it would fall through
+   to `outcome: rejected` and stamp dead ground the moment fps-ajs lands the 410 floor. An
+   absent key on either side reads as the five-station default (via `.get(key, DEFAULT)`, not
+   `.get(key) or DEFAULT` — the latter would silently promote an explicit `null` too), so every
+   floor committed before this axis existed keeps grading exactly as it does today. **The
+   noise floor itself is still five-station** — this stamps and guards the axis, it does not
+   move it. Next: `fps-ajs` (recompute at 410, 40 draws, ~11h), blocking dep set.
 2. **Run those BEFORE any new pass/fail grading** — notably `fps-490` (locked-block ablation).
    Block *rankings* survive a ruler change; pass/fail calls do not.
 

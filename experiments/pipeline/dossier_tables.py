@@ -77,6 +77,7 @@ from experiments.lib.flips import (
     summarise_regret,
 )
 from experiments.lib.io import current_git_sha, to_jsonable
+from experiments.lib.universe import station_codes_digest
 from experiments.lib.zones import assign_regime, pooled_cpl
 
 # FROZEN_DB_FILENAME is batch_freeze's artifact to name (it writes the clone); runner.py and
@@ -94,6 +95,7 @@ from experiments.pipeline.runner import (
     read_run_status,
 )
 from fuel_signal import db as _db
+from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.dates import date_from_int
 from fuel_signal.fill import MAX_GAP_FILL_DAYS
 from fuel_signal.score_phase2 import threshold_sweep
@@ -127,14 +129,25 @@ NULL_METHOD_PLACEBO_PINNED_COLUMN = "placebo_column_pinned_source"
 #: KIND of unavailability instead of pattern-matching the prose `reason` (fps-3jj.17's rule:
 #: the ledger outcome is mechanical, never a 05:06 judgement call).
 #:
-#: Only the arity case carries a code today, and that asymmetry is the point rather than an
+#: The arity and station_population cases carry a code; every other refusal falls through to
+#: dossier.md's default `outcome: rejected`, and that asymmetry is the point rather than an
 #: oversight. `docs/routines/dossier.md` maps `available: false` to `outcome: rejected`, which
 #: is defensible for the pre-existing refusals (a batch with no floor at all has no ruler and
-#: never will without human action) but is WRONG for this one: the run itself completed and
-#: graded fine, and building the right-arity ruler turns it into a real measurement. Writing
-#: `rejected` there would stamp dead ground onto a candidate nothing has measured — the exact
-#: harm fps-3jj.17 exists to prevent. See dossier.md Step 1.4's arity carve-out.
+#: never will without human action) but is WRONG for these two: the run itself completed and
+#: graded fine, and computing the right ruler (right arity, or right population) turns it into
+#: a real measurement. Writing `rejected` there would stamp dead ground onto a candidate
+#: nothing has measured — the exact harm fps-3jj.17 exists to prevent. See dossier.md Step
+#: 1.4's carve-outs.
 NOISE_BAND_REFUSAL_ARITY = "floor_arity_below_run"
+
+#: fps-916 (review of PR #362): same carve-out shape as arity above, for the same reason — a
+#: population-mismatched run graded fine, and the floor that would grade it PROPERLY just
+#: hasn't been computed yet at this run's own population. Without this code the refusal falls
+#: through to dossier.md's default `outcome: rejected`, which is exactly wrong the moment
+#: fps-ajs lands the 410-station floor while runner.py still stamps no population on the run
+#: side: every batch1 candidate would be written up as rejected on a ruler mismatch nothing
+#: measured, rather than left in the dossier queue until the right floor exists.
+NOISE_BAND_REFUSAL_POPULATION = "station_population_mismatch"
 
 #: RETIRED (fps-3jj.25). There was briefly a second arity refusal, `run_arity_above_cap`, for a
 #: candidate wider than a `placebo.MAX_RULER_ARITY` constant. Both are gone: the cap made the
@@ -1005,6 +1018,15 @@ def _resolve_effective_n_draws(noise_floor: dict, *, nominal: int) -> float:
 #: accumulate by design). fps-30p: read them all.
 NOISE_FLOOR_GLOB = "noise_floor*.json"
 
+#: fps-916: the identity `station_population` reads as when the key is ABSENT — on
+#: either side of the comparison. Every floor committed before this axis existed (and
+#: every run graded by `runner.py` today, which has no CLI path to override
+#: `station_codes`) was in fact five-station, so an absent key must resolve to exactly
+#: this rather than being refused as "cannot be shown to match" — the same treatment
+#: `n_placebo_columns` gets (`floor_arity = int(bank.get("n_placebo_columns", 1))`): a
+#: pre-existing floor reads as the value it always in fact was, not as a mismatch.
+DEFAULT_STATION_POPULATION = station_codes_digest(PREFERRED_STATIONS)
+
 
 def _band_std_usable(deltas: np.ndarray, band_std: float) -> bool:
     """True iff `band_std` (an `np.std(deltas, ddof=1)`) is a real, positive ruler.
@@ -1029,11 +1051,13 @@ def _bank_admissibility(
     refuse_identity_mismatch: bool,
     refuse_null_method_mismatch: bool,
     refuse_narrow_arity: bool,
+    refuse_population_mismatch: bool,
 ) -> dict:
     """Everything that decides "is this bank usable" BEFORE its band statistics are computed:
-    identity (`baseline_fingerprint`, `tank_params`), `null_method`, arity, and `partial`
-    (fps-1x5 — the one place `_noise_band` and `_comparable_noise_banks` both decide this,
-    replacing two independently-written copies that had already diverged once, fps-tnz).
+    identity (`baseline_fingerprint`, `tank_params`), `null_method`, arity, `station_population`
+    (fps-916), and `partial` (fps-1x5 — the one place `_noise_band` and `_comparable_noise_banks`
+    both decide this, replacing two independently-written copies that had already diverged
+    once, fps-tnz).
 
     Strictness is a parameter per axis because the two callers deliberately disagree on it —
     see their own docstrings for why. `refuse_identity_mismatch` mirrors `_noise_band`'s own
@@ -1045,16 +1069,27 @@ def _bank_admissibility(
     promoting to canonical (fps-awz vs fps-30p). `refuse_narrow_arity` only ever refuses a
     floor NARROWER than the run; a floor at or above the run's arity is always admissible and
     always disclosed via `arity_exceeds_run`/`arity_excess` on both paths, because a wider
-    ruler can only raise the bar (fps-3jj.14/fps-3jj.25).
+    ruler can only raise the bar (fps-3jj.14/fps-3jj.25). `refuse_population_mismatch` follows
+    `refuse_narrow_arity`'s OWN gating (`check_fingerprint` on the canonical path, unconditional
+    on the sibling path) for the same reason: retrospective.py's dummy `results` has no real
+    population to compare against either. Unlike arity, though, there is no strictness LEVEL
+    to relax within that gate — a differently-populated band has no "can only raise the bar"
+    direction — a five-station band and a 410-station band are simply two different measurements, and
+    `tgp_cycle_displacement` on batch1 clears the five-station bar (z −2.330) while failing the
+    same candidate against the broad one (z −1.544) purely from the yardstick. A sibling bank
+    computed over a mismatched population corroborates nothing, so `_comparable_noise_banks`
+    refuses it rather than disclosing it the way it discloses a narrower arity or a different
+    null_method.
 
     Returns `{"ok": True, "floor_arity", "arity_exceeds_run", "arity_excess",
     "narrower_than_run"}` when admissible. Returns `{"ok": False, "axis", "floor_value",
-    "run_value"}` — one of "baseline_fingerprint" / "null_method" / "tank_params" / "arity" /
-    "partial" — naming which check failed, for the caller to build its OWN (differently
-    worded — canonical is actionable-and-verbose, siblings are terse) refusal message from.
-    Message text is deliberately NOT unified here: the two callers' readers are different
-    (an unattended dossier session pasting canonical's reason into a README vs. a batch-level
-    corroboration listing), and forcing one wording onto both was never asked for by fps-1x5.
+    "run_value"}` — one of "baseline_fingerprint" / "null_method" / "tank_params" /
+    "station_population" / "arity" / "partial" — naming which check failed, for the caller to
+    build its OWN (differently worded — canonical is actionable-and-verbose, siblings are
+    terse) refusal message from. Message text is deliberately NOT unified here: the two
+    callers' readers are different (an unattended dossier session pasting canonical's reason
+    into a README vs. a batch-level corroboration listing), and forcing one wording onto both
+    was never asked for by fps-1x5.
     """
     null_method = bank.get("null_method")
     # NOT `... or 1` (review of PR #349) — that would silently promote a bank explicitly
@@ -1080,6 +1115,24 @@ def _bank_admissibility(
         run_tank_params = run_meta.get("tank_params")
         if floor_tank_params is None or floor_tank_params != run_tank_params:
             return {"ok": False, "axis": "tank_params", "floor_value": floor_tank_params, "run_value": run_tank_params}
+
+    if refuse_population_mismatch:
+        # `.get(key, DEFAULT)`, not a refusal on absence (unlike fingerprint/tank_params
+        # above): every floor and every run graded before this axis existed was in fact
+        # five-station (no CLI/caller path ever overrode `station_codes` in practice), so
+        # a MISSING key reads as what it always in fact was — the same "absent reads as
+        # the historical default" treatment `n_placebo_columns` gets from `floor_arity`
+        # above. `.get(key, DEFAULT)`, NOT `.get(key) or DEFAULT` (review of PR #362, the
+        # same `... or 1` mistake fps-3jj.14's arity guard already rejected two lines up):
+        # `or` would silently promote an explicit `null`/`""` into the five-station default
+        # too, not just a genuinely missing key.
+        floor_population = bank.get("station_population", DEFAULT_STATION_POPULATION)
+        run_population = run_meta.get("station_population", DEFAULT_STATION_POPULATION)
+        if floor_population != run_population:
+            return {
+                "ok": False, "axis": "station_population",
+                "floor_value": floor_population, "run_value": run_population,
+            }
 
     if refuse_narrow_arity and run_arity > floor_arity:
         return {"ok": False, "axis": "arity", "floor_value": floor_arity, "run_value": run_arity}
@@ -1193,6 +1246,7 @@ def _comparable_noise_banks(
             refuse_identity_mismatch=True,
             refuse_null_method_mismatch=False,
             refuse_narrow_arity=False,
+            refuse_population_mismatch=True,
         )
         if not admiss["ok"]:
             if admiss["axis"] == "partial":
@@ -1283,6 +1337,7 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
         refuse_identity_mismatch=check_fingerprint,
         refuse_null_method_mismatch=True,
         refuse_narrow_arity=check_fingerprint,
+        refuse_population_mismatch=check_fingerprint,
     )
     if not admiss["ok"]:
         axis, floor_value, run_value = admiss["axis"], admiss["floor_value"], admiss["run_value"]
@@ -1361,6 +1416,35 @@ def _noise_band(results: dict, batch_dir: pathlib.Path | None, *, check_fingerpr
                 f"this run's ({run_value!r}) — the floor was computed at a different cadence "
                 "(or predates tank_params entirely) and does not grade this run. Recompute with "
                 "`PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> --force`.",
+            }
+        if axis == "station_population":
+            # fps-916: same failure class as baseline_fingerprint/tank_params above — a
+            # floor measuring a DIFFERENT population from the one this run replayed — but
+            # unlike those two (and like arity) the run itself is NOT wrong: it completed
+            # and graded fine, and computing the right floor turns it into a real
+            # measurement rather than leaving it permanently ungradeable. Carries
+            # NOISE_BAND_REFUSAL_POPULATION for exactly that reason (review of PR #362) —
+            # without it this falls through to dossier.md's default `outcome: rejected`,
+            # which would stamp dead ground onto every batch1 candidate the moment fps-ajs
+            # lands the 410-station floor while runner.py still stamps no population on the
+            # run side. Unlike arity there is no "wider is only harder" direction to fall
+            # back on: a five-station band and a 410-station band are simply two different
+            # rulers. tgp_cycle_displacement on batch1 clears the five-station bar (z −2.330)
+            # and fails the broad(410) one (z −1.544) for the same candidate, purely from the
+            # yardstick — the flip this axis exists to prevent from happening silently.
+            return {
+                "available": False,
+                "reason_code": NOISE_BAND_REFUSAL_POPULATION,
+                "reason": f"noise_floor.json's station_population ({floor_value!r}) does not "
+                f"match this run's ({run_value!r}) — the floor was computed over a different "
+                "station population and does not grade this run: the same candidate can clear "
+                "a five-station band and fail a broad one from the yardstick alone (fps-916). "
+                "Recompute the floor at this run's own population: `PYTHONPATH=. uv run python "
+                "-m experiments.pipeline.noise_floor <batch> --force` for the five-station "
+                "default, or add `--n-stations <n>` to match a broader run. This run is NOT "
+                "rejected and must not be written up as such — it completed and graded fine, "
+                "and becomes a real measurement once a matching-population floor exists. Leave "
+                "it in the dossier queue (write no README.md, no ledger entry) until then.",
             }
         if axis == "arity":
             # fps-3jj.14: same failure class as baseline_fingerprint, null_method and

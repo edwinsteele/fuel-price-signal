@@ -82,6 +82,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sqlite3
 import time
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -90,7 +91,14 @@ import click
 
 from experiments.lib.constants import SEEDS
 from experiments.lib.io import current_git_sha, to_jsonable
-from experiments.lib.realised import ArmSpec, BaselineCache, run_paired_realised_backtest
+from experiments.lib.realised import ArmSpec, BaselineCache, _plan_folds, run_paired_realised_backtest
+from experiments.lib.universe import (
+    UniverseSpec,
+    draw_universe,
+    eligible_stations,
+    station_codes_digest,
+    station_pool_digest,
+)
 from experiments.pipeline.batch_freeze import (
     BASELINE_COLUMNS_FILENAME,
     DEFAULT_BATCHES_DIR,
@@ -118,6 +126,7 @@ from experiments.pipeline.runner import (
     _make_lookup_provider,
 )
 from fuel_signal.backtest import TankParams, format_tank_params
+from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.features import baseline_fingerprint, load_features
 
 BASELINE_ARM_NAME = "baseline"
@@ -135,6 +144,12 @@ DEFAULT_N_DRAWS = 20
 PLACEBO_SEED_DEFAULT: int = SEEDS[0]
 
 FIT_STABILITY_FILENAME = "fit_stability.json"
+
+# Same value experiments/2026-09-05_arbiter_universe_width/{timing,homogeneity}.py draw
+# with — not load-bearing to match (the digest reads the ACTUAL drawn codes, not the seed),
+# but keeping it in step means a --n-stations run here draws the identical universe those
+# scripts already measured, rather than a fresh, unvetted sample of the same width.
+UNIVERSE_SEED = 20260905
 
 # Enforced bound on each draw's self_correlation self-check (see the draw loop below): the
 # largest |correlation| a placebo may retain with the column it was built from.
@@ -221,6 +236,8 @@ def compute_noise_floor(
     inner_fold_params: dict | None = None,
     fold_subset: Iterable[int] | None = None,
     station_codes: list[int] | None = None,
+    station_universe_spec: dict | None = None,
+    station_universe_pool_digest: str | None = None,
     tank: TankParams | None = None,
     out_name: str = NOISE_FLOOR_FILENAME,
     same_source_columns: list[str] | None = None,
@@ -259,6 +276,28 @@ def compute_noise_floor(
     sensitivity, not a replacement ruler, so it is written beside the real one under its own
     name (e.g. `noise_floor_k3.json`) rather than forcing over it — `--force` on the default
     name destroys the floor every dossier so far was graded against.
+
+    station_codes (fps-916): was already threaded to `run_paired_realised_backtest` (None
+    resolves to `fuel_signal.config.PREFERRED_STATIONS` there) but never stamped into the
+    payload — every floor computed so far was in fact five-station, and nothing recorded
+    that. Stamped as `station_population`: `experiments.lib.universe
+    .station_codes_digest(station_codes or PREFERRED_STATIONS)`, a `count:hash` identity
+    over the ACTUAL codes, not just a count — a bare count can't tell a five-station
+    population from a different five-station population, and `dossier_tables
+    ._bank_admissibility` refuses grading a run against a floor whose `station_population`
+    doesn't match (fps-916). An absent key on either side reads as the five-station default,
+    so every floor committed before this axis existed keeps grading exactly as it does today.
+
+    `station_codes_digest` is used for `station_population` on BOTH the five-station default
+    and the CLI's `--n-stations`-drawn path — a single namespace is the point (review of PR
+    #362 finding 1b: `eligible_pool_digest` hashes a spec's whole GATED POOL, which is not
+    only a different hash construction but is also blind to `spec.n`/`spec.seed` entirely, so
+    two different `--n-stations` widths drawn from an unchanged pool would stamp the IDENTICAL
+    digest under it — the exact cross-population admission this axis exists to prevent).
+    `station_universe_spec` / `station_universe_pool_digest` are separate, PURELY
+    informational provenance fields the CLI passes through when it drew a sampled
+    population (`spec.as_dict()` and `station_pool_digest`/`eligible_pool_digest` respectively)
+    — neither is read by `_bank_admissibility`; both are None for the five-station default.
 
     tank (fps-15c): the TankParams every draw runs at, and the cadence stamped into the
     payload's `tank_params`. None (default) resolves to `TankParams()` — the canonical
@@ -498,6 +537,16 @@ def compute_noise_floor(
         # it in fact was, so an existing committed floor keeps grading 1-column candidates
         # and only stops grading multi-column ones.
         "n_placebo_columns": arity,
+        # fps-916: `count:hash` identity of the population every draw actually replayed —
+        # see this function's docstring for why a hash rather than a bare station count.
+        # A floor with no such key at all (pre-fps-916) reads as the five-station default in
+        # dossier_tables._bank_admissibility, which is what every one of them in fact was.
+        "station_population": station_codes_digest(station_codes or PREFERRED_STATIONS),
+        # Provenance ONLY (review of PR #362) — never read by _bank_admissibility. None for
+        # the five-station default; the CLI's --n-stations fills these in from the
+        # UniverseSpec it drew station_codes from.
+        "station_universe_spec": station_universe_spec,
+        "station_universe_pool_digest": station_universe_pool_digest,
         # Declared columns that are entirely NaN in the frozen frame, so the screen can never
         # accept them. NOT the full set of screen failures (a column can also fail on
         # correlation); this is the structural subset, which is what bounds the draw pool.
@@ -572,6 +621,8 @@ def compute_fit_stability_diagnostic(
     inner_fold_params: dict | None = None,
     fold_subset: Iterable[int] | None = None,
     station_codes: list[int] | None = None,
+    station_universe_spec: dict | None = None,
+    station_universe_pool_digest: str | None = None,
     tank: TankParams | None = None,
     force: bool = False,
     verbose: bool = True,
@@ -672,6 +723,15 @@ def compute_fit_stability_diagnostic(
         "null_method": "seed_swap",
         "seeds_a": list(seeds_a),
         "seeds_b": list(seeds_b),
+        # fps-916: same identity `compute_noise_floor` stamps — informational here too
+        # (nothing grades this diagnostic against a run the way noise_floor.json is), but
+        # matching the sibling artifact keeps a human reading both files unsurprised.
+        "station_population": station_codes_digest(station_codes or PREFERRED_STATIONS),
+        # Provenance ONLY (review of PR #362) — never read by _bank_admissibility. None for
+        # the five-station default; the CLI's --n-stations fills these in from the
+        # UniverseSpec it drew station_codes from.
+        "station_universe_spec": station_universe_spec,
+        "station_universe_pool_digest": station_universe_pool_digest,
         "fold_subset": list(fold_subset) if fold_subset is not None else None,
         "partial": fold_subset is not None,
         "computed_at": datetime.now(timezone.utc).isoformat(),
@@ -767,10 +827,24 @@ def _parse_fold_subset(value: str | None) -> list[int] | None:
     "was graded against the noise floor — only pass this if you intend to replace that "
     "ruler.",
 )
+@click.option(
+    "--n-stations", "n_stations", default=None, type=click.IntRange(min=1),
+    help="Draw a station population of this width from the batch's eligible pool "
+    "(experiments.lib.universe, gated on every outer fold's real val window) instead of "
+    "grading at the five-station default (fps-916). Mirrors "
+    "experiments/2026-09-05_arbiter_universe_width/homogeneity.py's own draw — same "
+    "seed, same window construction — so this CLI reproduces the population that "
+    "script already measured rather than an unvetted new sample of the same width. "
+    "Stamped into the floor as `station_population` (a hash of the ACTUAL drawn codes, "
+    "same identity the five-station default uses — not a hash of the eligible pool, which "
+    "would not distinguish two different --n-stations widths drawn from it), so a run "
+    "graded against a differently-populated floor is refused rather than silently "
+    "mismatched.",
+)
 def main(
     batch_name: str, batches_dir: str, n_draws: int, arity: int, out_name: str,
     same_source_column: tuple[str, ...], fit_stability: bool, fold_subset: str | None,
-    force: bool,
+    force: bool, n_stations: int | None,
 ) -> None:
     """Compute and persist the noise-floor calibration for an already-frozen batch."""
     batch_dir = pathlib.Path(batches_dir) / batch_name
@@ -783,19 +857,59 @@ def main(
             "--same-source-column has no meaning with --fit-stability: that diagnostic swaps "
             "SEEDS on the unchanged baseline and adds no placebo column to pin. Drop one."
         )
+
+    station_codes: list[int] | None = None
+    station_universe_spec: dict | None = None
+    station_universe_pool_digest: str | None = None
+    if n_stations is not None:
+        # Real val windows, not the span envelope: a span-level gate lets through a station
+        # that's dark for one whole fold (experiments.lib.universe.UniverseSpec's own
+        # docstring — 189/599 on batch1), and aggregate_backtest skips such a cell silently.
+        frame = load_features(batch_dir / "features.csv")
+        windows = tuple((p.val_start, p.val_end) for p in _plan_folds(frame, {}, None))
+        spec = UniverseSpec(
+            n=n_stations, seed=UNIVERSE_SEED,
+            start_date=windows[0][0], end_date=windows[-1][1], windows=windows,
+        )
+        conn = sqlite3.connect(batch_dir / FROZEN_DB_FILENAME)
+        try:
+            # eligible_stations called ONCE and reused for both the draw and the pool
+            # digest (review of PR #362) — sample_station_universe + a separate
+            # eligible_pool_digest call each ran their own full gated-pool + per-window
+            # coverage scan against the same conn/spec.
+            eligible = eligible_stations(conn, spec)
+            station_codes = draw_universe(eligible, n=n_stations, seed=UNIVERSE_SEED)
+            # Provenance only (review of PR #362 finding 1a): this is the digest of the
+            # ELIGIBLE POOL the spec's gates admit, not of `station_codes` itself — it does
+            # NOT vary with n_stations, so it cannot serve as the grading identity (that's
+            # `station_population` below, from the actual drawn codes). It still answers "did
+            # the pool this was drawn from move under fill.py rebuilding daily_prices".
+            station_universe_pool_digest = station_pool_digest(eligible)
+        finally:
+            conn.close()
+        station_universe_spec = spec.as_dict()
+
     if fit_stability:
-        compute_fit_stability_diagnostic(batch_dir, fold_subset=subset, force=force)
+        compute_fit_stability_diagnostic(
+            batch_dir, fold_subset=subset, force=force,
+            station_codes=station_codes, station_universe_spec=station_universe_spec,
+            station_universe_pool_digest=station_universe_pool_digest,
+        )
         click.echo(f"Wrote fit-stability diagnostic for batch '{batch_name}' -> {batch_dir / FIT_STABILITY_FILENAME}")
         return
     compute_noise_floor(
         batch_dir, n_draws=n_draws, arity=arity, out_name=out_name,
         same_source_columns=list(same_source_column) or None,
         fold_subset=subset, force=force,
+        station_codes=station_codes, station_universe_spec=station_universe_spec,
+        station_universe_pool_digest=station_universe_pool_digest,
     )
     what = (
         f"texture-ICC diagnostic (pinned to {', '.join(same_source_column)}; NOT a grading ruler)"
         if same_source_column else f"noise floor (arity {arity})"
     )
+    if n_stations is not None:
+        what += f", {n_stations}-station population"
     click.echo(f"Wrote {what} for batch '{batch_name}' -> {batch_dir / out_name}")
 
 

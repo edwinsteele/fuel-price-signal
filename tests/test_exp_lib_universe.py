@@ -31,6 +31,8 @@ from experiments.lib.universe import (
     eligible_stations,
     gate_failures,
     sample_station_universe,
+    station_codes_digest,
+    station_pool_digest,
 )
 from fuel_signal.db import (
     create_schema,
@@ -568,6 +570,61 @@ class TestPoolDigest:
         after = eligible_pool_digest(conn, _spec())
         assert before != after
         assert before.startswith("1:") and after.startswith("1:")
+
+    def test_is_blind_to_n_and_seed_by_design(self, conn):
+        """Named explicitly (fps-916 review, PR #362 finding 1a) so nobody mistakes this
+        for an identity a specific --n-stations DRAW can be checked against:
+        eligible_stations, which this hashes, never reads spec.n/spec.seed at all — only
+        draw_universe does. Two different widths sampled from the SAME unchanged pool
+        stamp the IDENTICAL digest here. Use station_codes_digest on the actual drawn
+        codes for a width-sensitive identity; this function is DB-vintage provenance for
+        the pool a draw came FROM, never a stand-in for what was actually drawn.
+        """
+        _seed_pool(conn, {PC_PARRAMATTA: 5})
+        small = _spec(n=2, seed=1)
+        large = _spec(n=5, seed=99)
+        assert eligible_pool_digest(conn, small) == eligible_pool_digest(conn, large)
+
+    def test_matches_station_pool_digest_on_the_same_pool(self, conn):
+        _seed_pool(conn, {PC_PARRAMATTA: 3})
+        spec = _spec()
+        assert eligible_pool_digest(conn, spec) == station_pool_digest(
+            eligible_stations(conn, spec)
+        )
+
+
+# ---------------------------------------------------------------------------
+# station_codes_digest (fps-916)
+# ---------------------------------------------------------------------------
+
+class TestStationCodesDigest:
+    """A pure function of the codes themselves — no DB access, no gates. Unlike
+    `eligible_pool_digest`, this is the right tool for a FIXED/declared population (the
+    five preferred stations) that may not itself pass a spec's eligibility gates.
+    """
+
+    def test_is_a_pure_function_of_the_codes(self):
+        assert station_codes_digest([3, 1, 2]) == station_codes_digest([1, 2, 3])
+
+    def test_moves_when_the_codes_move(self):
+        assert station_codes_digest([1, 2, 3]) != station_codes_digest([1, 2, 4])
+
+    def test_shape_matches_eligible_pool_digest(self):
+        digest = station_codes_digest([1, 2, 3])
+        count, _, hex_part = digest.partition(":")
+        assert count == "3"
+        assert len(hex_part) == 12
+        int(hex_part, 16)  # raises ValueError if not hex
+
+    def test_moves_with_count_alone(self):
+        """Two same-length station_codes digests can coincide only by hash collision, but
+        two DIFFERENT-length ones can never coincide — the count prefix alone separates
+        them, which is what makes '5:...' vs '410:...' distinguishable at a glance."""
+        five = station_codes_digest([1, 2, 3, 4, 5])
+        four = station_codes_digest([1, 2, 3, 4])
+        assert five.split(":")[0] == "5"
+        assert four.split(":")[0] == "4"
+        assert five != four
 
 
 # ---------------------------------------------------------------------------

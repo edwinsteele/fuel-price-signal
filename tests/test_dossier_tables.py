@@ -49,7 +49,8 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
                    tank_params: str | None = "50/3.571/7d/10%",
                    effect_delta_cpl_held: float = -0.05,
                    omit_shock_folds: bool = False,
-                   realised_deltas: list[dict] | None = None) -> dict:
+                   realised_deltas: list[dict] | None = None,
+                   station_population: str | None = None) -> dict:
     meta = {
         "batch_dir": str(batch_dir), "seeds": [42, 43, 44], "realised_seed": 42,
         "n_windows": 4, "realised_wall_seconds": 12.3, "wall_seconds": 20.0,
@@ -59,6 +60,12 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
         "n_baseline_columns": 54, "baseline_fingerprint": "54:deadbeef1234",
         "tank_params": tank_params,
     }
+    # station_population (fps-916) is a real results.json field only once runner.py grows
+    # a --n-stations equivalent (out of this bead's scope) — omitted by default here to
+    # match every results.json this repo has ever actually written, the same "field
+    # omitted, not present-but-null" treatment shock_folds gets above.
+    if station_population is not None:
+        meta["station_population"] = station_population
     if not omit_shock_folds:
         # A results.json predating fps-3tu's shock-fold field simply never had the key —
         # not present-but-null — so the legacy-path fixture omits it entirely rather than
@@ -165,6 +172,7 @@ def _write_run(
     tank_params: str | None = "50/3.571/7d/10%", fills_df: pd.DataFrame | None = None,
     effect_delta_cpl_held: float = -0.05, omit_shock_folds: bool = False,
     realised_deltas: list[dict] | None = None,
+    station_population: str | None = None,
 ) -> tuple[pathlib.Path, pathlib.Path]:
     batch_dir = tmp_path / "batch1"
     batch_dir.mkdir(exist_ok=True)
@@ -181,6 +189,7 @@ def _write_run(
         batch_dir, status=status, target=target, inputs=inputs, columns=columns,
         tank_params=tank_params, effect_delta_cpl_held=effect_delta_cpl_held,
         omit_shock_folds=omit_shock_folds, realised_deltas=realised_deltas,
+        station_population=station_population,
     )
     (run_dir / dt.RESULTS_FILENAME).write_text(json.dumps(results))
     if status == "graded":
@@ -2329,7 +2338,7 @@ def test_mechanism_family_survives_into_facts(tmp_path):
 
 # ── noise-band arity guard (fps-3jj.14) ───────────────────────────────────────
 
-def _floor_with(arity=None, n=20):
+def _floor_with(arity=None, n=20, station_population=None):
     deltas = list(np.random.default_rng(7).normal(0, 0.02, size=n))
     payload = {
         "deltas_cpl_held": deltas, "baseline_fingerprint": "54:deadbeef1234",
@@ -2337,6 +2346,8 @@ def _floor_with(arity=None, n=20):
     }
     if arity is not None:
         payload["n_placebo_columns"] = arity
+    if station_population is not None:
+        payload["station_population"] = station_population
 
     def _write(batch_dir):
         (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps(payload))
@@ -2598,6 +2609,114 @@ def test_noise_band_treats_a_floor_with_no_arity_key_as_arity_1(tmp_path):
     multi_band = dt.build_facts(multi)["noise_band"]
     assert multi_band["available"] is False
     assert "1-column null" in multi_band["reason"]
+
+
+# ── noise-band station-population guard (fps-916) ─────────────────────────────
+
+def test_noise_band_treats_a_floor_with_no_population_key_as_five_station(tmp_path):
+    """Every floor committed before this axis existed — and every run graded by
+    runner.py today, which has no CLI path to override station_codes — was in fact
+    five-station. An absent key on EITHER side must read as that default rather than
+    being refused as 'cannot be shown to match' (the fingerprint treatment), the same
+    way an absent n_placebo_columns reads as arity 1."""
+    run_dir, _ = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with())
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is True
+
+
+def test_noise_band_refuses_a_wide_population_run_against_a_five_station_floor(tmp_path):
+    """The measured scenario fps-916 exists to catch: tgp_cycle_displacement on batch1
+    clears the five-station band (z -2.330) and fails the SAME candidate against a
+    broad(410) band (z -1.544) — same feature, opposite verdict, from the yardstick
+    alone. A run stamped with a non-default population must not be silently graded
+    against a floor that defaults to five-station."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a"], batch_extras=_floor_with(),
+        station_population="410:4a9920301726",
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert "station_population" in band["reason"]
+    # fps-916 review: this run is NOT a rejection — it completed and graded fine, and
+    # becomes a real measurement once the matching-population floor exists. Without this
+    # code the refusal falls through to dossier.md's default outcome: rejected, which
+    # would stamp dead ground the instant fps-ajs lands the 410 floor.
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_POPULATION
+    assert "NOT rejected" in band["reason"]
+
+
+def test_noise_band_refuses_a_five_station_run_against_a_wide_floor(tmp_path):
+    """Mirror image: a floor explicitly computed at a broad population must not grade a
+    run that never declared one (and therefore defaults to five-station)."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a"],
+        batch_extras=_floor_with(station_population="410:4a9920301726"),
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is False
+    assert "station_population" in band["reason"]
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_POPULATION
+
+
+def test_noise_band_treats_an_explicit_null_population_as_absent_not_five_station(tmp_path):
+    """review of PR #362: `.get(key, DEFAULT)`, not `.get(key) or DEFAULT` — the latter
+    would silently promote an explicit `null` into the five-station default too, the same
+    `... or 1` mistake PR #349's review already rejected for arity two lines away in the
+    source. A floor stamping `station_population: null` (as opposed to omitting the key
+    entirely) must therefore NOT be treated as the five-station default it would read as
+    under `or`."""
+    run_dir, batch_dir = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with())
+    payload = json.loads((batch_dir / dt.NOISE_FLOOR_FILENAME).read_text())
+    payload["station_population"] = None
+    (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps(payload))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    # None != DEFAULT_STATION_POPULATION (a real hash string), so this must refuse —
+    # `.get(key) or DEFAULT` would instead have let it through as `available: True`.
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_POPULATION
+
+
+def test_noise_band_allows_a_run_and_floor_declaring_the_same_wide_population(tmp_path):
+    """Not a hard-coded refusal of anything non-default — a matching DECLARED population
+    on both sides must grade cleanly, same as the five-station default does."""
+    run_dir, _ = _write_run(
+        tmp_path, columns=["a"],
+        batch_extras=_floor_with(station_population="410:4a9920301726"),
+        station_population="410:4a9920301726",
+    )
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    assert band["available"] is True
+
+
+def test_comparable_noise_banks_refuses_a_mismatched_population(tmp_path):
+    """fps-916: unlike arity or null_method, a differently-populated sibling bank is
+    REFUSED as corroboration, not disclosed — there is no 'wider can only be harder'
+    direction for population, so it cannot safely stand in for anything."""
+    run_dir, batch_dir = _write_run(
+        tmp_path, columns=["a"], batch_extras=_floor_with(),
+    )
+    (batch_dir / "noise_floor_wide.json").write_text(json.dumps({
+        "deltas_cpl_held": list(np.random.default_rng(3).normal(0, 0.02, size=20)),
+        "baseline_fingerprint": "54:deadbeef1234", "tank_params": "50/3.571/7d/10%",
+        "null_method": dt.NULL_METHOD_PLACEBO_COLUMN,
+        "station_population": "410:4a9920301726",
+    }))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+    sibling = next(b for b in band["comparable_banks"] if b["name"] == "noise_floor_wide.json")
+
+    assert sibling["comparable"] is False
+    assert "station_population" in sibling["reason"]
 
 
 def test_noise_band_refuses_a_floor_declaring_zero_placebo_columns(tmp_path):
