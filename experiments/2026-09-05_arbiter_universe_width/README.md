@@ -270,8 +270,17 @@ Two beads carry the fix, in order:
 **What this does not establish** (`reference_negative_results_ledger` shape — `not_tested` is
 the payload):
 
-- Whether the **placebo band** narrows with universe width the way the fold-clustered sd did.
-  Assumed ≈ 2× above; `not_tested`, and it is the whole of `fps-ajs`.
+- ~~Whether the **placebo band** narrows with universe width the way the fold-clustered sd did.
+  Assumed ≈ 2× above; `not_tested`, and it is the whole of `fps-ajs`.~~
+  **Retired 2026-09-06** (`fps-ajs`, `experiments/2026-09-06_noise_floor_n410`): it narrows
+  **1.437× [0.993, 2.198]** at matched arity — less than the ≈2× assumed above, and the
+  interval does not exclude 1×. The broad delta nonetheless clears at **z = −3.330** vs a bar
+  of 1.706, near the ≈−3.1 predicted here but **by the wrong mechanism**: the 410-station
+  placebo null carries a **+0.0561 c/L mean (t = +6.37, p = 1.6e-07)** that five stations does
+  not. Decomposed over the +1.826 of |z| this buys, the mean shift and the narrowing contribute
+  comparably (order-dependent: +1.168/+0.812 vs +0.658/+1.013) — roughly half the improvement
+  comes from an effect this write-up did not hypothesise.
+  Criterion 5 survives. The bank is arity 1 and grades no batch1 candidate.
 - Whether homogeneity holds for **any candidate other than `tgp_cycle_displacement`**. One
   candidate, chosen as the best available signal-to-noise. `not_tested`.
 - Whether the broad and five deltas genuinely **differ in magnitude** (−0.129 vs −0.208).

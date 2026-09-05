@@ -53,6 +53,82 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: methodology -- the PLACEBO BAND's dependence on replay population width (no
+    feature under test; batch1/tgp_cycle_displacement as the specimen). Bank is
+    experiments/batches/batch1/noise_floor_n410.json, written beside the canonical ruler.
+  inputs: [batch1 frozen fuel_signal.db, features.parquet, the 410-station universe spec
+      (pool digest 410:4a9920301726, same sampler as fps-nas), 40 placebo draws x 14 folds]
+  claim: >-
+    From fps-nas, logged there as not_tested and load-bearing for its criterion-5
+    decision: the placebo band narrows with universe width the way the fold-clustered sd
+    did (exactly 1.999x, 0.7982 -> 0.3992, for 102x the decisions). If it narrows ~2x the
+    broad delta of -0.1292 scores ~-3.1 and clears more convincingly than the five-station
+    figure ever did; if it does not narrow, grading on the broad population is strictly
+    harder for no compensating gain and criterion 5 needs revisiting.
+  falsified: >-
+    NARROWING PARTIALLY UPHELD, MAGNITUDE OVERSTATED, AND THE RUN CANNOT SEPARATE THE TWO
+    ENDPOINTS. Same-arity (k=1) comparison, the only clean one: sd 0.0800 (5 stations, 20
+    draws) -> 0.0556 (410 stations, 40 draws) = 1.437x, against the 2.00x assumed. F =
+    2.066 on df (19,39), two-sided p = 0.055, 95% CI on the sd ratio [0.993, 2.198] --
+    which contains BOTH the assumed 2.00x AND 1.00x (no narrowing at all). Paired on the
+    20 source columns both k=1 banks drew, 1.379x. The binding constraint on settling this
+    is now the FIVE-station bank's 20 draws, not the 410 bank's 40; more stations will not
+    help.
+    THE BEAD NOMINATED THE WRONG COMPARATOR: its acceptance criterion cites "the
+    five-station band's 0.0999", which is the ARITY-3 bank (noise_floor.json), while the
+    run defaults to arity 1. 0.0999 -> 0.0556 is 1.796x with arity and width confounded.
+    THE FINDING NOBODY ASKED FOR, and the larger one: AT 410 STATIONS THE PLACEBO NULL IS
+    NOT CENTRED ON ZERO. Band mean +0.0561 c/L, t = +6.37, p = 1.6e-07 -- a full band-sd
+    above zero, where both five-station banks sit on zero (+0.0251, t = +0.79; -0.0089,
+    t = -0.50). A meaningless column COSTS +0.056 c/L on the broad population. Not a
+    column-selection artifact: paired on the 20 shared source columns the shift is +0.0676
+    c/L, t = +2.66, p = 0.015 (texture held, only population changes), and splitting the
+    410 bank into columns the k=1 bank also drew (+0.0588) vs columns only it drew
+    (+0.0534) gives Welch t = +0.30, p = 0.77 -- the shift is in both halves. Consequence:
+    the bar moves from -0.1506 to -0.0388 c/L, +0.1118 EASIER, of which the mean shift
+    supplies +0.0650 and the sd narrowing only +0.0468 -- an EXACT, order-independent split,
+    because bar = mean - z*sd is additive. FOR THE BAR THE MEAN SHIFT IS THE LARGER TERM AND
+    WAS NOBODY'S HYPOTHESIS. Grading is unaffected -- _score_bank already computes
+    (delta - band_mean)/band_std, so no dossier to date is wrong -- but every intuition
+    about where the 410 bar sits is.
+    tgp_cycle_displacement re-graded (NOT dossier-legal, see not_tested): broad -0.1292
+    scores z = -3.330 against a bar of 1.706 and CLEARS, vs z = -1.544 / fails against the
+    extant five-station band. fps-nas predicted ~-3.1 and landed within 7% BY THE WRONG
+    ROUTE: decomposing the +1.826 of |z| between grading the broad delta on the five-station
+    k=1 band (-1.504) and on the 410 band (-3.330), the mean shift contributes +1.168 taking
+    sd first and +0.812 taking mean first, the narrowing +0.658 and +1.013. z IS A RATIO, SO
+    THE SPLIT IS ORDER-DEPENDENT AND NEITHER TERM IS DOMINANT -- averaging the orders gives
+    ~+0.99 to the mean shift and ~+0.84 to the narrowing. The defensible claim is the weaker
+    one: roughly half the improvement comes from an effect not in the hypothesis. (Unlike the
+    bar, which is additive and splits exactly.) The criterion-5 decision survives.
+  not_tested: >-
+    BLOCKED on a further ~11.8h run per arity: THE BANK GRADES NO batch1 CANDIDATE. It is
+    arity 1 (DEFAULT_PLACEBO_ARITY; no --arity was passed, and the bead's command did not
+    name one) while every batch1 candidate is arity 2 or 3, and _noise_band refuses a floor
+    narrower than the run. Verified by calling _bank_admissibility directly on all five
+    candidates, not read off the source: as committed all five refuse on station_population
+    (fps-916 working as designed -- five-station runs must not be graded against a
+    410-station band), and if re-run at 410 all five refuse on arity. A usable broad ruler
+    needs --arity 2 at minimum. MEASURABLE NOW, needs draws not stations: whether the
+    narrowing is 1x or 2x -- the CI [0.993, 2.198] is wide because the FIVE-station k=1
+    bank has only 20 draws; deciding it means more draws on the narrow side.
+    POST HOC AND UNTESTED: the offered mechanism for the mean shift (a noise column
+    perturbs which station the strategy picks, and picking wrongly among 410 costs more
+    than among 5, where there is less price dispersion to lose). It is a reading of an
+    unpredicted result, not a tested claim, and nothing here distinguishes it from
+    alternatives. MEASURABLE NOW: whether the mean shift is monotone in universe width
+    (a bank at an intermediate n would say), and whether it survives at arity > 1.
+  outcome: inconclusive
+  calibration: >-
+    All three banks compared share baseline_fingerprint 54:1a6ec2d84a69, tank_params
+    50/3.571/1d/10%, null_method placebo_column, and all 14 windows with partial: false --
+    population and arity are the only axes that differ, which is what makes the comparison
+    readable. Draw hygiene of the new bank is clean and checked: 40 draws, 40 DISTINCT
+    source columns, 40 distinct block seeds, |self_correlation| max 0.4695 against a 0.60
+    cap, so effective_n_draws = 40.0 = nominal and there is no reuse to price. The
+    universe pool digest (410:4a9920301726) matches fps-nas's, so the two runs sampled the
+    same population.
+  evidence: experiments/2026-09-06_noise_floor_n410
 - candidate: methodology -- the realised arbiter's replay POPULATION (no feature under
     test; batch1/tgp_cycle_displacement as the specimen). Sampler is
     experiments/lib/universe.py, landed PR #361.
@@ -100,12 +176,14 @@
     _bank_admissibility checks baseline_fingerprint / tank_params / null_method / arity
     / partial but has no population axis. Same defect shape as fps-15c's cadence stamp.
   not_tested: >-
-    BLOCKED on fps-ajs (itself blocked on fps-916): whether the PLACEBO BAND narrows
-    with universe width the way the fold-clustered sd did. Assumed ~2x throughout the
-    write-up and load-bearing for the criterion-5 decision -- if it does narrow, the
-    broad delta scores ~-3.1 and clears more convincingly than five ever did; if it
-    does not, grading broadly is strictly harder for no gain and the decision needs
-    revisiting. MEASURABLE NOW, needs fits: whether homogeneity holds for any candidate
+    RETIRED 2026-09-06 by fps-ajs, experiments/2026-09-06_noise_floor_n410: whether the
+    PLACEBO BAND narrows with universe width. It does, by 1.437x [0.993, 2.198] at same
+    arity -- NOT the ~2x assumed here, and the CI contains 1.00x too, so this run's
+    assumption was overstated and the follow-up could not decisively separate the ends.
+    Criterion 5 survives anyway: the broad delta scores z = -3.330 and clears, close to
+    the ~-3.1 predicted here BUT BY THE WRONG ROUTE -- the 410-station placebo null
+    carries a +0.0561 c/L positive mean (t = +6.37) that five stations does not, and that
+    unpredicted shift supplies more of the z than the narrowing does. MEASURABLE NOW, needs fits: whether homogeneity holds for any candidate
     other than tgp_cycle_displacement -- one candidate was run, chosen as the best
     available signal-to-noise; the other four batch1 candidates need the same paired
     run, ~1h each at 410. PERMANENTLY UNTESTABLE by this design: whether the broad and
