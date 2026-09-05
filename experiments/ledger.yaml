@@ -53,6 +53,86 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: methodology -- the realised arbiter's replay POPULATION (no feature under
+    test; batch1/tgp_cycle_displacement as the specimen). Sampler is
+    experiments/lib/universe.py, landed PR #361.
+  inputs: [batch1 frozen fuel_signal.db (daily_prices coverage, council, Sticky share),
+    features.parquet, _plan_folds' real 14 val windows]
+  claim: >-
+    Two claims, from fps-nas. (1) COST: per fold per arm the expensive work does not
+    scale with the replay universe -- _train_calibrate_select_tau fits a full LGBM on
+    all 714 stations' fold-train plus a walk-forward OOF loop, while only load_history
+    and the aggregate_backtest tank walk scale -- so 5 -> 200 stations multiplies the
+    cheap part only. Stated in the bead as structural, never measured, and doubted in
+    writing before the run: ModelStrategy.decide does ONE single-row predict_proba per
+    station-day, so a 200-station 90-day fold is 18,000 sklearn calls per arm.
+    (2) HOMOGENEITY: a feature that helps Sydney-wide helps at the five commute
+    stations, so one arbiter can grade broadly and report narrowly. Prior support was
+    thin and on the wrong statistic (fps-e6i: per-row LOG-LOSS gain at the five sits
+    0.33 SE from network-wide, which is not CPL homogeneity).
+  falsified: >-
+    Claim 2 UPHELD; claim 1's CONCLUSION upheld but BOTH HALVES OF ITS MECHANISM WRONG.
+    (1a) The 18,000-call doubt was physically correct: replay is dead linear in station
+    count, 38.4x cost for 40x stations, ~0.058 s/station-fold. It only fails to matter
+    because it starts at 0.30s. (1b) load_history DOES NOT SCALE -- 28.3s at n=5 vs
+    27.4s at n=200 across a 40x widening -- though the bead named it as one of the two
+    scaling terms. The fixed cost is fit + history ~= 71s, not fit's 44.1s alone, and
+    stations are charged only through replay. Net: 40x stations = +14% wall clock;
+    measured at the 410-station census, 72 s/arm-fold vs 48 at five.
+    (2) Homogeneity holds on every axis measured. tgp_cycle_displacement pooled
+    delta_cpl_held: five -0.2077 c/L, broad(410) -0.1292 c/L; same sign, 12/14 folds
+    agree on sign, r = 0.704, own-2*SE intervals overlap, and each population's point
+    estimate falls inside the other's interval. The two goals are not at cross purposes.
+    THREE THINGS THE RUN FOUND THAT THE BEAD DID NOT ASK: (i) the resolution gain is
+    2.00x, not 10x -- 102x the decisions (83 -> 8,476) halved the per-fold sd
+    (0.7982 -> 0.3992) and no more, because the fold is the independent replicate and
+    widening the universe does not create folds; sizing on station-days would have
+    reported sqrt(102) ~= 10x and manufactured the improvement under measurement.
+    (ii) NEITHER width clears its own fold-clustered interval -- t = 0.98 at five,
+    1.27 at 410 -- although both clear the placebo band the dossier actually grades on
+    (five: z = -2.330 against a bar of 1.923). Two rulers asking different questions:
+    the band asks "could a meaningless column have produced this pooled number", the
+    fold-clustered SE asks "does it repeat across folds". The project's headline
+    candidate passes the first at both widths and fails the second at both widths, and
+    no dossier currently reports the second. (iii) Grading the broad delta against the
+    EXTANT five-station band flips the verdict (z -1.544, fails), and the mismatch would
+    be silent: compute_noise_floor() accepts station_codes and never stamps it, and
+    _bank_admissibility checks baseline_fingerprint / tank_params / null_method / arity
+    / partial but has no population axis. Same defect shape as fps-15c's cadence stamp.
+  not_tested: >-
+    BLOCKED on fps-ajs (itself blocked on fps-916): whether the PLACEBO BAND narrows
+    with universe width the way the fold-clustered sd did. Assumed ~2x throughout the
+    write-up and load-bearing for the criterion-5 decision -- if it does narrow, the
+    broad delta scores ~-3.1 and clears more convincingly than five ever did; if it
+    does not, grading broadly is strictly harder for no gain and the decision needs
+    revisiting. MEASURABLE NOW, needs fits: whether homogeneity holds for any candidate
+    other than tgp_cycle_displacement -- one candidate was run, chosen as the best
+    available signal-to-noise; the other four batch1 candidates need the same paired
+    run, ~1h each at 410. PERMANENTLY UNTESTABLE by this design: whether the broad and
+    five deltas genuinely differ in MAGNITUDE (-0.129 vs -0.208). Disjoint baskets, no
+    shared denominator -- deliberately not computed, and no amount of widening makes it
+    computable. BLOCKED on fps-wst: whether feature-dark stations materially reweight
+    the 410-station pooled CPL. The coverage gate counts daily_prices rows and cannot
+    see feature availability by construction -- fold 1 passes the per-window gate at
+    0.96 while holding ZERO feature rows for both Blue Mountains stations. NOT DECIDED
+    (not a measurement): whether the fold-clustered t should gate anything, given it
+    does not clear at either width for the project's cleanest signal.
+  outcome: graduated
+  calibration: >-
+    Pipeline-validation run, and it reproduced its independent reference exactly. The
+    five-station arm returned pooled delta_cpl_held = -0.2077 c/L, which is batch1's
+    committed headline for this candidate to the digit -- so the widened path is
+    measuring the same quantity the dossier does, and nothing above is an artifact of
+    homogeneity.py bypassing run_candidate (it must bypass it: r0_cache.joblib is keyed
+    only on batch_dir, fps-enx, so calling run_candidate twice at different universes
+    would silently overwrite the five-station R0 cache every other batch1 candidate
+    depends on). One correction the run forced on its own setup: the fold geometry is
+    2021-11-05 .. 2025-04-17 and the eligible pool 410 of 599 across 29 councils
+    (digest 410:4a9920301726); a hand derivation gives 2021-11-06 .. 2024-12-29 and
+    607/751 across 32, and an earlier draft of the README carried it. Build the spec
+    from _plan_folds, never by hand.
+  evidence: experiments/2026-09-05_arbiter_universe_width
+
 - candidate: diagnostic — is the WFCV log-loss gain located where the decision rule
     reads it? (no feature under test; batch1/tgp_cycle_displacement as the specimen)
   inputs: [rowpreds.parquet (screen, raw probabilities), r0_cache.joblib (arbiter's
@@ -107,10 +187,15 @@
     own_tau_median = held_tau_median = 0.25 plus a +/-30% sweep. BLOCKED on fps-4z6:
     whether a preferred-five-restricted screen is a usable second indicator depends on
     its own noise band, which nothing computes yet -- it is better ALIGNED but lower
-    POWERED, and must not become a graduation gate before that is priced. PERMANENTLY
-    UNTESTABLE by this pipeline as configured: whether the five stations' CPL outcome
-    is predictable at all from 5,693 rows -- the design has 14 folds and no mechanism
-    to widen the replay universe without changing what the arbiter is for.
+    POWERED, and must not become a graduation gate before that is priced. SUPERSEDED 2026-09-05 by
+    2026-09-05_arbiter_universe_width (fps-nas), which was written here as PERMANENTLY
+    UNTESTABLE: "the design has 14 folds and no mechanism to widen the replay universe
+    without changing what the arbiter is for". The mechanism now exists
+    (experiments/lib/universe.py) and the widening was run at 410 stations. The half of
+    the line that survives is the fold count: widening bought exactly 2.00x on the
+    fold-clustered interval, not sqrt(102)x, because the fold is the replicate and
+    widening does not create folds. So the five stations' CPL outcome is measurable at
+    102x the decisions and STILL does not clear its own interval (t = 0.98 -> 1.27).
   outcome: rejected
   calibration: >-
     Pipeline-validation run, and it reproduced its independent reference exactly. The

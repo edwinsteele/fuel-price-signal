@@ -1,0 +1,76 @@
+{
+  "issue": "fps-nas",
+  "question": "criterion 1 \u2014 is the realised arbiter's per-fold cost fit-dominated?",
+  "batch_dir": "experiments/batches/batch1",
+  "fold": 11,
+  "val_start": "2024-04-23",
+  "val_end": "2024-07-21",
+  "seed": 42,
+  "universe_seed": 20260905,
+  "inner_fold_params": {
+    "train_min_days": 1095,
+    "val_days": 90,
+    "step_days": 90
+  },
+  "n_baseline_columns": 54,
+  "fit_seconds": 44.14528741710819,
+  "own_tau": 0.25,
+  "by_size": [
+    {
+      "n_stations": 5,
+      "source": "PREFERRED_STATIONS",
+      "n_councils": 2,
+      "coverage_min": 1.0,
+      "history_seconds": 28.33073483314365,
+      "replay_seconds": 0.3026678750757128,
+      "scaling_seconds": 28.633402708219364,
+      "fill_events": 161,
+      "cpl": 203.0813953488373,
+      "seconds_per_station": 5.726680541643873,
+      "scaling_vs_fit": 0.64861742631044,
+      "scaling_x_vs_smallest": 1.0,
+      "stations_x_vs_smallest": 1.0,
+      "one_arm_fold_seconds": 72.77869012532756,
+      "fit_share": 0.6065688643349915
+    },
+    {
+      "n_stations": 50,
+      "source": "sample_station_universe(seed=20260905)",
+      "n_councils": 28,
+      "coverage_min": 1.0,
+      "history_seconds": 26.761366917053238,
+      "replay_seconds": 2.917879000073299,
+      "scaling_seconds": 29.679245917126536,
+      "fill_events": 2438,
+      "cpl": 189.40684809279517,
+      "seconds_per_station": 0.5935849183425307,
+      "scaling_vs_fit": 0.6723083629901695,
+      "scaling_x_vs_smallest": 1.0365252855053428,
+      "stations_x_vs_smallest": 10.0,
+      "one_arm_fold_seconds": 73.82453333423473,
+      "fit_share": 0.5979758411373073
+    },
+    {
+      "n_stations": 200,
+      "source": "sample_station_universe(seed=20260905)",
+      "n_councils": 31,
+      "coverage_min": 1.0,
+      "history_seconds": 27.42959654191509,
+      "replay_seconds": 11.613808917114511,
+      "scaling_seconds": 39.0434054590296,
+      "fill_events": 9910,
+      "cpl": 188.98059908089283,
+      "seconds_per_station": 0.195217027295148,
+      "scaling_vs_fit": 0.884429748754985,
+      "scaling_x_vs_smallest": 1.3635614969303662,
+      "stations_x_vs_smallest": 40.0,
+      "one_arm_fold_seconds": 83.1886928761378,
+      "fit_share": 0.5306645157033236
+    }
+  ],
+  "projected_full_run_hours": {
+    "5": 0.5660564787525477,
+    "50": 0.5741908148218257,
+    "200": 0.6470231668144051
+  }
+}
