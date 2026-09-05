@@ -22,6 +22,7 @@ from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT
 from experiments.lib.realised import BaselineCache, BaselineCacheMismatch
 from experiments.pipeline import batch_freeze
 from experiments.pipeline.batch_freeze import resolve_baseline_columns
+from experiments.pipeline.dossier_tables import DEFAULT_STATION_POPULATION
 from experiments.pipeline.runner import (
     ABORT_REASON_LEAK_BY_DECLARATION,
     BASELINE_CACHE_FILENAME,
@@ -1492,3 +1493,186 @@ def test_template_candidate_passes_validation():
     assert candidate.CONFIDENCE_EFFECT is not None
     assert candidate.CONFIDENCE_ZONE is not None
     assert candidate.TARGET["axis"] == "day_of_week"
+
+
+# --- fps-ajs follow-up: the run side of fps-916's population identity -------------
+
+
+def test_run_candidate_stamps_default_station_population_when_no_codes_given(
+    tmp_path, monkeypatch
+):
+    """A five-station run must stamp the SAME digest `_bank_admissibility` falls back to.
+
+    Before this field existed a results.json carried no population, so the grading path
+    read it as DEFAULT_STATION_POPULATION — right for the default, and silently wrong the
+    moment a run replayed a wider universe. Pinning the default here is what makes the
+    absent-vs-explicit cases provably identical, so adding the stamp cannot re-grade any
+    run written before it.
+    """
+    from experiments.lib.universe import station_codes_digest
+    from experiments.pipeline.dossier_tables import DEFAULT_STATION_POPULATION
+    from fuel_signal.config import PREFERRED_STATIONS
+
+    assert station_codes_digest(PREFERRED_STATIONS) == DEFAULT_STATION_POPULATION
+
+
+def test_run_candidate_stamps_supplied_station_population(tmp_path, monkeypatch):
+    """station_codes -> results.json's station_population, as the digest of the codes
+    ACTUALLY replayed (not the eligible pool, which is blind to how many were drawn).
+
+    Must go through the SUCCESS path: `_finish`'s abort meta is a deliberate status-only
+    stub (`{"wall_seconds": ...}`) carrying no identity field at all — not
+    baseline_fingerprint, not tank_params, not this — because an aborted run has no delta
+    to grade. Stubbing the arbiter to RAISE would assert against that stub and prove
+    nothing about the field a dossier actually reads.
+    """
+    from experiments.lib.universe import station_codes_digest
+
+    seen: dict = {}
+
+    def _capture_then_succeed(*args, **kwargs):
+        seen.update(kwargs)
+        return _FakeRealisedFull(None)
+
+    monkeypatch.setattr(runner_module, "run_paired_realised_backtest", _capture_then_succeed)
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    codes = [101, 102, 103]
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+        station_codes=codes,
+        station_universe_spec={"n": 3},
+        station_universe_pool_digest="7:cafef00dfeed",
+    )
+
+    assert result.status == STATUS_GRADED
+    assert seen["station_codes"] == codes
+    meta = json.loads((tmp_path / "out" / "results.json").read_text())["meta"]
+    assert meta["station_population"] == station_codes_digest(codes)
+    assert meta["station_population"] != DEFAULT_STATION_POPULATION
+    assert meta["station_universe_spec"] == {"n": 3}
+    assert meta["station_universe_pool_digest"] == "7:cafef00dfeed"
+
+
+def test_run_candidate_default_run_stamps_the_five_station_population(tmp_path, monkeypatch):
+    """No station_codes -> the stamp is the five-station default, byte-identical to the
+    fallback `_bank_admissibility` uses for a results.json written before this field. That
+    equality is what makes adding the stamp non-breaking for every committed run."""
+    monkeypatch.setattr(
+        runner_module, "run_paired_realised_backtest", lambda *a, **k: _FakeRealisedFull(None)
+    )
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+    )
+
+    meta = result.results["meta"]
+    assert meta["station_population"] == DEFAULT_STATION_POPULATION
+    assert meta["station_universe_spec"] is None
+    assert meta["station_universe_pool_digest"] is None
+
+
+def test_runner_cli_n_stations_draws_the_same_population_as_the_noise_floor(monkeypatch):
+    """The anti-drift property this option exists for.
+
+    A floor and the runs it grades must draw the IDENTICAL population from the same
+    `--n-stations N`, or `_bank_admissibility` refuses every grade. Both sides now call
+    one helper at one seed, so this asserts the two CLIs agree by construction rather
+    than by a reviewer noticing — patched at `universe`'s own seam so the composition
+    inside `draw_batch_universe` is what runs, in BOTH callers.
+    """
+    from click.testing import CliRunner
+
+    from experiments.lib import universe as universe_module
+    from experiments.lib.universe import station_codes_digest
+
+    drawn = [101, 102, 103]
+    seeds_seen: list[int] = []
+
+    def _fake_eligible(conn, spec):
+        return ["pool-standin"] * 7
+
+    def _fake_draw(eligible, *, n, seed):
+        seeds_seen.append(seed)
+        return drawn
+
+    monkeypatch.setattr(universe_module, "eligible_stations", _fake_eligible)
+    monkeypatch.setattr(universe_module, "draw_universe", _fake_draw)
+    monkeypatch.setattr(universe_module, "station_pool_digest", lambda p: "7:cafef00dfeed")
+    monkeypatch.setattr(
+        runner_module, "_plan_folds",
+        lambda frame, params, subset: [_FakeRunnerFoldPlan("2024-01-01", "2024-03-30")],
+    )
+
+    captured: dict = {}
+
+    def _fake_run_candidate(batch_dir, candidate_path, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop here — only the drawn population matters")
+
+    monkeypatch.setattr(runner_module, "run_candidate", _fake_run_candidate)
+    monkeypatch.setattr(runner_module, "load_features", lambda p: "frame-standin")
+
+    with CliRunner().isolated_filesystem():
+        batch_dir = pathlib.Path("batch")
+        batch_dir.mkdir()
+        (batch_dir / "cand.py").write_text("# stub\n")
+        result = CliRunner().invoke(
+            runner_module.main,
+            ["--batch-dir", str(batch_dir), "--candidate", str(batch_dir / "cand.py"),
+             "--n-stations", "3"],
+        )
+
+    assert captured["station_codes"] == drawn
+    assert captured["station_universe_pool_digest"] == "7:cafef00dfeed"
+    # the digest the run will stamp == the digest noise_floor stamps for the same draw
+    assert station_codes_digest(captured["station_codes"]) == station_codes_digest(drawn)
+    # and both CLIs must ask for the SAME seed, or they draw different universes
+    assert seeds_seen == [runner_module.UNIVERSE_SEED]
+    assert "stop here" in str(result.exception)
+
+
+def test_runner_cli_without_n_stations_never_touches_the_universe_draw(monkeypatch):
+    """The default path opens no DB connection and draws nothing — station_codes stays
+    None so run_candidate falls through to PREFERRED_STATIONS."""
+    from click.testing import CliRunner
+
+    from experiments.lib import universe as universe_module
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("must not be called without --n-stations")
+
+    monkeypatch.setattr(universe_module, "eligible_stations", _boom)
+    monkeypatch.setattr(universe_module, "draw_universe", _boom)
+
+    captured: dict = {}
+
+    def _fake_run_candidate(batch_dir, candidate_path, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(runner_module, "run_candidate", _fake_run_candidate)
+
+    with CliRunner().isolated_filesystem():
+        batch_dir = pathlib.Path("batch")
+        batch_dir.mkdir()
+        (batch_dir / "cand.py").write_text("# stub\n")
+        CliRunner().invoke(
+            runner_module.main,
+            ["--batch-dir", str(batch_dir), "--candidate", str(batch_dir / "cand.py")],
+        )
+
+    assert captured["station_codes"] is None
+    assert captured["station_universe_spec"] is None
+    assert captured["station_universe_pool_digest"] is None
+
+
+class _FakeRunnerFoldPlan:
+    def __init__(self, val_start, val_end):
+        self.val_start = val_start
+        self.val_end = val_end

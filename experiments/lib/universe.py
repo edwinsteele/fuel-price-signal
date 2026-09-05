@@ -909,3 +909,63 @@ def describe_universe(
         "n_failing_spec_gates": len(failures),
         "gate_failures": {str(c): failures[c] for c in sorted(failures)},
     }
+
+
+#: Seed every `--n-stations` draw in this repo uses. Not load-bearing to match — the
+#: grading identity is `station_codes_digest` over the ACTUAL drawn codes, not the seed —
+#: but keeping one value means `noise_floor --n-stations N` and `runner --n-stations N`
+#: draw the IDENTICAL universe, so a floor and the runs it grades share a population by
+#: construction instead of by a reviewer noticing. Same value
+#: `experiments/2026-09-05_arbiter_universe_width/{timing,homogeneity}.py` drew with, so a
+#: CLI run reproduces the population those scripts already measured rather than an
+#: unvetted fresh sample of the same width.
+UNIVERSE_SEED = 20260905
+
+
+def draw_batch_universe(
+    db_path, *, n: int, windows: Sequence[tuple[int, int]], seed: int = UNIVERSE_SEED
+) -> tuple[list[int], dict, str]:
+    """Draw a `n`-station population from a frozen batch DB, with its provenance.
+
+    Returns `(station_codes, spec_dict, pool_digest)` — exactly the three things a
+    caller stamps into its artifact. Shared by `noise_floor.py` (the ruler) and
+    `runner.py` (the runs it grades) so the two cannot drift into drawing different
+    populations from the same `--n-stations N`: a floor and a run whose populations
+    disagree are refused by `dossier_tables._bank_admissibility`, and the cheapest way
+    to never hit that refusal by accident is for both sides to call one function.
+
+    `windows` is passed in rather than derived here on purpose. Deriving it needs
+    `_plan_folds` and `load_features`, and importing those would turn this module from a
+    leaf (stdlib + `fuel_signal` only) into one that pulls in the whole realised-arbiter
+    stack — and `noise_floor.py` already imports `runner.py`, so a shared helper that
+    reached upward would have to thread a cycle. Callers do the two-line derivation:
+
+        frame = load_features(batch_dir / "features.csv")
+        windows = tuple((p.val_start, p.val_end) for p in _plan_folds(frame, {}, None))
+
+    Use the REAL val windows, never the span envelope: a span-level gate admits a station
+    that is dark for one whole fold (`UniverseSpec`'s docstring — 189/599 on batch1) and
+    `aggregate_backtest` then skips that cell silently.
+
+    The returned digest is `station_pool_digest(eligible)` — the ELIGIBLE POOL the spec's
+    gates admit, which does NOT vary with `n` and so cannot serve as the grading identity
+    (that is `station_codes_digest` over the returned codes, which the caller stamps as
+    `station_population`). It answers a different question: did the pool this was drawn
+    from move under `fill.py` rebuilding `daily_prices`. See
+    `feedback_identity_digest_vs_provenance_digest` for why conflating the two is a trap.
+    """
+    spec = UniverseSpec(
+        n=n, seed=seed,
+        start_date=windows[0][0], end_date=windows[-1][1], windows=tuple(windows),
+    )
+    conn = sqlite3.connect(db_path)
+    try:
+        # Called ONCE and reused for both the draw and the pool digest (review of
+        # PR #362): `sample_station_universe` + a separate `eligible_pool_digest` each
+        # ran their own full gated-pool + per-window coverage scan over the same conn.
+        eligible = eligible_stations(conn, spec)
+        station_codes = draw_universe(eligible, n=n, seed=seed)
+        pool_digest = station_pool_digest(eligible)
+    finally:
+        conn.close()
+    return station_codes, spec.as_dict(), pool_digest
