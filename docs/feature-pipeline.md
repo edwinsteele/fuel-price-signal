@@ -246,6 +246,46 @@ PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables --scan experim
 PYTHONPATH=. uv run python -m experiments.pipeline.retrospective <batch>
 ```
 
+### Grading on a wider station population (`--n-stations`)
+
+Both the floor and the runs it grades default to the five commute stations
+(`PREFERRED_STATIONS`). `fps-nas` decided to **grade on a broad 410-station Sydney sample
+and report the five**; `--n-stations N` is how each side is pointed at that population.
+Both take the flag, both draw through `experiments.lib.universe.draw_batch_universe` at the
+same `UNIVERSE_SEED`, and both stamp `station_population` (a digest of the codes actually
+replayed) into their artifact:
+
+```bash
+# the ruler — arity must be >= the widest candidate in the batch, and --out-name keeps it
+# BESIDE the existing floor rather than replacing the one every dossier was graded against
+PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> \
+    --n-stations 410 --n-draws 40 --arity 3 --out-name noise_floor_n410_k3.json
+
+# a candidate at the same width (launch.py does NOT pass this — wide runs are by hand)
+PYTHONPATH=. uv run python -m experiments.pipeline.runner \
+    --batch-dir experiments/batches/<batch> \
+    --candidate experiments/candidates/<batch>/<name>.py --n-stations 410
+```
+
+Three things that bite, in the order people hit them:
+
+- **A run and a floor must agree on population, or the grade is refused.**
+  `dossier_tables._bank_admissibility` compares the two `station_population` stamps. This is
+  the intended behaviour (a five-station run graded against a 410-station band is
+  meaningless), but it means widening is a *pair* of jobs — the floor alone grades nothing.
+- **A floor must also be at least as wide in ARITY as the candidate.** An arity-1 floor
+  refuses every arity-2/3 candidate. batch1's candidates are arity 2–3, so a grading floor
+  there needs `--arity 3`. Arity costs no extra wall clock (the fit loop is per draw, not
+  per column); it costs a little resolution through source-column reuse, which
+  `placebo.effective_n_draws` prices into the bar.
+- **`r0_cache.joblib` is one file per batch dir**, fingerprinted on `station_codes`. A
+  mismatch falls back to a full refit — never a correctness risk — but alternating widths in
+  one batch dir re-fits R0 on each flip (~17 min/run at n=410: 975s cached vs 2024s not).
+  Group runs by width, or give a wide sweep its own batch dir.
+
+Measured properties of the wide floor, and why the bar moves, are in
+`experiments/2026-09-06_noise_floor_n410/README.md`.
+
 `batch_freeze.py` (now including the noise floor) and `runner.py`'s realised stage are both
 heavy (single-arm or paired full walk-forward fits, ~10–25 min) — see `bd recall` /
 `feedback_user_runs_pipeline` if invoking interactively: hand the command to the user rather

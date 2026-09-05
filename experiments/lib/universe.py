@@ -923,16 +923,37 @@ UNIVERSE_SEED = 20260905
 
 
 def draw_batch_universe(
-    db_path, *, n: int, windows: Sequence[tuple[int, int]], seed: int = UNIVERSE_SEED
+    db_path, *, n: int, windows: Sequence[tuple[str, str]], seed: int = UNIVERSE_SEED
 ) -> tuple[list[int], dict, str]:
     """Draw a `n`-station population from a frozen batch DB, with its provenance.
 
     Returns `(station_codes, spec_dict, pool_digest)` — exactly the three things a
     caller stamps into its artifact. Shared by `noise_floor.py` (the ruler) and
-    `runner.py` (the runs it grades) so the two cannot drift into drawing different
-    populations from the same `--n-stations N`: a floor and a run whose populations
-    disagree are refused by `dossier_tables._bank_admissibility`, and the cheapest way
-    to never hit that refusal by accident is for both sides to call one function.
+    `runner.py` (the runs it grades) so that, **given the same `n`, `seed` and
+    `windows`**, the two cannot draw different populations: a floor and a run whose
+    populations disagree are refused by `dossier_tables._bank_admissibility`, and the
+    cheapest way to never hit that refusal by accident is for both sides to call one
+    function at one seed.
+
+    **That guarantee is conditional on `windows`, and the callers do NOT always agree.**
+    `noise_floor.py` plans with `_plan_folds(frame, {}, None)` — it has no outer-geometry
+    options — while `runner.py` plans with the run's own `outer_fold_params`. So
+    `runner --n-stations N --outer-val-days 60` draws from a pool gated on different
+    windows than the floor used and may legitimately produce a different
+    `station_population`. That is the SAFE direction: the mismatch is refused at grading
+    rather than silently graded, and gating a run's universe on windows it does not
+    replay would instead re-open the dark-fold hole `UniverseSpec`'s docstring exists to
+    close (189/599 on batch1). Do NOT "fix" it by hardcoding `{}` here.
+
+    Note `baseline_fingerprint` is columns-only (`fuel_signal/features.py`), so outer
+    geometry is not otherwise part of a run's grading identity — this parameter makes
+    `station_population` a partial proxy guard for a mismatch nothing checked before.
+
+    `windows` is `(val_start, val_end)` DATE STRINGS (`_FoldPlan.val_start` is a
+    `strftime("%Y-%m-%d")`), matching `UniverseSpec.windows`. Beware: `_fails_any_window`
+    and `_worst_window_coverage` in this same module take a parameter also called
+    `windows` that is `Sequence[tuple[int, int]]` of `(observed_count, window_days)`.
+    Same name, unrelated meaning — do not write to the wrong one by analogy.
 
     `windows` is passed in rather than derived here on purpose. Deriving it needs
     `_plan_folds` and `load_features`, and importing those would turn this module from a
@@ -954,9 +975,20 @@ def draw_batch_universe(
     from move under `fill.py` rebuilding `daily_prices`. See
     `feedback_identity_digest_vs_provenance_digest` for why conflating the two is a trap.
     """
+    windows = tuple(windows)
+    if not windows:
+        # Reachable, not theoretical: `_plan_folds` returns () when the fold geometry
+        # admits no window (e.g. --outer-train-min-days 99999), and indexing below would
+        # raise a bare IndexError pointing here — a WORSE diagnostic than the geometry
+        # error the same flags produce WITHOUT --n-stations. Fail with the actual cause.
+        raise ValueError(
+            f"draw_batch_universe(): no fold windows to gate a {n}-station universe on. "
+            "The outer fold geometry produced zero validation windows — fix that first; "
+            "the universe draw is downstream of it."
+        )
     spec = UniverseSpec(
         n=n, seed=seed,
-        start_date=windows[0][0], end_date=windows[-1][1], windows=tuple(windows),
+        start_date=windows[0][0], end_date=windows[-1][1], windows=windows,
     )
     conn = sqlite3.connect(db_path)
     try:

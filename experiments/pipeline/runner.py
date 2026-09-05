@@ -1267,6 +1267,14 @@ def main(
         # for why, and for why `windows` is derived here rather than inside the helper.
         # Derived from the OUTER fold plan this run will actually use, so overriding the
         # outer geometry and --n-stations together still gates on the windows replayed.
+        # That deliberately differs from noise_floor's hardcoded `{}` (it has no outer
+        # options); the docstring covers why matching it would be worse, not better.
+        #
+        # This parses features.csv a second time — run_candidate loads it again below.
+        # Left as-is knowingly: folds depend only on price_date so both parses yield the
+        # same geometry, and this is the --n-stations path, where the run it precedes is
+        # ~34min at n=410. Threading the frame through run_candidate to save one parse
+        # would widen its signature for a saving lost in the noise. (PR #364, finding 7.)
         frame = load_features(batch_dir / "features.csv")
         windows = tuple(
             (p.val_start, p.val_end) for p in _plan_folds(frame, outer_fold_params, None)

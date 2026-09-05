@@ -11,6 +11,7 @@ from fractions import Fraction
 
 import pytest
 
+from experiments.lib import universe as universe_module
 from experiments.lib.universe import (
     ARBITER_FUEL_CODE,
     DEFAULT_MAX_STICKY_FRACTION,
@@ -26,6 +27,7 @@ from experiments.lib.universe import (
     _min_days,
     allocate_by_stratum,
     describe_universe,
+    draw_batch_universe,
     draw_universe,
     eligible_pool_digest,
     eligible_stations,
@@ -919,3 +921,94 @@ class TestDrawUniverse:
         pool = _pool(a=2)
         with pytest.raises(ValueError, match="duplicate station codes"):
             draw_universe(pool + pool[:1], n=2, seed=1)
+
+
+class TestDrawBatchUniverse:
+    """The shared draw `noise_floor --n-stations` and `runner --n-stations` both call.
+
+    Added with PR #364's review (findings 2 and 4): the CLI-level tests each see only
+    their own caller, so the property that actually matters — what the returned
+    population is a function OF — is pinned here, at the one function both sides use.
+    """
+
+    @staticmethod
+    def _patched(monkeypatch):
+        """Record the spec each call builds; return a draw that depends on its inputs.
+
+        A fake returning a FIXED list would make any two calls compare equal and the
+        tests below vacuous — the whole point is that a changed input changes the draw.
+        """
+        seen: list = []
+
+        def _fake_eligible(conn, spec):
+            seen.append(spec)
+            return ["pool-standin"] * 9
+
+        monkeypatch.setattr(universe_module, "eligible_stations", _fake_eligible)
+        monkeypatch.setattr(
+            universe_module, "draw_universe",
+            lambda eligible, *, n, seed: [hash((n, seed, len(eligible))) % 1000],
+        )
+        monkeypatch.setattr(universe_module, "station_pool_digest", lambda p: "9:deadbeef0000")
+        return seen
+
+    def test_same_inputs_give_the_same_population(self, tmp_path, monkeypatch):
+        """The guarantee the shared helper exists for, stated exactly: same n + seed +
+        windows -> same station_population. This is what stops a floor and the runs it
+        grades being refused by _bank_admissibility for no reason."""
+        self._patched(monkeypatch)
+        db = tmp_path / "f.db"
+        db.touch()
+        windows = (("2024-01-01", "2024-03-30"), ("2024-03-31", "2024-06-28"))
+
+        a = draw_batch_universe(db, n=3, windows=windows, seed=20260905)
+        b = draw_batch_universe(db, n=3, windows=windows, seed=20260905)
+
+        assert station_codes_digest(a[0]) == station_codes_digest(b[0])
+        assert a[1] == b[1]
+
+    def test_different_windows_can_give_a_different_population(self, tmp_path, monkeypatch):
+        """The CONDITION on that guarantee, and why the docstring says the callers can
+        legitimately disagree: noise_floor plans with `{}` and runner with its own
+        outer_fold_params, so the same --n-stations N is not automatically the same
+        population. The spec differs, which is what reaches the coverage gates."""
+        seen = self._patched(monkeypatch)
+        db = tmp_path / "f.db"
+        db.touch()
+
+        draw_batch_universe(
+            db, n=3, seed=20260905,
+            windows=(("2024-01-01", "2024-03-30"), ("2024-03-31", "2024-06-28")),
+        )
+        draw_batch_universe(
+            db, n=3, seed=20260905,
+            windows=(("2024-01-01", "2024-03-30"), ("2024-03-31", "2024-05-29")),
+        )
+
+        # Not just the per-window gate: the span envelope's end_date moves with it.
+        assert seen[0].windows != seen[1].windows
+        assert seen[0].end_date != seen[1].end_date
+
+    def test_a_different_seed_gives_a_different_population(self, tmp_path, monkeypatch):
+        """Both CLIs must pass UNIVERSE_SEED. If one drifted, this is the axis that
+        would silently change the drawn codes."""
+        self._patched(monkeypatch)
+        db = tmp_path / "f.db"
+        db.touch()
+        windows = (("2024-01-01", "2024-03-30"),)
+
+        a = draw_batch_universe(db, n=3, windows=windows, seed=20260905)
+        b = draw_batch_universe(db, n=3, windows=windows, seed=999999999)
+
+        assert a[0] != b[0]
+
+    def test_empty_windows_names_the_fold_geometry_not_an_index_error(self, tmp_path):
+        """`_plan_folds` returns () for a geometry admitting no window (e.g.
+        --outer-train-min-days 99999). Indexing windows[0] would raise a bare IndexError
+        pointing into this helper — a worse diagnostic than the geometry error the same
+        flags produce WITHOUT --n-stations. PR #364 review, finding 4."""
+        db = tmp_path / "f.db"
+        db.touch()
+
+        with pytest.raises(ValueError, match="no fold windows"):
+            draw_batch_universe(db, n=410, windows=())

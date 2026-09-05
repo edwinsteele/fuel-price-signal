@@ -1498,10 +1498,13 @@ def test_template_candidate_passes_validation():
 # --- fps-ajs follow-up: the run side of fps-916's population identity -------------
 
 
-def test_run_candidate_stamps_default_station_population_when_no_codes_given(
-    tmp_path, monkeypatch
-):
+def test_preferred_stations_digest_equals_the_admissibility_default():
     """A five-station run must stamp the SAME digest `_bank_admissibility` falls back to.
+
+    Deliberately NOT a runner test — it exercises no runner code and takes no fixtures.
+    It pins one equality between two constants, which is the property that makes adding
+    the stamp non-breaking. The runner-side coverage is
+    test_run_candidate_default_run_stamps_the_five_station_population below.
 
     Before this field existed a results.json carried no population, so the grading path
     read it as DEFAULT_STATION_POPULATION — right for the default, and silently wrong the
@@ -1577,19 +1580,24 @@ def test_run_candidate_default_run_stamps_the_five_station_population(tmp_path, 
     assert meta["station_universe_pool_digest"] is None
 
 
-def test_runner_cli_n_stations_draws_the_same_population_as_the_noise_floor(monkeypatch):
-    """The anti-drift property this option exists for.
+def test_runner_cli_n_stations_draws_at_the_shared_universe_seed(monkeypatch):
+    """The runner half of the anti-drift property: it draws at the SHARED seed.
 
-    A floor and the runs it grades must draw the IDENTICAL population from the same
-    `--n-stations N`, or `_bank_admissibility` refuses every grade. Both sides now call
-    one helper at one seed, so this asserts the two CLIs agree by construction rather
-    than by a reviewer noticing — patched at `universe`'s own seam so the composition
-    inside `draw_batch_universe` is what runs, in BOTH callers.
+    Deliberately does NOT claim "same population as the noise floor". This test only
+    invokes the runner CLI, so it cannot see noise_floor at all — an earlier version
+    asserted the cross-CLI property and passed with noise_floor's seed mutated to
+    999999999 (PR #364 review, finding 2). The other half is covered independently by
+    test_noise_floor.py::test_cli_n_stations_draws_a_wide_population_and_stamps_it,
+    which asserts noise_floor's own `draw_seed == UNIVERSE_SEED`; between them the seed
+    axis is pinned from both sides.
+
+    The cross-caller property is conditional anyway — see
+    test_draw_batch_universe_population_follows_the_windows_it_is_given, and
+    `draw_batch_universe`'s docstring on why the two callers plan different windows.
     """
     from click.testing import CliRunner
 
     from experiments.lib import universe as universe_module
-    from experiments.lib.universe import station_codes_digest
 
     drawn = [101, 102, 103]
     seeds_seen: list[int] = []
@@ -1630,10 +1638,12 @@ def test_runner_cli_n_stations_draws_the_same_population_as_the_noise_floor(monk
 
     assert captured["station_codes"] == drawn
     assert captured["station_universe_pool_digest"] == "7:cafef00dfeed"
-    # the digest the run will stamp == the digest noise_floor stamps for the same draw
-    assert station_codes_digest(captured["station_codes"]) == station_codes_digest(drawn)
-    # and both CLIs must ask for the SAME seed, or they draw different universes
+    # The load-bearing assertion: the runner must ask for the SHARED constant, not a
+    # seed of its own. (A `station_codes_digest(captured[...]) == station_codes_digest(
+    # drawn)` line stood here and was f(x) == f(x) given the first assert — it passed
+    # for a digest returning a constant. PR #364 review, finding 5.)
     assert seeds_seen == [runner_module.UNIVERSE_SEED]
+    assert runner_module.UNIVERSE_SEED is universe_module.UNIVERSE_SEED
     assert "stop here" in str(result.exception)
 
 
