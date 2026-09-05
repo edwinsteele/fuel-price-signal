@@ -2641,6 +2641,12 @@ def test_noise_band_refuses_a_wide_population_run_against_a_five_station_floor(t
 
     assert band["available"] is False
     assert "station_population" in band["reason"]
+    # fps-916 review: this run is NOT a rejection — it completed and graded fine, and
+    # becomes a real measurement once the matching-population floor exists. Without this
+    # code the refusal falls through to dossier.md's default outcome: rejected, which
+    # would stamp dead ground the instant fps-ajs lands the 410 floor.
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_POPULATION
+    assert "NOT rejected" in band["reason"]
 
 
 def test_noise_band_refuses_a_five_station_run_against_a_wide_floor(tmp_path):
@@ -2655,6 +2661,27 @@ def test_noise_band_refuses_a_five_station_run_against_a_wide_floor(tmp_path):
 
     assert band["available"] is False
     assert "station_population" in band["reason"]
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_POPULATION
+
+
+def test_noise_band_treats_an_explicit_null_population_as_absent_not_five_station(tmp_path):
+    """review of PR #362: `.get(key, DEFAULT)`, not `.get(key) or DEFAULT` — the latter
+    would silently promote an explicit `null` into the five-station default too, the same
+    `... or 1` mistake PR #349's review already rejected for arity two lines away in the
+    source. A floor stamping `station_population: null` (as opposed to omitting the key
+    entirely) must therefore NOT be treated as the five-station default it would read as
+    under `or`."""
+    run_dir, batch_dir = _write_run(tmp_path, columns=["a"], batch_extras=_floor_with())
+    payload = json.loads((batch_dir / dt.NOISE_FLOOR_FILENAME).read_text())
+    payload["station_population"] = None
+    (batch_dir / dt.NOISE_FLOOR_FILENAME).write_text(json.dumps(payload))
+
+    band = dt.build_facts(run_dir)["noise_band"]
+
+    # None != DEFAULT_STATION_POPULATION (a real hash string), so this must refuse —
+    # `.get(key) or DEFAULT` would instead have let it through as `available: True`.
+    assert band["available"] is False
+    assert band["reason_code"] == dt.NOISE_BAND_REFUSAL_POPULATION
 
 
 def test_noise_band_allows_a_run_and_floor_declaring_the_same_wide_population(tmp_path):

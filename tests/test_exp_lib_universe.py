@@ -32,6 +32,7 @@ from experiments.lib.universe import (
     gate_failures,
     sample_station_universe,
     station_codes_digest,
+    station_pool_digest,
 )
 from fuel_signal.db import (
     create_schema,
@@ -569,6 +570,27 @@ class TestPoolDigest:
         after = eligible_pool_digest(conn, _spec())
         assert before != after
         assert before.startswith("1:") and after.startswith("1:")
+
+    def test_is_blind_to_n_and_seed_by_design(self, conn):
+        """Named explicitly (fps-916 review, PR #362 finding 1a) so nobody mistakes this
+        for an identity a specific --n-stations DRAW can be checked against:
+        eligible_stations, which this hashes, never reads spec.n/spec.seed at all — only
+        draw_universe does. Two different widths sampled from the SAME unchanged pool
+        stamp the IDENTICAL digest here. Use station_codes_digest on the actual drawn
+        codes for a width-sensitive identity; this function is DB-vintage provenance for
+        the pool a draw came FROM, never a stand-in for what was actually drawn.
+        """
+        _seed_pool(conn, {PC_PARRAMATTA: 5})
+        small = _spec(n=2, seed=1)
+        large = _spec(n=5, seed=99)
+        assert eligible_pool_digest(conn, small) == eligible_pool_digest(conn, large)
+
+    def test_matches_station_pool_digest_on_the_same_pool(self, conn):
+        _seed_pool(conn, {PC_PARRAMATTA: 3})
+        spec = _spec()
+        assert eligible_pool_digest(conn, spec) == station_pool_digest(
+            eligible_stations(conn, spec)
+        )
 
 
 # ---------------------------------------------------------------------------

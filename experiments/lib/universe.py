@@ -573,6 +573,19 @@ def eligible_stations(
     return out
 
 
+def station_pool_digest(pool: Sequence[EligibleStation]) -> str:
+    """`count:hash` over an already-computed eligible pool — the pure half of
+    `eligible_pool_digest`, split out (fps-916 review) so a caller that already has
+    the pool (e.g. to also `draw_universe` from it) doesn't pay for a second
+    `eligible_stations` DB scan just to digest it.
+
+    NOT sensitive to how many of the pool were actually DRAWN — this hashes the
+    pool `spec`'s gates admitted, not a sample of it (see `eligible_pool_digest`).
+    """
+    payload = ";".join(f"{s.station_code}:{s.coverage:.6f}" for s in pool)
+    return f"{len(pool)}:{hashlib.sha256(payload.encode()).hexdigest()[:12]}"
+
+
 def eligible_pool_digest(conn: sqlite3.Connection, spec: UniverseSpec) -> str:
     """A short hash of the pool `spec` admits — the DB-vintage half of a run's stamp.
 
@@ -580,10 +593,15 @@ def eligible_pool_digest(conn: sqlite3.Connection, spec: UniverseSpec) -> str:
     out of THIS database. `daily_prices` is rebuilt by `fill.py`, so a spec alone does
     not pin a universe (see `UniverseSpec`'s docstring). Stamp both, and two runs that
     drew different pools cannot look identical in meta.json.
+
+    NOT sensitive to `spec.n` or `spec.seed` (fps-916 review finding) — `eligible_stations`
+    never reads either; they only steer `draw_universe`'s SAMPLE of this pool. Two draws of
+    different widths from an unchanged pool stamp the IDENTICAL digest here. This makes the
+    function a DB-vintage provenance signal for the pool a spec's GATES admit, never an
+    identity for a specific drawn `station_codes` list — `station_codes_digest` on the
+    actual drawn codes is the right tool for that, and is what grading now compares on.
     """
-    pool = eligible_stations(conn, spec)
-    payload = ";".join(f"{s.station_code}:{s.coverage:.6f}" for s in pool)
-    return f"{len(pool)}:{hashlib.sha256(payload.encode()).hexdigest()[:12]}"
+    return station_pool_digest(eligible_stations(conn, spec))
 
 
 def station_codes_digest(station_codes: Sequence[int]) -> str:

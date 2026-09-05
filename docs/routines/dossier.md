@@ -459,6 +459,16 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
          verdict and an unbounded nightly re-pick. If you ever see that code, the run predates
          the change; treat it exactly like the case above.)
 
+       - `facts["noise_band"]["reason_code"] == "station_population_mismatch"` → **STOP, exactly
+         as the arity case above** — same carve-out, same reason (`fps-916`): the floor was
+         computed over a different station population (e.g. the five preferred stations vs a
+         broader sample) than this run replayed, the run itself completed and graded fine, and
+         it becomes a real measurement the moment a floor at this run's own population exists.
+         Report that this batch needs a matching-population ruler (quote the `reason`, which
+         carries the exact commands) and move on. Write no README.md, no ledger entry, for the
+         same `find_pending_runs` reason as the arity case. Check this BEFORE the `available`
+         test below, same ordering caveat as arity.
+
        - `facts["noise_band"]["available"]` is `false` (any other reason) → `outcome: rejected`. No
          noise floor means no ruler to grade "below the instrument's resolution" against, so there
          is nothing to call inconclusive — same as before this rule existed. Note the unavailability
