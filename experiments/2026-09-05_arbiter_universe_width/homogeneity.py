@@ -245,8 +245,12 @@ def main() -> None:
         "runs": runs,
         "homogeneity": homogeneity,
     }
-    write_meta(HERE, meta, baseline_columns=baseline_columns, tank=tank)
-    (HERE / "homogeneity.json").write_text(json.dumps(meta, indent=2, default=str))
+    # From write_meta's RETURN, not `meta` — see fps-6rm / timing.py. This artifact
+    # happened to satisfy the cadence-stamp scanner anyway, because `_run` copies
+    # `tank_params` into each run row, but that is an accident of this script's shape
+    # and not something the next edit to it should have to rely on.
+    stamped = write_meta(HERE, meta, baseline_columns=baseline_columns, tank=tank)
+    (HERE / "homogeneity.json").write_text(json.dumps(stamped, indent=2, default=str))
 
     print("\n" + "=" * 72)
     for r in runs:

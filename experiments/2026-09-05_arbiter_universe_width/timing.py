@@ -187,8 +187,13 @@ def main() -> None:
             str(r["n_stations"]): 14 * 2 * r["one_arm_fold_seconds"] / 3600 for r in rows
         },
     }
-    write_meta(HERE, meta, baseline_columns=baseline_columns, tank=tank)
-    (HERE / "timing.json").write_text(json.dumps(meta, indent=2, default=str))
+    # timing.json is written from write_meta's RETURN, not from `meta`: the cadence
+    # stamp these three `cpl` values need goes onto a copy, so serialising `meta`
+    # here ships them unstamped (fps-6rm). Also carries the baseline identity, which
+    # is otherwise lost — homogeneity.py writes meta.json in this same directory, so
+    # whichever script runs second clobbers the other's.
+    stamped = write_meta(HERE, meta, baseline_columns=baseline_columns, tank=tank)
+    (HERE / "timing.json").write_text(json.dumps(stamped, indent=2, default=str))
     print(f"\nwrote {HERE / 'timing.json'}")
     print("\nfit is dominant where fit_share > 0.5:")
     for r in rows:
