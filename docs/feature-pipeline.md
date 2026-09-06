@@ -261,13 +261,15 @@ replayed) into their artifact:
 PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor <batch> \
     --n-stations 410 --n-draws 40 --arity 3 --out-name noise_floor_n410_k3.json
 
-# a candidate at the same width (launch.py does NOT pass this — wide runs are by hand)
+# a candidate at the same width (launch.py does NOT pass this — wide runs are by hand).
+# NOTE the candidate path: point it at a WIDE-ONLY copy of the module, never at the
+# five-station one in-place — see the out-dir bullet below.
 PYTHONPATH=. uv run python -m experiments.pipeline.runner \
     --batch-dir experiments/batches/<batch> \
-    --candidate experiments/candidates/<batch>/<name>.py --n-stations 410
+    --candidate experiments/candidates/<batch>_n410/<name>.py --n-stations 410
 ```
 
-Three things that bite, in the order people hit them:
+Four things that bite, in the order people hit them:
 
 - **A run and a floor must agree on population, or the grade is refused.**
   `dossier_tables._bank_admissibility` compares the two `station_population` stamps. This is
@@ -275,16 +277,39 @@ Three things that bite, in the order people hit them:
   meaningless), but it means widening is a *pair* of jobs — the floor alone grades nothing.
 - **A floor must also be at least as wide in ARITY as the candidate.** An arity-1 floor
   refuses every arity-2/3 candidate. batch1's candidates are arity 2–3, so a grading floor
-  there needs `--arity 3`. Arity costs no extra wall clock (the fit loop is per draw, not
-  per column); it costs a little resolution through source-column reuse, which
-  `placebo.effective_n_draws` prices into the bar.
+  there needs `--arity 3`. Arity costs essentially no extra wall clock — the fit loop is
+  per draw, not per column (`noise_floor.py:409`), and the two batch1 410-station banks
+  measured 42,572s at arity 1 against 44,316s at arity 3 for the same 40 draws x 14 folds
+  (+4%). It costs a little resolution through source-column reuse, which
+  `placebo.effective_n_draws` prices into the bar: 40 draws at arity 3 draw 120 column
+  slots from a ~49-column pool, giving 28.08 effective draws and a `z_gate` of 1.7332
+  against 1.7058 at arity 1.
 - **`r0_cache.joblib` is one file per batch dir**, fingerprinted on `station_codes`. A
   mismatch falls back to a full refit — never a correctness risk — but alternating widths in
   one batch dir re-fits R0 on each flip (~17 min/run at n=410: 975s cached vs 2024s not).
   Group runs by width, or give a wide sweep its own batch dir.
+- **A wide re-run will DESTROY the narrow run's `results.json` unless you give it its own
+  candidate path.** `runner`'s output directory is `default_out_dir(candidate_path)` — the
+  candidate path with `.py` stripped — and `run_candidate` unlinks any existing
+  `results.json` there before it starts (`runner.py:393`). So re-running an
+  already-dossiered candidate at a new width in place deletes the old result and leaves it
+  desynchronised from the `facts.json`, `README.md` and PNGs beside it, which together are
+  the batch's dossier record. **A separate batch dir does NOT fix this** — `out_dir` is
+  derived from the candidate path, not the batch dir, so that only isolates `r0_cache`.
+  Give the wide runs a parallel candidate directory of **symlinks** to the originals, so
+  each gets its own out-dir while there is still one definition of each candidate. Nothing
+  couples the batch to the candidate's parent directory name: the batch comes from
+  `--batch-dir` and is stamped as `meta.batch_dir`. Worked example:
+  `experiments/candidates/batch1_n410/`.
 
 Measured properties of the wide floor, and why the bar moves, are in
-`experiments/2026-09-06_noise_floor_n410/README.md`.
+`experiments/2026-09-06_noise_floor_n410/README.md`. **Read its Phase 2 section before
+quoting any figure from it**: the arity-1 findings (the band narrows 1.44x with width; the
+410 null carries a +0.056 c/L positive mean) do not reproduce at arity 3, which is the only
+arity that can legally grade a batch1 candidate. At arity 3 the width narrowing is 1.065x
+[0.679, 1.995] and the band mean is +0.0298 (p = 0.10). Widening the population is worth
++0.0342 c/L of bar at that arity, and the largest term in it is the draw count, not the
+width.
 
 `batch_freeze.py` (now including the noise floor) and `runner.py`'s realised stage are both
 heavy (single-arm or paired full walk-forward fits, ~10–25 min) — see `bd recall` /
