@@ -53,6 +53,99 @@
 # Entries below 2026-08-17 were hand-backfilled from experiment READMEs and
 # analysis.md files (bd fps-3jj.3). Later entries are pipeline-generated.
 
+- candidate: methodology -- whether the PLACEBO BAND's population-width behaviour is an
+    ARITY-1 ARTIFACT, and the first legally admissible 410-station grade of a batch1
+    candidate. Bank is experiments/batches/batch1/noise_floor_n410_k3.json (40 draws,
+    arity 3, 12.3h), written beside the canonical ruler, never over it.
+  inputs: [batch1 frozen fuel_signal.db, features.parquet, the same 410-station universe
+      (population digest 410:5bbff5bf61d3, pool digest 410:4a9920301726), 40 placebo draws
+      x 3 columns x 14 folds, git_sha 0cdbccf]
+  claim: >-
+    Four predictions extrapolated from the arity-1 410 bank BEFORE this run, recorded so it
+    could falsify them: (1) sd ~ 0.0695, i.e. 0.0556 scaled by the five-station k=1->k=3
+    ratio of 1.249x -- if it lands far off, the arity effect does not transfer across
+    population width; (2) effective_n_draws ~ 28.08, since 40 draws x arity 3 needs 120
+    column-slots from a 49-column pool, giving z_gate ~ 1.7332; (3) the +0.0561 c/L
+    positive band mean the arity-1 410 bank carries persists, and possibly grows with
+    arity (the post-hoc mechanism -- a noise column misallocates among 410 stations --
+    predicts more columns perturb the pick more); (4) tgp_cycle_displacement's broad delta
+    of -0.1292 still clears, at z ~ -3.2. Underneath all four: that an arity-3 410 bank
+    would make the criterion-5 grading path usable, since a floor grades any run of arity
+    <= its own and all five batch1 candidates are arity 2 or 3.
+  falsified: >-
+    THE TWO ARITHMETIC PREDICTIONS ARE EXACT AND BOTH STATISTICAL ONES ARE WRONG, IN
+    OPPOSITE DIRECTIONS. effective_n_draws 28.076 (predicted 28.08) and z_gate 1.7332
+    (predicted 1.7332). But sd is 0.0938, 35% ABOVE the 0.0695 extrapolated -- the arity
+    effect does NOT transfer across width (1.686x [1.226, 2.319] at 410 vs 1.249x [0.736,
+    2.398] at five; the 410 ratio excludes 1.00x, the five-station one does not) -- and the
+    mean is +0.0298, roughly half the +0.0561 assumed.
+    THE +0.056 BIAS DOES NOT REPRODUCE AT ARITY 3, WHICH RETIRES THE PREDECESSOR ENTRY'S
+    HEADLINE AS AN ARITY-1 RESULT. 410 k=3 mean +0.0298, t = +1.68 on effective_n_draws
+    28.076, p = 0.104 (t = +2.01 / p = 0.051 on the nominal 40; the honest figure discounts
+    for source-column reuse). It is indistinguishable from zero, and from the five-station
+    arity-3 mean of +0.0251 (Welch t = +0.14, p = 0.894). The bank is homogeneous -- halves
+    +0.0294 vs +0.0303, Welch p = 0.98 -- so this is not run drift. THE CLAIM THAT SURVIVES
+    IS THE NARROW ONE: the width-driven bias is shown at arity 1 and NOT SHOWN at arity 3;
+    it is not DISPROVED, because the arity-1 and arity-3 410 means are not distinguishable
+    from each other either (Welch t = +1.52, p = 0.133) once the sd is 1.69x wider, and the
+    2x2 interaction is -0.060 +/- 0.040, z = -1.50, p = 0.134. Evidence AGAINST the
+    predecessor's post-hoc mechanism, though: it predicts the bias grows with arity and the
+    point estimate falls.
+    THE NARROWING IS ITSELF ARITY-DEPENDENT AND VANISHES AT THE GRADING ARITY. Width
+    narrowing is 1.437x [0.993, 2.198], p = 0.055 at k=1 but 1.065x [0.679, 1.995],
+    p = 0.726 at k=3. The predecessor's "narrows 1.44x" must be quoted WITH ITS ARITY. The
+    two rows are not distinguishable from each other, but at the only arity that can grade
+    a candidate there is no measurable narrowing at all.
+    THE PRACTICAL GAIN FROM GRADING AT 410 IS +0.0342 c/L OF BAR, NOT +0.1118, AND ITS
+    LARGEST TERM IS THE DRAW COUNT. Canonical five-station k=3 bar -0.1670 -> 410 k=3 bar
+    -0.1328. bar = mean - z*sd is additive so the split is exact: mean shift +0.0047, sd
+    narrowing +0.0117 (held at the five-station z_gate), and MORE DRAWS +0.0178 (z_gate
+    1.9226 at 10 draws -> 1.7332 at 28.08). Population width is not the dominant term; the
+    predecessor's +0.1118 was mostly the arity-1 band's narrowness, unavailable to any run
+    that grades a real candidate.
+    tgp_cycle_displacement FAILS ITS FIRST LEGAL 410-STATION GRADE: broad -0.1292 scores
+    z = -1.695 against a bar of 1.7332. Predicted -3.2. The predecessor's z = -3.330 was an
+    ARITY-REFUSED grade and must not be quoted as a verdict. TWO QUALIFICATIONS IN OPPOSITE
+    DIRECTIONS, both load-bearing. (a) CONSERVATIVE: the candidate is arity 2 and the bank
+    arity 3 -- admissible but wider than a matched ruler; interpolating the measured k=1 and
+    k=3 sds gives ~0.0747 for k=2, at which the same delta scores z ~ -2.13 and WOULD clear.
+    (b) A NEAR MISS: it needs a band sd <= 0.0918 and the bank has 0.0938, 2.3% over
+    (equivalently the delta would have to reach -0.1328 and is -0.1292), on a variance
+    estimated from 40 draws at relSE 0.113. NET: at broad width this candidate's verdict is
+    currently set by the RULER'S ARITY across a z range of -3.33 (k=1) to -1.70 (k=3), wider
+    than the width question the predecessor was built to settle. fps-nas's criterion 5 is
+    neither vindicated the way the predecessor reported nor refuted -- the matched arity-2
+    bank decides it and has not been run.
+  not_tested: >-
+    THE MATCHED ARITY-2 410 BANK, ~12h at 40 draws. It is the ruler that actually decides
+    tgp_cycle_displacement (arity 2) at broad width, and the interpolated sd puts the
+    verdict on the other side of the bar from the arity-3 grade. Nothing in the pipeline
+    pins a bank's arity to EQUAL the run's -- _noise_band only requires >= -- so both
+    admissible choices here (2 and 3) straddle the bar and the looser one is picked by what
+    happens to exist.
+    RE-RUNNING THE FIVE CANDIDATES AT 410, ~0.56h each (14 folds x 2 arms at ~72 s/arm-fold),
+    ~2.8h consecutively. All five are refused today on station_population (fps-916 working
+    as designed) and ALL FIVE ARE ADMISSIBLE against this bank once re-run -- verified by
+    calling _bank_admissibility directly on each, not read off the source. Run them grouped
+    by width: r0_cache.joblib is one file per batch dir fingerprinted on station_codes, so a
+    width flip costs a full refit (~17 min: 2024s uncached vs 975s cached), once if grouped
+    and every run if interleaved.
+    STILL MEASURABLE, needs draws not stations: whether the width narrowing is 1x or 2x. The
+    binding constraint remains the FIVE-station banks (20 draws at k=1, 10 at k=3), not the
+    410 banks' 40.
+    STILL POST HOC: the mean-shift mechanism, now doubted as well as untested.
+  outcome: inconclusive
+  calibration: >-
+    All four banks compared share baseline_fingerprint 54:1a6ec2d84a69, tank_params
+    50/3.571/1d/10%, null_method placebo_column, and all 14 windows with partial: false;
+    the analysis script now REFUSES to run if any of those axes drifts, rather than
+    comparing silently. Population and arity remain the only axes that differ. Draw hygiene
+    of the new bank is clean and checked: 40 draws x arity 3 = 120 column-slots drawing all
+    49 available columns 2-3 times each, no column repeated inside a draw, 120 distinct
+    block seeds, |self_correlation| max 0.4701 against the 0.60 cap. The reuse is PRICED,
+    not ignored -- effective_n_draws 28.076 of 40 nominal, which raises z_gate from 1.7058
+    to 1.7332, and every t-test on the band mean above uses the effective figure.
+  evidence: experiments/2026-09-06_noise_floor_n410
 - candidate: methodology -- the PLACEBO BAND's dependence on replay population width (no
     feature under test; batch1/tgp_cycle_displacement as the specimen). Bank is
     experiments/batches/batch1/noise_floor_n410.json, written beside the canonical ruler.
@@ -77,8 +170,9 @@
     THE BEAD NOMINATED THE WRONG COMPARATOR: its acceptance criterion cites "the
     five-station band's 0.0999", which is the ARITY-3 bank (noise_floor.json), while the
     run defaults to arity 1. 0.0999 -> 0.0556 is 1.796x with arity and width confounded.
-    THE FINDING NOBODY ASKED FOR, and the larger one: AT 410 STATIONS THE PLACEBO NULL IS
-    NOT CENTRED ON ZERO. Band mean +0.0561 c/L, t = +6.37, p = 1.6e-07 -- a full band-sd
+    THE FINDING NOBODY ASKED FOR, and the larger one -- BUT SEE THE ARITY-3 ENTRY ABOVE,
+    WHICH SHOWS IT DOES NOT REPRODUCE AT THE GRADING ARITY: AT 410 STATIONS THE PLACEBO
+    NULL IS NOT CENTRED ON ZERO. Band mean +0.0561 c/L, t = +6.37, p = 1.6e-07 -- a full band-sd
     above zero, where both five-station banks sit on zero (+0.0251, t = +0.79; -0.0089,
     t = -0.50). A meaningless column COSTS +0.056 c/L on the broad population. Not a
     column-selection artifact: paired on the 20 shared source columns the shift is +0.0676
@@ -91,7 +185,9 @@
     WAS NOBODY'S HYPOTHESIS. Grading is unaffected -- _score_bank already computes
     (delta - band_mean)/band_std, so no dossier to date is wrong -- but every intuition
     about where the 410 bar sits is.
-    tgp_cycle_displacement re-graded (NOT dossier-legal, see not_tested): broad -0.1292
+    tgp_cycle_displacement re-graded (NOT dossier-legal, see not_tested; SUPERSEDED
+    2026-09-06 by the arity-3 entry above, where the legal grade is z = -1.695 vs bar
+    1.7332 and FAILS -- do not quote the -3.330 as a verdict): broad -0.1292
     scores z = -3.330 against a bar of 1.706 and CLEARS, vs z = -1.544 / fails against the
     extant five-station band. fps-nas predicted ~-3.1 and landed within 7% BY THE WRONG
     ROUTE: decomposing the +1.826 of |z| between grading the broad delta on the five-station
@@ -180,10 +276,14 @@
     PLACEBO BAND narrows with universe width. It does, by 1.437x [0.993, 2.198] at same
     arity -- NOT the ~2x assumed here, and the CI contains 1.00x too, so this run's
     assumption was overstated and the follow-up could not decisively separate the ends.
-    Criterion 5 survives anyway: the broad delta scores z = -3.330 and clears, close to
-    the ~-3.1 predicted here BUT BY THE WRONG ROUTE -- the 410-station placebo null
-    carries a +0.0561 c/L positive mean (t = +6.37) that five stations does not, and that
-    unpredicted shift supplies more of the z than the narrowing does. MEASURABLE NOW, needs fits: whether homogeneity holds for any candidate
+    Criterion 5 was reported as surviving on a z = -3.330 grade, CORRECTED 2026-09-06:
+    that bank is arity 1 and cannot legally grade this arity-2 candidate. Against the
+    arity-3 410 bank the broad delta scores z = -1.695 vs a bar of 1.7332 and FAILS, by
+    2.3%. Criterion 5 is neither vindicated nor refuted -- the matched arity-2 bank
+    decides it and has not been run. The +0.0561 c/L positive band mean invoked in the
+    original correction is itself arity-1-specific (+0.0298, p = 0.104 at arity 3), and
+    the width narrowing that was to supply the rest is 1.065x [0.679, 1.995] at arity 3
+    against 1.437x at arity 1. MEASURABLE NOW, needs fits: whether homogeneity holds for any candidate
     other than tgp_cycle_displacement -- one candidate was run, chosen as the best
     available signal-to-noise; the other four batch1 candidates need the same paired
     run, ~1h each at 410. PERMANENTLY UNTESTABLE by this design: whether the broad and

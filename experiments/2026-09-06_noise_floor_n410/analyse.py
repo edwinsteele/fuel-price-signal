@@ -1,14 +1,23 @@
-"""fps-ajs: grade the 410-station placebo band against its five-station predecessors.
+"""Grade the 410-station placebo bands against their five-station predecessors.
 
-Reads the three committed banks in experiments/batches/batch1/ and answers the one
-question fps-nas logged as `not_tested`: does the placebo band narrow with universe
-width the way the fold-clustered sd did (exactly 2.00x)?
+Phase 1 (fps-ajs, sections 1-5): reads the three committed banks in
+experiments/batches/batch1/ and answers the one question fps-nas logged as
+`not_tested` -- does the placebo band narrow with universe width the way the
+fold-clustered sd did (exactly 2.00x)?
+
+Phase 2 (sections 6-9): adds `noise_floor_n410_k3.json`, the arity-3 410-station
+bank. Phase 1's bank is arity 1 and therefore grades NO batch1 candidate (all five
+are arity 2 or 3, and `_noise_band` refuses a floor narrower than the run), so every
+phase-1 grade of `tgp_cycle_displacement` was an analysis of the ruler, never a
+verdict. The arity-3 bank is the first 410-station ruler that is legally admissible
+for the candidates, and it is what sections 6-9 grade on.
 
 Run: PYTHONPATH=. uv run python -m experiments.2026-09-06_noise_floor_n410.analyse
 (or: PYTHONPATH=. uv run python experiments/2026-09-06_noise_floor_n410/analyse.py)
 """
 import json
 import pathlib
+from collections import Counter
 
 import numpy as np
 from scipy import stats
@@ -39,14 +48,24 @@ def main():
     k3, x3 = load("noise_floor.json")
     k1, x1 = load("noise_floor_k1.json")
     w, xw = load("noise_floor_n410.json")
+    wk3, xwk3 = load("noise_floor_n410_k3.json")
+
+    axes = ("baseline_fingerprint", "tank_params", "null_method", "n_windows")
+    ref = {a: k3.get(a) for a in axes}
+    for name, d in [("noise_floor_k1.json", k1), ("noise_floor_n410.json", w),
+                    ("noise_floor_n410_k3.json", wk3)]:
+        bad = {a: (ref[a], d.get(a)) for a in axes if d.get(a) != ref[a]}
+        if bad or d.get("partial"):
+            raise SystemExit(f"{name} is not comparable: {bad or 'partial: true'}")
 
     print("=" * 78)
-    print("1. THE THREE BANKS")
+    print("1. THE FOUR BANKS")
     print("=" * 78)
     rows = [
         ("noise_floor.json", "5", 3, k3, x3),
         ("noise_floor_k1.json", "5", 1, k1, x1),
         ("noise_floor_n410.json", "410", 1, w, xw),
+        ("noise_floor_n410_k3.json", "410", 3, wk3, xwk3),
     ]
     print(f"{'bank':<22}{'pop':>5}{'k':>3}{'n':>4}{'mean':>9}{'sd':>8}"
           f"{'relSE':>7}{'t(mean=0)':>11}{'p':>10}")
@@ -188,6 +207,169 @@ def main():
           f"{len(set(p['block_seed'] for p in w['placebo_draws']))} distinct block seeds")
     print(f"    |self_correlation| max {sc.max():.4f} (cap 0.60), mean {sc.mean():.4f}")
     print(f"    effective_n_draws {w['effective_n_draws']} of {w['n_draws']} nominal")
+
+    print()
+    print("=" * 78)
+    print("6. PHASE 2 -- THE ARITY-3 410 BANK vs WHAT WAS PREDICTED FOR IT")
+    print("=" * 78)
+    print("  Predictions were extrapolated from phase 1 before the run, and are printed")
+    print("  here so the run can falsify them. They are not findings.")
+    m_w3, sd_w3 = xwk3.mean(), xwk3.std(ddof=1)
+    ne_w3 = wk3["effective_n_draws"]
+    z_w3 = family_wise_z_threshold(1, ne_w3)
+    rows = [
+        ("sd", 0.0556 * (x3.std(ddof=1) / x1.std(ddof=1)), sd_w3, "0.0556 x the 5-stn k1->k3 ratio"),
+        ("effective_n_draws", 28.08, ne_w3, "40 draws x 3 cols from a 49-col pool"),
+        ("z_gate", 1.7332, z_w3, "family_wise_z_threshold(1, n_eff)"),
+        ("mean", 0.0561, float(m_w3), "assumed the k=1 410 bias carries"),
+    ]
+    print(f"  {'quantity':<20}{'predicted':>11}{'measured':>11}{'err':>10}  basis")
+    for lab, pred, got, basis in rows:
+        print(f"  {lab:<20}{pred:>11.4f}{got:>11.4f}{got - pred:>+10.4f}  {basis}")
+    print("  -> the two ARITHMETIC predictions (n_eff, z_gate) are exact; both")
+    print("     STATISTICAL ones (sd, mean) are wrong, and wrong in opposite directions.")
+
+    print()
+    print("=" * 78)
+    print("7. THE 2x2: DOES ARITY BEHAVE THE SAME AT BOTH WIDTHS?")
+    print("=" * 78)
+    cell = {(5, 1): x1, (5, 3): x3, (410, 1): xw, (410, 3): xwk3}
+    print("  mean (c/L):")
+    print(f"    {'pop':>5}{'k=1':>10}{'k=3':>10}{'k3 - k1':>10}")
+    for pop in (5, 410):
+        a, b = cell[(pop, 1)], cell[(pop, 3)]
+        print(f"    {pop:>5}{a.mean():>+10.4f}{b.mean():>+10.4f}{b.mean() - a.mean():>+10.4f}")
+    print(f"    {'410-5':>5}{cell[(410,1)].mean()-cell[(5,1)].mean():>+10.4f}"
+          f"{cell[(410,3)].mean()-cell[(5,3)].mean():>+10.4f}")
+    inter = ((cell[(410, 3)].mean() - cell[(410, 1)].mean())
+             - (cell[(5, 3)].mean() - cell[(5, 1)].mean()))
+    se = np.sqrt(sum(v.var(ddof=1) / len(v) for v in cell.values()))
+    print(f"    interaction {inter:+.4f}, SE {se:.4f}, z = {inter/se:+.2f}, "
+          f"p = {2*stats.norm.sf(abs(inter/se)):.3f}")
+    print("  sd (c/L):")
+    print(f"    {'pop':>5}{'k=1':>10}{'k=3':>10}{'k3/k1':>10}")
+    for pop in (5, 410):
+        a, b = cell[(pop, 1)], cell[(pop, 3)]
+        sa, sb = a.std(ddof=1), b.std(ddof=1)
+        F = sb**2 / sa**2
+        lo = np.sqrt(F / stats.f.ppf(0.975, len(b) - 1, len(a) - 1))
+        hi = np.sqrt(F / stats.f.ppf(0.025, len(b) - 1, len(a) - 1))
+        print(f"    {pop:>5}{sa:>10.4f}{sb:>10.4f}{sb/sa:>9.3f}x  95% CI [{lo:.3f}, {hi:.3f}]")
+    for k in (1, 3):
+        a, b = cell[(5, k)], cell[(410, k)]
+        sa, sb = a.std(ddof=1), b.std(ddof=1)
+        F = sa**2 / sb**2
+        lo = np.sqrt(F / stats.f.ppf(0.975, len(a) - 1, len(b) - 1))
+        hi = np.sqrt(F / stats.f.ppf(0.025, len(a) - 1, len(b) - 1))
+        pF = 2 * min(stats.f.sf(F, len(a) - 1, len(b) - 1),
+                     stats.f.cdf(F, len(a) - 1, len(b) - 1))
+        print(f"    width narrowing at k={k}: {sa/sb:.3f}x, p = {pF:.3f}, "
+              f"95% CI [{lo:.3f}, {hi:.3f}]")
+    print("  is the 410 k=3 mean above zero? (the phase-1 headline, re-asked at arity 3)")
+    for lab, n in [("nominal n = 40", float(len(xwk3))), (f"effective n = {ne_w3:.3f}", ne_w3)]:
+        t = m_w3 / (sd_w3 / np.sqrt(n))
+        print(f"    {lab:<24} t = {t:+.3f}, p = {2*stats.t.sf(abs(t), n-1):.4f}")
+    tt = stats.ttest_ind(xw, xwk3, equal_var=False)
+    print(f"    410 k=1 vs k=3 mean: {xw.mean():+.4f} vs {m_w3:+.4f}, "
+          f"Welch t = {tt.statistic:+.2f}, p = {tt.pvalue:.3f}")
+    tt = stats.ttest_ind(xwk3, x3, equal_var=False)
+    print(f"    410 k=3 vs 5-stn k=3: {m_w3:+.4f} vs {x3.mean():+.4f}, "
+          f"Welch t = {tt.statistic:+.2f}, p = {tt.pvalue:.3f}")
+    a, b = xwk3[:20], xwk3[20:]
+    tt = stats.ttest_ind(a, b, equal_var=False)
+    print(f"    bank halves: first20 {a.mean():+.4f} vs last20 {b.mean():+.4f}, "
+          f"Welch t = {tt.statistic:+.2f}, p = {tt.pvalue:.3f}")
+
+    print("  the bar, at the arity that actually grades candidates (k=3):")
+    print(f"    {'bank':<24}{'mean':>9}{'sd':>9}{'z_gate':>9}{'bar':>10}")
+    for lab, d, v in [("5-stn k=3 (canonical)", k3, x3), ("410 k=3", wk3, xwk3),
+                      ("410 k=1 (phase 1)", w, xw)]:
+        n = d.get("effective_n_draws") or len(v)
+        m, sv = v.mean(), v.std(ddof=1)
+        zg = family_wise_z_threshold(1, n)
+        print(f"    {lab:<24}{m:>+9.4f}{sv:>9.4f}{zg:>9.4f}{m - zg*sv:>+10.4f}")
+    m_a, s_a, z_a = x3.mean(), x3.std(ddof=1), family_wise_z_threshold(1, 10)
+    bar_a, bar_b = m_a - z_a * s_a, m_w3 - z_w3 * sd_w3
+    print(f"    5-stn k=3 -> 410 k=3: bar moves {bar_b - bar_a:+.4f} c/L "
+          f"(a less-negative bar is EASIER); exact additive split:")
+    print(f"      mean shift      {m_w3 - m_a:+.4f}")
+    print(f"      sd narrowing    {z_a*s_a - z_a*sd_w3:+.4f}  (at the 5-stn z_gate)")
+    print(f"      more draws      {z_a*sd_w3 - z_w3*sd_w3:+.4f}  "
+          f"(z_gate {z_a:.4f} at 10 draws -> {z_w3:.4f} at {ne_w3:.2f})")
+    print("      -> the DRAW COUNT, not the population width, is the largest term.")
+
+    print()
+    print("=" * 78)
+    print("8. THE FIRST LEGAL 410-STATION GRADE OF tgp_cycle_displacement")
+    print("=" * 78)
+    print("  The candidate is arity 2. An arity-3 bank is admissible (a floor grades any")
+    print("  run of arity <= its own) but CONSERVATIVE: sd grows with arity, so the band")
+    print("  is wider than a matched arity-2 ruler would be.")
+    for lab, delta, m, sdv, zg, legal in [
+        ("broad vs 410 k=3  (LEGAL, conservative)", DELTA_BROAD, m_w3, sd_w3, z_w3, True),
+        ("broad vs 410 k=1  (phase 1; arity-refused)", DELTA_BROAD, xw.mean(),
+         xw.std(ddof=1), family_wise_z_threshold(1, w.get("effective_n_draws") or len(xw)), False),
+        ("broad vs 5-stn k=3 (fps-nas; wrong width)", DELTA_BROAD, x3.mean(),
+         x3.std(ddof=1), family_wise_z_threshold(1, 10), False),
+        ("five  vs 5-stn k=3 (as published)", DELTA_FIVE, x3.mean(),
+         x3.std(ddof=1), family_wise_z_threshold(1, 10), True),
+    ]:
+        zc = (delta - m) / sdv
+        print(f"  {lab:<42} z = {zc:+.3f} vs bar {zg:.3f} -> "
+              f"{'CLEARS' if zc < 0 and abs(zc) >= zg else 'FAILS ':<6}"
+              f"{'' if legal else '  [not a legal grade]'}")
+    print(f"  predicted for this run: z ~ -3.2. Measured: {(DELTA_BROAD - m_w3)/sd_w3:+.3f}.")
+    print("  The prediction was made against the arity-1 bank's sd and does not survive")
+    print("  correcting the arity. The verdict flips with the ruler's arity, not the data.")
+    print("  how close is the fail?")
+    need = abs(DELTA_BROAD - m_w3) / z_w3
+    print(f"    at the stamped bar it needs sd <= {need:.4f}; the bank has {sd_w3:.4f} "
+          f"({sd_w3/need - 1:+.1%})")
+    print(f"    equivalently the delta would have to reach {m_w3 - z_w3*sd_w3:+.4f} c/L "
+          f"(it is {DELTA_BROAD:+.4f})")
+    s_k2 = 0.5 * (xw.std(ddof=1) + sd_w3)
+    print(f"    an arity-2 bank -- the MATCHED ruler, not run -- interpolates to sd ~ "
+          f"{s_k2:.4f};")
+    print(f"    at that sd and this mean the grade would be z = "
+          f"{(DELTA_BROAD - m_w3)/s_k2:+.3f}, i.e. it could flip. Not measured.")
+
+    print()
+    print("=" * 78)
+    print("9. WHAT THE ARITY-3 410 BANK UNLOCKS, AND ITS DRAW HYGIENE")
+    print("=" * 78)
+    for cand in sorted(pathlib.Path("experiments/candidates/batch1").glob("*/results.json")):
+        r = json.loads(cand.read_text())
+        meta = dict(r.get("meta", {}))
+        arity = len(r.get("candidate", {}).get("columns") or [])
+        as_is = _bank_admissibility(
+            wk3, run_meta=meta, run_arity=arity, refuse_identity_mismatch=True,
+            refuse_null_method_mismatch=True, refuse_narrow_arity=True,
+            refuse_population_mismatch=True)
+        if_rerun = _bank_admissibility(
+            wk3, run_meta=dict(meta, station_population=wk3["station_population"]),
+            run_arity=arity, refuse_identity_mismatch=True,
+            refuse_null_method_mismatch=True, refuse_narrow_arity=True,
+            refuse_population_mismatch=True)
+        print(f"  {cand.parent.name:<28} arity={arity}  as-committed: refused on "
+              f"{as_is.get('axis')!s:<20} if re-run at 410: "
+              f"{'OK' if if_rerun['ok'] else 'refused on ' + str(if_rerun.get('axis'))}")
+    draws = wk3["placebo_draws"]
+    by_draw = {}
+    for d in draws:
+        by_draw.setdefault(d["draw"], []).append(d["source_column"])
+    sc = np.array([abs(d["self_correlation"]) for d in draws])
+    reuse = Counter(d["source_column"] for d in draws)
+    print(f"    {len(by_draw)} draws x arity {sorted({len(v) for v in by_draw.values()})}"
+          f" = {len(draws)} column-slots, {len(reuse)} distinct source columns of "
+          f"{wk3['n_baseline_columns_available']} available")
+    print(f"    per-column reuse min {min(reuse.values())} max {max(reuse.values())}; "
+          f"duplicate column inside a draw: "
+          f"{any(len(set(v)) < len(v) for v in by_draw.values())}")
+    print(f"    {len({d['block_seed'] for d in draws})} distinct block seeds; "
+          f"|self_correlation| max {sc.max():.4f} (cap 0.60), mean {sc.mean():.4f}")
+    print(f"    effective_n_draws {ne_w3:.3f} of {wk3['n_draws']} nominal -- "
+          f"reuse costs {wk3['n_draws'] - ne_w3:.2f} draws, and the bar pays for it "
+          f"(z_gate {z_w3:.4f} vs {family_wise_z_threshold(1, 40):.4f} at 40)")
 
 
 if __name__ == "__main__":
