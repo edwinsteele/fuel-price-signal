@@ -269,12 +269,24 @@ PYTHONPATH=. uv run python -m experiments.pipeline.runner \
     --candidate experiments/candidates/<batch>_n410/<name>.py --n-stations 410
 ```
 
-Four things that bite, in the order people hit them:
+Five things that bite, in the order people hit them:
 
 - **A run and a floor must agree on population, or the grade is refused.**
   `dossier_tables._bank_admissibility` compares the two `station_population` stamps. This is
   the intended behaviour (a five-station run graded against a 410-station band is
   meaningless), but it means widening is a *pair* of jobs — the floor alone grades nothing.
+- **Doing both halves is still not enough: the dossier cannot make a wide bank the headline
+  grade.** `_noise_band` reads one file by fixed name — `NOISE_FLOOR_FILENAME =
+  "noise_floor.json"`, the canonical five-station bank — and there is no population-aware
+  bank selection. So a 410 run is refused against the canonical bank on
+  `station_population`, and the matching 410 bank is reachable only through
+  `_comparable_noise_banks`, which is corroboration by contract: *"The canonical bank alone
+  drives `candidate_z_vs_band` and therefore the ledger outcome … a sibling that disagrees
+  is a fact to report, never a grade to substitute."* `fps-nas`'s criterion 5 (grade broad,
+  report five) is therefore **not implementable through the dossier path as the code
+  stands** — grade a wide run by reading the sibling's z into a hand-written experiment
+  write-up, or change bank selection deliberately and by PR. Do not let a `--scan` quietly
+  record five "refused: station_population" dossiers and call that the answer.
 - **A floor must also be at least as wide in ARITY as the candidate.** An arity-1 floor
   refuses every arity-2/3 candidate. batch1's candidates are arity 2–3, so a grading floor
   there needs `--arity 3`. Arity costs essentially no extra wall clock — the fit loop is
