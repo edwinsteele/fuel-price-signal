@@ -1,0 +1,571 @@
+{
+  "status": "graded",
+  "candidate": {
+    "name": "tgp_cycle_displacement",
+    "hypothesis": "The retail trough is bounded below by the wholesale floor, so how far the floor has MOVED since this cycle's retail peak sets how deep this particular trough can go. A cycle that began when the floor was 6 c/L higher than it is now has room for a deeper trough than a cycle of identical length and phase whose floor never moved. Neither of the two TGP expressions tested so far asks this. station_minus_tgp_cents reads today's floor LEVEL (accurate when the floor is stable, misleading when it is moving \u2014 which is precisely how it failed). tgp_delta_7d reads the floor's velocity over a FIXED 7-day window that has no relationship to where the retail cycle is. Anchoring the displacement to the cycle's own peak makes it a depth-remaining statistic instead of a level or a momentum term.",
+    "predicted_signature": "Decision-timing: on rows where the floor has fallen a long way since the peak, the model should WAIT past the point the lock would buy, because the trough it is approaching is deeper than the network clock implies; where the floor has been flat or has risen since the peak, it should buy earlier. Expect the effect to concentrate on NON-SHOCK folds \u2014 the mechanism is about the floor setting trough depth in an ordinary cycle, and the shock folds are exactly where the previous TGP gap candidate was measured to HURT (+0.011 log-loss). A shock-concentrated win here would therefore be evidence against the stated mechanism rather than for it, and should be read as such. Magnitude expectation is small: results.csv history puts single-column features at 0.03-0.26 c/L and both prior TGP expressions landed inside the noise band.",
+    "confidence_effect": 0.3,
+    "confidence_zone": 0.55,
+    "columns": [
+      "tgp_cycle_displacement_cents",
+      "tgp_cycle_displacement_frac_amp"
+    ],
+    "inputs": [
+      "price_date",
+      "tgp_delta_7d",
+      "cycle_days_since_peak",
+      "cycle_last_max_cents",
+      "cycle_last_min_cents"
+    ],
+    "prior_art": "Adjacent to two ledger entries on the same upstream series. (1) station_minus_tgp_cents \u2014 REJECTED: helps calm (-0.012) but hurts shock (+0.011), because today's TGP is accurate when the floor is stable and misleading when it is moving; its ledger not_tested says outright 'AND THE OPEN ONE: whether the gap helps on LATE-DESCENT rows specifically. It was rejected on the SHOCK axis, which is not the axis its mechanism targets \u2014 the same oracle diagnostic that fed this rejection also measured gap -> depth-remaining at r2=0.63.' (2) tgp_delta_7d \u2014 INCONCLUSIVE (+0.0059 c/L on the corrected 54-column baseline; the June 2026 graduation retracted 2026-08-19); its not_tested names 'horizons between 7 and 14 days' and 'whether ANY TGP expression helps on the LATE-DESCENT axis specifically'. What differs mechanically: this is neither a level nor a fixed-window velocity. It is a DISPLACEMENT between two dates chosen by the retail cycle itself, so it is immune to the level's stability problem (it is a difference, so the unknown reconstruction constant cancels) and its horizon is the cycle's age rather than an arbitrary 7 days. It is also NOT the gap: it never compares a retail price to a wholesale price, so it cannot reproduce the floor-proximity brake that cancelled velocity's pre-spike buy in gap_x_vel7 (also rejected). Explicit reparameterisation check: correlation against tgp_delta_7d itself is reported in the batch record; note the screen's predictor set is the LOCK ONLY, which excludes tgp_delta_7d (NON_MODEL_COLUMNS, evaluated-inconclusive) \u2014 see PR #331 for why that is the right set and what the old superset did to exactly this ground.",
+    "mechanism_family": "wholesale-lead",
+    "target": {
+      "axis": "regime",
+      "expect_concentration_in": [
+        "normal"
+      ],
+      "folds": []
+    }
+  },
+  "effect_resolved": true,
+  "effect_delta_cpl_held": -0.12924489283599883,
+  "zone": {
+    "resolved": false,
+    "target_delta_cpl_own": -0.08984432643674722,
+    "other_delta_cpl_own": -0.2192088055690533,
+    "n_target_candidate_fills": 160264,
+    "n_other_candidate_fills": 70352
+  },
+  "grading_error": null,
+  "aggregate": [
+    {
+      "arm": "R0",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 184.7826907790863,
+      "cpl_own": 179.72243839242935,
+      "saving_own_pct": 2.7384883104157396,
+      "cpl_held": 179.72243839242935,
+      "saving_held_pct": 2.7384883104157396
+    },
+    {
+      "arm": "candidate",
+      "n_windows": 14,
+      "own_tau_median": 0.25,
+      "held_tau_median": 0.25,
+      "always_cpl": 184.7826907790863,
+      "cpl_own": 179.59319349959335,
+      "saving_own_pct": 2.8084325742919027,
+      "cpl_held": 179.59319349959335,
+      "saving_held_pct": 2.8084325742919027
+    }
+  ],
+  "fold_run_deltas": [
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 1,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.017767143256363305,
+      "delta_ll_hard25_median": -0.10345797349079433
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 2,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.009034712581125648,
+      "delta_ll_hard25_median": -0.05422550583471042
+    },
+    {
+      "fold": 3,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 3,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.0171052913184504,
+      "delta_ll_hard25_median": -0.1080137486947863
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 4,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": -0.04020136993548212,
+      "delta_ll_hard25_median": -0.08323620114791819
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 5,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.00016368380209275113,
+      "delta_ll_hard25_median": -0.04265549362980492
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 6,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.00637280246179861,
+      "delta_ll_hard25_median": -0.033400656891224734
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 7,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.010548738505674227,
+      "delta_ll_hard25_median": 0.04485298861492304
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 8,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.03799660753024228,
+      "delta_ll_hard25_median": -0.14908746278820284
+    },
+    {
+      "fold": 9,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 9,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.01583717636689891,
+      "delta_ll_hard25_median": -0.06414972543301034
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 10,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.010377740460849133,
+      "delta_ll_hard25_median": -0.05941656424362218
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 11,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.005574405216359213,
+      "delta_ll_hard25_median": 0.02900881026532809
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 12,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": 0.002526999967047139,
+      "delta_ll_hard25_median": 0.02271798280095938
+    },
+    {
+      "fold": 13,
+      "regime": "normal",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 13,
+      "regime": "normal",
+      "run": "candidate",
+      "delta_ll_all_median": -0.002670432414359103,
+      "delta_ll_hard25_median": -0.008463934224631209
+    },
+    {
+      "fold": 14,
+      "regime": "shock",
+      "run": "R0",
+      "delta_ll_all_median": 0.0,
+      "delta_ll_hard25_median": 0.0
+    },
+    {
+      "fold": 14,
+      "regime": "shock",
+      "run": "candidate",
+      "delta_ll_all_median": 0.011070808625650685,
+      "delta_ll_hard25_median": 0.033856218803307137
+    }
+  ],
+  "realised_deltas": [
+    {
+      "fold": 1,
+      "arm": "candidate",
+      "delta_cpl_held": 0.22014890577557367,
+      "delta_cpl_own": 0.22014890577557367,
+      "tau_diverges": false
+    },
+    {
+      "fold": 2,
+      "arm": "candidate",
+      "delta_cpl_held": 0.2822269374429709,
+      "delta_cpl_own": 0.2822269374429709,
+      "tau_diverges": false
+    },
+    {
+      "fold": 3,
+      "arm": "candidate",
+      "delta_cpl_held": -0.742980182926658,
+      "delta_cpl_own": -0.742980182926658,
+      "tau_diverges": false
+    },
+    {
+      "fold": 4,
+      "arm": "candidate",
+      "delta_cpl_held": -0.4698501192077913,
+      "delta_cpl_own": -0.4698501192077913,
+      "tau_diverges": false
+    },
+    {
+      "fold": 5,
+      "arm": "candidate",
+      "delta_cpl_held": 0.01631661269777851,
+      "delta_cpl_own": 0.01631661269777851,
+      "tau_diverges": false
+    },
+    {
+      "fold": 6,
+      "arm": "candidate",
+      "delta_cpl_held": -0.048186840786343055,
+      "delta_cpl_own": -0.048186840786343055,
+      "tau_diverges": false
+    },
+    {
+      "fold": 7,
+      "arm": "candidate",
+      "delta_cpl_held": -0.13416490733115438,
+      "delta_cpl_own": -0.13416490733115438,
+      "tau_diverges": false
+    },
+    {
+      "fold": 8,
+      "arm": "candidate",
+      "delta_cpl_held": 0.3674941376456218,
+      "delta_cpl_own": 0.3674941376456218,
+      "tau_diverges": false
+    },
+    {
+      "fold": 9,
+      "arm": "candidate",
+      "delta_cpl_held": 0.21878690264912848,
+      "delta_cpl_own": 0.21878690264912848,
+      "tau_diverges": false
+    },
+    {
+      "fold": 10,
+      "arm": "candidate",
+      "delta_cpl_held": -1.0010660261104078,
+      "delta_cpl_own": -1.0010660261104078,
+      "tau_diverges": false
+    },
+    {
+      "fold": 11,
+      "arm": "candidate",
+      "delta_cpl_held": -0.2738053615117053,
+      "delta_cpl_own": -0.2738053615117053,
+      "tau_diverges": false
+    },
+    {
+      "fold": 12,
+      "arm": "candidate",
+      "delta_cpl_held": -0.35778388541658046,
+      "delta_cpl_own": -0.35778388541658046,
+      "tau_diverges": false
+    },
+    {
+      "fold": 13,
+      "arm": "candidate",
+      "delta_cpl_held": -0.08330400981941466,
+      "delta_cpl_own": -0.08330400981941466,
+      "tau_diverges": false
+    },
+    {
+      "fold": 14,
+      "arm": "candidate",
+      "delta_cpl_held": 0.11080006119024688,
+      "delta_cpl_own": 0.11080006119024688,
+      "tau_diverges": false
+    }
+  ],
+  "seed_variance": {
+    "summary": {
+      "all": {
+        "cohort_median_seed_std": 0.00815664545092206,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 2
+      },
+      "hard25": {
+        "cohort_median_seed_std": 0.02564288447008132,
+        "n_cells": 28,
+        "n_flagged_gt_5x": 2
+      }
+    },
+    "flags": [
+      {
+        "cohort": "all",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.04577158957845631,
+        "ratio_vs_cohort_median": 5.611570326779633
+      },
+      {
+        "cohort": "all",
+        "fold": 3,
+        "run": "R0",
+        "seed_std": 0.04510154120949116,
+        "ratio_vs_cohort_median": 5.529422785489922
+      },
+      {
+        "cohort": "hard25",
+        "fold": 2,
+        "run": "R0",
+        "seed_std": 0.13260218587337955,
+        "ratio_vs_cohort_median": 5.1711103728635655
+      },
+      {
+        "cohort": "hard25",
+        "fold": 3,
+        "run": "candidate",
+        "seed_std": 0.15640209281148537,
+        "ratio_vs_cohort_median": 6.099239459350471
+      }
+    ]
+  },
+  "error": null,
+  "meta": {
+    "batch_dir": "experiments/batches/batch1",
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "realised_seed": 42,
+    "n_windows": 14,
+    "tank_params": "50/3.571/1d/10%",
+    "tank_params_fields": {
+      "tank_size_litres": 50.0,
+      "daily_consumption_litres": 3.5714285714285716,
+      "evaluation_interval_days": 1,
+      "floor_fraction": 0.1
+    },
+    "realised_wall_seconds": 1007.7495562920813,
+    "baseline_cache_used": true,
+    "baseline_cache_hit_folds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "wall_seconds": 1528.1744630411267,
+    "pass_criterion": null,
+    "extra_feature_provider_hits": 513783,
+    "extra_feature_provider_misses": 2766,
+    "git_sha": "209532cf12493f65664a41eca3bf9685de82f5fb",
+    "bead_id": null,
+    "n_baseline_columns": 54,
+    "baseline_fingerprint": "54:1a6ec2d84a69",
+    "station_population": "410:5bbff5bf61d3",
+    "station_universe_spec": {
+      "start_date": "2021-11-05",
+      "end_date": "2025-04-17",
+      "span_days": 1260,
+      "min_coverage": 0.9,
+      "min_days": 1134,
+      "max_sticky_fraction": 0.5,
+      "councils": [
+        "Bayside",
+        "Blacktown",
+        "Blue Mountains",
+        "Botany Bay",
+        "Burwood",
+        "Camden",
+        "Campbelltown",
+        "Canada Bay",
+        "Canterbury-Bankstown",
+        "Cumberland",
+        "Fairfield",
+        "Georges River",
+        "Hawkesbury",
+        "Hornsby",
+        "Hunters Hill",
+        "Inner West",
+        "Ku-ring-gai",
+        "Lane Cove",
+        "Liverpool",
+        "Mosman",
+        "North Sydney",
+        "Northern Beaches",
+        "Parramatta",
+        "Penrith",
+        "Randwick",
+        "Rockdale",
+        "Ryde",
+        "Strathfield",
+        "Sutherland Shire",
+        "Sydney",
+        "The Hills Shire",
+        "Waverley",
+        "Willoughby",
+        "Wollondilly",
+        "Woollahra"
+      ],
+      "fuel": "E10",
+      "windows": [
+        [
+          "2021-11-05",
+          "2022-02-02"
+        ],
+        [
+          "2022-02-03",
+          "2022-05-03"
+        ],
+        [
+          "2022-05-04",
+          "2022-08-01"
+        ],
+        [
+          "2022-08-02",
+          "2022-10-30"
+        ],
+        [
+          "2022-10-31",
+          "2023-01-28"
+        ],
+        [
+          "2023-01-29",
+          "2023-04-28"
+        ],
+        [
+          "2023-04-29",
+          "2023-07-27"
+        ],
+        [
+          "2023-07-28",
+          "2023-10-25"
+        ],
+        [
+          "2023-10-26",
+          "2024-01-23"
+        ],
+        [
+          "2024-01-24",
+          "2024-04-22"
+        ],
+        [
+          "2024-04-23",
+          "2024-07-21"
+        ],
+        [
+          "2024-07-22",
+          "2024-10-19"
+        ],
+        [
+          "2024-10-20",
+          "2025-01-17"
+        ],
+        [
+          "2025-01-18",
+          "2025-04-17"
+        ]
+      ],
+      "coverage_gated_per_window": true,
+      "n": 410,
+      "seed": 20260905,
+      "stratify_by": "council",
+      "allocation": "proportional (largest remainder); never exceeds a stratum's size"
+    },
+    "station_universe_pool_digest": "410:4a9920301726",
+    "shock_folds": [
+      1,
+      3,
+      4,
+      14
+    ],
+    "shock_quantile": 0.25,
+    "shock_folds_source": "cache"
+  }
+}

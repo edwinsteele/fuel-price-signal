@@ -12,6 +12,18 @@ phase-1 grade of `tgp_cycle_displacement` was an analysis of the ruler, never a
 verdict. The arity-3 bank is the first 410-station ruler that is legally admissible
 for the candidates, and it is what sections 6-9 grade on.
 
+Phase 3 (section 10): all five batch1 candidates were re-run at 410 stations
+(experiments/candidates/batch1_n410/), so section 9's "if re-run at 410" column is
+no longer hypothetical. Section 10 grades the measured broad deltas against the
+arity-3 410 bank BY HAND. It is done here, and not through `dossier_tables`,
+because `_noise_band` reads one bank by fixed filename (NOISE_FLOOR_FILENAME =
+"noise_floor.json", the five-station arity-3 bank) and has no population-aware
+selection: a dossier over a 410 run refuses on `station_population` by design
+(fps-916) and reaches the 410 bank only as a `_comparable_noise_banks` sibling,
+which is corroboration and explicitly never a grade. Making that selection
+population-aware is a real design change to experiments/pipeline/ and needs its
+own PR; it is deliberately NOT done as a side effect of reading these results.
+
 Run: PYTHONPATH=. uv run python -m experiments.2026-09-06_noise_floor_n410.analyse
 (or: PYTHONPATH=. uv run python experiments/2026-09-06_noise_floor_n410/analyse.py)
 """
@@ -23,6 +35,7 @@ import numpy as np
 from scipy import stats
 
 from experiments.pipeline.dossier_tables import (
+    NOISE_FLOOR_FILENAME,
     _bank_admissibility,
     family_wise_z_threshold,
 )
@@ -31,6 +44,15 @@ BATCH = pathlib.Path("experiments/batches/batch1")
 # fps-nas: tgp_cycle_displacement's pooled delta at each width, from
 # experiments/2026-09-05_arbiter_universe_width/README.md.
 DELTA_FIVE, DELTA_BROAD = -0.2077, -0.1292
+
+# Phase 3. The five batch1 candidates, re-run with --n-stations 410 against the same
+# batch dir. `*.py` in this directory are SYMLINKS to ../batch1/*.py -- the candidate
+# code is byte-identical at both widths; only the station universe differs.
+FIVE = pathlib.Path("experiments/candidates/batch1")
+WIDE = pathlib.Path("experiments/candidates/batch1_n410")
+CANDIDATES = ("lga_trough_propagation", "network_move_breadth",
+              "station_descent_dynamics", "stickiness_phase_saddle",
+              "tgp_cycle_displacement")
 
 
 def load(name):
@@ -370,6 +392,190 @@ def main():
     print(f"    effective_n_draws {ne_w3:.3f} of {wk3['n_draws']} nominal -- "
           f"reuse costs {wk3['n_draws'] - ne_w3:.2f} draws, and the bar pays for it "
           f"(z_gate {z_w3:.4f} vs {family_wise_z_threshold(1, 40):.4f} at 40)")
+
+    print()
+    print("=" * 78)
+    print("10. THE FIVE RE-RUNS AT 410 STATIONS -- GRADED BY HAND")
+    print("=" * 78)
+    print("  Section 9's 'if re-run at 410' column is now measured, not hypothetical.")
+    print("  Graded here rather than through a dossier because `_noise_band` selects the")
+    print(f"  bank by FIXED FILENAME ({NOISE_FLOOR_FILENAME!r}, the five-station arity-3")
+    print("  bank) with no population-aware choice; a 410 run refuses on station_population")
+    print("  (fps-916, by design) and sees this bank only as a corroborating sibling.")
+
+    runs = {}
+    for name in CANDIDATES:
+        wide = json.loads((WIDE / name / "results.json").read_text())
+        five = json.loads((FIVE / name / "results.json").read_text())
+        runs[name] = (five, wide)
+
+    print()
+    print("  10a. INTEGRITY GATE -- did every run actually widen? (the silent-fallback")
+    print("       failure mode: a run that fell back to five stations and graded anyway)")
+    stamps = ("station_population", "baseline_fingerprint", "tank_params")
+    bad = []
+    for name, (five, wide) in runs.items():
+        meta = wide.get("meta", {})
+        problems = [f"status={wide.get('status')!r}"] if wide.get("status") != "graded" else []
+        problems += [f"{a}={meta.get(a)!r} != {wk3[a]!r}"
+                     for a in stamps if meta.get(a) != wk3[a]]
+        if meta.get("n_windows") != wk3["n_windows"]:
+            problems.append(f"n_windows={meta.get('n_windows')} != {wk3['n_windows']}")
+        if problems:
+            bad.append((name, problems))
+        print(f"    {name:<28} {'OK' if not problems else 'FAIL: ' + '; '.join(problems)}")
+    if bad:
+        raise SystemExit(f"integrity gate failed: {bad}")
+    print(f"    all five: status=graded, population={wk3['station_population']},")
+    print(f"    baseline={wk3['baseline_fingerprint']}, tank={wk3['tank_params']},")
+    print(f"    n_windows={wk3['n_windows']} -- identical to the bank on every axis.")
+    print("    Five-station stamp for contrast: station_population = "
+          f"{runs['tgp_cycle_displacement'][0]['meta'].get('station_population')!r} "
+          "(pre-fps-916; that null is why the")
+    print("    as-committed runs refuse against ANY population-stamped bank).")
+
+    print()
+    print("  10b. ADMISSIBILITY, measured on the runs as they now exist")
+    print("       (section 9 had to substitute the population stamp to ask this)")
+    for name, (five, wide) in runs.items():
+        arity = len(wide.get("candidate", {}).get("columns") or [])
+        a = _bank_admissibility(
+            wk3, run_meta=dict(wide.get("meta", {})), run_arity=arity,
+            refuse_identity_mismatch=True, refuse_null_method_mismatch=True,
+            refuse_narrow_arity=True, refuse_population_mismatch=True)
+        print(f"    {name:<28} arity={arity}  vs noise_floor_n410_k3.json: "
+              f"{'OK' if a['ok'] else 'REFUSED on ' + str(a.get('axis'))}")
+    print("    The bank is arity 3; every candidate is arity 2 or 3, so admissible.")
+    print("    For the arity-2 pair the bank is CONSERVATIVE (sd grows with arity), not")
+    print("    matched -- see section 8. The arity-2 bank was considered and dropped.")
+
+    print()
+    print("  10c. THE GRADES")
+    z_family = family_wise_z_threshold(len(CANDIDATES), ne_w3)
+    print(f"    band: mean {m_w3:+.6f}  sd {sd_w3:.6f}  effective_n_draws {ne_w3:.3f}")
+    print(f"    single-candidate gate  z_gate(1, {ne_w3:.3f}) = {z_w3:.4f}  "
+          f"-> bar {m_w3 - z_w3*sd_w3:+.4f} c/L")
+    print(f"    family-wise gate       z_gate({len(CANDIDATES)}, {ne_w3:.3f}) = {z_family:.4f}  "
+          f"-> bar {m_w3 - z_family*sd_w3:+.4f} c/L")
+    print("    A candidate clears only if z < 0 (a SAVING) and |z| >= the gate.")
+    print()
+    print(f"    {'candidate':<28}{'k':>2}{'delta':>10}{'z':>9}{'vs 1':>8}{'vs 5':>8}")
+    grades = {}
+    for name, (five, wide) in runs.items():
+        arity = len(wide.get("candidate", {}).get("columns") or [])
+        d = float(wide["effect_delta_cpl_held"])
+        z = (d - m_w3) / sd_w3
+        one = "CLEARS" if z < 0 and abs(z) >= z_w3 else "fails"
+        fam = "CLEARS" if z < 0 and abs(z) >= z_family else "fails"
+        grades[name] = (d, z, one, fam)
+        print(f"    {name:<28}{arity:>2}{d:>+10.4f}{z:>+9.3f}{one:>8}{fam:>8}")
+    print()
+    n_clear = sum(1 for _, _, o, _ in grades.values() if o == "CLEARS")
+    print(f"    {n_clear} of {len(CANDIDATES)} clear the single-candidate bar; "
+          f"{sum(1 for *_, f in grades.values() if f == 'CLEARS')} clear the family-wise bar.")
+    print("    Three of the five deltas are POSITIVE -- the feature made the strategy more")
+    print("    expensive at 410 stations. A positive delta cannot clear any bar.")
+    best = min(grades.items(), key=lambda kv: kv[1][1])
+    d, z, _, _ = best[1]
+    print(f"    closest to the bar: {best[0]} at z = {z:+.3f}, "
+          f"{abs(z)/z_w3 - 1:+.1%} against the single-candidate gate "
+          f"({abs(z)/z_family - 1:+.1%} against the family-wise one).")
+    tz = grades["tgp_cycle_displacement"][1]
+    print(f"    tgp_cycle_displacement's own re-run: delta "
+          f"{grades['tgp_cycle_displacement'][0]:+.5f}, z {tz:+.3f}. Section 8 graded the")
+    print(f"    2026-09-05 broad delta of {DELTA_BROAD:+.4f} at z = "
+          f"{(DELTA_BROAD - m_w3)/sd_w3:+.3f}; the independent re-run reproduces it to "
+          f"{abs(grades['tgp_cycle_displacement'][0] - DELTA_BROAD):.5f} c/L.")
+    print("    So the near miss was real and is not a fluke of that earlier run.")
+
+    print()
+    print("  10d. WHAT WIDENING DID TO EACH CANDIDATE (five-station -> 410)")
+    print(f"    {'candidate':<28}{'5-stn':>10}{'410':>10}{'shift':>10}{'sign':>9}")
+    shifts = []
+    for name, (five, wide) in runs.items():
+        a = float(five["effect_delta_cpl_held"])
+        b = float(wide["effect_delta_cpl_held"])
+        shifts.append(b - a)
+        flip = "FLIPS" if (a < 0) != (b < 0) else ""
+        print(f"    {name:<28}{a:>+10.4f}{b:>+10.4f}{b - a:>+10.4f}{flip:>9}")
+    shifts = np.array(shifts)
+    print(f"    mean shift {shifts.mean():+.4f} c/L, sd {shifts.std(ddof=1):.4f}, "
+          f"all five same sign: {bool((shifts > 0).all() or (shifts < 0).all())}")
+    print("    Every candidate moved in the SAME direction -- more expensive -- when the")
+    print("    universe widened, by a similar amount. The five shifts are NOT independent")
+    print("    (same folds, same universe, same baseline), so no t-test is run across them;")
+    print("    the sd above describes their spread, it is not a standard error.")
+    print("    The comparison that IS well-posed: does a NULL column shift by as much?")
+    null_shift = m_w3 - x3.mean()
+    se_null = np.sqrt(x3.var(ddof=1) / len(x3) + sd_w3**2 / len(xwk3))
+    print(f"      placebo band mean, 5-stn k=3 -> 410 k=3: {x3.mean():+.4f} -> {m_w3:+.4f}"
+          f"  = {null_shift:+.4f} c/L")
+    print(f"      SE of that null shift (unpaired, n={len(x3)} and {len(xwk3)}): "
+          f"{se_null:.4f}")
+    print("      each candidate's shift against BOTH rulers -- the band's estimation")
+    print("      error, and the candidate's own fold-clustered error at the two widths:")
+    print(f"        {'candidate':<28}{'shift':>9}{'/SE band':>10}{'/SE fold':>10}")
+    for name, (five, wide) in runs.items():
+        s = float(wide["effect_delta_cpl_held"]) - float(five["effect_delta_cpl_held"])
+        f5 = np.array([r["delta_cpl_held"] for r in five["realised_deltas"]], dtype=float)
+        f4 = np.array([r["delta_cpl_held"] for r in wide["realised_deltas"]], dtype=float)
+        se_fold = np.sqrt(f5.var(ddof=1) / len(f5) + f4.var(ddof=1) / len(f4))
+        print(f"        {name:<28}{s:>+9.4f}{(s - null_shift)/se_null:>+10.2f}"
+              f"{(s - null_shift)/se_fold:>+10.2f}")
+    print("      The two rulers disagree about this shift, and the disagreement is the")
+    print("      point. On the band, every candidate moved further than the null did and")
+    print("      the smallest margin is still ~1.7 SE. On each candidate's own folds, NO")
+    print("      single shift is resolvable -- all are well under 1 SE. What carries the")
+    print("      finding is not any one shift but that all five went the same way. That")
+    print("      unanimity is suggestive, NOT a p-value: the five share folds, universe")
+    print("      and baseline, so it is not five independent coin flips and no 1/32 may")
+    print("      be quoted for it. What a decision would actually feel is the sign flips")
+    print("      -- 3 of 5 crossing from saving to cost.")
+    print("    Read it as a five-station universe flattering its own features, not as five")
+    print("    independent findings that happened to agree -- and note that this is exactly")
+    print("    the case where the choice of ruler changes what you are allowed to say.")
+
+    print()
+    print("  10e. THE OTHER RULER -- the candidate's own fold-clustered SE")
+    print("       No dossier reports this. It is the ruler on which fps-nas measured the")
+    print("       2.00x narrowing, and it disagrees with the band about what width buys.")
+    print(f"    {'candidate':<28}{'sd5':>8}{'sd410':>8}{'ratio':>8}{'t410':>8}{'p410':>8}")
+    ratios = []
+    for name, (five, wide) in runs.items():
+        f5 = np.array([r["delta_cpl_held"] for r in five["realised_deltas"]], dtype=float)
+        f4 = np.array([r["delta_cpl_held"] for r in wide["realised_deltas"]], dtype=float)
+        s5, s4 = f5.std(ddof=1), f4.std(ddof=1)
+        ratios.append(s5 / s4)
+        t = f4.mean() / (s4 / np.sqrt(len(f4)))
+        print(f"    {name:<28}{s5:>8.4f}{s4:>8.4f}{s5/s4:>7.2f}x{t:>+8.2f}"
+              f"{2*stats.t.sf(abs(t), len(f4)-1):>8.3f}")
+    ratios = np.array(ratios)
+    print(f"    median narrowing {np.median(ratios):.2f}x across the five "
+          f"(fps-nas measured 2.00x on tgp_cycle_displacement alone).")
+    print("    On THIS ruler widening buys real precision on every candidate. On the")
+    print(f"    placebo band it bought {x3.std(ddof=1)/sd_w3:.3f}x at arity 3 -- nothing.")
+    print("    Not one of the five has a fold-clustered mean distinguishable from zero at")
+    print("    410 stations either, so the two rulers AGREE on the verdict here and")
+    print("    disagree only about what width is worth. Which ruler batch2 grades on is")
+    print("    still open; these runs do not settle it, they only show the gap is real.")
+
+    print()
+    print("  10f. WHAT THE DOSSIER PATH WOULD SAY, IF RUN OVER THESE DIRECTORIES")
+    canon = json.loads((BATCH / NOISE_FLOOR_FILENAME).read_text())
+    for name, (five, wide) in runs.items():
+        arity = len(wide.get("candidate", {}).get("columns") or [])
+        a = _bank_admissibility(
+            canon, run_meta=dict(wide.get("meta", {})), run_arity=arity,
+            refuse_identity_mismatch=True, refuse_null_method_mismatch=True,
+            refuse_narrow_arity=True, refuse_population_mismatch=True)
+        print(f"    {name:<28} vs {NOISE_FLOOR_FILENAME}: "
+              f"{'OK' if a['ok'] else 'REFUSED on ' + str(a.get('axis'))}")
+    print("    That refusal is CORRECT: the canonical bank is five-station and these runs")
+    print("    are not. The headline verdict a dossier would print is 'refused', with the")
+    print("    grades in 10c visible only as a sibling. fps-nas criterion 5 -- grade broad,")
+    print("    report five -- is therefore not implementable through the dossier path as")
+    print("    the code stands, and this section is the deliberate substitute, not a")
+    print("    workaround for a bug.")
 
 
 if __name__ == "__main__":

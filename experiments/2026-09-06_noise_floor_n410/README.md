@@ -391,3 +391,171 @@ that phase 1's reassurance was an artifact of an inadmissible bank.
   banks' 20 and 10 draws.
 - The §2 mean-shift mechanism is now *doubted as well as* `not_tested` — it predicts the
   bias grows with arity and the point estimate falls.
+
+---
+
+## Phase 3 — the five candidates re-run at 410
+
+Phase 2 §9 said all five *would* be gradable once re-run at 410. They have been. Run
+2026-09-06/07, ≈34 min each, ≈2.8h total plus a one-off ~17 min `r0_cache` refit on the
+first, into `experiments/candidates/batch1_n410/` (whose `*.py` are **symlinks** to
+`../batch1/*.py`, so the candidate code is byte-identical at both widths and only the
+station universe differs):
+
+```bash
+for c in lga_trough_propagation network_move_breadth station_descent_dynamics \
+         stickiness_phase_saddle tgp_cycle_displacement; do
+  PYTHONPATH=. uv run python -m experiments.pipeline.runner \
+      --batch-dir experiments/batches/batch1 \
+      --candidate experiments/candidates/batch1_n410/$c.py \
+      --n-stations 410 2>&1 | tee experiments/candidates/batch1_n410/$c.log
+done
+```
+
+All five returned `status: "graded"` and all five stamp
+`station_population = 410:5bbff5bf61d3`, `baseline_fingerprint = 54:1a6ec2d84a69`,
+`tank_params = 50/3.571/1d/10%`, `n_windows = 14` — identical to the bank on every
+admissibility axis. `analyse.py` §10a gates on this explicitly: a run that silently fell
+back to five stations and graded anyway would invalidate the whole section, so it is
+checked rather than assumed. `_bank_admissibility` now returns `ok` for all five against
+`noise_floor_n410_k3.json` *without* the substituted population stamp phase 2 §9 needed.
+
+### 10. Nothing graduates: 0 of 5 clear, and three of them cost money
+
+Band: mean +0.029826, sd 0.093831, `effective_n_draws` 28.076.
+Single-candidate gate `z_gate(1, 28.076)` = 1.7332 → bar −0.1328 c/L.
+Family-wise gate `z_gate(5, 28.076)` = **2.5159** → bar −0.2062 c/L. Five candidates were
+run, so the family-wise gate is the one that governs the batch-level question; the
+single-candidate column is for reading one number in isolation.
+
+| candidate | arity | delta (c/L) | z | vs 1 | vs 5 |
+|---|--:|--:|--:|:--|:--|
+| `lga_trough_propagation` | 3 | +0.0666 | +0.392 | fails | fails |
+| `network_move_breadth` | 3 | −0.1004 | −1.388 | fails | fails |
+| `station_descent_dynamics` | 3 | +0.0604 | +0.326 | fails | fails |
+| `stickiness_phase_saddle` | 2 | +0.0544 | +0.262 | fails | fails |
+| `tgp_cycle_displacement` | 2 | −0.1292 | −1.695 | fails | fails |
+
+**Three of the five deltas are positive** — at 410 stations those features made the
+strategy *more expensive*. A positive delta cannot clear any bar at any gate.
+
+`tgp_cycle_displacement` is again the closest and again just short: z = −1.695, 2.2% under
+the single-candidate gate and 32.6% under the family-wise one. Its re-run reproduces the
+2026-09-05 `arbiter_universe_width` broad delta (−0.1292) to **0.00004 c/L**, from an
+independent run — so §8's near miss is a property of the feature and the ruler, not a fluke
+of that earlier run. The arity-2 pair is still graded by an arity-3 bank, which is
+admissible but conservative; the matched arity-2 ruler remains unrun, and remains the only
+thing that could move `tgp_cycle_displacement`.
+
+This agrees with batch1's own retrospective, which already said graduate nothing from
+batch1. The value here is methodological, for batch2.
+
+### 11. Every candidate got worse when the universe widened; the null did not
+
+| candidate | 5-stn | 410 | shift | |
+|---|--:|--:|--:|:--|
+| `lga_trough_propagation` | −0.0672 | +0.0666 | +0.1338 | **sign flips** |
+| `network_move_breadth` | −0.1627 | −0.1004 | +0.0623 | |
+| `station_descent_dynamics` | −0.0237 | +0.0604 | +0.0841 | **sign flips** |
+| `stickiness_phase_saddle` | −0.0761 | +0.0544 | +0.1305 | **sign flips** |
+| `tgp_cycle_displacement` | −0.2077 | −0.1292 | +0.0785 | |
+
+All five moved the same way — more expensive — mean +0.0978 c/L, spread 0.0324. **Three
+crossed from saving to cost.** The five shifts share folds, universe and baseline, so they
+are not independent; no t-test is run across them and **no 1/32 may be quoted** for the
+unanimity.
+
+The well-posed comparison is against the null. The placebo band's own mean moved
++0.0047 c/L over the same widening (SE 0.0349, unpaired, n=10 and 40) — so on the band's
+ruler each candidate's shift is 1.65–3.70 SE beyond the drift a null column pays.
+
+On the *other* ruler — each candidate's own fold-clustered SE at the two widths — the same
+shifts are **0.31–0.88 SE**, i.e. not individually resolvable at all. The two rulers
+disagree about this shift, and the disagreement is the finding. What survives on both is
+the direction and the sign flips, which is what a purchasing decision would actually feel.
+
+Read it as a five-station universe flattering its own features, not as five independent
+findings that agreed.
+
+### 12. Width buys 1.9x on the candidate's ruler and nothing on the band's
+
+| candidate | fold sd, 5-stn | fold sd, 410 | narrowing | t(410) | p |
+|---|--:|--:|--:|--:|--:|
+| `lga_trough_propagation` | 0.5653 | 0.3006 | 1.88x | +0.90 | 0.385 |
+| `network_move_breadth` | 0.5491 | 0.2656 | 2.07x | −1.07 | 0.304 |
+| `station_descent_dynamics` | 0.4665 | 0.3262 | 1.43x | +0.56 | 0.587 |
+| `stickiness_phase_saddle` | 0.4269 | 0.3232 | 1.32x | +0.68 | 0.506 |
+| `tgp_cycle_displacement` | 0.7982 | 0.3992 | **2.00x** | −1.27 | 0.227 |
+
+Median narrowing **1.88x** across the five. `fps-nas` measured 2.00x on
+`tgp_cycle_displacement` alone; that reproduces exactly, and it is not peculiar to that
+candidate. Against §7's **1.065x [0.679, 1.995]** on the arity-3 placebo band, the gap
+between the two rulers is now measured on five candidates rather than argued from one.
+
+Note what this does *not* buy: no candidate's fold-clustered mean is distinguishable from
+zero at 410 (p 0.227–0.587). The two rulers **agree on the verdict** and disagree only
+about what width is worth. That keeps the open question live rather than settling it.
+
+### 13. The grade could not be delivered through a dossier, and that is structural
+
+`_noise_band` selects its bank by fixed filename — `NOISE_FLOOR_FILENAME =
+"noise_floor.json"` (`dossier_tables.py:108,1320`), the canonical **five-station** arity-3
+bank. There is no population-aware selection. Confirmed live on all five re-run
+directories: every one is `REFUSED on station_population` against the canonical bank. The
+410 bank is reachable only via `_comparable_noise_banks`, whose docstring is explicit that
+siblings are corroboration and never a grade.
+
+So `dossier_tables --scan` over these directories would print five dossiers whose headline
+verdict is *"refused: station_population"*, with the correct 410 grades buried as siblings.
+That refusal is **correct** — `fps-916` working as designed — and §10 is therefore graded
+by hand in `analyse.py`, deliberately, not as a workaround for a bug.
+
+**`fps-nas` criterion 5 — grade broad, report five — is not implementable through the
+dossier path as the code stands.** Making bank selection population-aware is a real design
+change in `experiments/pipeline/` that would alter how every future dossier is graded; it
+needs its own PR and was explicitly not done as a side effect of reading these results.
+
+## Phase 3 conclusion
+
+**Batch1 graduates nothing at 410 stations, and the broad width makes that more emphatic,
+not less.** Zero of five clear the single-candidate bar; zero clear the family-wise bar
+that five candidates actually require; three of five turn into costs.
+`tgp_cycle_displacement` remains the only near miss, at 2.2% under the single-candidate
+gate, reproduced to 0.00004 c/L by an independent run.
+
+The finding worth carrying into batch2 is §11: **every candidate paid a widening penalty
+the null did not pay, and three changed sign.** A five-station universe does not merely add
+noise to a candidate's delta — it biases it favourably, by roughly +0.10 c/L here, which is
+the same order as the entire effect any batch1 candidate claimed. Batch2's grading
+population is a correctness question, not a precision question.
+
+And §12 sharpens the ruler question rather than answering it: on the candidate's own folds
+width is worth ~1.9x, on the placebo band it is worth nothing, and the two still agree on
+every verdict. Deciding which ruler batch2 grades on — and whether the fold-clustered
+interval gets reported at all — wants doing before batch2's freeze.
+
+## Phase 3 followups
+
+Discharged by this phase:
+
+- ~~Re-run the five candidates at 410 before any of them can be graded on this bank.~~ Done.
+- ~~2.00x on the fold-clustered ruler is a single-candidate measurement.~~ Now five;
+  median 1.88x.
+
+Still open, and re-ordered by what phase 3 learned:
+
+- **Decide the ruler before batch2's freeze.** No dossier reports the fold-clustered
+  interval. §12 shows the two rulers price width 1.9x apart while agreeing on verdicts —
+  the cheap move is to *report* both and keep grading on the band, which needs no new bank.
+- **Batch2's grading population.** §11 is the strongest argument yet for grading batch2
+  broad from the start: the five-station bias (~+0.10 c/L) is the size of the effects being
+  hunted. This is a decision, not an experiment.
+- **Population-aware bank selection** (`experiments/pipeline/`, needs a PR) if criterion 5
+  is to be delivered through dossiers rather than by hand. Optional — hand-grading in a lab
+  book entry costs nothing and keeps `fps-916`'s guard intact.
+- **The matched arity-2 410 bank** is still the only thing that could move
+  `tgp_cycle_displacement`, and it is still ~12h. Both arity-2 expressions are slated to be
+  re-run as arity-1 batch2 candidates against batch2's own floor, so this bank would grade
+  a shape nobody will run again. Unchanged recommendation: do not run it.
+- **Is the band's arity sensitivity fit-noise rather than replay noise?** Untouched by
+  phase 3. Still post-hoc, still one bank re-run at a different fit seed away from an answer.
