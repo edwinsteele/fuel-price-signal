@@ -355,6 +355,13 @@ Tests are required alongside all implementation. Key areas:
 
 ## Beads
 
+> **⚠ SUPERSEDED 2026-09-07 — GitHub Issues is the tracker again.** The 24 live issues were
+> migrated to GitHub as **#365–#388** (map: [docs/bd-id-map.md](docs/bd-id-map.md)). **File with
+> `gh issue create`, not `bd create`, and do not write to `bd` — its contents are historical.**
+> The Dolt DB still exists only because `experiments/pipeline/launch.py` has not been ported yet
+> (cutover phase 4). The rest of this section describes the retired setup and is kept until the
+> phase-6 docs sweep rewrites it; read it as history, not instruction.
+
 Work items (what was previously GitHub Issues) live in [Beads](https://github.com/gastownhall/beads) (`bd`), a git-native, dependency-aware issue tracker. GitHub Issues were retired for this project 2026-08-06; PRs, CI, and reviews still live on GitHub as before — only the backlog moved.
 
 - `.beads/` holds bd's config (git-tracked) and its Dolt database (`.beads/embeddeddolt/`, gitignored — it does not travel via ordinary `git push`). Cross-checkout sync is `bd dolt pull` / `bd dolt push` against the `origin` Dolt remote, not git.

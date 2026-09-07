@@ -10,7 +10,10 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
 - [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) — CLI reference for training/evaluating/diagnosing the ML model (dev reference, not day-to-day usage)
 - [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) — ML model design decisions; [docs/feature-pipeline.md](docs/feature-pipeline.md) — the AI-sourced candidate-feature pipeline's machinery
 - `PLAN_ml_signal.md` — active ML-signal plan. **Lives at repo root and is gitignored** (despite some docs saying `docs/PLAN_ml_signal.md` — that path is wrong).
-- Run `bd ready` for open work items (GitHub Issues retired in favour of Beads — see [AGENTS.md § Beads](AGENTS.md#beads)).
+- **Work items live in GitHub Issues (#365–#388) as of 2026-09-07** — `gh issue list`, not `bd ready`.
+  The Beads experiment was cut back over; `bd` is stale and must not be written to. Map:
+  [docs/bd-id-map.md](docs/bd-id-map.md); closed-issue archive: `docs/bd-archive/`. Much of the
+  bd-specific material below is pending the cutover's phase-6 sweep — see `PLAN_beads_cutover.md`.
 - Run `bd memories` for this repo's atomic technical gotchas (git discipline, DB-write timing, environment traps). These are short, load-bearing, and cheap to read — several are rules you will otherwise break before noticing.
 
 ## Model/effort guidance
