@@ -251,6 +251,25 @@ PYTHONPATH=. uv run python -m experiments.pipeline.retrospective <batch>
 Both the floor and the runs it grades default to the five commute stations
 (`PREFERRED_STATIONS`). `fps-nas` decided to **grade on a broad 410-station Sydney sample
 and report the five**; `--n-stations N` is how each side is pointed at that population.
+
+> **Confirmed for batch2 by the owner, 2026-09-07, and now on evidence rather than
+> affordability.** All five batch1 candidates were re-run at 410: all five got worse, three
+> crossed from saving to cost, and the placebo null moved only +0.0047 c/L over the same
+> widening. **A five-station universe biases a candidate's delta favourably by ~+0.10 c/L**
+> — the size of the entire effect any batch1 candidate claimed. Narrow grading does not
+> merely add noise, it manufactures savings. See `experiments/2026-09-06_noise_floor_n410/
+> README.md` § "Phase 3" and `docs/STATUS.md`.
+>
+> **Two defaults point the wrong way for batch2, and one caller drops the flag entirely:**
+> 1. `launch.py::build_runner_cmd` does **not** pass `--n-stations`, so a candidate launched
+>    the normal way silently runs at five stations.
+> 2. `--n-stations` defaults to `None` (five stations) on **both** `runner` and
+>    `noise_floor`, and `noise_floor --arity` defaults to **1**, which grades no
+>    multi-column candidate at all. Batch2's floor needs both flags set deliberately.
+>
+> The failure mode is loud, not silent: `station_population` is stamped on every run and
+> floor, so a forgotten flag comes back as a **population refusal**, not a mis-grade. Read
+> a population refusal in batch2 as "someone forgot `--n-stations`".
 Both take the flag, both draw through `experiments.lib.universe.draw_batch_universe` at the
 same `UNIVERSE_SEED`, and both stamp `station_population` (a digest of the codes actually
 replayed) into their artifact:
@@ -315,7 +334,8 @@ Five things that bite, in the order people hit them:
   `experiments/candidates/batch1_n410/`.
 
 Measured properties of the wide floor, and why the bar moves, are in
-`experiments/2026-09-06_noise_floor_n410/README.md`. **Read its Phase 2 section before
+`experiments/2026-09-06_noise_floor_n410/README.md` (Phase 3 grades the five re-run
+candidates; Phase 2 establishes the ruler). **Read its Phase 2 section before
 quoting any figure from it**: the arity-1 findings (the band narrows 1.44x with width; the
 410 null carries a +0.056 c/L positive mean) do not reproduce at arity 3, which is the only
 arity that can legally grade a batch1 candidate. At arity 3 the width narrowing is 1.065x
