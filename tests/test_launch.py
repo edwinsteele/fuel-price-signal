@@ -118,11 +118,13 @@ def _issue(
     blocked: bool = False,
     assigned: bool = True,
     created_at: str = "2026-09-01T00:00:00Z",
+    assignee: str = "routine-bot",
 ) -> dict:
     """A `gh issue list --json number,title,body,labels,assignees,createdAt,updatedAt` row.
 
-    Defaults to a live claim: assigned (the claim), `experiment`-labelled, not blocked,
-    retry budget unspent.
+    Defaults to a live claim held by THIS ROUTINE: assigned to the routine's own login,
+    `experiment`-labelled, not blocked, retry budget unspent. Pass a different
+    `assignee` for a claim a person made.
     """
     names = [EXPERIMENT_LABEL]
     if retried:
@@ -134,7 +136,7 @@ def _issue(
         "title": f"candidate {number}",
         "body": body,
         "labels": [{"name": name} for name in names],
-        "assignees": [{"login": "edwinsteele"}] if assigned else [],
+        "assignees": [{"login": assignee}] if assigned else [],
         "createdAt": created_at,
         "updatedAt": updated_at,
     }
@@ -167,6 +169,13 @@ def _recording(*issues: dict):
         calls.append(cmd)
         return inner(cmd, **kwargs)
     return fake_run, calls
+
+
+@pytest.fixture(autouse=True)
+def _stub_routine_login(monkeypatch):
+    """_routine_login() shells out to `gh api user`; pin it and clear the process cache."""
+    monkeypatch.setattr(launch_module, "_ROUTINE_LOGIN", None)
+    monkeypatch.setattr(launch_module, "_routine_login", lambda: "routine-bot")
 
 
 def _fake_repo_root(tmp_path, monkeypatch) -> pathlib.Path:
@@ -270,6 +279,7 @@ def test_find_stale_claims_skips_unassigned_issue(tmp_path, monkeypatch):
     candidate nobody has started, and touching it would release a claim that was
     never made -- and, with a retryable results.json from a PREVIOUS cycle still
     on disk, would burn its retry budget on the spot.
+
     """
     body = _stale_fixture(tmp_path, monkeypatch, results={"status": "aborted_pipeline"})
     monkeypatch.setattr(subprocess, "run", _listing(_issue(body, _stamp(_RECENT), assigned=False)))
@@ -386,25 +396,84 @@ def test_find_stale_claims_ignores_non_traceback_log(tmp_path, monkeypatch):
     assert find_stale_claims() == []
 
 
-def test_find_stale_claims_queries_open_experiment_issues(tmp_path, monkeypatch):
-    """The one query both the sweep and the claim share, and it must stay the flag form.
+def test_find_stale_claims_ignores_a_claim_a_person_made(tmp_path, monkeypatch):
+    """The sweep recovers claims THIS ROUTINE made, never a person's.
 
-    Measured 2026-09-08 (see ISSUE_LIST_LIMIT): the `--search` index reflects an
+    bd's claim marker was a STATUS, so `bd assign <id> <someone>` alone never entered
+    the sweep. GitHub's marker is an identity, so without this narrowing the population
+    widens from "claims this routine made" to "anything with an assignee": someone who
+    self-assigns an experiment issue to investigate a crash by hand would have their
+    claim released and the detached runner relaunched over the top of them, having spent
+    one of the two retries on the way.
+
+    This is also what makes `--remove-assignee "@me"` in release_stale_claim correct by
+    construction. That call is NOT the equivalent of bd's `bd assign <id> ""`, which
+    cleared whatever assignee was there -- on a foreign claim it would silently no-op,
+    leaving the issue assigned, commented on, and one sweep away from a wrongful block.
+    """
+    body = _stale_fixture(tmp_path, monkeypatch, results={"status": "aborted_pipeline"})
+    fake_run, calls = _recording(_issue(body, _stamp(_RECENT), assignee="a-person"))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert find_stale_claims() == []
+
+    recover_stale_claims()
+    assert not any(cmd[:3] == ["gh", "issue", "edit"] for cmd in calls)
+    assert not any(cmd[:3] == ["gh", "issue", "comment"] for cmd in calls)
+
+
+def test_claim_next_candidate_respects_a_claim_a_person_made(monkeypatch):
+    """The asymmetry to the sweep, and it is deliberate.
+
+    The claim query tests _is_claimed (anyone), not _is_own_claim (this routine): an
+    issue somebody else is holding must not be claimed out from under them, even though
+    the sweep won't touch it either.
+    """
+    theirs = _issue("b", "x", number=1, assignee="a-person", created_at="2026-01-01T00:00:00Z")
+    free = _issue("b", "x", number=2, assigned=False, created_at="2026-03-01T00:00:00Z")
+    fake_run, calls = _recording(theirs, free)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    issue = claim_next_candidate()
+
+    assert issue["number"] == 2
+    assert not any(cmd[:4] == ["gh", "issue", "edit", "1"] for cmd in calls)
+
+
+def test_the_experiment_listing_is_never_narrowed_with_the_assignee_flag(monkeypatch):
+    """Ownership is filtered in Python, not with `gh issue list --assignee "@me"`.
+
+    Measured 2026-09-08: an assignment appears in the plain `--label` listing in 0.71s
+    but takes 3.74s under `--assignee "@me"` -- the same 2-3s signature as `--search`,
+    because that flag is search-backed. Passing it would put the sweep back on the
+    eventually-consistent index this listing exists to avoid, and leave the module's two
+    queries on two different consistency models.
+    """
+    fake_run, calls = _recording()
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    find_stale_claims()
+    claim_next_candidate()
+
+    for listed in [cmd for cmd in calls if cmd[:3] == ["gh", "issue", "list"]]:
+        assert "--assignee" not in listed
+
+
+def test_experiment_listing_stays_the_flag_form_not_search(monkeypatch):
+    """Measured 2026-09-08 (see ISSUE_LIST_LIMIT): the `--search` index reflects an
     assignee change 2-3s late, where the label listing has it at the first read. main()
     runs the sweep and the claim about half a second apart, so on the search path an
     issue this run just blocked could still read as unassigned and be re-claimed.
     """
-    body = _stale_fixture(tmp_path, monkeypatch, run_log=_TRACEBACK)
-    fake_run, calls = _recording(_issue(body, _stamp(_OLD)))
+    fake_run, calls = _recording()
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    find_stale_claims()
+    claim_next_candidate()
 
-    listed = [cmd for cmd in calls if cmd[:3] == ["gh", "issue", "list"]]
-    assert len(listed) == 1
-    assert "--label" in listed[0] and EXPERIMENT_LABEL in listed[0]
-    assert listed[0][listed[0].index("--state") + 1] == "open"
-    assert "--search" not in listed[0]
+    listed = [cmd for cmd in calls if cmd[:3] == ["gh", "issue", "list"]][0]
+    assert "--label" in listed and EXPERIMENT_LABEL in listed
+    assert listed[listed.index("--state") + 1] == "open"
+    assert "--search" not in listed
 
 
 # ── release_stale_claim ───────────────────────────────────────────────────────
@@ -757,3 +826,23 @@ def test_retried_label_can_still_represent_the_whole_retry_budget():
         "MAX_RETRIES > 1 cannot be represented by the boolean `retried` label — "
         "see _retry_count; the counter needs a real store again before this can rise."
     )
+
+
+def test_claim_next_candidate_does_not_let_an_undated_row_jump_the_queue(monkeypatch):
+    """A row with no `createdAt` must sort LAST, not first.
+
+    `key=lambda i: i.get("createdAt") or ""` would make it sort ahead of every real ISO
+    timestamp and become a permanent queue head -- failing OPEN on the one ordering the
+    fps-rtd retry budget is defined against. Unlikely to come out of `gh`, but the
+    fail-closed direction costs nothing.
+    """
+    undated = _issue("b", "x", number=9, assigned=False, created_at="")
+    del undated["createdAt"]
+    dated = _issue("b", "x", number=1, assigned=False, created_at="2026-09-01T00:00:00Z")
+    fake_run, calls = _recording(undated, dated)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    issue = claim_next_candidate()
+
+    assert issue["number"] == 1
+    assert ["gh", "issue", "edit", "1", "--add-assignee", "@me"] in calls

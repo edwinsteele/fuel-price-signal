@@ -90,9 +90,13 @@ instructions nobody remembers to update.
 
    **Known lag, not a fault:** `gh issue list` takes ~7s to show a *newly created* issue
    (measured 2026-09-08). A candidate filed in the last few seconds before this routine fires
-   is therefore picked up the following night, not this one. Mutations — claims, releases,
-   blocks — do not lag. See `ISSUE_LIST_LIMIT` in `launch.py` for the measurement and for why
-   the query is the `--label` form rather than `--search`.
+   is therefore picked up the following night, not this one. What was measured is issue
+   creation and **assignee** changes — assignee writes were reflected at the first read. Label
+   writes (`retried`, `blocked`) were not measured, and the retry budget does not rely on them
+   being fast: `release_stale_claim` adds the `retried` label *before* it unassigns, so the
+   write that makes an issue claimable again is always the later of the two. Ordering is what
+   protects that, not latency. See `ISSUE_LIST_LIMIT` in `launch.py` for the measurement and
+   for why the query is the `--label` form rather than `--search`.
 
 ## Candidate-issue convention
 
@@ -127,6 +131,21 @@ unassigned and un-`blocked` ones, takes the oldest by creation date, and claims 
 
 **Assignee is the claim.** bd had an explicit `in_progress` status; GitHub does not, and does not
 need one — an `experiment` issue with an assignee is being worked, and one without is queued.
+
+⚠️ **Do not self-assign an `experiment` issue to investigate it. Add the `blocked` label
+instead.** bd's claim marker was a status, so assigning a bead to yourself left the routine's
+sweep alone. GitHub's marker is an identity, and this routine runs as the owner — so an issue
+you assign to yourself is indistinguishable from one the routine claimed. The stale sweep will
+treat it as its own stale claim: release it, spend a retry, and relaunch the detached runner
+over the top of whatever you were doing. The sweep compares assignee logins against its own, so
+*other* people's claims are safe from this; yours cannot be, because the routine runs as you.
+`blocked` is the one signal both the sweep and the claim query honour:
+
+```bash
+gh issue edit <N> --add-label blocked          # park it; the routine will not touch it
+gh issue edit <N> --remove-label blocked       # hand it back
+```
+
 Two labels carry what bd held as status and metadata: `blocked` (retry budget spent, a human must
 clear the fault) and `retried` (this claim has spent its one retry). Neither excludes anything on
 its own, so a blocked issue is *also* assigned to the owner — that assignment, not the label, is
@@ -135,7 +154,8 @@ what actually keeps it out of the claim query.
 ## Stale-claim recovery
 
 Mirrors CLAUDE.md's chore/polish worker pickup rule 4, adapted to the experiment queue. For every
-open, assigned, un-`blocked` `experiment` issue: resolve its `(batch_dir, candidate_path)`, look at
+open, un-`blocked` `experiment` issue **assigned to this routine's own login** (see the warning
+above for what that does and doesn't protect): resolve its `(batch_dir, candidate_path)`, look at
 `default_out_dir(candidate_path)`. It's stale iff `results.json` is absent, `run.log` exists and its tail
 looks like a Python traceback, and the claim hasn't been touched for more than 12 hours (long
 enough to cover a real multi-hour run; short enough that a crash isn't lost for days). Recovery

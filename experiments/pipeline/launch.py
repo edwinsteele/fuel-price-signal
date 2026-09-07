@@ -10,6 +10,17 @@ model changed shape in exactly three places, and those three are where the bugs 
     and does not need one. `bd ready --unassigned` becomes "open, `experiment`-labelled,
     `assignees` empty"; `bd update --claim` becomes `--add-assignee "@me"`;
     `bd assign <id> ""` becomes `--remove-assignee "@me"`.
+
+    This one has a sharp edge bd did not have, because bd's marker was a status and
+    GitHub's is an identity. **The stale sweep must only ever recover claims THIS
+    ROUTINE made** (_is_own_claim), while the claim query must respect EVERYONE's
+    assignments (_is_claimed): an issue a person assigned to themselves is their claim,
+    and stealing it would relaunch the detached runner over an investigation in
+    progress. What that CANNOT separate is the owner assigning themselves — this
+    routine runs as the owner, so it is the same login either way, and a
+    self-assignment is indistinguishable from a claim the routine made. To park an
+    `experiment` issue for hand investigation, add the `blocked` label; that is the one
+    signal the sweep and the claim query both honour. See docs/routines/launch.md.
   * **`blocked` is a label, not a status.** In bd, `blocked` was an exclusive status that
     dropped the issue out of `bd ready` on its own. A GitHub label does not exclude
     anything by itself, so blocking now does BOTH: it assigns the issue to the owner
@@ -140,6 +151,12 @@ ISSUE_JSON_FIELDS = "number,title,body,labels,assignees,createdAt,updatedAt"
 # preference rather than a lock.
 ISSUE_LIST_LIMIT = 200
 
+# Sorts after any ISO-8601 timestamp — see claim_next_candidate.
+_UNDATED_SORTS_LAST = "9999"
+
+# Resolved once per process by _routine_login().
+_ROUTINE_LOGIN: str | None = None
+
 _BATCH_RE = re.compile(r"^Batch:\s*(\S+)\s*$", re.MULTILINE)
 _MODULE_RE = re.compile(r"^Module:\s*(\S+)\s*$", re.MULTILINE)
 
@@ -187,9 +204,46 @@ def _label_names(issue: dict) -> set[str]:
 
 
 def _is_claimed(issue: dict) -> bool:
-    """Assignee IS the claim — see module docstring. bd's `in_progress` status has no
-    GitHub counterpart and needs none."""
+    """Claimed by ANYONE. Assignee IS the claim — see module docstring; bd's
+    `in_progress` status has no GitHub counterpart and needs none.
+
+    This is the claim query's test: never take an issue somebody is already holding.
+    The stale sweep wants the narrower _is_own_claim instead.
+    """
     return bool(issue.get("assignees"))
+
+
+def _routine_login() -> str:
+    """This routine's own GitHub login, cached for the process.
+
+    Deliberately not defensive: if `gh` can't say who we are, every downstream answer
+    about claim ownership is a guess, and both guesses are bad -- sweep nothing and
+    stale claims are never recovered, or sweep everything and a person's in-flight
+    investigation gets relaunched over. Dying here is the honest outcome.
+    """
+    global _ROUTINE_LOGIN
+    if _ROUTINE_LOGIN is None:
+        _ROUTINE_LOGIN = subprocess.run(
+            ["gh", "api", "user", "--jq", ".login"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+    return _ROUTINE_LOGIN
+
+
+def _is_own_claim(issue: dict) -> bool:
+    """Claimed by THIS ROUTINE, as opposed to by a person.
+
+    bd's claim marker was a status, so `bd assign <id> <someone>` alone never entered
+    the stale sweep. GitHub's marker is an identity, so the sweep has to make the
+    distinction itself or it will release a person's self-assigned claim and relaunch
+    the detached runner over their investigation.
+
+    What this CANNOT separate is the owner self-assigning: this routine runs as the
+    owner, so that is the same login either way. `blocked` is the park signal for that
+    -- see the module docstring and docs/routines/launch.md.
+    """
+    logins = {a.get("login") for a in (issue.get("assignees") or [])}
+    return _routine_login() in logins
 
 
 def _gh_comment(issue: dict, body: str) -> None:
@@ -211,6 +265,14 @@ def _open_experiment_issues() -> list[dict]:
     Callers filter and sort; this is the one query both the stale sweep and the claim
     share. See ISSUE_LIST_LIMIT for the measurement behind the flag form rather than
     `--search`, and for what this listing is and isn't consistent about.
+
+    Note there is no `--assignee "@me"` here even though find_stale_claims wants exactly
+    that narrowing, and it is filtered in Python instead. Measured 2026-09-08: an
+    assignment shows up in this listing in 0.71s but takes 3.74s to appear under
+    `--assignee "@me"` -- the same 2-3s signature as `--search`, because that flag is
+    search-backed. Passing it would have put the sweep back on the eventually-consistent
+    index this listing exists to avoid, and left the module's two queries on two
+    different consistency models.
     """
     issues = _gh_json(
         "issue", "list",
@@ -286,17 +348,29 @@ def _decide_release_or_block(issue: dict) -> tuple[str, int | None]:
 
 
 def find_stale_claims(now: datetime | None = None) -> list[dict]:
-    """Read-only: which claimed experiment issues need their claim released,
-    blocked, or have a spent retry counter reset.
+    """Read-only: which of THIS ROUTINE's claimed experiment issues need their claim
+    released, blocked, or have a spent retry counter reset.
 
-    "Claimed" is "open, `experiment`-labelled, has an assignee, and not already
-    `blocked`" — the GitHub spelling of bd's `--status in_progress --label experiment`.
-    The `blocked` exclusion is load-bearing, not cosmetic: in bd, `blocked` was an
-    exclusive *status*, so a blocked issue could not also be in_progress and this
-    query skipped it for free. A label excludes nothing on its own, and a blocked
-    issue is deliberately left assigned (that is what keeps it out of the claim
-    queue), so without this filter every blocked issue would look like a live claim
-    and be re-examined forever.
+    "Claimed" is "open, `experiment`-labelled, assigned to this routine's own login, and
+    not already `blocked`" — the GitHub spelling of bd's
+    `--status in_progress --label experiment`.
+
+    Two of those three exclusions were free under bd and have to be written here:
+
+    * **assigned to this routine** (_is_own_claim, not merely _is_claimed). bd's marker
+      was a status, so `bd assign <id> <someone>` alone never entered this sweep.
+      GitHub's marker is an identity, so without this the population widens from "claims
+      this routine made" to "anything with an assignee" — and the sweep would release a
+      person's self-assigned claim and relaunch the runner over their investigation. It
+      also makes the `--remove-assignee "@me"` in release_stale_claim correct by
+      construction rather than by luck: the only assignment it can ever be clearing is
+      this routine's own. What it cannot separate is the OWNER self-assigning (same
+      identity) — see the module docstring; `blocked` is the park signal for that.
+    * **`blocked`.** In bd this was an exclusive *status*, so a blocked issue could not
+      also be in_progress and this query skipped it for free. A label excludes nothing
+      on its own, and a blocked issue is deliberately left assigned (that is what keeps
+      it out of the claim queue), so without this filter every blocked issue would look
+      like a live claim and be re-examined forever.
 
     Three shapes:
 
@@ -344,7 +418,7 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
     stale: list[dict] = []
     for issue in _open_experiment_issues():
-        if not _is_claimed(issue) or BLOCKED_LABEL in _label_names(issue):
+        if not _is_own_claim(issue) or BLOCKED_LABEL in _label_names(issue):
             continue
         try:
             _, candidate_path = parse_candidate_ref(issue.get("body", ""))
@@ -427,6 +501,12 @@ def release_stale_claim(issue: dict, traceback_tail: str, *, retry_count: int | 
     `traceback_tail` carries whichever evidence the caller found -- a
     traceback tail for a crashed run, or a one-line explanation for a run that
     finished in a retryable status -- so the issue records WHY it was released.
+
+    `--remove-assignee "@me"` clears only this routine's own assignment, never someone
+    else's — which is exactly right, because find_stale_claims only ever hands this
+    function issues _is_own_claim already accepted. Note that it is NOT the equivalent
+    of bd's `bd assign <id> ""`, which cleared whatever assignee was there; the narrowed
+    sweep population, not this call, is what makes that difference safe.
 
     `retry_count`, when given, is recorded as the `retried` label. **The label is
     added BEFORE the assignee is removed** (fps-rtd PR #304 review finding #2, ported):
@@ -522,7 +602,10 @@ def claim_next_candidate() -> dict | None:
     ]
     if not ready:
         return None
-    issue = min(ready, key=lambda i: i.get("createdAt") or "")
+    # A row with no `createdAt` sorts LAST, not first. `or ""` would make it sort ahead
+    # of every real ISO timestamp and become a permanent queue head — failing open on
+    # the one ordering the fps-rtd retry budget is defined against.
+    issue = min(ready, key=lambda i: i.get("createdAt") or _UNDATED_SORTS_LAST)
     _gh_edit(issue, "--add-assignee", "@me")
     return issue
 
