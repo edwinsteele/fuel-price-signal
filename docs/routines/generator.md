@@ -578,12 +578,16 @@ reading a copy of this file that still states that order as a precondition, it i
 
 ## Filing
 
-**Create the batch's parent bead FIRST** (decided 2026-08-23, batch1). Every batch gets
-one tracking bead — type `epic`, parented to `fps-3jj`, labelled `design` and **never**
-`experiment` (a bead carrying that label enters the launch queue, and the parent has no
-`Batch:`/`Module:` lines to parse, so the routine would claim it and abort it on the
-first night). The candidate beads are its children, and so are the batch-level tasks that
-only become possible once the queue drains. `fps-3jj.18` is the worked example; it holds
+> **Tracker: GitHub Issues, via `gh`.** The bd→GitHub cutover landed 2026-09-07
+> (phase 4, `223d0be`). `bd` is stale — do not file to it. The commands below are the
+> ported ones; where older prose elsewhere still says `bd create`, it is stale.
+
+**Create the batch's parent issue FIRST** (decided 2026-08-23, batch1). Every batch gets
+one tracking issue — labelled `design` and **never** `experiment` (an issue carrying that
+label enters the launch queue, and the parent has no `Batch:`/`Module:` lines to parse, so
+the routine would claim it and abort it on the first night). The candidate issues are its
+children, and so are the batch-level tasks that only become possible once the queue
+drains. `fps-3jj.18` is the worked example; it holds
 the freeze parameters, the batch's own detection bar, the candidate table in launch order,
 and the expected-yield statement written *before* any result existed.
 
@@ -591,30 +595,33 @@ Two children go in at filing time, not later, because neither has a scheduled ta
 both are easy to forget once the nightly runs start producing dossiers:
 
 - **Run the batch retrospective** (`fps-3jj.18.1` is the template) — blocked by every
-  candidate bead. This is the aim-(b) payoff artifact and the only place the leaderboard,
+  candidate issue. This is the aim-(b) payoff artifact and the only place the leaderboard,
   the family-wise gate, the confidence calibration and the mechanism-family concentration
   get written down.
 - **Act on the outcome** (`fps-3jj.18.2`) — blocked by the retrospective. Graduate,
   iterate, or record as mapped ground; a graduation is a separate `features.py` PR, never
   an inline edit.
 
-Per-candidate *dossier* runs get no bead: the dossier routine writes those unsupervised.
+Per-candidate *dossier* runs get no issue: the dossier routine writes those unsupervised.
 
 Then, for each candidate that clears the diversity gate and the redundancy checks:
 
 1. Write `experiments/candidates/<batch>/<NAME>.py` in the format above; commit
    **and `git push`** straight to `main` (`experiments/**` is PR-exempt). The launch
-   routine claims these candidates from a bead queue that any clone can serve — a
-   module still sitting on one machine's local `main` is a candidate the launcher
-   cannot run.
-2. `bd create` one issue per candidate, labelled `experiment`, `--parent` the batch bead
-   — the launch routine
-   (fps-3jj.5, `experiments/pipeline/launch.py`) queries `bd ready --label experiment`
-   and is structurally invisible to the chore/polish worker without this label.
-   Description must carry `HYPOTHESIS`, `TARGET`, `PREDICTED_SIGNATURE`, both
+   routine claims these candidates from a queue any clone can serve — a module still
+   sitting on one machine's local `main` is a candidate the launcher cannot run.
+2. `gh issue create --label experiment` one issue per candidate — the launch routine
+   (fps-3jj.5, `experiments/pipeline/launch.py`) lists open `experiment`-labelled issues
+   and is structurally invisible to the chore/polish worker without this label. Do
+   **not** assign it to anyone: **an unassigned issue is a queued candidate, and an
+   assignee is a claim.** An `experiment` issue you assign to yourself will be claimed,
+   swept and relaunched over as if the routine had claimed it (see
+   [launch.md](launch.md) — `blocked` is the park signal).
+
+   The **body** must carry `HYPOTHESIS`, `TARGET`, `PREDICTED_SIGNATURE`, both
    `CONFIDENCE` fields, `MECHANISM_FAMILY`, `PRIOR_ART`, and **exactly** two
    machine-parsed lines (`parse_candidate_ref()` in `launch.py` regex-matches these,
-   line-anchored — any other shape fails to parse and the bead gets immediately
+   line-anchored — any other shape fails to parse and the issue gets immediately
    aborted the first time the launch routine claims it):
    ```text
    Batch: experiments/batches/<batch>
@@ -623,24 +630,30 @@ Then, for each candidate that clears the diversity gate and the redundancy check
    Both paths must resolve inside `experiments/` (`<batch>` matching the batch dir
    this candidate's module was just written under is what makes that true).
 
-   **Creation order is run order.** `launch.py` claims with
-   `bd ready --label experiment --unassigned --sort oldest -n 1`, so the sequence you
-   `bd create` in is the sequence the nights run in. File highest-conviction first, so a
-   runner bug or a genuine surprise lands on the candidate that matters most rather than
-   on the one you cared least about.
+   **Creation order is run order.** `launch.py` takes the oldest unassigned
+   `experiment` issue by creation date, so the sequence you create them in is the
+   sequence the nights run in. File highest-conviction first, so a runner bug or a
+   genuine surprise lands on the candidate that matters most rather than on the one you
+   cared least about.
 
-   Also record each candidate's **column count** in its description — `fps-3jj.14`'s
-   arity calibration is sized from the batch's real arities, and reading them back off
-   the modules later is strictly worse than having the generator state them.
-3. `bd dolt push` after filing the batch.
-4. **Confirm the batch actually left this machine**: `git status --short` empty (the
-   `batch.md`/`batch.json` the redundancy screen wrote, and any `bd`-written
-   `.beads/interactions.jsonl` row, are both committed) and
-   `git log --oneline origin/main..main` empty (everything pushed). `bd dolt push` in
-   step 3 syncs the Dolt database only — it is a different system and never touches git,
-   so a green `bd dolt push` says nothing about whether the candidate modules landed.
-   That split is the exact shape of the failure: beads visible to the launch routine,
-   modules still on one laptop. See docs/CONVENTIONS.md § the exemption.
+   Also record each candidate's **column count** in the body — `fps-3jj.14`'s arity
+   calibration is sized from the batch's real arities, and reading them back off the
+   modules later is strictly worse than having the generator state them.
+3. **Confirm the batch actually left this machine**: `git status --short` empty (the
+   `batch.md`/`batch.json` the redundancy screen wrote is committed) and
+   `git log --oneline origin/main..main` empty (everything pushed). Filing the issues
+   says nothing about whether the candidate *modules* landed — GitHub and git are
+   different systems, and that split is the exact shape of the failure: issues visible
+   to the launch routine, modules still on one laptop. See docs/CONVENTIONS.md § the
+   exemption.
+
+   There is no separate tracker sync to run. Under bd this step also needed
+   `bd dolt push`; GitHub is the store, so `gh issue create` is the whole of it.
+
+4. **Allow ~7s before assuming a freshly filed candidate is visible.** `gh issue list`
+   lags issue creation by about that much (measured 2026-09-08). It matters only if you
+   file and then immediately run the launch routine by hand; the nightly schedule never
+   sits in that window.
 
 ## Batch record
 
