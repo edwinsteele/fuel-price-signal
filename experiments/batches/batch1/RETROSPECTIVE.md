@@ -15,6 +15,16 @@ pipeline — not a verdict on any individual candidate. Those live in each candi
 batch1 is the first batch where this artifact can do its job. batch0 had one candidate, so
 its leaderboard could not differentiate and its calibration read was a single point.
 
+> **READ THIS FIRST — added 2026-09-07.** Every `delta_cpl_held` and every `z` below was
+> measured by replaying **five** stations. That population has since been shown to bias a
+> candidate's delta **favourably by ~+0.10 c/L**, and all five candidates have been re-run
+> at 410 stations. **The recommendation — graduate nothing — is unchanged and better
+> supported.** What does change: `tgp_cycle_displacement` clears its single-candidate bar
+> here and clears **nothing** at 410, so the phrase "the only one to clear any bar" is a
+> property of the narrow population, not of the candidate. See
+> **§ Addendum — the 410-station re-runs** at the end of this document. Nothing in *Facts*
+> has been rewritten; it remains the record as computed at `61ffe5f`.
+
 > **Note on the SHA.** `retrospective_facts.json` was computed at `61ffe5f`, immediately
 > after PR #359 merged and *before* the `fps-rlh` grading backfill (`cd3de8f`) landed. That
 > ordering cannot affect any number here: `retrospective.py` reads no `grading` field
@@ -280,6 +290,13 @@ For the next generator session, in priority order:
    already plans to run both TGP expressions as batch2 candidates against a floor that
    applies to them — that is the right next step, and it should be read as re-testing the
    effect, not as promoting it.
+
+   > **Amended 2026-09-07.** "The only one to clear any bar" is true at five stations and
+   > false at 410, where it clears neither the single-candidate bar (z = −1.695 vs 1.7332)
+   > nor the family-wise one (2.5159). The recommendation itself stands unchanged — carry
+   > it forward as a measurement — but the *reason* is now stronger than "mechanism
+   > falsified": the economic result itself does not survive the grading population batch2
+   > will use. Re-test, do not promote.
 2. **Add a batch-internal redundancy check before batch2 grades anything.** The
    family-label diversity control is weaker than it looks, and batch2 is planned at 10–15
    candidates, where the chance of two labels naming one mechanism is higher, not lower.
@@ -293,3 +310,99 @@ The batch's headline for aim (b): the pipeline worked. It ran five AI-sourced ca
 end to end, leaked nothing, graded all five, and — most usefully — told two different
 stories about its best candidate that a single-instrument screen would have collapsed into
 one wrong answer.
+
+
+---
+
+# Addendum — the 410-station re-runs (2026-09-07)
+
+Added after the fact. **Nothing in *Facts* above was rewritten** — it stands as computed at
+`61ffe5f` on five stations. This section records what changed when the same five candidates
+were re-run on the population batch2 will actually be graded on.
+
+Sources: `experiments/2026-09-06_noise_floor_n410/README.md` § "Phase 3" (method, statistics
+and caveats), `experiments/candidates/batch1_n410/` (the runs), commit `47b66b3`.
+
+## Why this exists
+
+Every number in *Facts* was measured by replaying the five commute stations. `fps-nas` asked
+whether that population is the right one to grade on; the answer arrived in stages, and the
+last stage is the one that matters here. All five candidates were re-run at 410 stations
+against `noise_floor_n410_k3.json` — a matched-width, matched-arity placebo bank. All five
+returned `graded` and stamp the population, baseline and tank identity of that bank, so no
+run silently fell back.
+
+## What the re-runs say
+
+Band: mean +0.029826, sd 0.093831, `effective_n_draws` 28.076. Single-candidate gate 1.7332
+(bar −0.1328 c/L); **family-wise gate for five candidates 2.5159** (bar −0.2062 c/L).
+
+| candidate | 5-stn Δ | 5-stn z | 410 Δ | 410 z | clears (410) |
+|---|--:|--:|--:|--:|:--|
+| `tgp_cycle_displacement` | −0.2077 | −2.3295 | −0.1292 | −1.695 | no |
+| `network_move_breadth` | −0.1627 | −1.8794 | −0.1004 | −1.388 | no |
+| `stickiness_phase_saddle` | −0.0761 | −1.0128 | **+0.0544** | +0.262 | no |
+| `lga_trough_propagation` | −0.0672 | −0.9233 | **+0.0666** | +0.392 | no |
+| `station_descent_dynamics` | −0.0237 | −0.4886 | **+0.0604** | +0.326 | no |
+
+**0 of 5 clear either gate. Three deltas turn positive** — at 410 stations those features
+made the strategy *more expensive*, and a positive delta cannot clear any bar.
+
+`tgp_cycle_displacement`'s 410 delta reproduces the independently-measured broad delta from
+`experiments/2026-09-05_arbiter_universe_width/` to **0.00004 c/L**, so its 2.3% shortfall
+against the single-candidate gate is a property of the feature and the ruler, not an
+artifact of one run.
+
+## What this changes in the document above
+
+- **The recommendation is unchanged: graduate nothing.** It is now supported on two
+  populations rather than one, and on the wider population it is not close.
+- **"The only candidate to clear its own single-candidate bar" is population-specific.**
+  At 410 nothing clears anything. § "Did the headline candidate hold up against noise?"
+  reaches the right answer for a reason that has since been superseded by a stronger one.
+- **The leaderboard's TOP survives; the bottom two swap.** On both Δ and z the 410 order is
+  `tgp_cycle_displacement`, `network_move_breadth`, `stickiness_phase_saddle` — unchanged —
+  then **`station_descent_dynamics` and `lga_trough_propagation` exchange 4th and 5th**
+  (Δ +0.0604 vs +0.0666; five-station −0.0237 vs −0.0672). Those two are separated by
+  0.006 c/L at 410 and by 0.044 at five, well inside the band's own sd of 0.094 either way,
+  so the swap is not a finding — but the leaderboard is not order-invariant under widening
+  and should not be described as such. Everything above that rests on the *leader*, or on
+  economic rank decoupling from mechanism-prediction accuracy, is unaffected: the top three
+  hold and the two that swap are 4th and 5th under both rulers.
+- **The `not_tested` entry "whether the batch would look different at another cadence"
+  is untouched.** Everything here is still 1d. Width is not cadence.
+
+## The finding worth carrying to batch2
+
+**A five-station universe biases a candidate's delta favourably by ~+0.10 c/L.** All five
+moved the same way when the universe widened — mean **+0.0978 c/L**, spread 0.0324 — while
+the placebo band's own mean moved only **+0.0047 c/L** over the same widening. That offset
+is the same order as the entire effect any candidate in this batch claimed.
+
+Read plainly: the narrow population does not merely add noise to a delta, it manufactures
+savings. **Batch2's grading population is a correctness question, not a precision one**,
+and batch2 has been decided at 410 on exactly this evidence (`docs/STATUS.md`).
+
+Two honesty caveats, both load-bearing:
+
+- The five shifts share folds, universe and baseline. They are **not** independent, so no
+  t-test is run across them and **no 1/32 may be quoted** for the unanimity.
+- Against each candidate's **own** fold-clustered SE, the same shifts are 0.31–0.88 SE —
+  individually unresolvable. The two rulers disagree about this shift; what survives on
+  both is the direction and the three sign flips.
+
+## What was NOT done, deliberately
+
+- **The four `open` rows in `experiments/INDEX.md` were not closed by investigation.** Their
+  per-candidate threads are unresolved and, as of 2026-09-07, will not be pursued — batch1
+  graduates nothing, so nothing downstream depends on them.
+- **Per-fold homogeneity across widths was not computed for four of the five.** `fps-nas`
+  established that a broad replay measures the same quantity as a narrow one on
+  `tgp_cycle_displacement` alone (12/14 folds agreeing on sign, r = 0.704). The other four
+  now have runs at both widths, so the check needs analysis and no compute — but it was not
+  run, and the premise still rests on one candidate chosen for its signal-to-noise. Three of
+  five flip sign across widths where `tgp_cycle_displacement` does not; that is consistent
+  with the systematic offset acting on near-zero deltas rather than with inhomogeneity, but
+  it is not evidence either way. Recorded in `experiments/ledger.yaml`.
+
+**With this addendum, batch1 is closed.**
