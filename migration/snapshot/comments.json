@@ -1,0 +1,575 @@
+{
+  "fps-1785999729707-1-0301bf82": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T05:55:20Z",
+      "id": "01a01896-a23d-79a8-8c21-6e77e31bb8fd",
+      "issue_id": "fps-1785999729707-1-0301bf82",
+      "text": "COMPONENT 5 GAINS A SECOND EDIT (fps-zci, PR #312 — read before starting the re-lock).\n\nComponent 5 as written says \"add tgp_delta_7d to the production feature list\".\nThat is now necessary but NOT sufficient, and the shortfall is a hard stop, not a\nwarning.\n\nfuel_signal/features.py gained NON_MODEL_COLUMNS: a registry of columns computed\ninto features.csv but deliberately outside the model contract, each with a reason\ncode. tgp_delta_7d is in it, tagged held-out-pending-graduation.\n\nnon_model_columns() decides a column's category from what the column IS — never by\nchecking whether the lock already claims it. That asymmetry is deliberate: a\ndetector that skipped whatever the lock contains cannot detect a column wrongly IN\nthe lock, which is exactly the fps-sa1 defect (10 rejected brand-trough columns\nsitting in a 64-column R0 for two months).\n\nConsequence for this issue: if you add \"tgp_delta_7d\" to LOCKED_FEATURE_COLUMNS and\nstop there, resolve_baseline_columns() raises NonModelColumnLeak and batch_freeze /\nthe runner abort. The fix is one line in the same change — delete the\n\"tgp_delta_7d\" entry from NON_MODEL_COLUMNS.\n\nRevised component 5:\n  1. add \"tgp_delta_7d\" to the locked feature list (TGP_FEATURE_COLUMNS folds into\n     LOCKED_FEATURE_COLUMNS — note ORDER: APPEND, never insert or sort; a\n     permutation fits a different model, worth 0.038 c/L at the arbiter, fps-zci)\n  2. DELETE its NON_MODEL_COLUMNS entry in the same commit\n  3. regenerate features.csv/.parquet, retrain + calibrate, write the artifact\n  4. tests/test_feature_contract.py asserts LOCKED_FEATURE_COLUMNS == the artifact's\n     feature_columns (ORDERED ==). It SKIPS when data/models/ is absent, so it will\n     not run in CI — verify locally before merging the re-lock.\n  5. the baseline fingerprint changes at the re-lock (currently 54:1a6ec2d84a69).\n     That is expected and is the point: every result records it, so pre- and\n     post-re-lock runs will no longer be silently compared as if commensurable.\n\nDocumented in docs/CONVENTIONS.md § \"The baseline feature set is declared, never\ndiscovered\" and AGENTS.md § Canonical feature set.\n\nStill gated on fps-3jj.9 (noise floor) per docs/STATUS.md — this comment is about\nHOW to land chip 4/5 when it is unblocked, not a signal that it is."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T23:23:46Z",
+      "id": "01a01c56-80c5-7bc3-8de0-b45215b3e1dd",
+      "issue_id": "fps-1785999729707-1-0301bf82",
+      "text": "Closing as superseded, 2026-08-20.\n\nThis issue's scope is landing tgp_delta_7d in the production model. That question is\nanswered: it does not graduate. The June realised-arbiter graduation (-0.039 c/L)\nwas retracted 2026-08-19 — it does not reproduce (+0.0059 on identical columns,\nfolds and seed) and was never resolvable, being smaller than the ~0.05 c/L value of\none buy/wait decision flip; against the R0-vs-R0 noise floor it sits at the 40th\npercentile of pure fit noise. No TGP feature is in the lock.\n\nChips 1-3 landed and stay: the downloader (fuel_signal/tgp.py), the DB ingest, and\nthe features.py compute. The column remains computed and PIT-safe. Chip 4/5 (the\nFEATURE_COLUMNS bump + re-lock) will not happen for this feature, so the acceptance\ncriterion \"Model re-locked with tgp_delta_7d in FEATURE_COLUMNS\" is unachievable\nrather than pending.\n\nRecord corrected in: PR #314 (NON_MODEL_COLUMNS reason -> new\nNON_MODEL_REASON_INCONCLUSIVE), and commit 5a94a05 (experiments/ledger.yaml header\ncomment + the June entry + station_minus_tgp_cents not_tested, and the INDEX.md\n2026-06-20 row).\n\nTwo reasons this closes rather than staying open as a TGP umbrella:\n\n1. It was a BLOCKER on fps-3jj.11 (batch 2). Leaving it open holds batch 2 hostage\n   to a re-lock that has been decided against. After this close, batch 2's only\n   remaining blocker is fps-cf8, which is the correct state.\n2. Its premise (\"graduated from the realised/CpL arbiter\") is the exact claim just\n   retracted everywhere else. Leaving it open reintroduces that contamination in\n   the one place a cold session is most likely to look.\n\nSuccessor: fps-x0f — \"Is late descent a real target, and does the TGP gap help\nthere? Reconcile the phase axis first\". That is the live TGP question now, and it is\nbetter framed: it asks whether ANY TGP expression earns a place, rather than\nassuming one already has."
+    }
+  ],
+  "fps-1785999730023-4-264564ac": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T23:29:18Z",
+      "id": "01a01c5b-8ed3-7af8-87ff-3d1fcb85abd8",
+      "issue_id": "fps-1785999730023-4-264564ac",
+      "text": "Bumped P3 -> P2, 2026-08-20. Filed as a tidy-up; it now gates the decision step of fps-x0f (is late descent a real target?). The regime headroom spread it would put CIs on — late_descent 1.00 / overdue 1.33 / normal 1.50, range 0.50 c/L — sits entirely inside this same experiment's own +/-0.5 c/L per-band noise estimate, so the 'regime axis FLAT' verdict is unresolved rather than flat. Station-bootstrap CIs are what tell those apart."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T01:00:07Z",
+      "id": "01a01cae-b464-7e6b-8bbb-85e5efb1314a",
+      "issue_id": "fps-1785999730023-4-264564ac",
+      "text": "Done 2026-08-20, commit b6e0a9c, experiments/2026-08-20_headroom_attribution/. Bias fix WORKS (denominators paired to 0.0-1.7%, replay reconciles exactly on 140 station-fold-arms, old estimator reproduces #262's 7.09/-0.53 exactly). But the target quantity is NOT IDENTIFIED: per-zone headroom depends on two free conventions (cost basis fifo/average, interval label start/mid/end) and across those 6 combinations each zone moves MORE than the zones differ. Regime spread 2.53-2.95 vs between-zone 0.90-3.36; volatility worse (>=16c spans -0.11..5.02). No contrast separates on either axis. Negatives return at average/end and average/mid, so even the bias fix is convention-dependent. Criterion 3 answered: 12-16c CI clears 0 under both cost bases at start-labelling, but the point estimate roughly halves and its PEAK status does not survive fifo. oracle<=model holds at window level only. Cannot be fixed with more data - this is identification, not variance."
+    }
+  ],
+  "fps-2l9": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-23T21:13:38Z",
+      "id": "01a03078-ca7d-75fb-99a9-7f32f93bd4b8",
+      "issue_id": "fps-2l9",
+      "text": "[launch] validated, launched detached pid=2528, log=/Users/esteele/Code/fuel-price-signal/experiments/candidates/batch1/network_move_breadth/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-23T21:43:22Z",
+      "id": "01a03094-0328-7271-bb24-67eba0fc00c5",
+      "issue_id": "fps-2l9",
+      "text": "[pipeline] network_move_breadth: graded — moved the arbiter (delta_cpl_held=-0.1552)\nZone: concentrated where predicted (target=-0.3065 vs other=-0.0925)\nwall=1782.6s  windows=14  seeds=[42, 43, 44, 45, 46]"
+    }
+  ],
+  "fps-2sf": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-27T11:10:20Z",
+      "id": "01a042e9-e72a-7586-b375-2be24e0ad653",
+      "issue_id": "fps-2sf",
+      "text": "[launch] validated, launched detached pid=77723, log=/Users/esteele/Code/fuel-price-signal/experiments/candidates/batch1/tgp_cycle_displacement/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-27T11:27:29Z",
+      "id": "01a042f9-98a8-7ce0-80b3-24c197816db7",
+      "issue_id": "fps-2sf",
+      "text": "[pipeline] tgp_cycle_displacement: graded — moved the arbiter (delta_cpl_held=-0.2015)\nZone: did NOT concentrate where predicted (target=-0.1392 vs other=-0.3405)\nwall=1027.1s  windows=14  seeds=[42, 43, 44, 45, 46]"
+    }
+  ],
+  "fps-2us": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-09T22:32:45Z",
+      "id": "019fe8a8-31f9-7d3a-8a66-6ec4353c0fc1",
+      "issue_id": "fps-2us",
+      "text": "Reference prototype landed on main: `experiments/2026-08-10_backfill_requery_profile/` (commit e11c238).\n\n`proto_backfill.py` has a working `day_bucket_stream()` plus the parity check against the current query — lift the shape from there rather than re-deriving it. `README.md` carries the full profile table and the memory measurements; `run.log` is the recorded run.\n\nRe-run the before-numbers with:\n```\nPYTHONPATH=. uv run python experiments/2026-08-10_backfill_requery_profile/profile_backfill.py fuel_signal.db\n```"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-09T22:39:03Z",
+      "id": "019fe8ad-f886-7c31-95c3-14cf674dc1af",
+      "issue_id": "fps-2us",
+      "text": "Correction to the comment above: run.log is gitignored (`*.log`, repo-wide) and will NOT be in your checkout. The README's Results tables carry every number it held — re-run the scripts rather than looking for the file. The issue description has the corrected pointer."
+    }
+  ],
+  "fps-32p": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-17T11:59:22Z",
+      "id": "01a00f97-2fee-7505-8b83-0560d9505d79",
+      "issue_id": "fps-32p",
+      "text": "[launch] validated, launched detached pid=14242, log=/Users/esteele/Documents/Claude/fuel-price-signal/experiments/candidates/batch0/tgp_delta_7d/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-18T05:21:29Z",
+      "id": "01a01351-466c-7f23-ad5b-00fa83fa0061",
+      "issue_id": "fps-32p",
+      "text": "[launch] validated, launched detached pid=22003, log=/Users/esteele/Code/fuel-price-signal/experiments/candidates/batch0/tgp_delta_7d/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-18T05:31:16Z",
+      "id": "01a0135a-3b7a-7a3d-b5d8-f1d5da03004d",
+      "issue_id": "fps-32p",
+      "text": "[pipeline] tgp_delta_7d: aborted_pipeline (wall=585.6s)\nrealised backtest config error (not a DB/environment failure): ValueError(\"feature 'days_since_trough_entry_7_eleven' is in feature_columns but no value was produced for it (extra_feature_provider must supply every added column).\")\n\nThis is a pipeline/environment fault, not a verdict on the candidate — the claim will be released for a re-run by the next launch sweep."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-18T07:05:45Z",
+      "id": "01a013b0-bef4-76e9-915a-038c105a7c50",
+      "issue_id": "fps-32p",
+      "text": "[launch] claim released for re-run.\n\nrun finished with retryable status 'aborted_pipeline' -- a pipeline/environment fault, not a verdict on the candidate. Releasing for re-run (1/1)."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-18T07:06:10Z",
+      "id": "01a013b1-1e1d-7173-b7ec-a4fd7b7fd2f6",
+      "issue_id": "fps-32p",
+      "text": "[launch] validated, launched detached pid=41421, log=/Users/esteele/Code/fuel-price-signal/experiments/candidates/batch0/tgp_delta_7d/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-18T07:39:53Z",
+      "id": "01a013cf-fe34-774b-b492-feb7ff5d8c8c",
+      "issue_id": "fps-32p",
+      "text": "[pipeline] tgp_delta_7d: rejected — did not move the arbiter (delta_cpl_held=+0.0941)\nZone: not resolved — CONFIDENCE_EFFECT did not resolve true — scored conditionally\nwall=2022.1s  windows=14  seeds=[42, 43, 44, 45, 46]"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T04:08:46Z",
+      "id": "01a01835-10a6-7b79-8516-5972e826a3a8",
+      "issue_id": "fps-32p",
+      "text": "Re-run and superseded, 2026-08-19 (this bead stays closed — audit pointer only).\n\nThe run this bead recorded (+0.0941, 'rejected') was measured against a wrong baseline. batch0 was re-run twice more after two contract defects were fixed, and the final run is the record:\n\n  R0 189.6717090069284 -> candidate 189.6775604142693,  delta_cpl_held +0.005851\n  CALIBRATION PASSED — matches an independent reference (+0.0059) to every printed digit.\n\nDefects, both in the contract handed to the pipeline, not the pipeline: fps-sa1 (wrong column SET — R0 carried the 10 Phase 4b brand-trough columns rejected 2026-06-02; PR #309) and fps-zci (wrong column ORDER — sorted vs the locked artifact's group order, 52/54 indices differing; PR #310).\n\nOn the feature: +0.0059 c/L is inert and never was measurable — one buy/wait decision flip is worth ~0.05 c/L pooled, larger than the -0.039 that graduated it in June (which does not reproduce). #271 stays on hold, track stays open.\n\nFull record: experiments/candidates/batch0/tgp_delta_7d/README.md, commit ae7683b. Investigation: fps-nor (closed)."
+    }
+  ],
+  "fps-3i7": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-18T06:54:06Z",
+      "id": "01a013a6-139c-7d0b-afbe-e4e1375e7636",
+      "issue_id": "fps-3i7",
+      "text": "Opened PR #306 (design/fps-3i7-brand-trough-decide) — wires brand-trough features into ModelStrategy.decide(), root-caused via bd fps-32p's batch0 pipeline abort. Verified against the real frozen batch0 DB (50 stations, 0 failures, previously failed on the first decide() call)."
+    }
+  ],
+  "fps-3jj": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-17T09:05:19Z",
+      "id": "01a00ef7-d893-78f8-ba83-58a790314ceb",
+      "issue_id": "fps-3jj",
+      "text": "[fps-3jj.6 session] fps-3jj.6 (dossier routine) merged — PR #301. Pipeline now has all three pieces landed: batch freeze (fps-3jj.1), validation harness (fps-3jj.2), candidate runner (fps-3jj.4), launch routine (fps-3jj.5), dossier routine (fps-3jj.6). Remaining open children: fps-3jj.8 (retrospective), fps-3jj.9 (noise band, P3), fps-3jj.10 (held back), fps-3jj.11 (run generator for batch 2).\n\nOne acceptance-criteria item needs re-checking before batch 2: \"Dossier routine picks up a completed run unattended and produces a readable README\" holds for a single candidate per batch dir, but an independent review of PR #301 found (and fps-icv now tracks, P1) that launch.py/runner.py give every candidate in a batch the SAME out_dir — candidate 2+ overwrites candidate 1's artifacts, and the dossier routine's README.md-presence queue gate means candidate 2+ is then silently never dossiered. Batch 1 (a single candidate) doesn't exercise this; batch 2 (5 candidates, fps-3jj.11, now blocked on fps-icv) will. Not fixed as part of fps-3jj.6 since it lives in fps-3jj.5's already-merged files, outside that PR's diff."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T23:40:11Z",
+      "id": "01a0218b-e37d-77ac-a226-470ed76429e2",
+      "issue_id": "fps-3jj",
+      "text": "Parent-design text is stale in two places — 2026-08-21. Read this before following the description above.\n\n1. BATCH NUMBERING. The description's 'Batch 1 = 1 candidate (tgp_delta_7d)' / 'Batch 2 = 5' scheme numbered from 1 while the directories numbered from 0. Batches are now numbered by DIRECTORY: batch0 = the calibration batch (done 2026-08-19), batch1 = the first AI-sourced set of 5, batch2+ = 10-15. Where this description says 'batch 2', read batch1. Fixed in docs/routines/generator.md (commit 6f61efb); fps-3jj.11 retitled.\n\n2. TGP ORDERING CONSTRAINT IS DISCHARGED. The description says 'Do not complete that re-lock before batch 1' and orders batch 1 -> TGP re-lock -> batch 2. That order can never hold: #271 closed as superseded 2026-08-20, no TGP feature is in the lock, and tgp_delta_7d's graduation was retracted as inert. batch0 reached its verdict, which was the actual gate. Fixed in generator.md (commit 35b183e).\n\n3. PER-RUN ARMS: 'no per-night placebo' is PARTLY REOPENED by fps-awz. That decision stands as written - the objection was to one placebo draw per night. But the batch-setup noise floor it chose instead (R0-vs-R0 at two seed groups) measures the wrong null: it is an UNPAIRED seed swap, while a candidate is judged PAIRED at a fixed seed with one column added, where almost everything cancels (batch0's arms agreed on 741 of 752 fills). fps-awz replaces it with a bank of placebo COLUMNS computed once at freeze - which is the shape this section chose, with a null that matches the operation being tested.\n\nCurrent blockers on batch1 (fps-3jj.11): fps-awz, fps-15c, fps-oqz, fps-aay."
+    }
+  ],
+  "fps-3jj.11": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-17T09:04:48Z",
+      "id": "01a00ef7-5e59-76e1-a745-68c3ae8516af",
+      "issue_id": "fps-3jj.11",
+      "text": "[fps-3jj.6 session] Added fps-icv as a blocking dependency. It's P1, not yet started: launch.py/runner.py default out_dir to the candidate module's parent, which is the whole BATCH directory shared by every candidate — so candidate 2+ in a multi-candidate batch overwrites candidate 1's results.json/rowpreds.parquet/fills.parquet in place, and once the dossier routine has written a README.md into that shared directory for candidate 1, the directory is permanently excluded from its work queue. Candidate 2+ are silently never dossiered.\n\nThis bites exactly this issue's own deliverable — batch 2 is 5 candidates. Filing/running batch 2 before fps-icv lands would lose 4 of 5 candidates' dossiers with no error, no traceback, nothing in run.log — just missing README.md files days later. Confirmed against the actual merged code, not a hypothetical (see fps-icv's description for the full trace and the PR #301 review that found it)."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T21:59:19Z",
+      "id": "01a0212f-8cca-7e40-910e-42558037f3f9",
+      "issue_id": "fps-3jj.11",
+      "text": "Ordering constraint in this description is DISCHARGED — do not treat it as a gate.\n\nThe description says batch 1 must run and the TGP re-lock must finish before this issue starts. Both are settled: batch 1 reached its verdict 2026-08-19 (experiments/batches/batch0), and the TGP re-lock will never happen — #271 closed as superseded 2026-08-20, no TGP feature is in the lock, tgp_delta_7d's graduation retracted as inert. All four blocked-by deps are closed. docs/routines/generator.md carried the same stale gate verbatim and was fixed on main in 35b183e.\n\nRemaining real blocker before invoking the generator is NOT in the TGP thread: the batch-level noise gate cannot resolve what it claims at n=5 candidates. dossier_tables.py:316 computes an EMPIRICAL percentile over the 5-draw noise band, so it can only take values {0,20,40,60,80,100}, while family_wise_percentile_threshold(5) = 99.0. The gate therefore collapses to 'beat all 5 draws', whose null probability is 1/6 = 16.7% per candidate (nominal 1%) and ~60% family-wise over 5 candidates (nominal 5%). batch0 never exposed this: at n=1 the threshold is 95.0, also only reachable at percentile 100, and tgp_delta_7d landed at 40. Filing 5 candidates makes this the batch's headline gate."
+    }
+  ],
+  "fps-3jj.13": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-23T04:49:42Z",
+      "id": "01a02cf3-fa43-78ca-bd96-4d7dd42c44ef",
+      "issue_id": "fps-3jj.13",
+      "text": "Decision: option (2) — keep the status taxonomy as-is (STATUS_ABORTED_CANDIDATE stays the\ncatch-all), add a structured `abort_reason` field to results.json instead of a new status\ncode. Chosen over (1) because a new STATUS_DISQUALIFIED-style top-level status would need\nre-plumbing through TERMINAL_STATUSES/RETRYABLE_STATUSES and every consumer that keys off\nthose sets, for a distinction those sets don't actually care about (a declared leak is still\nnon-retryable, deterministic, and attributable to the candidate — same bucket as any other\naborted_candidate for retry/queue purposes). A reason code is additive and, as the bead's own\noption (2) note anticipated, generalises to other causes later without another status-cut.\n\nImplementation:\n- `ABORT_REASON_LEAK_BY_DECLARATION = \"leak_by_declaration\"` in runner.py.\n- Tagged at the one real site: validate.py's `TargetColumnInInputs` (INPUTS declaring a label\n  column, or COLUMNS declaring one) is now caught explicitly in run_candidate rather than\n  falling through the generic Exception handler. (runner.py's own separate COLUMNS-overlap\n  check against TARGET_COLUMNS turned out to be dead code for this purpose — validate_candidate\n  always raises first — so it stays untagged/unreachable for TARGET_COLUMNS; only its\n  baseline_columns collision is real and that's not a leak.)\n- `_finish()` always writes `abort_reason` (null when not applicable), not an optional key.\n- `dossier_tables._provenance` carries it into facts.json.\n- `retrospective.build_outcome_tally` keys `dossiered_by_status` on `\"{status}:{abort_reason}\"`\n  when set, so e.g. `\"aborted_candidate:leak_by_declaration\"` tallies separately from plain\n  `\"aborted_candidate\"` — the countable leak rate aim (b) asked for.\n- docs/routines/retrospective.md updated so the retrospective write-up reports both counts.\n\nPR incoming."
+    }
+  ],
+  "fps-3jj.14": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-23T09:31:25Z",
+      "id": "01a02df5-e5b5-777d-a435-d156fe8e266f",
+      "issue_id": "fps-3jj.14",
+      "text": "HANDOVER (2026-08-23, session end) — code done on PR #332, measurement not started.\n\nCriteria (a) and (b) MET on PR #332 (open, CI green, NOT merged). The PR trailer is\ndeliberately `Part of:` and not `Resolves:` — criteria (c) and (d) are genuinely unmet,\nso merging must not close this bead.\n\n  [x] (a) compute_noise_floor takes an arity parameter; payload records n_placebo_columns\n  [x] (b) _noise_band refuses an arity mismatch with an actionable message\n  [ ] (c) calibration run at batch1's modal arity (3), 10 draws, recorded\n  [ ] (d) finding written up: how much does the band widen with k?\n\nNEXT ACTION is one owner-run command, ~2h (draw 1 ~22 min, draws 2-10 ~11 min each;\nanchored on batch1's own 20-draw floor at wall_seconds 13717):\n\n  PYTHONPATH=. uv run python -m experiments.pipeline.noise_floor batch1 \\\n      --arity 3 --n-draws 10 --out-name noise_floor_k3.json \\\n      2>&1 | tee experiments/batches/batch1/noise_floor_k3.log\n\nThen: PYTHONPATH=. uv run python experiments/2026-08-23_placebo_arity/compare_arity.py\n\n10 draws is the ceiling, not a choice — the draw pools bind on n_draws * arity against a\n30-seed pool, so max draws at arity k is floor(30/k). Pre-flighted on the real frozen\nframe: 10 groups x 3 DISTINCT source columns screened in 6.4s, all inside\nMAX_SELF_CORRELATION (worst stickiness_score +0.468).\n\nTHE LAUNCH ROUTINE IS DISABLED. Owner turned off `fuel-price-signal-launch` on\n2026-08-23 and stated they will not re-enable it without working it through first. Do not\nre-enable it as a side effect of finishing this bead.\n\nReview outcome (request-changes, confidence 0.85) — both blockers addressed:\n- Blocker 1: the refusal message prescribed a dead end. `_noise_band` reads only\n  `noise_floor.json` and nothing reads an arity-suffixed side-file, so \"then point this\n  batch's ruler at it\" named no mechanism. Promotion is a RENAME and the message now says\n  so in runnable commands. Rejected alternative: having `_noise_band` prefer\n  `noise_floor_k<run_arity>.json` — it breaks the one-sided guard, because a 2-column\n  candidate would miss its k=2 file, fall back, and be refused.\n- Blocker 2: criteria (c)/(d) unmet — conceded, hence `Part of:`.\n\nLATE CATCH, not from the review, and the most important thing here: an arity refusal\nwould have become `outcome: rejected` in experiments/ledger.yaml. dossier.md Step 1.4\nmaps `noise_band.available: false` -> `rejected`, which is DEAD GROUND the next generator\nwon't re-propose. Five unmeasured candidates would have been recorded as refuted by an\nunsupervised 05:06 routine. Fixed with `reason_code: \"floor_arity_below_run\"` plus a\ndossier.md carve-out (write NO README.md, NO ledger entry — leave the run in the queue;\nfind_pending_runs keys on \"results.json present, README.md absent\", so silence is what\nlets a later night grade it properly).\n\nREMAINING AFTER (c) AND (d):\n1. Decide which floor grades batch1, and PROMOTE BY RENAME (there is no selector):\n     mv experiments/batches/batch1/noise_floor.json    .../noise_floor_k1.json\n     mv experiments/batches/batch1/noise_floor_k3.json .../noise_floor.json\n   Do NOT --force a recompute over noise_floor.json — safe for grading, but it destroys\n   the ruler existing dossiers were graded against and the k=1 arity baseline.\n2. Propagate the new bar. docs/CONVENTIONS.md § \"the honest single-candidate bar\" states\n   -0.15 / -0.22 c/L; those are k=1 numbers and fps-3jj.18's description quotes them too.\n3. Write up experiments/2026-08-23_placebo_arity/README.md (its STATUS section is a\n   placeholder saying the measurement has not run). No ledger.yaml entry — this is an\n   instrument finding, not a candidate claim.\n4. Merge #332, then close this bead. Only then discuss re-enabling launch."
+    }
+  ],
+  "fps-3jj.19": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-23T08:36:52Z",
+      "id": "01a02dc3-f434-7105-9d55-0cc5fbb460eb",
+      "issue_id": "fps-3jj.19",
+      "text": "ORDERING CORRECTION (fps-3jj.14, 2026-08-23) — this bead's \"freeze, then generate\" order\nis now incomplete, and following it as written costs batch2 an extra ~2h run discovered\nlate.\n\n`batch_freeze.freeze_batch` computes the noise floor as its final step by calling\n`compute_noise_floor(batch_dir, tank=tank)` — arity defaults to 1. So a freshly frozen\nbatch ALWAYS has a 1-column floor. Since fps-3jj.14 landed, `dossier_tables._noise_band`\nrefuses to grade a k-column candidate against a floor with fewer columns, so every\nmulti-column candidate in batch2 would be refused by the floor its own freeze produced.\n\nAt batch2's size (10-15 candidates) that is not a corner case: on batch1's evidence most\ncandidates are 2-3 column groups.\n\nSequence that actually works, and the one fps-3jj.14's own bead body specifies\n(\"Generation happens FIRST — the calibration should be sized to the column counts the\nbatch actually contains rather than a guess\"):\n\n  1. Freeze batch2. Accept the arity-1 floor it produces; it is still the right ruler for\n     any 1-column candidate and costs nothing extra.\n  2. Run the generator. RECORD EVERY CANDIDATE'S COLUMN COUNT (already a filing\n     obligation in generator.md § Filing).\n  3. THEN one more floor run at the batch's MODAL (or max) arity, before any candidate is\n     dossiered:\n       noise_floor batch2 --arity <k> --n-draws <floor(30/k)> --out-name noise_floor_k<k>.json\n     Note the draw pools bind on n_draws * arity against a 30-seed pool, so max draws is\n     floor(30/k) — 10 at k=3, 7 at k=4.\n  4. Decide which file is batch2's ruler (see below) BEFORE re-enabling the launch routine.\n\nKnown rough edge to expect at step 4: `_noise_band` reads the hardcoded filename\n`noise_floor.json`, so \"make the k=3 floor this batch's ruler\" is a manual rename\n(`noise_floor.json` -> `noise_floor_k1.json`, then `noise_floor_k<k>.json` ->\n`noise_floor.json`). Reversible and it preserves both, but there is no supported\n\"which floor is the ruler\" selector. If batch2 makes that annoying enough, that is the\nchange to ask for rather than working around it each time."
+    }
+  ],
+  "fps-3jj.5": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-17T08:05:02Z",
+      "id": "01a00ec0-a75b-7e6b-a443-d726f1995bb4",
+      "issue_id": "fps-3jj.5",
+      "text": "[fps-3jj.6] The dossier routine (PR #301) is built against two assumptions about this issue's implementation — flagging so they don't silently diverge:\n\n1. **claim.json contract.** Stale-claim recovery in `experiments/pipeline/dossier_tables.py` (`find_stale_claims`) expects the launch routine to write `<run_dir>/claim.json = {\"bead_id\": ..., \"candidate\": ..., \"started_at\": <ISO8601 UTC>}` the moment it claims a candidate bead, before launching the runner detached. If the launch routine doesn't produce this file, stale claims (crashed launches) become invisible to the dossier routine and never get released back to `bd ready`.\n2. **Run-directory layout.** dossier_tables.py assumes one subdirectory per candidate under `experiments/candidates/<batch>/<candidate-name>/` (results.json/rowpreds.parquet/fills.parquet/run.log all together) — i.e. the launch routine must override `run_candidate(..., out_dir=...)` rather than relying on its default (`candidate_path.parent`, which would collide across candidates sharing a batch dir).\n\nBoth are documented in `docs/routines/dossier.md` (\"Known gaps to flag, not silently work around\"). If fps-3jj.5 ends up doing something different, please update that doc (not just the code) so the two routines stay in sync — same rationale as the shim-vs-scheduler decision (fps-6zj)."
+    }
+  ],
+  "fps-3jj.9": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T01:41:42Z",
+      "id": "01a017ae-6c0c-7d9c-ac70-757ce4960801",
+      "issue_id": "fps-3jj.9",
+      "text": "Promoted P3 -> P1 (2026-08-19, from bd fps-nor).\n\nNo longer a nice-to-have: it is now the blocking capability for the tgp_delta_7d / #271 verdict, and the reason batch0's headline could not be read.\n\nEmpirical handle from the fps-nor rerun (experiments/candidates/batch0/tgp_delta_7d/diagnostic_baseline_composition.py, same frozen batch0 snapshot, 14 folds, seed 42, correct 54-col baseline):\n\n- pooled delta_cpl_held = +0.0059 c/L\n- per-fold pooled contributions span -0.209 to +0.654 c/L, i.e. the largest single fold is ~110x the pooled result and they nearly cancel\n- the two arms differ on 11 of 752 fills each way (1.5%); the two BASELINES, which differ by 10 whole feature columns, differ on 6/7 fills\n- fold 10: 1 differing fill -> -0.046 c/L pooled. So one buy/wait flip is worth ~0.05 c/L pooled.\n\nThat last figure is the punchline: the -0.039 c/L that GRADUATED tgp_delta_7d in June is smaller than one decision flip. -0.039 (June), +0.0059 (correct baseline, now) and +0.0941 (wrong baseline) are all within a couple of flips of zero and of each other.\n\nThis is a first handle, not a band — it comes from one paired run. What is still needed is the placebo/shuffle distribution this issue describes, so a dossier can say whether a delta clears anything."
+    }
+  ],
+  "fps-490": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-09-05T01:44:17Z",
+      "id": "01a06f3c-e686-7232-961c-97ac209bb551",
+      "issue_id": "fps-490",
+      "text": "Blocked on fps-ajs (2026-09-05, from fps-nas).\n\nThis issue grades each locked block pass/fail against\n`experiments/batches/batch1/noise_floor.json`, and that file is about to be replaced. fps-nas\ndecided (criterion 5) to grade candidates on a broad 410-station population rather than the\nfive commute stations; fps-916 stamps the population into the floor and refuses a\ncross-population grade, then fps-ajs recomputes the floor at 410.\n\nWhy this blocks rather than merely cautions: the bar this issue exists to validate is stated\nin band-sd units (alpha ~= 0.10, 1.451 band-sd = 0.145 c/L @ 1d), and the band sd is exactly\nwhat changes. Measured on batch1/tgp_cycle_displacement, grading a broad-population delta\nagainst the extant FIVE-station band flips it from clears (z -2.330) to fails (z -1.544). Block\n*rankings* would survive a ruler change; the pass/fail calls this issue is for would not — and\n\"the locked set can't clear the bar, so the bar is wrong\" is not a conclusion worth reaching on\na ruler already scheduled for replacement.\n\nNo change needed to the method here (shuffle-in-place, arity-matched) — only to when it runs\nand which floor it reads.\n\nFull context: experiments/2026-09-05_arbiter_universe_width/README.md, and docs/STATUS.md\n§ \"The realised arbiter's grading population is changing\"."
+    }
+  ],
+  "fps-53j": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-09T22:32:44Z",
+      "id": "019fe8a8-30b9-76fd-b935-07fb5b8480ea",
+      "issue_id": "fps-53j",
+      "text": "Reference prototype landed on main: `experiments/2026-08-10_backfill_requery_profile/` (commit e11c238).\n\n`proto_backfill.py` has a working `lga_sums_slicer()` plus the parity check against the current query — lift the shape from there rather than re-deriving it. `README.md` carries the full profile table and the memory measurements; `run.log` is the recorded run.\n\nRe-run the before-numbers with:\n```\nPYTHONPATH=. uv run python experiments/2026-08-10_backfill_requery_profile/profile_backfill.py fuel_signal.db\n```"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-09T22:39:03Z",
+      "id": "019fe8ad-f753-7a8b-8a75-b166edc6043f",
+      "issue_id": "fps-53j",
+      "text": "Correction to the comment above: run.log is gitignored (`*.log`, repo-wide) and will NOT be in your checkout. The README's Results tables carry every number it held — re-run the scripts rather than looking for the file. The issue description has the corrected pointer."
+    }
+  ],
+  "fps-5mn": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T08:52:59Z",
+      "id": "01a01e5f-a309-77ac-908c-ac5328287f4a",
+      "issue_id": "fps-5mn",
+      "text": "## Severity raised to P1 — a DOCUMENTED user-facing example is already broken\n\nAudit run 2026-08-20 (the `not_tested` line fps-fii left open: \"has any other\nresult been measured at a cadence whose lattice makes the clamp reachable?\").\n\n**Committed record is CLEAN.** Every harness result runs `TankParams()` = 7d,\nwhich is safe. No doc or README quotes a number produced at a non-default\ncadence. `git log -S\"evaluation_interval_days=\"` shows the knob touched only by\nthe five commits that built the engine; the default has been 7 throughout.\n\n**But README.md:756 documents an unsafe config:**\n\n    --tank-size 60 --daily-use 4.5 --eval-interval 7\n\nD = 31.5 L, floor = 6 L, and the engine starts at 50% = **30 L**. The STARTING\nlevel is already inside the (6, 31.5) gap — above the emergency floor, unable to\nsurvive one interval. So the very first `wait` strands the tank (28.5 L strands\ntoo). Every strategy except `always_buy` is affected, from the first decision,\nsilently.\n\nThis is why P2 -> P1: not an experiments-only concern, a documented path a user\nis invited to run.\n\n**Added scope:**\n\n- [ ] `validate_never_dry` must reject README.md:756's config, and that exact\n      config becomes a regression test (known-bad input with a known reason)\n- [ ] The validator must check the STARTING level (0.5 * tank_size), not only the\n      wait-chain lattice — this config is caught at the start level, so a\n      lattice-only check would pass it\n- [ ] Replace the README example with a config **chosen because the validator\n      accepts it**, in this same PR. Deliberately NOT fixed ahead of the\n      validator: hand-picking a \"safe\" replacement and verifying it with the same\n      hand-arithmetic is the failure mode that already cost one review cycle.\n\n**Separate, minor, NOT scoped here:** `results.csv` records no tank/cadence\ncolumn, so every historical row's tank params are known by assumption (the\ndefault never moved) rather than by record. Harmless today. Worth a provenance\ncolumn only if the default is ever changed — file it then, not now."
+    }
+  ],
+  "fps-6to": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-24T11:09:38Z",
+      "id": "01a03376-2de1-75df-bd81-3b239238109c",
+      "issue_id": "fps-6to",
+      "text": "[launch] validated, launched detached pid=34291, log=/Users/esteele/Code/fuel-price-signal/experiments/candidates/batch1/station_descent_dynamics/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-24T11:27:39Z",
+      "id": "01a03386-aab7-7382-89a2-2a92aca0048e",
+      "issue_id": "fps-6to",
+      "text": "[pipeline] station_descent_dynamics: graded — moved the arbiter (delta_cpl_held=-0.0272)\nZone: did NOT concentrate where predicted (target=+0.0138 vs other=-0.0345)\nwall=1079.2s  windows=14  seeds=[42, 43, 44, 45, 46]"
+    }
+  ],
+  "fps-6yi": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-26T11:09:00Z",
+      "id": "01a03dc2-500e-7468-a090-a47fabcff8d0",
+      "issue_id": "fps-6yi",
+      "text": "[launch] validated, launched detached pid=8223, log=/Users/esteele/Code/fuel-price-signal/experiments/candidates/batch1/stickiness_phase_saddle/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-26T11:25:52Z",
+      "id": "01a03dd1-c17f-73b1-85a5-b4967ec30267",
+      "issue_id": "fps-6yi",
+      "text": "[pipeline] stickiness_phase_saddle: graded — moved the arbiter (delta_cpl_held=-0.0735)\nZone: not resolved — TARGET declared neither folds nor axis/expect_concentration_in\nwall=1010.6s  windows=14  seeds=[42, 43, 44, 45, 46]"
+    }
+  ],
+  "fps-awz": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T22:22:31Z",
+      "id": "01a02144-c6f4-7822-b814-9800c243d87f",
+      "issue_id": "fps-awz",
+      "text": "Additional acceptance criterion — the floor's staleness guard misses a cadence re-lock.\n\nfreeze.json records batch/snapshot_date/frozen_at/source_features/source_db/n_baseline_columns/baseline_fingerprint. noise_floor.json records seeds/fold_subset/partial/computed_at/git_sha/baseline_fingerprint. Neither records TankParams.\n\ndocs/CONVENTIONS.md says a re-lock invalidates the batch's noise floor, and separately says moving evaluation_interval_days IS a deliberate re-lock with the same ceremony as changing LOCKED_FEATURE_COLUMNS. But the guard is fingerprint-based and the fingerprint is columns-only, so a cadence change invalidates every CPL number in the batch while leaving the fingerprint identical — silently. fps-929 may well argue for daily cadence, which makes this reachable, not hypothetical.\n\n- [ ] freeze.json and noise_floor.json stamp the TankParams they ran under (results.csv already has the tank_params column from fps-xx1 — reuse that formatting, 50/3.571/7d/10%)\n- [ ] _noise_band() refuses (available: false) on a tank/cadence mismatch the same way it already refuses on a fingerprint mismatch, with a reason string naming cadence"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T22:39:07Z",
+      "id": "01a02153-fc6c-7776-bcaa-2a1b925faa6a",
+      "issue_id": "fps-awz",
+      "text": "Follow-up edit to docs/routines/generator.md, once this bead lands.\n\nThe generator brief deliberately says nothing about how large an effect needs to be, because the honest bar is not known until the ruler here is rebuilt. Once it is, add a short passage to generator.md stating the bar as a number, so the generator aims at mechanisms with a plausible shot at moving realised CPL rather than at micro-refinements.\n\nInclude the caveat that the bar is a detection threshold, not a target: the historical record (results.csv) shows single columns delivering 0.03-0.26 c/L, so a bar above that is a statement about the instrument's resolution, not about what a good feature looks like. Do not let it read as 'propose nothing below X c/L'.\n\n- [ ] generator.md states the post-rework bar as a number, with that caveat"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-21T10:14:12Z",
+      "id": "01a023d0-589e-74da-9294-9c4ae5dc4551",
+      "issue_id": "fps-awz",
+      "text": "PR #321 opened (branch claude/fps-awz-e0f0b9), implementing the placebo-column null + distance-based gate + ~20 draws. Not closing yet — waiting on merge, and on the honest-bar number which needs a real recompute against batch0 (I don't run the heavy pipeline in-session per this repo's convention).\n\nScope notes:\n- The comment thread's TankParams-stamping checklist item is already done (fps-15c, merged).\n- The tank/cadence mismatch guard in _noise_band() is out of scope here — re-filed as fps-v8o (a chore) after fps-15c's author found this bead was scoped to something else.\n- Filed fps-cds as the generator.md follow-up (depends on this bead + the real recompute)."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-21T10:51:45Z",
+      "id": "01a023f2-bb39-70f2-9737-923905c1fda7",
+      "issue_id": "fps-awz",
+      "text": "Second review round (peer Claude session, verified 3 of 10 findings against real batch0 data) surfaced two real gaps beyond the first round: (1) noise_floor.json had no stamp of which null-construction method produced it, so batch0's already-committed pre-fps-awz seed-swap file would keep passing _noise_band()'s checks post-merge and silently grade candidates against the wrong band — fixed with a null_method field + refusal guard; (2) a real locked column can be entirely NaN in a batch (an LGA council with no trough events in range), which would abort a real run — fixed with an eligible-column pre-filter. Also applied a sqrt(1+1/n_draws) prediction-interval correction to the z-gate threshold (was ~2.5-10% too lax) and fixed a 39->45 doc miscount. All pushed to PR #321 (commit 26807e9). Still not closing — same blockers as before: PR not yet merged, honest-bar number pending the real batch0 recompute."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-21T11:45:55Z",
+      "id": "01a02424-5068-7027-bb80-c8a760c2ec0b",
+      "issue_id": "fps-awz",
+      "text": "Third review round (peer session actually ran the code against real batch0 data, not just reasoned about it): confirmed compute_noise_floor aborted at draw 2 of 20 on real data — two real bugs, both fixed (PR #321, commit 7dea084). (1) np.corrcoef returns NaN on ANY NaN element, masking a real correlation as unverifiable for lga_mean_cents/brand_mean_cents (partial NaN, not all-NaN) -- switched to pd.Series.corr (pairwise-complete). (2) Bigger one: 4 columns (cycle_mean_length, cycle_peak_count, lga_mean_cents, brand_mean_cents) fail the shift_autocorrelation check at EVERY offset, deterministically -- not a rare input, a property of the column. Abort-on-first-failure meant the module could never produce a floor on batch0 at all. Replaced with a screen-and-substitute design: placebo.screen_draws checks the whole candidate pool (cheap, no backtest) before any fit runs, substituting on failure. Confirms MAX_SHIFT_AUTOCORRELATION=0.6 is doing real, now-verified work, not sitting unused. Still not closing -- same blockers: PR not yet merged, honest-bar number pending the real batch0 recompute (which should now actually complete)."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-21T11:51:04Z",
+      "id": "01a02429-06db-7dc3-9cce-1a9dfc716eb3",
+      "issue_id": "fps-awz",
+      "text": "Peer's screen_draws re-run against real batch0 (data-only, no fit): 20/20 draws found cleanly, 5 substitutions, both prior fixes confirmed working. New finding, not a blocker: the screen systematically excludes ALL level-like columns (4 cycle-magnitude + all price-level columns failed at every offset, every time) since a circular shift can't decorrelate a slowly-varying series from itself. Surviving bank is dominated by days_since_trough_entry_* (12/20). Real candidates can be level-like, so the band characterizes 'adding a fast-varying column' not 'adding an arbitrary column' -- a real gap, not a bug, and doesn't invalidate the rework (still strictly better than seed-swap). Documented in placebo.py + feature-pipeline.md (commit 04d2104). Filed fps-d7m (design, blocked-by this) for the block-permutation alternative rather than attempting a construction redesign in this PR. PR #321 now verified against real batch0 data three times over (provider wiring, prediction-interval math, screen-and-substitute). Still not closing -- PR not yet merged, honest-bar number pending the user's own compute_noise_floor batch0 --force run."
+    }
+  ],
+  "fps-axu": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T07:39:55Z",
+      "id": "019fff36-9389-76e1-9371-ac7955ec00d9",
+      "issue_id": "fps-axu",
+      "text": "In progress via PR #293 (opened by the worker Routine, 2026-08-14 07:36 UTC). Its claim of this issue never synced to the shared Dolt DB because bd dolt push is still broken (fps-sk0) — reconciling by hand from an interactive session that can push. PR carries claude-authored+chore+auto-merge-ok; should auto-merge once CI is green and it clears the 900s age gate."
+    }
+  ],
+  "fps-cgf": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-25T11:09:55Z",
+      "id": "01a0389c-cbbc-72e2-88dd-3150ab518564",
+      "issue_id": "fps-cgf",
+      "text": "[launch] validated, launched detached pid=47187, log=/Users/esteele/Code/fuel-price-signal/experiments/candidates/batch1/lga_trough_propagation/run.log"
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-25T11:31:07Z",
+      "id": "01a038b0-3597-7854-9555-6bb8bfe76c80",
+      "issue_id": "fps-cgf",
+      "text": "[pipeline] lga_trough_propagation: graded — moved the arbiter (delta_cpl_held=-0.0675)\nZone: did NOT concentrate where predicted (target=+0.0463 vs other=-0.3794)\nwall=1270.9s  windows=14  seeds=[42, 43, 44, 45, 46]"
+    }
+  ],
+  "fps-evn": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T01:23:32Z",
+      "id": "01a01cc4-27b0-7a16-b2b7-9fe090bd84f5",
+      "issue_id": "fps-evn",
+      "text": "Sequence note, 2026-08-20: run AFTER fps-fii (P1), which resizes the prize this measure would then go hunting in. fps-evn and fps-grp are deliberately BOTH P2 — they are genuinely comparable in urgency and neither blocks the other, so their relative order in 'bd ready' carries no meaning. If you want a tiebreak: fps-evn is the one with something waiting on it (fps-x0f depends on it)."
+    }
+  ],
+  "fps-fii": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T01:23:32Z",
+      "id": "01a01cc4-2663-7ab2-929f-83dc65bd753a",
+      "issue_id": "fps-fii",
+      "text": "Promoted P2 -> P1, 2026-08-20. Do this FIRST of the three beads filed today. Rationale: it gates whether the other two are worth running. The 'we're near diminishing returns, stop feature work' judgement rests entirely on 1.66 c/L of remaining headroom, and that number is measured under a 7-day decision grid that is a TankParams default rather than a fact about the world. If a finer cadence materially lowers the ceiling, the prize is bigger than believed and the whole stop/continue call changes. It is also the cheapest of the three (run_oracle_backtest is fit-free). Same P1 rationale as fps-3jj.9's promotion: this gates a decision we are otherwise about to make on an unvalidated number."
+    }
+  ],
+  "fps-ghr": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-25T10:07:55Z",
+      "id": "01a03864-0720-7e2c-a0fa-d35624c81bd9",
+      "issue_id": "fps-ghr",
+      "text": "ROOT CAUSE of the coverage holes — mechanical, and mostly a PIPELINE AMPLIFICATION\nrather than raw data absence.\n\nTwo stages compound:\n\n1. fuel_signal/fill.py: MAX_GAP_FILL_DAYS = 28. Gaps where\n   (entry_date - last_date).days <= 28 are forward-filled; anything longer is left\n   unfilled entirely, deliberately (\"station likely closed or rebuilt\"). So the\n   smallest raw gap that survives into the frame is 28 missing days.\n\n2. fuel_signal/labels.py: a label needs 90 contiguous lookback days AND 7 contiguous\n   forward days (rolling(lookback_days, min_periods=lookback_days), plus the explicit\n   \"window does not span exactly N calendar days\" checks at lines 151/162). Around any\n   surviving hole that strips a further 7 rows before and 90 rows after.\n\nPredicted minimum hole in the modelling frame: 28 + 7 + 90 = 125 days.\nOBSERVED minimum across all 245 holes: exactly 125 days. Median 132 -> implies a\n~35-day raw outage. Zero holes shorter than 125 exist, which is the signature of this\nmechanism rather than of independent station closures.\n\nConsequence worth stating plainly: a station that stops reporting for one month\ndisappears from the model for four and a half.\n\nThe Feb-2022 cohort: hole starts cluster 2022-02-16/21/22/23, returns cluster\n2022-06-28/29/30 (52 stations). Working back through the two stages, the underlying\nraw outage is roughly late Feb -> late March 2022 for ~52 Sydney stations\nsimultaneously.\n\nHYPOTHESIS, NOT VERIFIED: that window coincides with the Feb-March 2022 eastern\nAustralia floods (Sydney flooding in early March 2022). Cheap test: are the ~52\naffected stations geographically clustered? Station metadata (suburb/postcode/LGA)\nis needed for this and was not readily available from the experiment artifacts —\nthe cleaned CSVs carry Suburb/Postcode but no station_code.\n\nThis reframes the bead: the question is no longer only \"does panel composition\ncontaminate network aggregates\" but also \"is a 125-day minimum exclusion the right\npolicy\". Two sub-questions:\n  - Is MAX_GAP_FILL_DAYS = 28 plus a 90-day label lookback jointly too aggressive?\n    A shorter re-qualification path (e.g. allow labels once 90 days of POST-return\n    data exist, which is what already happens, but reconsider whether the 28-day\n    fill cliff should instead taper) would return stations sooner.\n  - Does the synchronised 575 -> 642 panel jump move the locked network aggregates?\n    That test is unchanged and still the decisive one."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-25T10:24:21Z",
+      "id": "01a03873-12a4-7aba-a334-28ffffa3b772",
+      "issue_id": "fps-ghr",
+      "text": "DECISIVE TEST RUN (2026-08-25). Verdict: composition drift is REAL but BOUNDED and\nconcentrated in a handful of days. Low priority, cheap fix available.\n\nMethod: chain-linked index. Each day's change in the network mean is measured only\nover stations present on BOTH that day and the previous day, then cumulated. Any\ndivergence from the naive full-panel mean is composition drift by construction. Run\nover 2021-11-05..2025-04-17, 1260 dates x 714 stations, from data/features.parquet.\n\n(A first attempt compared a \"balanced panel\" of the 348 always-present stations\nagainst the full panel. That test was too weak to conclude from: those 348 are not a\nrepresentative subsample, so the two means differ by ~1 c/L sd continuously, which\nswamps any artifact below that size. The chain-linked design has no such problem.)\n\nRESULTS\n  total composition drift over the 3.4y window : +0.461 c/L\n  drift range                                  : -1.181 .. +0.568 c/L\n  daily |drift change|: median 0.0000, p99 0.0959, max 0.5669 (on 2022-06-29)\n\nThe median daily drift change is EXACTLY ZERO -- on most days the panel does not\nchange and the artifact is nil. It is concentrated in ~8 days across 3.4 years:\n\n  2022-06-29  +0.567 c/L  (panel +32 stations)\n  2022-02-07  +0.256      (+13)\n  2022-06-28  +0.206      (+19)\n  2022-02-17  -0.149      (-11)\n  2024-03-01  +0.138       (-3)\n  2022-01-06  -0.130       (+5)\n  2024-01-29  +0.116       (-3)\n  2021-12-08  -0.114       (+2)\n\nAcross the Feb-2022-cohort return week (2022-06-27 -> 07-05) the drift accumulates\n+0.876 c/L.\n\nWHY IT MATTERS DESPITE BEING SMALL: the network mean feeds\nstation_minus_sydney_avg_cents directly, and lga_mean_cents / brand_mean_cents feed\ntheir own station_minus_* derivatives. So on those ~8 days every station's\nrelative-price features are biased by up to ~0.6 c/L for bookkeeping reasons. For\nscale, the project's live headroom is 2.97 c/L and no single feature has ever\ndelivered 0.5 c/L alone -- so the artifact is not negligible on the days it occurs,\neven though it touches few rows.\n\nALSO FOUND: the count of LGAs with a computed lga_mean_cents steps 28 -> 30 exactly\nat 2022-06-28, as two LGAs cross the \">= 3 non-Sticky stations\" floor. So composition\nchange alters feature AVAILABILITY, not just level. network_px_std never goes NaN\n(the Competitive cohort never drops below 2).\n\nIMPORTANT CAVEAT -- what this test did NOT cover. It measured a plain mean over all\nstations present. Production uses a Competitive-cohort sample std (network_px_std)\nand non-Sticky, >=3-station LGA/brand means. Those cohorts churn for a SECOND reason\nthis test cannot see: a station's station_class can change from one snapshot_date to\nthe next, moving it in or out of the cohort with no data-availability change at all.\nThat churn could be larger than the availability churn measured here. Testing it\nneeds the station_class table, which is not populated in this checkout\n(data/fuel.sqlite is 0 bytes). This is the remaining open question on this bead.\n\nSUGGESTED FIX (cheap, if pursued): chain-link the aggregates, or compute the level\non a fixed cohort and apply changes only over stations present in consecutive\nsnapshots. Either removes the artifact by construction."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-25T10:33:39Z",
+      "id": "01a0387b-9840-7422-b5e3-217b2edfc6b1",
+      "issue_id": "fps-ghr",
+      "text": "COHORT CHARACTERISATION + ROOT-CAUSE UPDATE (2026-08-25). The Feb-2022 disappearance\nis NOT a real-world outage and NOT a rename. The raw data is continuous; the gap is\nmanufactured somewhere between data/cleaned/*.csv and the modelling frame.\n\nMethod: recovered station metadata from data/snapshots/**/*.csv (station_code + name/\naddress/suburb/brand; 3,295 stations), matched to data/cleaned/*.csv on a normalised\naddress key (703 of 714 panel stations matched, 1,098,701 raw rows).\n\n1. GEOGRAPHY -- scattered, not a flood footprint. The 52 are spread right across\n   Sydney: Dural, Heathcote, Randwick, Moorebank, Cremorne, Woollahra, Concord,\n   Five Dock, Kingsford, Kensington. Postcode 20xx is over-represented (53.8% of\n   cohort vs 19.1% of panel) but that is inner/eastern/southern Sydney generally, not\n   a contiguous affected area. The Feb-March 2022 flood hypothesis is NOT supported.\n\n2. BRAND -- skewed, but the skew does not explain anything. On 2026 labels the cohort\n   is 28.8% Ampol Foodary and 28.8% BP against panel shares of 11.2% and 15.5%. In the\n   2022 raw feed they were mostly Coles Express, BP and 7-Eleven.\n\n3. MASS RENAME -- REFUTED, and refuted in the opposite direction. Comparing each\n   station's brand before 2022-02-24 with its brand after 2022-03-25:\n     cohort  brand changed   1 / 51 =  2.0%\n     control brand changed  68 / 604 = 11.3%\n   The cohort was five times LESS likely to rebrand than the rest of the panel. The\n   dominant transition of that period (EG Ampol -> Caltex Woolworths, 59 stations)\n   sits almost entirely in the CONTROL group. Whatever removed the cohort from the\n   frame, it was not a name or brand change.\n   (An earlier pass of this check reported 15/51 brand+name changes. That was wrong --\n   it used groupby().last()/.first() on an unsorted frame, so \"pre\" and \"post\" were\n   arbitrary rows rather than the chronological boundary values. Corrected above.)\n\n4. THE ACTUAL FINDING -- the raw feed never went quiet. Distinct cohort stations\n   reporting E10 per month, Nov 2021 -> Sep 2022:\n     cohort (of 52):  50 50 51 50 49 51 50 51 50 49 47\n     control (of 651): 537 539 587 586 566 584 584 579 574 572 580\n   Feb 2022 = 50, March 2022 = 49. No dip whatsoever. Same for U91/P95/P98/DL, so it\n   is not a fuel-grade switch either. 51 of 52 cohort stations have raw rows inside\n   the 2022-02-24..2022-03-30 window.\n\n   So data/cleaned/*.csv HAS continuous E10 prices for these stations across a window\n   in which the modelling frame shows nothing. The loss is introduced downstream --\n   in the cleaned-CSV -> daily_prices ingestion (fuel_signal.db) or in whatever DB\n   state features.parquet was built from.\n\n   LEADING HYPOTHESIS, NOT CONFIRMED: the SQLite DB was populated before the\n   historical CSVs were completed/backfilled and was never rebuilt from scratch.\n   data/cleaned mtimes are 2026-05-02 (116 files) and 2026-05-11 (1). features.parquet\n   is 2026-08-22 -- newer, but it is built FROM the DB, not from the CSVs, so its\n   mtime says nothing about whether the DB ever re-read the backfilled CSVs. Cannot\n   check directly here: data/fuel.sqlite and data/fuel_signal.db are both 0 bytes in\n   this checkout (likely not carried through the 2026-08-18 repo move).\n\nVERIFICATION (heavy, owner to run): rebuild from the cleaned CSVs and re-derive, then\ncheck whether the cohort's 2022-02-24..2022-06-28 hole disappears:\n    uv run python -m fuel_signal.db\n    uv run python -m fuel_signal.fill\n  ...then rebuild features and re-run the hole scan.\nIf the hole vanishes, this is a stale-DB artifact and ~198 stations x 245 holes of\n\"missing\" history are recoverable -- which would also shrink the composition drift\nmeasured earlier in this bead, since most of that drift is the cohort's return.\n\nThis substantially raises the value of the bead: it is no longer only \"does panel\nchurn contaminate aggregates\" but \"is the model training on a frame that is missing\ndata we already hold on disk\"."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-25T10:41:03Z",
+      "id": "01a03882-5f78-716b-8778-2a0304dd02c3",
+      "issue_id": "fps-ghr",
+      "text": "ROOT CAUSE CONFIRMED (2026-08-25), using experiments/batches/batch1/fuel_signal.db --\nthe frozen 500MB DB the batch1 runs used. No rebuild was needed.\n\nTWO EARLIER CLAIMS IN THIS BEAD ARE WRONG. Retracting both:\n\n  RETRACTED 1: \"the raw feed never went quiet -- E10 reporting never stopped.\"\n  That used MONTHLY buckets. Station 3 has exactly one E10 observation in March 2022\n  (on the 31st), which made March look fully covered. At daily granularity the hole\n  is obvious.\n\n  RETRACTED 2: \"the pipeline lost data it already has on disk\", and the stale-DB /\n  CSV-backfill hypothesis built on it. The DB holds exactly what the feed published.\n  Nothing was lost in ingestion. There is no stale-DB bug.\n\nWHAT ACTUALLY HAPPENED\n\nThe bulk source is a price-CHANGE event log, not a daily census (README says so\nexplicitly). A station appears only on days it moves its price.\n\nE10 price-change events per day across the whole panel:\n  2022-02-10..03-11  100-380 stations/day   (normal)\n  2022-03-12..03-20    9-51 stations/day    (collapse)\n  2022-03-30           515 stations\n  2022-03-31           549 stations         (mass repricing)\n\nAfter the 24 Feb 2022 invasion spike, Sydney pump prices sat on a high plateau and\nstations simply stopped changing them for weeks. Then on 30 March 2022 the federal\nfuel excise cut (announced 29 March, ~22c/L) took effect and essentially every\nstation repriced on the same day -- which is why 515 and 549 stations report on\n30/31 March and why the cohort all \"returns\" together.\n\nSo the chain is:\n  1. Genuine price plateau -> station posts no E10 change for >28 days.\n     e.g. station 3: last E10 observation 2022-02-23 (186.9), next 2022-03-31\n     (198.9) -- a 36-day gap.\n  2. fill.py MAX_GAP_FILL_DAYS=28 refuses to forward-fill, treating it as\n     \"station likely closed or rebuilt\".\n  3. labels.py then strips 7 days before and 90 days after.\n  4. Net: a 125+ day hole in the modelling frame.\n\nConfirmed panel-wide: 81 stations have a >28d E10 gap starting Feb-Apr 2022, and\nALL 25 sampled cohort stations do (0 exceptions).\n\nWHY THIS MATTERS MORE THAN THE ORIGINAL BEAD\n\nThe data is correct and the ingestion is correct. The defect is that fill.py's\n\"no price change for >28 days == closed\" heuristic misfires during long price\nplateaus -- and a plateau is exactly the market state where a buy/wait signal is\nmost valuable. The pipeline goes blind precisely when the question is hardest, and\nit does so for ~12% of the panel at once.\n\nThis also fully explains the composition drift measured earlier in this bead: the\n575 -> 642 jump is not stations reopening, it is the excise cut ending the plateau.\n\nSUGGESTED DIRECTION (needs a decision, not obvious):\n  - Distinguish \"no price change\" from \"no data\". The feed's own semantics make a\n    long flat run a legitimate observation, not an absence. A station still listed\n    in the daily snapshot but not posting a change is demonstrably open.\n  - data/snapshots/ is a daily census and could serve as the liveness oracle for\n    exactly this: present in snapshot + no change event == price held, fill it.\n  - If MAX_GAP_FILL_DAYS stays, it should at minimum not apply when other fuel\n    grades at the same station are still reporting (station 3 kept posting P98/U91\n    changes throughout its E10 \"gap\").\n\nRecommend re-titling this bead. It is no longer about panel churn contaminating\naggregates; that turned out bounded (~0.5 c/L on ~8 days). The real finding is that\na 28-day fill cap plus a 90-day label lookback silently removes ~12% of the panel\nfor 4+ months whenever the market plateaus."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-25T10:50:55Z",
+      "id": "01a0388b-6835-7abe-8132-ecb139922ac8",
+      "issue_id": "fps-ghr",
+      "text": "CORRECTION (2026-08-25): it is NOT a price plateau. Retracting that from the previous\ncomment. It is an upstream hole in the NSW published data.\n\nRow counts in data/raw/ (the downloaded NSW bulk CSVs, before any processing by this\nproject), all fuel grades, all NSW:\n\n  10/03/2022   3581\n  12/03/2022    289\n  13/03/2022    163\n  16/03/2022     95\n  20/03/2022     49     <- ~98% below normal\n  25/03/2022    727\n  29/03/2022    691\n  30/03/2022   2836\n  01/04/2022   8882\n\ndata/cleaned/ mirrors this exactly, so the thinning is NOT introduced by this\nproject's download, clean or ingest steps. The NSW bulk feed for roughly 12-24 March\n2022 is simply incomplete.\n\nCorroborating signature in the DB: P95 and P98 sit at literally ZERO events statewide\nfrom 2022-03-11 to 2022-03-29 while E10/U91 continue at reduced volume. Zero premium\nprice changes across NSW for 19 days is not physically possible, so this is missing\ndata rather than an unusually quiet market. The network E10 median also moved\n183.9 -> 176.9 -> 185.8 -> 198.9 across the window that station 3 supposedly held one\nprice, which independently rules out the plateau reading.\n\n(Also retracting the earlier suggestion that data/snapshots/ could act as a liveness\noracle here. Snapshots only start 2026-08 -- there is no 2022 coverage. Owner flagged\nthis; it was a bad suggestion.)\n\nPROVENANCE of the cap: commit 87bd867, 2026-05-11,\n\"feat: cap forward-fill gap length to exclude closed-station periods (closes #30)\".\nRationale in the message: \"preventing stale prices from polluting label computation\nand cycle detection during station closures/rebuilds\". So the constant was chosen\ndeliberately for CLOSURES. A source-side publication outage was not a case it was\ndesigned against, and it cannot distinguish the two -- both present as one long gap.\n\nPROPOSED FIX (uses the signature that actually separates the two cases):\nA genuine closure is IDIOSYNCRATIC -- one station goes dark while the rest of the\npanel reports normally. A feed outage is SYNCHRONISED -- a large fraction of the\npanel has a gap spanning the same dates. So gate the cap on concurrency:\n\n  - For a candidate gap on station S spanning [a,b], measure what fraction of the\n    panel also has no observation across [a,b].\n  - If that fraction is high (feed outage), forward-fill through it regardless of\n    length -- the station was demonstrably trading, we just were not told the price.\n  - If it is low (real closure), keep the current 28-day refusal.\n\nThis is strictly better than tuning MAX_GAP_FILL_DAYS, which cannot separate the\ncases at any threshold. It would recover ~81 stations x 4+ months for March 2022\nalone, and would generalise to any future feed interruption.\n\nCaveat worth stating: filling through a 19-day publication hole means carrying a\nstale price across a window in which the market moved ~15-20 c/L. That is its own\ndistortion and arguably worse than exclusion for LABEL purposes. A reasonable\ncompromise is to fill for panel-membership/aggregate purposes (so the station keeps\ncontributing to network_px_std, lga_mean_cents etc. and does not vanish for 4 months)\nwhile leaving LABELS unlabelled across the affected span. Needs a decision."
+    }
+  ],
+  "fps-grp": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T01:20:54Z",
+      "id": "01a01cc1-bc33-767c-b78f-0ccb989118e4",
+      "issue_id": "fps-grp",
+      "text": "CONVENTIONS.md half of AC4 is DONE (commit 2695406) — § 'Bucketed results — check the convention spread before believing an ordering' now carries the rule, the bias-not-variance point, the contrast-testing requirement, and the path-coupled-cost generalisation. Remaining on this bead: the actual audit (enumerate period-sliced economics, decide the 2026-06-18 gate1 per-regime saving% verdict, annotate affected INDEX/ledger rows, and annotate #262's own 2026-06-19 row)."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T01:23:33Z",
+      "id": "01a01cc4-28f5-78fc-81da-9d40f4050e08",
+      "issue_id": "fps-grp",
+      "text": "Sequence note, 2026-08-20: deliberately left at P2 alongside fps-evn rather than demoted, because the defect it hunts is SILENT — the 2026-06-18 gate1 per-regime saving% is measured against always-buy, so unlike the #262 map it produces no impossible negatives to give itself away, and it is one of the three findings fps-x0f must reconcile. Nothing blocks on this bead, which is why it is not P1; that is not the same as it being safe to defer indefinitely."
+    }
+  ],
+  "fps-hg7": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T05:46:34Z",
+      "id": "019ffece-cdee-7334-8b3c-8bd7a5ef42c2",
+      "issue_id": "fps-hg7",
+      "text": "Fixed and merged to main directly (docs-only change, no PR needed): CLAUDE.md now applies auto-merge-ok to chore PRs on open (e4ab110), and docs/automation.md's label table + state machine updated to match. Owner confirmed intent: option 1, auto-merge should be live for chore PRs — decided via ongoing months of investment in auto-merge.yml (age gate, Dependabot extension, schedule tuning) despite the docs saying otherwise since 2026-05-01's d5d056e accidentally dropped the label-application step.\n\nLeaving this open rather than closing: the third acceptance criterion (one worker PR observed traversing the intended merge path end to end) hasn't been verified yet. Per owner instruction this session, no further Routine runs are being triggered until fps-sk0 is also fixed — so live verification waits for the next natural scheduled run (or a deliberate verification run once fps-sk0 lands)."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T07:10:37Z",
+      "id": "019fff1b-c24b-79f6-9cb7-7f2fb95b1d21",
+      "issue_id": "fps-hg7",
+      "text": "Verified end-to-end: PR #292 (bd-fps-sk0-token-guard fix) carried claude-authored+chore+auto-merge-ok, sat green, and was merged automatically by app/github-actions at 2026-08-14T07:10:01Z — no manual click. auto-merge-ok labeling + the workflow both work as intended."
+    }
+  ],
+  "fps-nas": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-09-04T23:08:11Z",
+      "id": "01a06ead-fd60-7d79-ab82-fe84f6f54088",
+      "issue_id": "fps-nas",
+      "text": "## Handoff 2026-09-05 (interactive session, worktree fps-nas-task-pickup-e5fc84)\n\n**Landed for review: PR #361** — `experiments/lib/universe.py` + 45 tests. This is the\nmachinery only: a declared, reproducible station-sampling scheme (criterion 2). Nothing\ncalls it; `realised.py`/`noise_floor.py`/`runner.py` untouched; no position taken on which\npopulation grades candidates.\n\n**Prepared but NOT committed** (experiments/** convention: a bare harness that has recorded\nnothing does not go to `main`) in\n`experiments/2026-09-05_arbiter_universe_width/` on that branch:\n- `README.md` — the plan, the sampling scheme's justification, and the comparison contract\n- `timing.py` — criterion 1. Times `fit` / `load_history` / `replay` SEPARATELY at 5/50/200\n  on one fold, because \"the total got 3x slower\" doesn't say which knob to turn.\n- `homogeneity.py` — criteria 3-4. One candidate (`tgp_cycle_displacement`) at both\n  populations, each delta read against its OWN fold-clustered 2*SE, never differenced.\n\n**Findings already in hand, before any run:**\n1. **607 of 751 stations are eligible across 32 councils** over batch1's real 14-fold span\n   (2021-11-06..2024-12-29). A ~120x wider universe is available if it is affordable.\n2. **The reference five are not homogeneous on coverage.** Station 414 (BP Valley Heights)\n   has 0.718 E10 coverage over that span and fails the 0.90 gate the broad sample uses. Any\n   broad-vs-five read differs on an axis unrelated to the feature. Reported, never filtered.\n3. **`aggregate_backtest` silently skips a station with no data in a window** and\n   `run_backtest` clamps a dry tank — which is why coverage is a correctness gate and not\n   tidiness. A dark station reweights the pooled CPL without announcing itself.\n4. **Reason to doubt the bead's structural costing:** `ModelStrategy.decide` calls\n   `predict_proba` on ONE row per station-day. At the locked 1d cadence a 200-station,\n   90-day fold is 18,000 single-row sklearn calls per arm. Criterion 1 may come back\n   negative. Do not assume fit-dominance — `timing.py` measures it.\n5. **`fps-enx` filed:** `r0_cache.joblib` is keyed only on `batch_dir`, so alternating\n   universes thrashes it. This is why `homogeneity.py` calls\n   `run_paired_realised_backtest` directly instead of `run_candidate` twice.\n\n**Still open on this bead:** criteria 1, 3, 4, 5, 6 — all gated on the owner running\n`timing.py` (fast) and then `homogeneity.py` (not fast). Criterion 6 is not free either:\n`noise_floor.py` threads `station_codes` the same way, and batch1's committed\n`noise_floor.json` took 8368s at FIVE stations."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-09-04T23:42:25Z",
+      "id": "01a06ecd-5293-796a-ac91-07ca268020ee",
+      "issue_id": "fps-nas",
+      "text": "## Finding that changes the bead's premise (2026-09-05, from PR #361 review)\n\n**The incumbent five-station arbiter is a FOUR-station instrument across two of its\nfourteen folds.** Station 414 (BP Valley Heights) has this per-fold E10 coverage\nvector over batch1's real 14-fold geometry (2021-11-05 .. 2025-04-17):\n\n    [0.96, 1.00, 1.00, 0.33, 0.00, 0.00, 0.10, 1.00 x7]\n\nFolds 5 and 6 are ENTIRELY dark; folds 4 and 7 are barely covered. Four of fourteen\nfolds unusable. `aggregate_backtest` silently skips a station whose window CPL is\nNaN, so this has never announced itself — and the span-level figure (0.742) makes it\nlook merely thin rather than absent. The other four preferred stations are clean\n(1.00 across every fold, bar two 0.96s).\n\nWhy this matters for fps-nas beyond data hygiene:\n\n1. **The \"~92 independent decisions\" figure is optimistic.** Those decisions are not\n   evenly spread across 5 stations x 14 folds; two folds have 20% less population\n   than assumed and two more are close to it.\n2. **It sharpens the homogeneity caveat.** The reference population is not\n   homogeneous on coverage *with itself* across time, so a broad-vs-five comparison\n   differs on an axis unrelated to any candidate feature. Report both populations'\n   coverage; do not filter the five (they are exogenous — the owner's actual commute).\n3. **It is an argument FOR widening**, independent of the resolution argument the\n   bead already makes.\n\nSecond measurement, a limitation rather than a defect: `fill.py` forward-fills gaps\nof <= 28 days into `daily_prices`, so a presence count sees only >28-day darkness and\neverything shorter is a stale price the replay trades on as live (up to 27 consecutive\ndays). **Two-thirds of every day the arbiter has ever replayed is forward-filled** —\nmedian 0.663 at the five, 0.679 across the 599-station eligible pool. Pre-existing and\nunchanged by any of this work. Medians differ by 1.02x so composition does not bite\nthere, but the tail does: 64.8% of the broad pool carries a >= 21-day filled run\nagainst 40% of the five. `describe_universe` now reports `observed_fraction_*` for\nboth populations so a homogeneity read can see it rather than assume it.\n\nBoth measured independently and reproduced by a second session; neither is a claim\nabout a candidate feature, so neither is blocked on the timing/homogeneity runs."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-09-04T23:49:53Z",
+      "id": "01a06ed4-28b6-7ee0-899d-3ddbfa96c36a",
+      "issue_id": "fps-nas",
+      "text": "## Addendum: 414's dark folds DO intersect the shock set (2026-09-05)\n\nCheap check suggested by the PR #361 reviewer, and it comes back positive.\n\n414's degraded folds are {4, 5, 6, 7} (coverage 0.33 / 0.00 / 0.00 / 0.10).\nbatch1's empirical shock set (`experiments/batches/batch1/shock_folds.json`,\ncorrected set per fps-hnp) is **{1, 3, 4, 14}**.\n\n**Fold 4 is in both.** And it is not an incidental fold: `fold_baseline_ll` puts it at\n**0.4218**, the second-hardest of the fourteen (only fold 1 at 0.4254 is worse). So the\narbiter evaluates one of its two hardest folds — and a shock fold, which several\ncandidate signatures are graded on — with 414 contributing about a third of its days.\nFolds 5 and 6 (414 fully dark, four-station instrument) are NOT in the shock set, and\nfold 7 (0.10) is not either.\n\nWhy this is worth carrying into the write-up rather than filing as data hygiene:\n\n- The per-fold noise band is not constant across folds, and nothing currently records\n  that it varies. A fold-level regression read as signal is being read against a band\n  that is wider in folds 4-7 than elsewhere, for a reason unrelated to any feature.\n- It lands specifically on the regime axis. `TARGET`/zone grading (fps-3jj) splits\n  shock vs normal, so the one contaminated fold sits in the smaller of the two cells\n  (4 shock folds vs 10 normal), where it carries proportionally more weight.\n- Bounded, not fatal: one of four shock folds is affected, and only partially (0.33,\n  not 0.00). This is a caveat to state when reading a zone verdict, not a reason to\n  discard one.\n\nDoes NOT change the recommendation to widen; if anything it strengthens the third\nbullet of the previous comment — the argument for widening that does not depend on the\nresolution argument, and therefore survives even if the timing run says a broad\nuniverse is impractical."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-09-05T00:03:04Z",
+      "id": "01a06ee0-3986-7d04-ad36-197630a3ae15",
+      "issue_id": "fps-nas",
+      "text": "## PR #361 MERGED 2026-09-05 (squash 8e39b7a) — bead deliberately NOT closed\n\n`experiments/lib/universe.py` + 82 tests are on `main`. That is acceptance criterion 2\n(station-sampling scheme chosen and justified) and nothing else.\n\n**Deliberately left `in_progress`.** The PR body's line reads\n`Resolves: fps-nas (partially)`, and the post-merge checklist's \"close the bead named\nin Resolves:\" does not apply to a partial one. Five of six criteria are untouched:\n\n- [x] 2. Station-sampling scheme chosen and justified\n- [ ] 1. One-fold timing run at 5 / ~50 / ~200 confirming the cost is fit-dominated\n- [ ] 3. Broad-population realised CPL for >= 1 batch1 candidate beside the five-station figure\n- [ ] 4. Homogeneity read out explicitly\n- [ ] 5. Decision recorded on which population grades, which is merely reported\n- [ ] 6. Noise floor implications addressed\n\nCriteria 1 and 3 are compute the owner runs. Scripts are staged **uncommitted** at\n`experiments/2026-09-05_arbiter_universe_width/` in the PRIMARY worktree (README,\n`timing.py`, `homogeneity.py`), verified to run from `main` post-merge. They stay\nuncommitted per the convention that a lab-book entry lands on `main` with its results,\nnot as a bare harness.\n\nDo NOT re-derive the universe spec by hand next session: `timing.py` and\n`homogeneity.py` both already build it from `_plan_folds`, pass the real 14 val windows,\nand stamp `eligible_pool_digest`. Two facts they encode that are expensive to rediscover:\nthe true fold geometry is **2021-11-05 .. 2025-04-17** (not the 2024-12-29 a hand\nderivation gives), and `sample_station_universe` now REFUSES a spec without `windows`."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-09-05T00:04:59Z",
+      "id": "01a06ee1-fa9b-79fe-8fa1-04a8ccbe3c47",
+      "issue_id": "fps-nas",
+      "text": "## Correction to my 414 comments above (2026-09-05, post-merge)\n\nTwo of my earlier claims need narrowing. Checked against\n`project_preferred_station_outages`, which already documented most of this.\n\n**1. The four-fold hole was NOT a new finding.** That memory already records \"folds 4-7:\n414 genuinely closed (rebuild) — an honest 4-station market\", and fold 1 as a\n**3-station SHOCK fold** (414 and 18517 both dark). My per-fold vector corroborates it\nfrom a different table, nothing more. And fold 1 is the worse case, not fold 4: 3\nstations on a shock fold beats 414-at-0.33 on one.\n\n**2. The shock intersection is real but I named the wrong fold as the headline.**\nShock set is {1, 3, 4, 14}. Fold 1 (3-station) and fold 4 (414 at 0.33) are both in it.\nFold 1 was already known; fold 4 is the increment.\n\n**What IS new, and it is a limitation of what just merged — bd fps-wst.**\nMy gate counts `daily_prices` rows. The feature frame disagrees, by construction:\n\n| fold | station | feature rows | daily_prices |\n|---|---|---|---|\n| 1 | 414 / 18517 | **0 / 0** | 86 / 86 |\n| 8 | 414 | **8** | 90 |\n\n`fill.py` forward-fills `daily_prices` for gaps <= 28d; `labels.py` strips 7d before and\n90d after a gap from the feature frame. So fold 1 passes my per-window gate at 0.96\ncoverage while having ZERO feature rows for both Blue Mountains stations — the exact\nfold the memory flags as \"a measurement gap, not a thin market\".\n\nConsequence for this bead: `daily_prices` coverage is the REPLAY axis and is a valid\ngate for it, but it is **not** a proxy for feature availability, so a widened universe\ngated only on it can admit feature-dark stations (provider misses -> NaN; reduced\nsample, silently and unevenly). Read the homogeneity result with that in mind, and\nprefer fps-wst's reported-field approach over adding a second gate."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-09-05T01:38:58Z",
+      "id": "01a06f38-07e7-7186-9c5a-7616aa92626b",
+      "issue_id": "fps-nas",
+      "text": "## Measurement phase COMPLETE 2026-09-05 — landed direct to main (148744b)\n\nexperiments/2026-09-05_arbiter_universe_width/ carries the full write-up, both\nscripts, timing.json and homogeneity.json. INDEX.md row + ledger.yaml entry in the\nsame commit.\n\n[x] 1. Timing run at 5/50/200 — **conclusion holds, both halves of the stated\n       mechanism wrong.** fit 44.1s flat. Replay IS dead-linear (38.4x for 40x\n       stations, ~0.058 s/station-fold) — the 18,000-predict_proba doubt raised in\n       the previous handoff was physically correct, it just starts at 0.30s.\n       `load_history` does NOT scale (28.3s at n=5 vs 27.4s at n=200), though the\n       bead named it as one of the two scaling terms. Fixed cost is fit + history\n       ~= 71s, not fit's 44s alone. Net +14% for 40x.\n[x] 2. Sampling scheme — PR #361, previously recorded.\n[x] 3. Broad-population CPL — run at **410**, the whole eligible pool, not the 200\n       timing.py justified. Owner set the compute budget explicitly (up to 5x on\n       freezes/candidate runs is cheap), which removes cost as a tiebreak; the 0.90\n       coverage gate is a correctness filter not a cost one, so 410 is the ceiling\n       at any budget. Measured 72 s/arm-fold at 410 vs 48 at five.\n[x] 4. Homogeneity — **HOLDS.** tgp_cycle_displacement pooled delta_cpl_held:\n       five -0.2077, broad(410) -0.1292. Same sign, 12/14 folds agree, r = 0.704,\n       own-2*SE intervals overlap, each point estimate inside the other's interval.\n[x] 5. **DECIDED: grade on the broad 410, report the five.** The broad estimate is\n       both more precise (2x tighter) and less flattering, i.e. a stricter bar in\n       c/L. The five stay exogenous — never filtered, sampled or gated.\n[x] 6. Noise floor — addressed here, discharged by **fps-916 -> fps-ajs** (blocking\n       dep set). Grading the broad delta against the EXTANT five-station band flips\n       it to fail (z -1.544 vs -2.330). And the mismatch would be silent:\n       `compute_noise_floor()` accepts `station_codes` (noise_floor.py:223) and\n       never stamps it; `_bank_admissibility` checks baseline_fingerprint /\n       tank_params / null_method / arity / partial and has no population axis. Same\n       defect shape as fps-15c's cadence stamp. Costed at 410: ~3.1h at 10 draws,\n       ~11h at 40.\n\n**Three findings the bead did not ask for, all worth carrying forward:**\n\n1. **The resolution gain is 2.00x, not 10x.** 102x the decisions (83 -> 8,476)\n   halved the per-fold sd (0.7982 -> 0.3992) and no more. The fold is the\n   independent replicate and widening the universe does not create folds. Sizing on\n   station-days would have reported sqrt(102) ~= 10x and manufactured exactly the\n   improvement under measurement — the comparison contract in the README was\n   written to avoid this and it fired.\n2. **Neither width clears its own fold-clustered interval** — t = 0.98 at five,\n   1.27 at 410 — although both clear the placebo band the dossier grades on\n   (five: z = -2.330 vs a bar of 1.923). Two rulers asking different questions: the\n   band asks \"could a null column produce this pooled number\", the fold-clustered SE\n   asks \"does it repeat across folds\". The project's cleanest signal passes the\n   first at both widths and fails the second at both widths, and **no dossier\n   currently reports the second.** Recorded as `not_decided`, not filed — whether it\n   should gate anything is a design call, not a measurement.\n3. **Harness validated:** the five-station arm returned -0.2077, batch1's committed\n   headline to the digit, so nothing above is an artifact of homogeneity.py\n   bypassing run_candidate. It must bypass it (fps-enx) — and fps-enx is now on the\n   critical path, since criterion 5 means two populations coexist routinely.\n\n**Correction landed in ledger.yaml:** fps-e6i's entry carried \"PERMANENTLY\nUNTESTABLE by this pipeline as configured: ... no mechanism to widen the replay\nuniverse without changing what the arbiter is for\". This run built that mechanism\nand used it. Rewritten as SUPERSEDED, keeping the half that survives — the fold\ncount, which is what caps the gain at 2x.\n\nClosing: all six criteria discharged, with the two follow-on beads carrying the\nnoise-floor work."
+    }
+  ],
+  "fps-sk0": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T05:58:01Z",
+      "id": "019ffed9-4b0b-7781-882e-8e1b827a157f",
+      "issue_id": "fps-sk0",
+      "text": "Diagnostic notes recovered from a live run (session cse_01BGBTNYbqkvEHDEcjCvnaoE, 2026-08-14 ~05:37-05:46 UTC) that could NOT sync via bd dolt push (same bug), so its findings were trapped in that now-destroyed sandbox and only recoverable via the raw Routine session transcript. Preserving them here + a new hypothesis:\n\n**What that run found:**\n- Reproduced the 403 live, twice, with identical output each time.\n- Ruled out \"GitHub blanket-rejects refs/dolt/* namespace\": `git ls-remote https://github.com/edwinsteele/fuel-price-signal.git 'refs/dolt/*'` succeeded and returned an existing ref, so reads to that namespace work fine.\n- Checked the local egress proxy's own status endpoint (`$HTTPS_PROXY/__agentproxy/status`) for recent relay failures: 15 total, all to `gastownhall-eventsapi.com:443` (unrelated to this repo) — zero entries for github.com or any dolt-related host. If the proxy itself were blocking/rejecting the push by policy, you'd expect it to show up here.\n\n**New hypothesis (mine, from re-reading the transcript — unverified, needs a live run to confirm):**\nPickup rule 0's fallback path (`gh auth token 2>/dev/null || echo \"${GH_TOKEN:-$GITHUB_TOKEN}\"`) assumes `$GH_TOKEN`/`$GITHUB_TOKEN` hold a real credential when `gh` itself is absent. In this run, `gh` genuinely wasn't installed (\"gh: command not found\") — this environment talks to GitHub via an MCP tool instead, not the `gh` CLI, so `gh auth token` was never going to work. The fallback then read `$GH_TOKEN`, which printed as literally `proxy-injected` (confirmed: the script's own \"token present, length 14\" message — `len(\"proxy-injected\") == 14`, not a coincidence). That literal placeholder string then got embedded verbatim as the password in the Dolt remote's tokenized URL.\n\nIf `proxy-injected` is a sentinel this environment's egress proxy is meant to recognize and silently swap for a real credential (rather than a literal secret value), and if Dolt's internal git subprocess doesn't route that specific request through the proxy the way plain `git`/`gh` calls do, GitHub's real server would receive a literal, bogus `x-access-token:proxy-injected` credential and correctly reject it with 403 — which matches every symptom: `git ls-remote` (ambient, unmodified remote) works, `gh`-tool-based calls work, but the *tokenized* Dolt remote specifically fails.\n\nThis would mean fps-sk0's original framing (\"egress proxy policy blocks the ref namespace\") is likely wrong — the proxy isn't blocking anything; pickup rule 0 is handing Dolt a garbage credential when `gh` is unavailable.\n\n**Proposed low-risk fix (not yet applied — needs live verification before landing):** before embedding `$GH_TOKEN`/`$GITHUB_TOKEN` into the Dolt remote URL, reject values that look like placeholders (e.g. exactly `proxy-injected`, or that don't match a real GitHub token shape like `gho_`/`ghp_`/`ghs_`/`github_pat_` prefixes) and skip the explicit remote reconfiguration in that case, falling back to whatever ambient credential handling already makes `git ls-remote` work. This can't regress the known-working case (fps-ddf's run had a real `gh`-sourced token, which would still pass the shape check).\n\nNot landing this fix blind — it's a plausible root cause, not a confirmed one, and this issue is explicitly about not making unverified changes to shared automation. Needs one supervised live run to confirm before code changes."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T07:18:50Z",
+      "id": "019fff23-4940-7812-8467-b6adb1ccba3e",
+      "issue_id": "fps-sk0",
+      "text": "Root cause now conclusively narrowed by a live run (session cse_01RwJMuHfNyeBzikS8g9DoqR, 2026-08-14 07:11-07:17 UTC), after PR #292's credential-guard fix landed:\n\n**PR #292's fix was necessary but not sufficient.** It correctly stopped embedding the bogus \"proxy-injected\" placeholder as a Dolt remote credential — but bd dolt push still failed with the identical 403, even with zero credential embedded (falling back purely to ambient auth).\n\n**Decisive test:** `git push --dry-run origin HEAD:refs/heads/<branch>` — a real WRITE to a normal branch ref, using the exact same ambient credentials — succeeded. So this environment's ambient credentials DO support pushes in general. Only `bd dolt push`'s target (the `refs/dolt/data` custom ref namespace) is rejected with 403.\n\nThis rules out both prior hypotheses (bad/placeholder credential; blanket read-block on the namespace — reads already confirmed fine). What's left, precisely: **this environment's egress proxy or the ambient credential's underlying GitHub token is specifically blocking pushes to non-standard git ref namespaces** (`refs/dolt/*`), while permitting pushes to `refs/heads/*`. This is consistent with a common GitHub App / fine-grained-PAT restriction (broad \"Contents: write\" is often scoped to standard refs only, with custom namespaces requiring classic-PAT-level access).\n\n**This is not fixable from CLAUDE.md or repo code.** It needs one of:\n- A real classic PAT (full `repo` scope, not fine-grained/App-scoped) provisioned specifically for this Routine's environment for bd/dolt's push needs, or\n- The environment's egress/token policy explicitly allowlisting pushes to `refs/dolt/*`, or\n- A different Dolt sync transport that doesn't require a custom ref namespace.\n\nAll of these are outside what an agent session (interactive or Routine) can change — they need the owner or Anthropic support to investigate the Routine environment's (`env_013cCwqEo6PFqNSNxsYgny1k`) token provisioning/egress policy directly.\n\nLeaving open. PR #292's guard stays merged (it's a real, if partial, improvement — no bogus credential gets embedded anymore), but the underlying push-to-custom-ref-namespace block remains."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T07:40:12Z",
+      "id": "019fff36-d6b8-7791-9d9f-2fa3a452b6d8",
+      "issue_id": "fps-sk0",
+      "text": "Definitive root cause confirmed via upstream research (2026-08-14): this is dolthub/dolt#10486 — https://github.com/dolthub/dolt/issues/10486 — an open, unfixed bug filed by Dolt's own team: \"Currently git credentials that require an inline password do not work with dolt push, pull, fetch. These commands make a lot of changes to stdin, stdout, and stderr which is preventing this from getting to the git command.\" Zero comments, no fix shipped as of this writing.\n\nThis environment's ambient git auth uses an interactive-style mechanism (GIT_ASKPASS) — fine for plain `git push`/`git ls-remote` (both confirmed working), fatal for Dolt's own push/pull because of the linked bug. Two fix attempts landed in CLAUDE.md (PR #292: reject placeholder tokens before embedding; PR #4319652 direct-to-main: install `gh` if missing so a real token can be embedded, sidestepping Dolt's askpass bug entirely) — both correct in principle, but a live run (2026-08-14 07:29 UTC) proved this specific sandbox has no path to a real token at all: `curl` to `api.github.com` returns 403, downloading a GitHub release tarball returns 404 — this environment routes ALL GitHub API/file access through an internal MCP tool, not raw HTTPS, so `gh` cannot even be installed here to produce a real token.\n\nNet position: not fixable from CLAUDE.md or repo code. Two independent blockers stacked:\n1. Dolt's own upstream bug (dolthub/dolt#10486) — needs a Dolt fix, or a token embedded directly in the URL as a workaround.\n2. This sandbox provides no mechanism to obtain a real, embeddable token (no working `gh`, no installable `gh`, proxy-sentinel env vars only) — needs an Anthropic-side change to how Claude Code Routines provisions git credentials to sandboxes (e.g. a real static token as an env var, not a proxy sentinel), OR GitHub-side confirmation of whether the Claude GitHub App's permissions (checked 2026-08-14: Code read/write, all repos — nothing obviously restrictive) actually cover non-standard ref namespaces at all.\n\nUntil one of those lands, expect every Routine run to hit this on `bd dolt push`/`pull` from a fresh checkout, and expect any writes it makes locally (issue claims, closes, comments) to be silently stuck in that run's sandbox unless reconciled by hand from a session that can push (as this comment is)."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T22:07:32Z",
+      "id": "01a00250-e8e2-74f5-84b1-2d08b728fa3e",
+      "issue_id": "fps-sk0",
+      "text": "External research pass (2026-08-15, interactive session): confirmed the token-embedded-URL fix already matches Dolt's own documented CI pattern (their GitHub Actions example in the announcement blog is literally `x-access-token:$TOKEN@github.com/...`), and beads' own git-integration.md has no CI-credential guidance beyond \"if git is already credentialed, it works\" — so this wasn't a case of missing an obvious simpler documented approach. `github.token`/GITHUB_TOKEN in .beads/config.yaml is a red herring — that's scoped to the unrelated `bd github` issue-sync integration, not Dolt remote auth. Server mode doesn't apply either — it solves same-host concurrent writers, not Mac<->ephemeral-Routine sync.\n\nFound a concrete, more precise explanation for the \"downloading a GitHub release tarball returns 404\" symptom logged above. Pulled @beads/bd's actual npm postinstall.js: it downloads its own binary from `https://github.com/gastownhall/beads/releases/download/v${VERSION}/...` — the same github.com/releases/download domain the gh-install fallback targets — and that succeeds (bd installs fine in this environment). The difference: CLAUDE.md's gh-install script first hit `api.github.com/repos/cli/cli/releases/latest` to discover the version, and api.github.com is the domain already confirmed to 403 in this sandbox. An empty $GH_LATEST from that failed call would produce a malformed download URL (`.../download/v/gh__linux_amd64.tar.gz`), which predictably 404s — matching the logged symptom without requiring github.com/releases/download itself to be blocked. Revised CLAUDE.md's gh-install step to pin an exact version (2.97.0, same philosophy as the bd pin) and construct the download URL directly, removing the api.github.com dependency entirely. Not yet live-verified — needs a real Routine run to confirm gh actually installs this way.\n\nAlso found a second, independent, previously-untested failure mode while reading postinstall.js: @beads/bd's postinstall skips downloading the native binary entirely when process.env.CI is set, and bin/bd.js has no fallback download — just errors \"binary not found\" on first invocation. command -v bd only checks the npm shim exists, not that the binary downloaded. If this Routine's sandbox sets CI ambiently (common for container/orchestration platforms), npm install could report success while leaving bd non-functional. Added a bd --version verification step + env -u CI retry to pickup rule 0. Also not yet live-verified.\n\nNeither of these findings changes the core diagnosis already recorded above (Dolt's askpass-class bug + no path to a real token in this sandbox) — they're refinements to the gh-install mechanics that pickup rule 0 depends on, surfaced while researching whether a \"common pattern\" was being missed. Next scheduled Routine run is the first live test of both."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-14T22:55:26Z",
+      "id": "01a0027c-c2fd-7839-b822-649a6c30900e",
+      "issue_id": "fps-sk0",
+      "text": "2026-08-15: Owner decision — Cloud Routines are being turned off for this project, so this issue is no longer blocking anything actively running. Status set to `blocked` and priority downgraded P1 -> P3 accordingly (was raised to P1 on 2026-08-14 specifically because a live worker's claims/closures were being silently discarded while push was broken — that risk no longer applies once the Routine itself is disabled).\n\nFiled as an upstream Anthropic report, plus found three related open issues on anthropics/claude-code that describe overlapping symptoms in the same subsystem (the local git credential-injection proxy Routine sandboxes route github.com traffic through). Progress on any of these could mean this is worth revisiting:\n\n- https://github.com/anthropics/claude-code/issues/70474 — closed/stale, but a comment documents the actual proxy mechanism (hardcoded `insteadOf` rule + credential substitution) that best explains our symptom\n- https://github.com/anthropics/claude-code/issues/81445 — Routines' git ls-remote fails entirely via the same local proxy\n- https://github.com/anthropics/claude-code/issues/83563 — Routines' git push fails even on standard refs, same proxy\n- https://github.com/anthropics/claude-code/issues/73782 — api.github.com REST calls 403 for some paths via the session's proxy, git push unaffected\n\nRoot cause and everything already investigated remains as documented in the comments above — nothing here changes the technical diagnosis, only the priority/urgency now that the Routine consuming this is off."
+    }
+  ],
+  "fps-x0f": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T23:24:08Z",
+      "id": "01a01c56-d6f8-7cb5-bf48-f69c49376014",
+      "issue_id": "fps-x0f",
+      "text": "Dependency on fps-1785999730023-4-264564ac (#265, per-zone headroom attribution)\nadded 2026-08-20. It binds STEP 2 specifically, not the whole issue — recording why,\nsince bd dependencies are issue-level and step 1 can proceed meanwhile.\n\nStep 2 asks \"does recoverable headroom concentrate in late descent\", measured as\nmodel_cpl - oracle_cpl per regime zone. That is exactly the estimator #265 exists to\nfix, and #265's two defects both bite here:\n\nVARIANCE — and this is the decisive one, discovered while wiring this dependency.\nThe headroom map's regime reading is late_descent 1.00 / overdue 1.33 / normal 1.50:\na total spread of 0.50 c/L. The SAME experiment calibrates its own per-band noise\nfloor at approximately +/-0.5 c/L (from the impossible negatives: >=16c band -0.53,\n2025-01 -3.6, 2023-10 -2.9 — a perfect-foresight oracle cannot lose, so those are\nattribution artifacts sizing the error). The entire regime spread therefore sits\ninside the map's own error bar. \"Regime axis FLAT\" is more accurately \"regime axis\nUNRESOLVED\" — it cannot distinguish 1.00 from 1.50.\n\nThat is a THIRD independent defect in the finding that rested the late-descent\nthread, alongside the two already in this issue's description (the three findings\ndisagreeing, and the cycle_pct_through denominator). Three separate reasons to\ndistrust one verdict is enough to stop treating it as settled. #265's\nstation-bootstrap CIs are precisely what settles it: a cell reporting 1.00 +/- CI\neither clears 1.50 or does not.\n\nBIAS — path coupling is expected to be WORSE on a phase axis than on the volatility\naxis #265 was written against. #265's mechanism is that the oracle buys cheaply just\nbefore an expensive zone and coasts through it, so the saving lands in the\nneighbouring zone. Cycle-phase zones are by construction temporally adjacent and\ncyclic, and the oracle's optimal play IS to buy at trough and coast through peak and\nearly descent. So the saving generated by correctly timing a late-descent trough\nentry is structurally likely to be attributed to a neighbouring phase zone. A\nper-phase-zone headroom number is close to the worst case for this artifact.\n\nConsequence for sequencing: do not run step 2 on the current estimator. Doing so\nwould repeat the failure this issue exists to correct — reaching a verdict on an\ninstrument that cannot support it. Step 1 (fix or bound the phase axis) does not\ntouch per-zone headroom and can proceed in parallel; step 3 uses the log-loss screen\nand the realised arbiter, not this estimator.\n\nWorth noting the two fixes compose rather than conflict: #265 fixes HOW headroom is\nattributed within a zone, step 1 fixes WHICH ROWS are in the zone. Both are wrong\ntoday and they are independent errors."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T01:00:08Z",
+      "id": "01a01cae-b88a-78dd-b482-6e1fc4aa2dcc",
+      "issue_id": "fps-x0f",
+      "text": "Step 2 blocked measure identified 2026-08-20 (fps-...-264564ac, commit b6e0a9c): per-zone headroom CANNOT answer 'is late descent a real target', at any sample size. Not a noise problem - the decomposition depends on free bookkeeping conventions that move each zone further than the zones differ. Every per-zone row of #262 is withdrawn, including the 'regime axis FLAT' finding that rested this thread; #262's window-level 1.66 c/L stands. Replacement under consideration: decision-timing accuracy (did the model pick a worse week than the oracle?) - a rate, not a cost, so nothing is allocated to a period and all three conventions vanish. Also lower variance: ~124 late-descent decisions give +/-4.5pp on a rate vs +/-0.7 c/L on the cost."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T21:09:53Z",
+      "id": "01a02102-49aa-7d52-a78c-57199c4fbf77",
+      "issue_id": "fps-x0f",
+      "text": "fps-grp (PR #319, 2026-08-21) collapses this bead's three-way contradiction. Of the three\nmutually-inconsistent late-descent findings, THE TWO THAT DISAGREED WITH EACH OTHER are now\nboth withdrawn:\n\n  1. Gate-1 Layer-1 proxy regret (1.05 / 1.72 / 1.32)  -> late descent WORST   -> STANDS\n  2. Gate-1 Layer-2 realised saving% (0.64/2.13/4.06%) -> late descent BETTER  -> WITHDRAWN (fps-grp)\n  3. #262 per-regime headroom (1.50 / 1.00 / 1.33)     -> late descent LEAST   -> WITHDRAWN 2026-08-20\n\nRow 2 goes for the same reason row 3 did: realised CPL is a path-coupled total, and tagging a\nfill by the regime at its own date allocates it to a sub-period, which has no unique answer.\nDemonstrated on committed numbers, no re-run -- emergency-fill inclusion is a free convention\n(Layer 2 includes forced fills, Layer 3 excludes them; both defensible) worth 21.30 / 8.15 /\n13.69 c/L per bucket against a between-bucket spread of 6.73-10.40, and it REVERSES the\nordering. Note this takes Layer 3 with it: the flat chosen-only CPL 174.5/176.4/176.4 -- sorry,\n174.5/176.4/174.9 -- is a second draw from the same unidentified quantity, not the corrected\nversion of Layer 2. Row 1 survives because expected_cents_per_row is a per-row TP/FP/FN\nclassification score: no tank, no ledger, no path.\n\nWhat this changes here:\n\n- **Step 1 is re-scoped, not blocked.** It is no longer \"why do three findings disagree\" --\n  there is nothing left to reconcile. It is: one surviving reading, it is a PROXY not the\n  arbiter, its tau is re-picked inside each bucket, and it is cut on the known-defective\n  expanding-mean cycle_mean_length axis. The axis defect (this bead's actual step 1) is\n  untouched by fps-grp and still needs fixing or bounding.\n- **The realised regime axis has never been measured with an identified instrument, in either\n  direction.** So \"is late descent a target?\" is genuinely OPEN, not leaning either way.\n- **The thread was RESTED on row 3**, which is withdrawn -- so that closure argument is gone\n  independently of whether its conclusion was right. Don't re-cite it.\n- **Step 2's redirect is unchanged and now load-bearing:** it needs a measure that never\n  allocates cost to a period. Candidates that pass the fps-grp test: decision-timing accuracy\n  vs the oracle (\"did the model pick a worse week?\"), buy/wait agreement rates, per-row\n  log-loss -- all natively stamped at a moment. Or express the zone as a set of FOLDS, since\n  each (fold, station) is an independent simulation with its own tank and a fold-cut number\n  allocates nothing.\n\nFull enumeration and the arithmetic: experiments/2026-08-21_path_coupling_audit/README.md."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-20T21:10:10Z",
+      "id": "01a02102-8cf2-726d-a218-72d52471f79c",
+      "issue_id": "fps-x0f",
+      "text": "Correction to the previous comment: the Layer-3 chosen-only CPL triple is normal 174.5 / late_descent 176.4 / overdue 174.9 (the line above garbled it mid-sentence). Everything else in that comment stands."
+    }
+  ],
+  "fps-zci": [
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T02:54:00Z",
+      "id": "01a017f0-9cc2-708c-8b40-2bc000801c6c",
+      "issue_id": "fps-zci",
+      "text": "ORDER IS PART OF THE CONTRACT TOO (found 2026-08-19, batch0 calibration re-run).\n\nThe corrected 54-column batch0 run returned +0.0439, not the +0.0059 my hand-run reference gave. Same 54 columns, same seed 42, same snapshot — and the BASELINE arm differed too, so it is nothing to do with the candidate.\n\nCause: column ORDER. baseline_columns.json is sorted alphabetically; every June experiment, the TEMPLATE, and train_lgbm all use group order (FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS). Verified directly: same 54 columns at seed 42, sorted vs grouped, gives 732/47823 val rows different probabilities (max |dp| = 0.090, mean 4.7e-4). LightGBM breaks equal-gain split ties by feature index, and with 35 near-identical LGA trough columns exact ties are common. Realised effect: 0.038 c/L on the pooled delta — about 0.8 of a decision flip.\n\nTHE PART THAT MATTERS MOST: the locked artifact is GROUP ORDER.\n  joblib.load('data/models/lgbm_calibrated.joblib')['feature_columns'] == FEATURE_COLUMNS + LGA_FEATURE_COLUMNS + NETWORK_FEATURE_COLUMNS  -> True\n  ... == sorted(same)  -> False\n  52 of 54 column indices differ between the two orders.\nSo even after fps-sa1 fixed the column SET, the pipeline's R0 is still not the production model. Same bug class, one level down.\n\nresolve_baseline_columns()'s sorted() has a stated motive — 'Sorted so the on-disk contract is stable regardless of column insertion order' — which is exactly backwards. Sorting makes the FILE diff-stable while making the MODEL unstable to feature additions: inserting one alphabetically-early column reshuffles every index after it, perturbing the model everywhere and breaking comparability with every prior run. Group/append order leaves existing indices untouched when a new group is appended.\n\nImplications for this issue's shape:\n1. Drop sorted() from resolve_baseline_columns(); canonical order = production order = group order.\n2. Item 3's artifact check must be an ORDERED comparison (==, not set equality).\n3. Item 5's fingerprint must hash the ORDERED list, not the set.\n4. New: column order is an undeclared SECOND SEED. The project has seed discipline (multi-seed when delta logloss <~ 3x seed std) but nobody varies or reports order, so every cross-run comparison carries an unmeasured order term. Worth measuring order-variance against seed-variance once, so we know whether it needs the same discipline.\n\nChecked and clean: no feature-column list anywhere is built from unordered set iteration (every set() use in fuel_signal/ and experiments/ is a membership test or immediately sorted()). That would have been worse — Python string hashing is randomised per process, so it would be non-reproducible run to run."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T03:12:00Z",
+      "id": "01a01801-1830-7c7b-9750-d3ae814ceaf9",
+      "issue_id": "fps-zci",
+      "text": "MEASURED: order-variance is ~2% of seed-variance. Pin it; do NOT give it multi-seed discipline.\n\nOne train/val slice (2019-11-05..2021-11-05 train, 430,283 rows; 2021-11-05..2022-02-03 val, 47,823 rows), 5 draws each arm. SEED arm = group order fixed, seed over SEEDS. ORDER arm = seed 42 fixed, order over group/sorted/3 random permutations.\n\n                logloss std   logloss range   n_buy std   n_buy range\n  ORDER            0.000258        0.000630        11.7            29\n  SEED             0.015643        0.041815       497.0          1136\n  ORDER/SEED           0.02x                          0.02x\n\nDecision flips at tau=0.25 vs the arm's first draw:\n  ORDER: 8 / 14 / 29 / 8 rows   (0.017% - 0.061%)\n  SEED : 1743 / 2069 / 1768 / 1892 rows   (3.6% - 4.3%)\n\nSo item 4 of this issue resolves NEGATIVE: column order does not need the multi-seed treatment the project applies to seeds. It is a ~100x smaller perturbation. Pinning the canonical order (production group order) is sufficient, and is worth doing anyway for determinism and for parity with the locked artifact.\n\nTHE PART WORTH REMEMBERING, though: that same 0.02%-of-decisions perturbation moved the pooled realised delta_cpl_held by 0.038 c/L -- about 0.8 of a decision flip -- on the batch0 tgp_delta_7d run (group order +0.0059, sorted +0.0439, otherwise identical). A change far too small to matter for model quality is large enough to reorder the arbiter's headline. That is not a fact about column order; it is another measurement of the arbiter differencing two nearly-identical quantities, i.e. the same thing fps-3jj.9 exists to characterise, reached from a different direction.\n\nAlso confirmed by the same work: the pipeline itself is exact. An independently written script in the pipeline's column order reproduced its run to 7 decimal places (R0 189.6959584, cand 189.7398851, both diff 0.0000000), and the .asof vs exact-key provider difference (822 hits / 88 misses) again made no difference. The pipeline is trustworthy; what was not pinned is the contract handed to it."
+    },
+    {
+      "author": "Edwin Steele",
+      "created_at": "2026-08-19T03:56:23Z",
+      "id": "01a01829-bb5e-782d-8eb2-fe75e462a25a",
+      "issue_id": "fps-zci",
+      "text": "PR #310 merged (0a69c97). Order half of this issue is now landed for batch_freeze: resolve_baseline_columns() returns production order, batch0's baseline_columns.json regenerated and asserted equal to lgbm_calibrated.joblib's feature_columns, new test pins order against the artifact, CONVENTIONS.md documents the order + append rule and the 2%-of-seed-variance measurement.\n\nCALIBRATION NOW PASSES. Third pipeline run, production column order:\n  R0         189.6717090069284   independent reference 189.671709\n  candidate  189.6775604142693   independent reference 189.677560\n  delta      +0.005851           independent reference +0.0059\nExact to every printed digit, against a reference written before the fix existed, by a different script, using a different feature-injection path. The pipeline is exact; both failures were contract defects.\n\nSTILL OPEN in this issue (the parts that would have caught both defects automatically):\n1. One importable symbol for the locked set — still retyped by hand at ~20 call sites in experiments/.\n2. A test asserting that symbol == joblib feature_columns (ORDERED ==). batch_freeze now asserts it for batch0's contract file, but nothing asserts it for the constants themselves.\n3. NON_MODEL_COLUMNS registry — computed-but-excluded columns still carry no machine-readable reason.\n4. RESOLVED NEGATIVE: order does not need multi-seed discipline (2% of seed-variance). Pinning is sufficient.\n5. Fingerprint the ORDERED baseline into every result. Confirmed still missing: results.json's meta records batch_dir, git_sha, seeds, realised_seed, wall, provider hit/miss counts — and NO baseline identity at all. Both defects were invisible in the artifact that recorded the run. This remains the highest-value item."
+    }
+  ]
+}
