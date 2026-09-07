@@ -1,6 +1,28 @@
 """Launch routine (fps-3jj.5) — the nightly, ~10-minute, Claude-active piece of the
-AI-sourced feature pipeline: claim the next `experiment`-labelled bd issue, validate
+AI-sourced feature pipeline: claim the next `experiment`-labelled GitHub issue, validate
 its candidate module, launch the (hours-long, Claude-free) runner detached, and exit.
+
+Tracker: **GitHub Issues**, via the `gh` CLI. This module was originally written against
+`bd` (Beads); the 2026-09 cutover replaced every `bd` call with a `gh` one. The state
+model changed shape in exactly three places, and those three are where the bugs would be:
+
+  * **Assignee is the claim.** bd had an explicit `in_progress` status; GitHub does not,
+    and does not need one. `bd ready --unassigned` becomes "open, `experiment`-labelled,
+    `assignees` empty"; `bd update --claim` becomes `--add-assignee "@me"`;
+    `bd assign <id> ""` becomes `--remove-assignee "@me"`.
+  * **`blocked` is a label, not a status.** In bd, `blocked` was an exclusive status that
+    dropped the issue out of `bd ready` on its own. A GitHub label does not exclude
+    anything by itself, so blocking now does BOTH: it assigns the issue to the owner
+    (which is what actually drops it out of the unassigned queue and stops the
+    starvation) and adds the `blocked` label (which is what makes it legible in the UI
+    and is what the claim query filters on explicitly).
+  * **`retry_count` is a label, not free-form metadata.** GitHub issues have no metadata
+    bag. Since MAX_RETRIES is 1, the counter only ever holds 0 or 1 — so it is the
+    `retried` label, present or absent. See `_retry_count`.
+
+There is no `bd dolt pull` / `bd dolt push` equivalent and none is needed: GitHub is the
+store, so there is no second sync protocol to keep in step. (That sync was the entire
+content of fps-sk0, the bug that disabled the chore/polish worker Routine.)
 
 Detachment: `subprocess.Popen(..., start_new_session=True)`, NOT a shelled-out
 `setsid nohup ... &`. The parent design (fps-3jj) describes the shell recipe as
@@ -10,9 +32,9 @@ binary not guaranteed present on macOS — where this local routine actually run
 gives the same detachment semantics (new session, no controlling terminal, immune to
 the parent's SIGHUP) via the standard library, portably.
 
-Candidate-bead convention (this module is the consumer; fps-3jj.7's generator session
-is the producer and must follow it): an `experiment`-labelled bd issue's description
-must contain two lines,
+Candidate-issue convention (this module is the consumer; fps-3jj.7's generator session
+is the producer and must follow it): an `experiment`-labelled issue's body must contain
+two lines,
 
     Batch: experiments/batches/<batch-name>
     Module: experiments/candidates/<batch-name>/<candidate-name>.py
@@ -25,18 +47,19 @@ also where stale-claim recovery looks.
 
 Stale-claim recovery mirrors CLAUDE.md's worker-routine pickup rule 4, adapted to the
 experiment queue: dir exists, run.log ends in a traceback, no results.json, claimed
->12h ago -> post the traceback to the bead and release the claim.
+>12h ago -> post the traceback to the issue and release the claim.
 
 Retry budget (fps-rtd): releasing a claim so the next sweep can re-claim it sounds
-harmless, but a released bead keeps its original creation date -- so an unbounded
+harmless, but a released issue keeps its original creation date -- so an unbounded
 release is always the oldest unassigned issue and starves everything else in the
-queue forever. MAX_RETRIES caps this at one retry: the retry count lives in bd
-metadata (`retry_count`), the one place claim state already lives, rather than in
+queue forever. MAX_RETRIES caps this at one retry: the retry count lives on the issue
+itself (the `retried` label), the one place claim state already lives, rather than in
 results.json (deleted at the start of every run_candidate() call, so it can't
 survive across attempts). Once the budget is spent, the claim is blocked instead of
-released -- blocked issues drop out of `bd ready` entirely, so this is what actually
-stops the starvation, not just slows it. A human clears it by fixing the underlying
-fault, then `bd update <id> --status open --unset-metadata retry_count`.
+released -- a blocked issue is assigned and `blocked`-labelled, so it drops out of the
+claim query entirely, which is what actually stops the starvation rather than just
+slowing it. A human clears it by fixing the underlying fault, then
+`gh issue edit <N> --remove-label blocked --remove-label retried --remove-assignee <owner>`.
 
 The budget applies uniformly to every path that gives up on a claim -- a
 RETRYABLE_STATUSES abort, a crashed-mid-run traceback, AND a pre-launch validation
@@ -45,7 +68,7 @@ one per failure shape, via `_decide_release_or_block` and `release_stale_claim` 
 `block_exhausted_claim`. The counter also resets once a claim reaches a genuine
 TERMINAL_STATUSES verdict (review finding #3), via `clear_retry_metadata`: otherwise a
 candidate that spent its one retry, then eventually succeeded, would be born already
-at budget the next time a human manually re-queues that SAME bead (e.g. against a
+at budget the next time a human manually re-queues that SAME issue (e.g. against a
 re-frozen batch) -- its first retryable abort in that later, unrelated cycle would
 block immediately instead of getting the one retry the docstring promises.
 """
@@ -76,37 +99,69 @@ from fuel_signal.features import load_features
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXPERIMENTS_ROOT = REPO_ROOT / "experiments"
 EXPERIMENT_LABEL = "experiment"
+BLOCKED_LABEL = "blocked"
 STALE_AFTER = timedelta(hours=12)
 RUN_LOG_FILENAME = "run.log"
 RESULTS_FILENAME = "results.json"
 
-# fps-rtd: one automatic retry per claim (see module docstring), tracked in bd
-# metadata since results.json can't survive across run_candidate() attempts.
-RETRY_COUNT_METADATA_KEY = "retry_count"
+# fps-rtd: one automatic retry per claim (see module docstring). A GitHub issue has no
+# metadata bag, but with MAX_RETRIES == 1 the counter is a boolean, so it is a label.
+RETRIED_LABEL = "retried"
 MAX_RETRIES = 1
+
+# Fields every issue-shaped dict in this module carries. `body` is bd's `description`;
+# `number` is bd's `id`; `updatedAt` is the only timestamp GitHub exposes on the list
+# endpoint (bd had a dedicated `started_at`) -- see find_stale_claims for what that
+# costs.
+ISSUE_JSON_FIELDS = "number,title,body,labels,assignees,createdAt,updatedAt"
+
+# `gh issue list --label ...` returns newest-first and has no ascending-sort flag, so the
+# oldest-first ordering the retry budget depends on is done locally, over a window this
+# big. The queue has never held more than a handful of open candidates;
+# _open_experiment_issues warns if it ever reaches this limit, because past it the local
+# sort is no longer sorting the whole queue.
+#
+# Deliberately NOT `--search "label:experiment no:assignee sort:created-asc"`, which
+# would give the ordering for free. Measured 2026-09-08, this repo, polling at 0.5s:
+#
+#   query form   issue created    assignee added    assignee removed
+#   --label      ~6.8s            first poll        first poll
+#   --search     ~7.0s            1.96s             3.07s
+#
+# Both forms lag CREATION by ~7s (see docs/routines/launch.md — a candidate filed
+# seconds before the routine fires waits a night). The difference that matters is the
+# MUTATION column: main() runs recover_stale_claims() and then claim_next_candidate()
+# about half a second apart, so on the search path an issue this run just blocked can
+# still read as unassigned and be re-claimed on the spot — the starvation fps-rtd is
+# about, reached through a stale index. On the label path the block was already visible
+# at the first read. The margin is thin either way; if a run ever does re-claim
+# something it just blocked, the cost is one wasted nightly slot and it self-corrects
+# the next night (the issue is blocked by then), which is why this is a measured
+# preference rather than a lock.
+ISSUE_LIST_LIMIT = 200
 
 _BATCH_RE = re.compile(r"^Batch:\s*(\S+)\s*$", re.MULTILINE)
 _MODULE_RE = re.compile(r"^Module:\s*(\S+)\s*$", re.MULTILINE)
 
 
 class CandidateRefError(ValueError):
-    """A bd issue's description didn't carry a well-formed Batch:/Module: pair."""
+    """An issue's body didn't carry a well-formed Batch:/Module: pair."""
 
 
-def parse_candidate_ref(description: str) -> tuple[pathlib.Path, pathlib.Path]:
-    """Extract (batch_dir, candidate_path) from an experiment bead's description.
+def parse_candidate_ref(body: str) -> tuple[pathlib.Path, pathlib.Path]:
+    """Extract (batch_dir, candidate_path) from an experiment issue's body.
 
-    Paths are repo-root-relative in the bead text; returned as resolved absolute
+    Paths are repo-root-relative in the issue text; returned as resolved absolute
     paths. Both must resolve inside EXPERIMENTS_ROOT — an unattended nightly
     routine that `exec_module`s whatever `Module:` points at (validate.py's
     load_candidate_module) must not follow a `..` traversal or an absolute path
-    out of experiments/, however that string ended up in a bead description.
+    out of experiments/, however that string ended up in an issue body.
     """
-    batch_match = _BATCH_RE.search(description or "")
-    module_match = _MODULE_RE.search(description or "")
+    batch_match = _BATCH_RE.search(body or "")
+    module_match = _MODULE_RE.search(body or "")
     if not batch_match or not module_match:
         raise CandidateRefError(
-            "description must contain a 'Batch: <path>' line and a 'Module: <path>' line"
+            "body must contain a 'Batch: <path>' line and a 'Module: <path>' line"
         )
     batch_dir = (REPO_ROOT / batch_match.group(1)).resolve()
     candidate_path = (REPO_ROOT / module_match.group(1)).resolve()
@@ -116,17 +171,61 @@ def parse_candidate_ref(description: str) -> tuple[pathlib.Path, pathlib.Path]:
     return batch_dir, candidate_path
 
 
-def sync_pull() -> None:
-    subprocess.run(["bd", "dolt", "pull"], check=True)
-
-
-def sync_push() -> None:
-    subprocess.run(["bd", "dolt", "push"], check=True)
-
-
-def _bd_json(*args: str) -> list[dict]:
-    result = subprocess.run(["bd", *args, "--json"], check=True, capture_output=True, text=True)
+def _gh_json(*args: str) -> list[dict]:
+    result = subprocess.run(["gh", *args], check=True, capture_output=True, text=True)
     return json.loads(result.stdout) if result.stdout.strip() else []
+
+
+def issue_ref(issue: dict) -> str:
+    """The `gh issue <verb>` argument for this issue — its number, as a string."""
+    return str(issue["number"])
+
+
+def _label_names(issue: dict) -> set[str]:
+    labels = issue.get("labels") or []
+    return {label.get("name") for label in labels if isinstance(label, dict)}
+
+
+def _is_claimed(issue: dict) -> bool:
+    """Assignee IS the claim — see module docstring. bd's `in_progress` status has no
+    GitHub counterpart and needs none."""
+    return bool(issue.get("assignees"))
+
+
+def _gh_comment(issue: dict, body: str) -> None:
+    subprocess.run(
+        ["gh", "issue", "comment", issue_ref(issue), "--body-file", "-"],
+        input=body,
+        text=True,
+        check=True,
+    )
+
+
+def _gh_edit(issue: dict, *args: str) -> None:
+    subprocess.run(["gh", "issue", "edit", issue_ref(issue), *args], check=True)
+
+
+def _open_experiment_issues() -> list[dict]:
+    """Every open `experiment`-labelled issue, newest-first (gh's REST ordering).
+
+    Callers filter and sort; this is the one query both the stale sweep and the claim
+    share. See ISSUE_LIST_LIMIT for the measurement behind the flag form rather than
+    `--search`, and for what this listing is and isn't consistent about.
+    """
+    issues = _gh_json(
+        "issue", "list",
+        "--label", EXPERIMENT_LABEL,
+        "--state", "open",
+        "--limit", str(ISSUE_LIST_LIMIT),
+        "--json", ISSUE_JSON_FIELDS,
+    )
+    if len(issues) >= ISSUE_LIST_LIMIT:
+        click.echo(
+            f"[launch] WARNING: hit the {ISSUE_LIST_LIMIT}-issue list limit; oldest-first "
+            f"claim ordering is no longer over the whole queue. Raise ISSUE_LIST_LIMIT.",
+            err=True,
+        )
+    return issues
 
 
 def _looks_like_traceback_tail(log_path: pathlib.Path, tail_lines: int = 40) -> str | None:
@@ -149,32 +248,23 @@ def _retryable_status(out_dir: pathlib.Path) -> str | None:
 
 
 def _retry_count(issue: dict) -> int:
-    """Retries already spent on this claim (fps-rtd), from bd metadata.
+    """Retries already spent on this claim (fps-rtd): 1 if the `retried` label is on
+    the issue, else 0.
 
-    bd metadata survives the assign/status changes release_stale_claim makes
-    (results.json does not -- it's deleted at the start of every
-    run_candidate() call), so it's where a counter that must outlive one
-    attempt has to live. Missing metadata, a non-dict `metadata`, or a value
-    `int()` can't parse (a non-numeric string, `None`) reads as 0 -- the safer
-    misread here is "budget not yet spent", not an early block on a candidate
-    that never actually retried. A NEGATIVE value is clamped to 0 rather than
-    honoured, so a hand-edited `retry_count: -5` can't offset the `+ 1` in
-    _decide_release_or_block to extend the budget. A numeric STRING (`"2"`,
-    as opposed to a non-numeric one) IS honoured as its int value -- `bd
-    update --set-metadata` always writes real ints, never strings, but the
-    JSON form (`bd update --metadata '{"retry_count":"2"}'`) could, and a
-    string that parses cleanly is exactly the kind of value this function's
-    "read what's actually meant" contract should not zero out
-    (fps-rtd PR #304 review finding #5).
+    The label survives the assignee change release_stale_claim makes (results.json
+    does not -- it's deleted at the start of every run_candidate() call), so it's
+    where a counter that must outlive one attempt has to live.
+
+    This used to read a bd metadata integer, which brought a family of misread cases
+    with it -- a non-numeric string, a numeric string, `None`, a hand-edited negative
+    value offsetting the `+ 1` in _decide_release_or_block (fps-rtd PR #304 review
+    finding #5). A label is present or absent, so every one of those is now
+    structurally impossible rather than defended against. The return type stays `int`
+    because MAX_RETRIES arithmetic is the contract this feeds; if MAX_RETRIES ever
+    rises above 1, a boolean label stops being able to represent the counter and this
+    is the function that has to change first.
     """
-    metadata = issue.get("metadata")
-    if not isinstance(metadata, dict):
-        return 0
-    value = metadata.get(RETRY_COUNT_METADATA_KEY, 0)
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
+    return 1 if RETRIED_LABEL in _label_names(issue) else 0
 
 
 def _decide_release_or_block(issue: dict) -> tuple[str, int | None]:
@@ -196,8 +286,17 @@ def _decide_release_or_block(issue: dict) -> tuple[str, int | None]:
 
 
 def find_stale_claims(now: datetime | None = None) -> list[dict]:
-    """Read-only: which in_progress experiment issues need their claim released,
+    """Read-only: which claimed experiment issues need their claim released,
     blocked, or have a spent retry counter reset.
+
+    "Claimed" is "open, `experiment`-labelled, has an assignee, and not already
+    `blocked`" — the GitHub spelling of bd's `--status in_progress --label experiment`.
+    The `blocked` exclusion is load-bearing, not cosmetic: in bd, `blocked` was an
+    exclusive *status*, so a blocked issue could not also be in_progress and this
+    query skipped it for free. A label excludes nothing on its own, and a blocked
+    issue is deliberately left assigned (that is what keeps it out of the claim
+    queue), so without this filter every blocked issue would look like a live claim
+    and be re-examined forever.
 
     Three shapes:
 
@@ -206,8 +305,8 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
        because a run with no results.json may still be in flight. Bounded by
        MAX_RETRIES same as shape 2 (fps-rtd PR #304 review finding #1) -- a
        candidate that crashes the same deterministic way every attempt must
-       not re-win `bd ready` forever just because its failure mode happens to
-       be a traceback rather than a RETRYABLE_STATUSES result.
+       not re-win the claim query forever just because its failure mode happens
+       to be a traceback rather than a RETRYABLE_STATUSES result.
 
     2. Finished with a RETRYABLE_STATUSES status (aborted_pipeline /
        aborted_environment): the candidate never got a fair hearing, so its
@@ -218,28 +317,37 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
        module docstring for why an unbounded release starves the whole queue.
 
     3. Finished with a TERMINAL_STATUSES verdict (graded / disqualified /
-       aborted_candidate) AND this claim's retry_count metadata is still
-       nonzero from an earlier abort in the SAME cycle: action "reset_retry"
-       clears the counter (fps-rtd PR #304 review finding #3) so a LATER,
-       unrelated manual re-run of this same bead isn't born already at
-       budget. Doesn't touch status/assignee -- the claim is still
-       legitimately consumed and still needs a human or the dossier routine
-       to close it, same as any other terminal verdict.
+       aborted_candidate) AND this claim still carries the `retried` label from
+       an earlier abort in the SAME cycle: action "reset_retry" clears the
+       label (fps-rtd PR #304 review finding #3) so a LATER, unrelated manual
+       re-run of this same issue isn't born already at budget. Doesn't touch
+       assignee -- the claim is still legitimately consumed and still needs a
+       human or the dossier routine to close it, same as any other terminal
+       verdict.
 
-    A completed run with a fresh (zero) retry_count, or an unrecognised/
-    unparseable results.json status, is left alone. An issue whose description
+    A completed run with a fresh (unlabelled) retry budget, or an unrecognised/
+    unparseable results.json status, is left alone. An issue whose body
     doesn't parse, or that has no run.log yet (still validating, or launch
     crashed before ever writing one), is left alone too -- not this function's
     job to guess at those.
+
+    The age gate in shape 1 reads `updatedAt`, the only timestamp GitHub's list
+    endpoint carries; bd had a dedicated `started_at` that a comment did not move.
+    `updatedAt` therefore restarts the 12h clock every time this routine (or a human)
+    comments on a live claim. That is conservative in the safe direction — it delays a
+    release, never causes an early one — and a claim nobody is touching still ages out
+    normally.
 
     Each returned entry carries an "action" ("release", "block", or
     "reset_retry"); "release" entries also carry the "retry_count" to record.
     """
     now = now or datetime.now(timezone.utc)
     stale: list[dict] = []
-    for issue in _bd_json("list", "--status", "in_progress", "--label", EXPERIMENT_LABEL):
+    for issue in _open_experiment_issues():
+        if not _is_claimed(issue) or BLOCKED_LABEL in _label_names(issue):
+            continue
         try:
-            _, candidate_path = parse_candidate_ref(issue.get("description", ""))
+            _, candidate_path = parse_candidate_ref(issue.get("body", ""))
         except CandidateRefError:
             continue
         out_dir = default_out_dir(candidate_path)
@@ -278,9 +386,9 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
                     "action": "reset_retry",
                     "traceback_tail": (
                         f"run finished with terminal status {status!r} after this claim had "
-                        f"already spent a retry -- clearing the spent retry_count so a future, "
-                        f"unrelated re-run of this SAME bead gets the full budget again "
-                        f"(fps-rtd PR #304 review finding #3)."
+                        f"already spent a retry -- clearing the spent `{RETRIED_LABEL}` label "
+                        f"so a future, unrelated re-run of this SAME issue gets the full "
+                        f"budget again (fps-rtd PR #304 review finding #3)."
                     ),
                 })
             continue
@@ -288,7 +396,7 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
         traceback_tail = _looks_like_traceback_tail(out_dir / RUN_LOG_FILENAME)
         if traceback_tail is None:
             continue
-        claimed_at_raw = issue.get("started_at") or issue.get("updated_at")
+        claimed_at_raw = issue.get("updatedAt")
         if not claimed_at_raw:
             continue
         claimed_at = datetime.fromisoformat(claimed_at_raw.replace("Z", "+00:00"))
@@ -314,75 +422,67 @@ def find_stale_claims(now: datetime | None = None) -> list[dict]:
 
 
 def release_stale_claim(issue: dict, traceback_tail: str, *, retry_count: int | None = None) -> None:
-    """Post the reason, unassign, and reopen one stale-claimed experiment issue.
+    """Post the reason and unassign one stale-claimed experiment issue.
 
     `traceback_tail` carries whichever evidence the caller found -- a
     traceback tail for a crashed run, or a one-line explanation for a run that
-    finished in a retryable status -- so the bead records WHY it was released.
+    finished in a retryable status -- so the issue records WHY it was released.
 
-    `retry_count`, when given, is recorded on the bead as the retries already
-    spent on this claim -- see MAX_RETRIES / fps-rtd. The `--set-metadata`
-    write happens BEFORE `--status open` (fps-rtd PR #304 review finding #2):
-    if a `bd` call partway through this sequence fails (dolt lock contention,
-    a killed process), the safer stuck state is "looks already-retried"
-    (blocks one cycle early) rather than "counter never advanced" (the same
-    fault gets released and retried forever).
+    `retry_count`, when given, is recorded as the `retried` label. **The label is
+    added BEFORE the assignee is removed** (fps-rtd PR #304 review finding #2, ported):
+    if a `gh` call partway through this sequence fails (network, rate limit, a killed
+    process), the safer stuck state is "looks already-retried" (blocks one cycle early)
+    rather than "counter never advanced" (the same fault gets released and retried
+    forever). Under bd the equivalent ordering was `--set-metadata` before
+    `--status open`, because `--status open` was what made the issue claimable again.
+    Here it is the *unassign* that makes it claimable, so that is what the label has to
+    precede -- the same invariant, attached to a different call.
+
+    With MAX_RETRIES == 1 `retry_count` is only ever 1 when given; the boolean label
+    can represent it exactly. See _retry_count for what has to change if that rises.
     """
-    issue_id = issue["id"]
-    subprocess.run(
-        ["bd", "comment", issue_id, "--stdin"],
-        input=f"[launch] claim released for re-run.\n\n{traceback_tail}",
-        text=True,
-        check=True,
-    )
-    subprocess.run(["bd", "assign", issue_id, ""], check=True)
+    _gh_comment(issue, f"[launch] claim released for re-run.\n\n{traceback_tail}")
     if retry_count is not None:
-        subprocess.run(
-            ["bd", "update", issue_id, "--set-metadata", f"{RETRY_COUNT_METADATA_KEY}={retry_count}"],
-            check=True,
-        )
-    subprocess.run(["bd", "update", issue_id, "--status", "open"], check=True)
+        _gh_edit(issue, "--add-label", RETRIED_LABEL)
+    _gh_edit(issue, "--remove-assignee", "@me")
 
 
 def block_exhausted_claim(issue: dict, reason: str) -> None:
     """Retry budget spent (fps-rtd): block the claim instead of releasing it.
 
     A released-but-unassigned issue keeps its original creation date, so it's
-    always the oldest `bd ready` result and would be re-claimed ahead of
+    always the oldest result of the claim query and would be re-claimed ahead of
     everything else, forever -- the exact starvation this issue is about.
-    `blocked` status drops it out of `bd ready` entirely while keeping it
-    visible for triage (not silently dropped -- module docstring covers the
-    human recovery step).
+
+    Blocking is two things at once, and only one of them is mechanical: **the
+    assignment** is what drops the issue out of the unassigned claim query, and
+    **the `blocked` label** is what makes it visible for triage in the UI and is what
+    claim_next_candidate filters on explicitly (not silently dropped -- module
+    docstring covers the human recovery step). bd got both from one exclusive
+    `blocked` status; GitHub needs both written. They go in one `gh issue edit` call so
+    a partial failure can't leave the issue labelled-but-claimable or
+    claimed-but-unlabelled.
+
+    Assigning to `@me` rather than a hardcoded login: this routine runs locally as the
+    owner (docs/routines/launch.md), so `@me` IS the owner, and the issue it is being
+    handed back to is theirs to triage.
     """
-    issue_id = issue["id"]
-    subprocess.run(
-        ["bd", "comment", issue_id, "--stdin"],
-        input=f"[launch] retry budget exhausted -- blocking, not releasing.\n\n{reason}",
-        text=True,
-        check=True,
-    )
-    subprocess.run(["bd", "assign", issue_id, ""], check=True)
-    subprocess.run(["bd", "update", issue_id, "--status", "blocked"], check=True)
+    _gh_comment(issue, f"[launch] retry budget exhausted -- blocking, not releasing.\n\n{reason}")
+    _gh_edit(issue, "--add-label", BLOCKED_LABEL, "--add-assignee", "@me")
 
 
 def clear_retry_metadata(issue: dict, reason: str) -> None:
     """Reset a claim's spent retry budget once it reaches a real verdict
     (fps-rtd PR #304 review finding #3).
 
-    Doesn't touch status or assignee -- the claim is still `in_progress` and
-    still needs a human or the dossier routine to close it, same as any other
+    Doesn't touch the assignee -- the claim is still held and still needs a
+    human or the dossier routine to close it, same as any other
     TERMINAL_STATUSES verdict (see find_stale_claims). This only prevents a
     stale counter from an earlier failure cycle silently costing a later,
     unrelated cycle its retry.
     """
-    issue_id = issue["id"]
-    subprocess.run(
-        ["bd", "comment", issue_id, "--stdin"],
-        input=f"[launch] clearing spent retry budget on this now-terminal claim.\n\n{reason}",
-        text=True,
-        check=True,
-    )
-    subprocess.run(["bd", "update", issue_id, "--unset-metadata", RETRY_COUNT_METADATA_KEY], check=True)
+    _gh_comment(issue, f"[launch] clearing spent retry budget on this now-terminal claim.\n\n{reason}")
+    _gh_edit(issue, "--remove-label", RETRIED_LABEL)
 
 
 def recover_stale_claims(now: datetime | None = None) -> list[dict]:
@@ -397,23 +497,45 @@ def recover_stale_claims(now: datetime | None = None) -> list[dict]:
             release_stale_claim(
                 entry["issue"], entry["traceback_tail"], retry_count=entry.get("retry_count")
             )
-    if stale:
-        sync_push()
     return stale
 
 
 def claim_next_candidate() -> dict | None:
-    """Atomically claim the oldest ready experiment issue, or None if the queue is empty."""
-    claimed = _bd_json(
-        "ready", "--label", EXPERIMENT_LABEL, "--unassigned", "--sort", "oldest", "-n", "1", "--claim",
-    )
-    if not claimed:
+    """Claim the oldest ready experiment issue, or None if the queue is empty.
+
+    Ready is "open, `experiment`-labelled, unassigned, not `blocked`", oldest by
+    creation date -- exactly what `bd ready --label experiment --unassigned
+    --sort oldest -n 1` returned. The oldest-first ordering is what the fps-rtd retry
+    budget is defined against; don't change it without re-reading that argument.
+
+    **This is no longer atomic.** bd claimed in the same call that queried
+    (`--claim`); GitHub needs a list then an edit. Accepted deliberately: there is one
+    nightly process, and contention was measured at ~1 in-progress out of 28. If it
+    ever matters, the genuinely atomic primitive already in use here is free --
+    `git push origin HEAD:refs/heads/<branch>` fails if the ref exists, so branch
+    existence can be the claim. Don't build a heavier protocol before there is
+    contention to justify it.
+    """
+    ready = [
+        issue for issue in _open_experiment_issues()
+        if not _is_claimed(issue) and BLOCKED_LABEL not in _label_names(issue)
+    ]
+    if not ready:
         return None
-    sync_push()
-    return claimed[0]
+    issue = min(ready, key=lambda i: i.get("createdAt") or "")
+    _gh_edit(issue, "--add-assignee", "@me")
+    return issue
 
 
 def build_runner_cmd(batch_dir: pathlib.Path, candidate_path: pathlib.Path, bead_id: str) -> list[str]:
+    """The detached runner invocation.
+
+    `bead_id` now carries a GitHub issue NUMBER, not a bd id. The name is kept
+    deliberately: it is also the `--bead-id` flag on runner.py and the `bead_id` field
+    written into every results.json / facts.json, including the ones already committed
+    under experiments/candidates/. Renaming it would change an artifact schema to buy
+    nothing.
+    """
     return [
         "uv", "run", "python", "-m", "experiments.pipeline.runner",
         "--batch-dir", str(batch_dir),
@@ -449,23 +571,21 @@ def launch_detached(
 
 @click.command("launch")
 def main() -> None:
-    """Nightly entry point: sync, recover stale claims, claim + validate + launch one candidate."""
-    sync_pull()
-
+    """Nightly entry point: recover stale claims, claim + validate + launch one candidate."""
     recovered = recover_stale_claims()
     verbs = {"block": "blocked", "reset_retry": "reset retry budget on"}
     for entry in recovered:
         verb = verbs.get(entry.get("action"), "recovered")
-        click.echo(f"[launch] {verb} stale claim {entry['issue']['id']}")
+        click.echo(f"[launch] {verb} stale claim #{issue_ref(entry['issue'])}")
 
     issue = claim_next_candidate()
     if issue is None:
         click.echo("[launch] no experiment work ready")
         return
 
-    issue_id = issue["id"]
+    ref = issue_ref(issue)
     try:
-        batch_dir, candidate_path = parse_candidate_ref(issue.get("description", ""))
+        batch_dir, candidate_path = parse_candidate_ref(issue.get("body", ""))
     except CandidateRefError as exc:
         _abort_claim(issue, f"malformed candidate reference: {exc}")
         return
@@ -481,45 +601,40 @@ def main() -> None:
         _abort_claim(issue, f"validation failed: {exc!r}")
         return
 
-    cmd = build_runner_cmd(batch_dir, candidate_path, issue_id)
+    cmd = build_runner_cmd(batch_dir, candidate_path, ref)
     out_dir = default_out_dir(candidate_path)
     try:
         pid = launch_detached(cmd, out_dir)
     except OSError as exc:
         # A validated candidate that fails to actually launch (missing `uv`,
-        # permission error creating out_dir, etc.) must not leave the bead
+        # permission error creating out_dir, etc.) must not leave the issue
         # claimed forever -- same "release rather than strand" rule as a
         # validation failure above.
         _abort_claim(issue, f"failed to launch detached runner: {exc!r}")
         return
     log_path = out_dir / RUN_LOG_FILENAME
-    subprocess.run(
-        ["bd", "comment", issue_id, f"[launch] validated, launched detached pid={pid}, log={log_path}"],
-        check=True,
-    )
-    sync_push()
-    click.echo(f"[launch] {issue_id}: launched detached pid={pid} log={log_path}")
+    _gh_comment(issue, f"[launch] validated, launched detached pid={pid}, log={log_path}")
+    click.echo(f"[launch] #{ref}: launched detached pid={pid} log={log_path}")
 
 
 def _abort_claim(issue: dict, reason: str) -> None:
     """Validation failed before launch: apply the same retry budget as any
     other give-up path instead of releasing unconditionally (fps-rtd PR #304
-    review finding #4) -- a candidate whose description or module is broken
-    in a way that will never self-correct would otherwise re-win `bd ready`
-    and burn the nightly slot forever, exactly the starvation shape this bead
+    review finding #4) -- a candidate whose body or module is broken
+    in a way that will never self-correct would otherwise re-win the claim query
+    and burn the nightly slot forever, exactly the starvation shape this issue
     was filed about, just reached through pre-launch validation instead of a
     runtime abort. Reuses release_stale_claim / block_exhausted_claim so this
-    path shares their (already-tested) bd-call sequence rather than a third
+    path shares their (already-tested) call sequence rather than a third
     near-duplicate of it.
     """
-    issue_id = issue["id"]
+    ref = issue_ref(issue)
     action, next_count = _decide_release_or_block(issue)
     if action == "block":
         block_exhausted_claim(issue, f"aborted before launch — {reason}")
     else:
         release_stale_claim(issue, f"aborted before launch — {reason}", retry_count=next_count)
-    sync_push()
-    click.echo(f"[launch] {issue_id}: aborted before launch ({action}) — {reason}")
+    click.echo(f"[launch] #{ref}: aborted before launch ({action}) — {reason}")
 
 
 if __name__ == "__main__":

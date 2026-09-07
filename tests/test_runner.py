@@ -50,7 +50,7 @@ from experiments.pipeline.runner import (
     _save_baseline_cache,
     _summarise_for_comment,
     default_out_dir,
-    post_bd_comment,
+    post_issue_comment,
     read_run_status,
     record_pass_criterion,
     run_candidate,
@@ -803,7 +803,7 @@ def test_finish_posts_bd_comment_on_abort(tmp_path, monkeypatch):
     """
     posted = []
     monkeypatch.setattr(
-        runner_module, "post_bd_comment", lambda issue_id, text: posted.append((issue_id, text))
+        runner_module, "post_issue_comment", lambda issue_id, text: posted.append((issue_id, text))
     )
 
     _finish(STATUS_ABORTED_CANDIDATE, "cand", 0.0, tmp_path, error="boom", bead_id="fps-xyz")
@@ -819,7 +819,7 @@ def test_finish_posts_bd_comment_on_abort(tmp_path, monkeypatch):
 def test_finish_marks_retryable_status_as_not_the_candidates_fault(tmp_path, monkeypatch):
     posted = []
     monkeypatch.setattr(
-        runner_module, "post_bd_comment", lambda issue_id, text: posted.append((issue_id, text))
+        runner_module, "post_issue_comment", lambda issue_id, text: posted.append((issue_id, text))
     )
 
     _finish(STATUS_ABORTED_PIPELINE, "cand", 0.0, tmp_path, error="bad config", bead_id="fps-xyz")
@@ -830,7 +830,7 @@ def test_finish_marks_retryable_status_as_not_the_candidates_fault(tmp_path, mon
 def test_finish_without_bead_id_posts_nothing(tmp_path, monkeypatch):
     posted = []
     monkeypatch.setattr(
-        runner_module, "post_bd_comment", lambda issue_id, text: posted.append((issue_id, text))
+        runner_module, "post_issue_comment", lambda issue_id, text: posted.append((issue_id, text))
     )
 
     _finish(STATUS_ABORTED_CANDIDATE, "cand", 0.0, tmp_path, error="boom")
@@ -1383,7 +1383,7 @@ def test_summarise_for_comment_handles_grade_run_failure_shape():
     arbiter" (a real, negative finding). Regression test for a bug the fps-hvi
     review caught: this exact shape raised TypeError on `f"{None:+.4f}"`,
     which escaped run_candidate uncaught since it's evaluated as an argument
-    to post_bd_comment, outside that function's own try/except.
+    to post_issue_comment, outside that function's own try/except.
     """
     results = {
         "candidate": {"name": "cand"},
@@ -1400,8 +1400,8 @@ def test_summarise_for_comment_handles_grade_run_failure_shape():
     assert "did not move the arbiter" not in text
 
 
-def test_run_candidate_posts_bd_comment_even_when_grading_failed(monkeypatch):
-    """End-to-end version of the regression above: post_bd_comment must still
+def test_run_candidate_posts_issue_comment_even_when_grading_failed(monkeypatch):
+    """End-to-end version of the regression above: post_issue_comment must still
     fire (and run_candidate must still return a RunResult) when a run
     completes but _grade_run's except branch fired, with bead_id set —
     exactly the path the TypeError escaped through.
@@ -1429,13 +1429,13 @@ def test_run_candidate_posts_bd_comment_even_when_grading_failed(monkeypatch):
         "meta": {"wall_seconds": 1.0, "n_windows": 1, "seeds": [1]},
     }
 
-    post_bd_comment("fps-3jj.4", _summarise_for_comment(results))  # must not raise
+    post_issue_comment("42", _summarise_for_comment(results))  # must not raise
 
-    assert captured["cmd"] == ["bd", "comment", "fps-3jj.4", "--stdin"]
+    assert captured["cmd"] == ["gh", "issue", "comment", "42", "--body-file", "-"]
     assert "grading failed" in captured["input"]
 
 
-def test_post_bd_comment_invokes_bd_with_stdin(monkeypatch):
+def test_post_issue_comment_invokes_gh_with_stdin(monkeypatch):
     captured = {}
 
     def fake_run(cmd, input, text, check):  # noqa: A002 - matches subprocess.run's kwarg name
@@ -1443,26 +1443,26 @@ def test_post_bd_comment_invokes_bd_with_stdin(monkeypatch):
         captured["input"] = input
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    post_bd_comment("fps-3jj.4", "hello")
+    post_issue_comment("42", "hello")
 
-    assert captured["cmd"] == ["bd", "comment", "fps-3jj.4", "--stdin"]
+    assert captured["cmd"] == ["gh", "issue", "comment", "42", "--body-file", "-"]
     assert captured["input"] == "hello"
 
 
-def test_post_bd_comment_does_not_raise_when_bd_cli_fails(monkeypatch):
+def test_post_issue_comment_does_not_raise_when_gh_cli_fails(monkeypatch):
     def fake_run(cmd, input, text, check):  # noqa: A002 - matches subprocess.run's kwarg name
         raise subprocess.CalledProcessError(returncode=1, cmd=cmd)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    post_bd_comment("fps-3jj.4", "hello")  # must not raise — best-effort reporting
+    post_issue_comment("42", "hello")  # must not raise — best-effort reporting
 
 
-def test_post_bd_comment_does_not_raise_when_bd_missing(monkeypatch):
+def test_post_issue_comment_does_not_raise_when_gh_missing(monkeypatch):
     def fake_run(cmd, input, text, check):  # noqa: A002 - matches subprocess.run's kwarg name
-        raise FileNotFoundError("bd not found")
+        raise FileNotFoundError("gh not found")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    post_bd_comment("fps-3jj.4", "hello")  # must not raise — best-effort reporting
+    post_issue_comment("42", "hello")  # must not raise — best-effort reporting
 
 
 # ── batch-1 pass criterion ────────────────────────────────────────────────────
