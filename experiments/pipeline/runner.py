@@ -6,7 +6,7 @@ candidate module (fps-3jj.2's module format — see `experiments/candidates/TEMP
 for a worked example), runs the WFCV log-loss screen
 (`experiments/lib/folds.py` — descriptive colour) and the paired realised-CPL
 backtest (`experiments/lib/realised.py` — the arbiter), then emits results.json +
-rowpreds.parquet + fills.parquet and optionally posts a self-reported bd comment.
+rowpreds.parquet + fills.parquet and optionally posts a self-reported issue comment.
 
 R0 caching across a batch's nights (the parent design's "fit it once, cache the
 predictions") is implemented via `experiments/lib/realised.py`'s BaselineCache
@@ -63,9 +63,9 @@ aborted_pipeline and aborted_environment are RETRYABLE_STATUSES: the claim goes
 back to the queue once (launch.py's stale sweep, MAX_RETRIES=1). A second
 retryable abort of the same claim blocks it instead of releasing it again —
 a released-but-unassigned claim keeps its original creation date and would
-otherwise win `bd ready`'s oldest-first ordering forever, starving every
-other queued candidate (fps-rtd). Every terminal status posts a bd
-comment — an abort that says nothing on the bead is indistinguishable from a run
+otherwise win the launch routine's oldest-first claim ordering forever, starving
+every other queued candidate (fps-rtd). Every terminal status posts an issue
+comment — an abort that says nothing on the issue is indistinguishable from a run
 that never happened, which is exactly how fps-32p sat stuck for a day (fps-g31).
 
 Two CONFIDENCE fields (fps-3jj.4 DECIDED 2026-08-17):
@@ -156,7 +156,7 @@ STATUS_ABORTED_ENVIRONMENT = "aborted_environment"
 # The candidate got a fair, complete hearing and the claim was legitimately
 # consumed -- the complement of RETRYABLE_STATUSES. Read by
 # launch.find_stale_claims to reset a claim's spent retry-budget counter once
-# it reaches one of these, so a LATER, unrelated re-run of the same bead (e.g.
+# it reaches one of these, so a LATER, unrelated re-run of the same issue (e.g.
 # manually re-queued against a re-frozen batch) isn't born already at budget
 # (fps-rtd PR #304 review finding #3).
 TERMINAL_STATUSES = frozenset({STATUS_GRADED, STATUS_DISQUALIFIED, STATUS_ABORTED_CANDIDATE})
@@ -750,7 +750,7 @@ def run_candidate(
     results_path.write_text(json.dumps(to_jsonable(results), indent=2, default=str))
 
     if bead_id:
-        post_bd_comment(bead_id, _summarise_for_comment(results))
+        post_issue_comment(bead_id, _summarise_for_comment(results))
 
     return RunResult(
         status=STATUS_GRADED, candidate_name=name, wall_seconds=wall_seconds, results=results,
@@ -1087,14 +1087,14 @@ def _finish(
     bead_id: str | None = None, abort_reason: str | None = None,
     provider_stats: dict | None = None,
 ) -> RunResult:
-    """Write a status-only results.json, self-report to the bead, and return early.
+    """Write a status-only results.json, self-report to the tracker issue, and return early.
 
     Covers every non-completing outcome (validation, candidate, pipeline,
-    environment). The bd comment is not optional polish: before fps-g31 this
+    environment). The issue comment is not optional polish: before fps-g31 this
     path returned without posting anything, so an aborted run was
-    indistinguishable on the bead from a run that never started — fps-32p
+    indistinguishable on the issue from a run that never started — fps-32p
     aborted at 22:07 and nothing said so until a human read run.log the next
-    day. Whatever else changes here, keep something landing on the bead.
+    day. Whatever else changes here, keep something landing on the issue.
 
     abort_reason (fps-3jj.13): always written, null unless the caller passes a
     structured code (e.g. ABORT_REASON_LEAK_BY_DECLARATION) — present-but-null
@@ -1123,7 +1123,7 @@ def _finish(
     results_path.write_text(json.dumps(to_jsonable(results), indent=2, default=str))
     if bead_id:
         retryable = status in RETRYABLE_STATUSES
-        post_bd_comment(
+        post_issue_comment(
             bead_id,
             f"[pipeline] {name}: {status} (wall={wall_seconds:.1f}s)\n{error}\n\n"
             + (
@@ -1139,17 +1139,24 @@ def _finish(
     )
 
 
-def post_bd_comment(issue_id: str, text: str) -> None:
-    """Self-reported bd comment — `bd comment <id> --stdin`.
+def post_issue_comment(issue_ref: str, text: str) -> None:
+    """Self-reported comment on the tracker issue — `gh issue comment <N> --body-file -`.
 
     Best-effort: called after results.json/rowpreds/fills are already written,
-    so a `bd` CLI hiccup (missing binary, network) must not raise past a
+    so a `gh` CLI hiccup (missing binary, network, expired auth) must not raise past a
     successful run and lose the artifacts' return value. Prints instead.
+
+    `issue_ref` is a GitHub issue number; it arrives here as `--bead-id`, a name kept
+    from the Beads era because it is also the `bead_id` field in every committed
+    results.json / facts.json.
     """
     try:
-        subprocess.run(["bd", "comment", issue_id, "--stdin"], input=text, text=True, check=True)
+        subprocess.run(
+            ["gh", "issue", "comment", issue_ref, "--body-file", "-"],
+            input=text, text=True, check=True,
+        )
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        print(f"[runner] post_bd_comment({issue_id!r}) failed, continuing: {exc}", flush=True)
+        print(f"[runner] post_issue_comment({issue_ref!r}) failed, continuing: {exc}", flush=True)
 
 
 def _summarise_for_comment(results: dict) -> str:
@@ -1196,7 +1203,11 @@ def _summarise_for_comment(results: dict) -> str:
     type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path),
     help="Candidate module .py file.",
 )
-@click.option("--bead-id", default=None, help="bd issue ID to post the self-reported comment to.")
+@click.option(
+    "--bead-id", default=None,
+    help="GitHub issue number to post the self-reported comment to. Flag name kept from "
+         "the Beads era: it is also the `bead_id` field in every committed results.json.",
+)
 @click.option(
     "--outer-train-min-days", type=int, default=None,
     help="Outer walk-forward train_min_days (default: fuel_signal.evaluate's 1825).",
