@@ -114,7 +114,7 @@ def main() -> None:
                       f"{len(comments.get(bid, []))} comment(s) to follow")
                 continue
             url = gh("issue", "create", "--title", rec["title"], "--body", body,
-                     *sum((["--label", l] for l in labels), []))
+                     *sum((["--label", lb] for lb in labels), []))
             num = int(url.rstrip("/").rsplit("/", 1)[-1])
             id_map[bid] = num
             MAP_PATH.write_text(json.dumps(id_map, indent=2, sort_keys=True) + "\n")
