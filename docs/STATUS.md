@@ -165,7 +165,7 @@ Calibrate chose raw over isotonic.
 
 **Open follow-ups:**
 
-- **#157** (open, under consideration) — peak-side v2 features for the `lead −7..−4` over-prediction (+0.157), the dominant residual miscalibration.
+- **#157** (peak-side v2 features for the `lead −7..−4` over-prediction, +0.157, the dominant residual miscalibration) — closed 2026-08-16, superseded by [#369](https://github.com/edwinsteele/fuel-price-signal/issues/369): folded in as a candidate for the second AI-sourced feature batch rather than implemented ad hoc.
 
 The late-descent / extended-shallow-descent investigation that drove the 50→54-feat work is closed: #212 (RAC_full graduated → #216 lock), #219→#221 (canonical cohort), #214 rejected, #215 and #231 (interaction-column probe) closed. See those issues for the external-data decision. **Reopened 2026-08-19 as bd `fps-x0f`** — that chain's log-loss-based rejections stand, but the *economic* closure argument does not: #262's "regime axis FLAT" was withdrawn 2026-08-20 and the 2026-06-18 gate-1 per-regime saving% 2026-08-21, both as path-coupled costs allocated to a sub-period (`experiments/2026-08-21_path_coupling_audit/`, docs/CONVENTIONS.md § *Bucketed results*). The one surviving reading on that axis is gate-1's per-row proxy regret, which says late descent is the **worst** zone.
 
