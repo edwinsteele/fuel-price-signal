@@ -189,7 +189,14 @@ def parse_candidate_ref(body: str) -> tuple[pathlib.Path, pathlib.Path]:
 
 
 def _gh_json(*args: str) -> list[dict]:
-    result = subprocess.run(["gh", *args], check=True, capture_output=True, text=True)
+    """Run a `gh ... --json` command and parse its stdout.
+
+    stdout is piped because we parse it; stderr is deliberately NOT captured, so `gh`'s
+    own diagnostics ("not logged in", a rate-limit message, an API error body) land in
+    this routine's log instead of being swallowed into a bare exit status. Nobody is
+    watching a nightly run when it fails, so the message has to be somewhere by then.
+    """
+    result = subprocess.run(["gh", *args], check=True, stdout=subprocess.PIPE, text=True)
     return json.loads(result.stdout) if result.stdout.strip() else []
 
 
@@ -219,13 +226,16 @@ def _routine_login() -> str:
     Deliberately not defensive: if `gh` can't say who we are, every downstream answer
     about claim ownership is a guess, and both guesses are bad -- sweep nothing and
     stale claims are never recovered, or sweep everything and a person's in-flight
-    investigation gets relaunched over. Dying here is the honest outcome.
+    investigation gets relaunched over. Dying here is the honest outcome, and it is a
+    cheap place to die: find_stale_claims is the first thing main() does, so broken `gh`
+    auth stops the run before any write rather than halfway through one. stderr is left
+    uncaptured (see _gh_json) so the reason reaches the log.
     """
     global _ROUTINE_LOGIN
     if _ROUTINE_LOGIN is None:
         _ROUTINE_LOGIN = subprocess.run(
             ["gh", "api", "user", "--jq", ".login"],
-            check=True, capture_output=True, text=True,
+            check=True, stdout=subprocess.PIPE, text=True,
         ).stdout.strip()
     return _ROUTINE_LOGIN
 
