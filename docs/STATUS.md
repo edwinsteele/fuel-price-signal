@@ -251,11 +251,23 @@ fold-clustered interval, not sqrt(102)x: 102x the decisions halved the per-fold 
 (0.7982 → 0.3992) and no further, because the fold is the independent replicate and widening
 the universe does not create folds. The fold count, not the station count, is the ceiling.
 
-**Related caveat, still unresolved (owner has NOT decided this, 2026-09-07):** the placebo
-band and the fold-clustered t answer different questions, and `tgp_cycle_displacement` passes
-the first at both widths while failing the second at both (t = 0.98 at five, 1.27 at 410). No
-dossier reports the second. Whether it should gate anything is logged as `not_decided` in
-`experiments/ledger.yaml` — a design call, not a missing measurement.
+**Related design call, DECIDED 2026-09-07 by the owner: the placebo band gates; the
+fold-clustered interval informs.** The two answer different questions — the band asks "could
+a meaningless column have produced this number", the fold-clustered SE asks "does it repeat
+across folds" — and `tgp_cycle_displacement` passes the first at both widths while failing
+the second at both (t = 0.98 at five, 1.27 at 410).
+
+The band gates because it already corrects for how many candidates were tried (the gate moves
+1.7332 → 2.5159 across five candidates), and that is the pipeline's dominant false-positive
+risk. The fold-clustered t carries no such correction, and adding one is real design work. It
+is nonetheless **reported alongside the band from batch2 on**, because it answers something
+the band structurally cannot. **No dossier reports it today — that gap is the outstanding
+consequence of this decision.**
+
+Safe to take now because the two rulers agree on every verdict to date: phase 3 measured the
+gap across five candidates (width buys 1.88x median on the fold ruler, 1.065x on the band)
+and no candidate's fold mean differs from zero at 410 (p 0.227–0.587) while none clears the
+band either. If they ever disagree, escalate rather than auto-resolving.
 
 Phase 3 measured the gap on five candidates rather than one: **widening buys ~1.9x on the
 fold-clustered ruler (1.88x median, range 1.32–2.07) and 1.065x on the placebo band, i.e.

@@ -283,18 +283,40 @@
     decides it and has not been run. The +0.0561 c/L positive band mean invoked in the
     original correction is itself arity-1-specific (+0.0298, p = 0.104 at arity 3), and
     the width narrowing that was to supply the rest is 1.065x [0.679, 1.995] at arity 3
-    against 1.437x at arity 1. MEASURABLE NOW, needs fits: whether homogeneity holds for any candidate
-    other than tgp_cycle_displacement -- one candidate was run, chosen as the best
-    available signal-to-noise; the other four batch1 candidates need the same paired
-    run, ~1h each at 410. PERMANENTLY UNTESTABLE by this design: whether the broad and
+    against 1.437x at arity 1. MEASURABLE NOW, NEEDS ANALYSIS ONLY (no fits): the four missing
+    paired runs LANDED 2026-09-06/07 (commit 47b66b3, experiments/candidates/
+    batch1_n410/), so this no longer needs compute. Pooled deltas five -> 410:
+    lga_trough_propagation -0.0672 -> +0.0666, network_move_breadth -0.1627 -> -0.1004,
+    station_descent_dynamics -0.0237 -> +0.0604, stickiness_phase_saddle -0.0761 ->
+    +0.0544. THREE OF FIVE FLIP SIGN, where tgp_cycle_displacement -- the one candidate
+    homogeneity was established on -- does not. That is NOT yet evidence against
+    homogeneity: all three flippers had near-zero five-station deltas and the whole
+    batch carries a systematic +0.0978 c/L widening offset, so a sign flip is what an
+    offset acting on a small number looks like. The statistics that would actually
+    decide it -- per-fold sign agreement and correlation between the two widths, the
+    12/14 and r = 0.704 computed for tgp_cycle_displacement -- were NOT computed for
+    the other four. Until they are, homogeneity rests on a single candidate chosen for
+    its signal-to-noise, and the premise under fps-nas's "same measurement" claim is
+    narrower than it reads. PERMANENTLY UNTESTABLE by this design: whether the broad and
     five deltas genuinely differ in MAGNITUDE (-0.129 vs -0.208). Disjoint baskets, no
     shared denominator -- deliberately not computed, and no amount of widening makes it
     computable. BLOCKED on fps-wst: whether feature-dark stations materially reweight
     the 410-station pooled CPL. The coverage gate counts daily_prices rows and cannot
     see feature availability by construction -- fold 1 passes the per-window gate at
-    0.96 while holding ZERO feature rows for both Blue Mountains stations. NOT DECIDED
-    (not a measurement): whether the fold-clustered t should gate anything, given it
-    does not clear at either width for the project's cleanest signal.
+    0.96 while holding ZERO feature rows for both Blue Mountains stations. DECIDED 2026-09-07 by the owner
+    (not a measurement, and never was): the fold-clustered t does NOT gate. The placebo
+    band gates; the fold-clustered interval is REPORTED alongside it and blocks nothing.
+    Rationale: the band already carries a family-wise correction for how many candidates
+    were tried (1.7332 -> 2.5159 at five candidates), which is the pipeline's dominant
+    false-positive risk; the fold-clustered t has no such correction and adding one is
+    real design work. The fold ruler still answers a question the band structurally
+    cannot -- does the effect repeat across time rather than riding one good period --
+    so it is worth printing on every dossier, and today NO dossier prints it. That
+    reporting gap is the outstanding consequence of this decision. Safe to take now
+    because the two rulers agree on every verdict to date: phase 3 measured the gap on
+    five candidates (width buys 1.88x median on the fold ruler, 1.065x on the band) and
+    no candidate's fold mean differs from zero at 410 (p 0.227-0.587) while none clears
+    the band either. If they ever disagree, escalate rather than auto-resolving.
   outcome: graduated
   calibration: >-
     Pipeline-validation run, and it reproduced its independent reference exactly. The
