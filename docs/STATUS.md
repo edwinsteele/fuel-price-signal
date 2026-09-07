@@ -217,16 +217,51 @@ on sign, r = 0.704, intervals overlap). Full write-up and the numbers behind eve
 2. **Run those BEFORE any new pass/fail grading** — notably `fps-490` (locked-block ablation).
    Block *rankings* survive a ruler change; pass/fail calls do not.
 
+#### Confirmed for batch2 by the owner, 2026-09-07 — and now on evidence, not just affordability
+
+**Batch2 runs at 410 stations from the start.** `fps-nas` decided this on the grounds that
+widening is affordable and measures the same thing. Phase 3 of
+`experiments/2026-09-06_noise_floor_n410/` supplies the stronger reason: **a five-station
+universe biases a candidate's delta favourably by ~+0.10 c/L**, which is the size of the
+entire effect any batch1 candidate claimed. All five batch1 candidates were re-run at 410;
+all five got worse, three crossed from saving to cost, and the placebo null moved only
++0.0047 c/L over the same widening. Narrow grading does not merely add noise — it
+manufactures savings. This is a correctness constraint, not a precision preference.
+
+**Three things must line up, and two of them currently default the wrong way:**
+
+1. **`launch.py::build_runner_cmd` does not pass `--n-stations`** (`experiments/pipeline/
+   launch.py:416`). It was `fps-hc7`, P4, deliberately deferred while wide runs were
+   hand-invoked. **That deferral no longer holds: it is now a blocker for batch2**, because
+   a candidate launched the normal way silently runs at the five-station default.
+2. **Batch2's noise floor must be built with BOTH `--n-stations 410` and an `--arity` at
+   least as wide as the widest candidate.** Both CLIs default `--n-stations` to `None` (the
+   five-station `PREFERRED_STATIONS`), and `noise_floor --arity` defaults to **1**, which
+   grades no multi-column candidate at all. Neither default is right for batch2.
+3. **Nothing may be graded against batch1's `noise_floor.json`** — it is five-station.
+
+**The failure mode is loud, not silent, and that is by design.** `fps-916` stamps
+`station_population` on every run and floor, and `_bank_admissibility` refuses a
+cross-population grade. A candidate accidentally run at five stations against a 410 floor
+comes back *refused*, not quietly mis-graded. Treat a population refusal in batch2 as
+"someone forgot `--n-stations`", not as a bug in the guard.
+
 **Do not read the widening as a large power gain.** It buys exactly **2.00x** on the
 fold-clustered interval, not sqrt(102)x: 102x the decisions halved the per-fold sd
 (0.7982 → 0.3992) and no further, because the fold is the independent replicate and widening
 the universe does not create folds. The fold count, not the station count, is the ceiling.
 
-**Related caveat, unresolved:** the placebo band and the fold-clustered t answer different
-questions, and `tgp_cycle_displacement` passes the first at both widths while failing the
-second at both (t = 0.98 at five, 1.27 at 410). No dossier reports the second. Whether it
-should gate anything is logged as `not_decided` in `experiments/ledger.yaml` — a design call,
-not a missing measurement.
+**Related caveat, still unresolved (owner has NOT decided this, 2026-09-07):** the placebo
+band and the fold-clustered t answer different questions, and `tgp_cycle_displacement` passes
+the first at both widths while failing the second at both (t = 0.98 at five, 1.27 at 410). No
+dossier reports the second. Whether it should gate anything is logged as `not_decided` in
+`experiments/ledger.yaml` — a design call, not a missing measurement.
+
+Phase 3 measured the gap on five candidates rather than one: **widening buys ~1.9x on the
+fold-clustered ruler (1.88x median, range 1.32–2.07) and 1.065x on the placebo band, i.e.
+nothing.** The two still agree on every verdict to date — no candidate's fold mean differs
+from zero at 410 (p 0.227–0.587) and none clears the band — so this is a decision to take
+while it is cheap, not a live conflict. Deciding it before batch2's freeze is the point.
 
 ### Phase 5 (macro model)
 - Separate longer-horizon model (~30/60/90 days)
