@@ -8,12 +8,24 @@ metadata:
 `gh issue list` has two consistency classes, and automation that mutates an issue then re-reads a
 list in the same run must know which it is using.
 
-- `--search "..."` **and** `--assignee` go through GitHub's search index: a mutation this run just
-  made is invisible for **2-4s** after it lands.
-- Plain `--label` goes through the REST listing: the same mutation is visible on the **first**
-  read (measured 0.65-0.71s).
-- **Every** form lags issue *creation* by about **7s**, `--label` included. That only matters if
-  you file an issue and immediately list for it in the same run.
+Measured on this repo 2026-09-08, `gh` 2.98.0, polling at 0.5s:
+
+| query | issue CREATED appears | assignee change reflected |
+|---|---|---|
+| `gh issue list --label X --state open` | ~6.8-7.3s | **0.65-0.71s** (first read) |
+| `gh issue list --label X --assignee "@me"` | ~7s | **3.74s** |
+| `gh issue list --search "label:X no:assignee sort:created-asc"` | ~7.0s | 1.96s assign / 3.07s unassign |
+
+Two separate facts:
+
+1. **Every** form lags issue *creation* by ~7s, `--label` included. An issue filed seconds
+   before an automated sweep runs is invisible to it.
+2. **`--assignee` is search-index backed, same as `--search`.** Its 3.74s matches the `--search`
+   column, not the plain-listing column. Only the bare `--label` listing reflects a mutation on
+   the first read.
+
+So a filter flag is not free: reaching for `--assignee` to narrow a query silently moves it onto
+the eventually-consistent index.
 
 So: list by `--label`, filter client-side for assignee, `blocked`, and ordering. `--label` returns
 newest-first with no ascending-sort flag, hence the client-side oldest-by-`createdAt` pick in
