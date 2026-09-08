@@ -73,4 +73,5 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [https-push-when-1password-agent-down](https-push-when-1password-agent-down.md) — the HTTPS fallback works, but silently leaves `origin/main` stale, which is how a worktree branched off an old commit.
 - [gh-issue-list-consistency](gh-issue-list-consistency.md) — `gh issue list --search`/`--assignee` are search-index backed and lag a mutation 2–4s; plain `--label` does not. Every form lags *creation* ~7s.
 - [gh-auth-status-false-negative-restricted-token](gh-auth-status-false-negative-restricted-token.md) — `gh auth status` reports the worker Routine's restricted token as invalid (it isn't — that check is GraphQL too). Verify with `gh api user` instead.
+- [github-closes-keyword-substring-match](github-closes-keyword-substring-match.md) — `Closes #N` closes the issue even inside a sentence saying it's deliberately *not* a closing reference. Never put the keyword directly before a `#N` you don't mean to close.
 - [icloud-conflict-copies](icloud-conflict-copies.md) — **obsolete** since the repo moved out of `~/Documents`. Kept only so nobody re-derives the detection recipe.
