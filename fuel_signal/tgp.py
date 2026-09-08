@@ -61,6 +61,12 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 LANDING_URL = "https://aip.com.au/resources/historical-ulp-and-diesel-tgp-data/"
+# The only endpoint AIP has been confirmed to serve this page on is plain HTTP
+# (no TLS, confirmed live 2026-08-20). HTTPS is tried first regardless, since a
+# network intermediary could otherwise tamper with the page in transit and
+# have this write bogus Sydney TGP values into the canonical CSV; falling
+# back to the documented HTTP URL only if the HTTPS attempt fails outright.
+TGP_TABLES_HTTPS_URL = "https://api.aip.com.au/public/tgpTables"
 TGP_TABLES_URL = "http://api.aip.com.au/public/tgpTables"
 
 # The weekly history file. Matches ``AIP_TGP_Data_19-Jun-2026.xlsx`` but NOT the
@@ -108,25 +114,51 @@ def download_xlsx(url: str) -> bytes:
 
 
 def download_tgptables_html() -> str:
-    """Download the rolling 5-weekday-window tgpTables HTML page."""
-    logger.info("Downloading TGP tables page %s", TGP_TABLES_URL)
-    r = requests.get(TGP_TABLES_URL, timeout=30)
-    r.raise_for_status()
-    return r.text
+    """Download the rolling 5-weekday-window tgpTables HTML page.
+
+    Tries the HTTPS URL first, falling back to the documented plain-HTTP one
+    only if the HTTPS attempt fails outright (connection refused, TLS error,
+    HTTP error status, etc.) — see the ``TGP_TABLES_URL`` comment.
+    """
+    last_exc: requests.exceptions.RequestException | None = None
+    for url in (TGP_TABLES_HTTPS_URL, TGP_TABLES_URL):
+        try:
+            logger.info("Downloading TGP tables page %s", url)
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            return r.text
+        except requests.exceptions.RequestException as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
 
 
 def parse_tgptables_series(html: str) -> pd.Series:
     """Parse the Sydney ULP row from the tgpTables rolling-window HTML page.
 
+    tgpTables renders one ``table-striped`` table per fuel type (petrol,
+    diesel, ...); the petrol/ULP table is identified by its Sydney row's
+    ``sydneyUlp`` href, not by table order, since AIP's own ordering of the
+    per-fuel tables isn't guaranteed.
+
     Returns a date-indexed, sorted ``pd.Series`` named ``tgp_cents`` covering
-    whichever of the ~5 weekday columns parsed. Raises ``RuntimeError`` if the
-    petrol table, a Sydney row, or any dated column can't be found — the page
-    layout may have changed.
+    whichever of the ~5 weekday columns parsed. Raises ``RuntimeError`` if no
+    Sydney ULP table/row or dated column can be found — the page layout may
+    have changed.
     """
     soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table", class_="table-striped")
-    if table is None:
-        raise RuntimeError("No tgpTables table found — layout may have changed")
+    table = None
+    sydney_row = None
+    for candidate in soup.find_all("table", class_="table-striped"):
+        for tr in candidate.find_all("tr"):
+            anchor = tr.find("a", href=True)
+            if anchor and "sydneyulp" in anchor["href"].lower():
+                table, sydney_row = candidate, tr
+                break
+        if table is not None:
+            break
+    if table is None or sydney_row is None:
+        raise RuntimeError("No Sydney ULP tgpTables table found — layout may have changed")
 
     header_row = table.find("tr")
     if header_row is None:
@@ -135,15 +167,6 @@ def parse_tgptables_series(html: str) -> pd.Series:
     for cell in header_row.find_all(["th", "td"])[1:]:
         m = _TGPTABLES_DATE_RE.search(cell.get_text(" ", strip=True))
         dates.append(datetime.datetime.strptime(m.group(1), "%d %B %Y").date() if m else None)
-
-    sydney_row = None
-    for tr in table.find_all("tr"):
-        anchor = tr.find("a", href=True)
-        if anchor and "sydney" in anchor["href"].lower():
-            sydney_row = tr
-            break
-    if sydney_row is None:
-        raise RuntimeError("No Sydney row found in tgpTables — layout may have changed")
 
     data: dict[datetime.date, float] = {}
     for date, cell in zip(dates, sydney_row.find_all("td")[1:]):

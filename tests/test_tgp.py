@@ -5,11 +5,13 @@ import pathlib
 
 import pandas as pd
 import pytest
+import requests
 import responses as rsps
 from click.testing import CliRunner
 
 from fuel_signal.tgp import (
     LANDING_URL,
+    TGP_TABLES_HTTPS_URL,
     TGP_TABLES_URL,
     discover_tgp_url,
     download_tgptables_html,
@@ -61,6 +63,35 @@ TGPTABLES_HTML = """
     <td><a href="http://api.aip.com.au/public/sydneyDiesel">Sydney</a></td>
     <td>999.9</td>
     <td>999.9</td>
+  </tr>
+</table>
+</body></html>
+"""
+
+# Same data as TGPTABLES_HTML but with the diesel table listed first, to
+# prove table selection goes by the Sydney row's sydneyUlp href, not order.
+TGPTABLES_HTML_DIESEL_FIRST = """
+<html><body>
+<h3>Diesel (cents per litre, inclusive of GST)</h3>
+<table class="table table-striped">
+  <tr>
+    <th>City</th>
+    <th>Monday<br/>17 August 2026</th>
+  </tr>
+  <tr>
+    <td><a href="http://api.aip.com.au/public/sydneyDiesel">Sydney</a></td>
+    <td>999.9</td>
+  </tr>
+</table>
+<h3>Petrol (ULP, cents per litre, inclusive of GST)</h3>
+<table class="table table-striped">
+  <tr>
+    <th>City</th>
+    <th>Monday<br/>17 August 2026</th>
+  </tr>
+  <tr>
+    <td><a href="http://api.aip.com.au/public/sydneyUlp">Sydney</a></td>
+    <td>123.4</td>
   </tr>
 </table>
 </body></html>
@@ -143,6 +174,13 @@ def test_parse_tgptables_series_picks_petrol_sydney_only():
     assert s.name == "tgp_cents"
 
 
+def test_parse_tgptables_series_finds_petrol_table_regardless_of_order():
+    # Table selection must go by the Sydney row's sydneyUlp href, not by
+    # which table on the page comes first (diesel here, unlike TGPTABLES_HTML).
+    s = parse_tgptables_series(TGPTABLES_HTML_DIESEL_FIRST)
+    assert list(s) == [123.4]
+
+
 def test_parse_tgptables_series_raises_when_no_table():
     with pytest.raises(RuntimeError, match="table"):
         parse_tgptables_series("<html><body>no tables here</body></html>")
@@ -182,9 +220,25 @@ def test_merge_tgp_series_overrides_overlap_and_extends_tail():
 
 
 @rsps.activate
-def test_download_tgptables_html_returns_text():
+def test_download_tgptables_html_prefers_https():
+    rsps.add(rsps.GET, TGP_TABLES_HTTPS_URL, body=TGPTABLES_HTML, status=200)
+    # No HTTP mock registered — an HTTP fallback attempt would raise ConnectionError.
+    assert download_tgptables_html() == TGPTABLES_HTML
+
+
+@rsps.activate
+def test_download_tgptables_html_falls_back_to_http_on_https_failure():
+    rsps.add(rsps.GET, TGP_TABLES_HTTPS_URL, body=requests.exceptions.ConnectionError("no TLS"))
     rsps.add(rsps.GET, TGP_TABLES_URL, body=TGPTABLES_HTML, status=200)
     assert download_tgptables_html() == TGPTABLES_HTML
+
+
+@rsps.activate
+def test_download_tgptables_html_raises_when_both_fail():
+    rsps.add(rsps.GET, TGP_TABLES_HTTPS_URL, status=503)
+    rsps.add(rsps.GET, TGP_TABLES_URL, status=503)
+    with pytest.raises(requests.exceptions.HTTPError):
+        download_tgptables_html()
 
 
 # ---------------------------------------------------------------------------
