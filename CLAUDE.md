@@ -33,18 +33,24 @@ for the general model.
 
 ### If you are the scheduled worker routine
 
-> **Status: disabled, blocked on a second live fire.** The `fps-sk0` blocker (`bd dolt push`
-> couldn't authenticate from a Routine sandbox) is gone — `bd` is deleted. The first live fire
-> after re-enabling (2026-09-08) surfaced a *different* blocker: this Routine's environment
-> authenticates with a token scoped to "a pinned set of PR-review operations" and returns `403`
-> on any other GraphQL query — and `gh issue/pr list/view --json ...` and `gh issue/pr edit ...`
-> all resolve through GraphQL in this `gh` version, so every pickup-rule command that used them
-> failed outright. The rules below are rewritten to use REST (`gh api`) instead, per the error's
-> own suggestion, but **that rewrite is untested against the real restricted token** — it's
-> verified only by running the equivalent REST calls from an unrestricted session. Re-enabling
-> is phase 7 of [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398) and needs a
-> second live fire to confirm the rewrite actually works under the restriction. Until that
-> lands, don't assume the twice-daily schedule below is firing.
+> **Status: enabled and confirmed working.** Phase 7 of
+> [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398) is done. The `fps-sk0`
+> blocker (`bd dolt push` couldn't authenticate) is gone with `bd` deleted; a first live fire
+> after re-enabling (2026-09-08) then hit a *different* blocker — this Routine's environment
+> token serves only a pinned set of PR-review GraphQL operations and 403s on everything else,
+> which is what `gh issue/pr list/view --json` and `gh issue/pr edit` resolve through — fixed by
+> rewriting the pickup rules below to use REST (`gh api`) throughout (PR #401). A second live
+> fire the same day (session `cse_01T65ABEHNfEAiM2sUdibfjo`) confirmed the rewrite end to end
+> under the real restricted token: claimed #367, implemented it, opened PR #402 via REST, checked
+> for reviews via REST, addressed Sourcery's findings, and the PR merged clean.
+>
+> One residual gap found on that run, not yet fixed: **rule 0's `gh auth status` check itself
+> also 403s under this token** (it's GraphQL too) and reports "invalid" even though the token
+> works fine for everything else — `gh api user` is what actually confirms `gh` is usable here.
+> The run treated this correctly as a false negative rather than failing hard, but rule 0's text
+> below still says to fail hard on it. See
+> [docs/memory/gh-auth-status-false-negative-restricted-token.md](docs/memory/gh-auth-status-false-negative-restricted-token.md)
+> and [#403](https://github.com/edwinsteele/fuel-price-signal/issues/403).
 
 You are a Sonnet worker running as a **Claude Code Routine** (see [docs/automation.md](docs/automation.md))
 on a **twice-daily** schedule (`0 9,20 * * *` UTC), and you get a fresh checkout each run rather
