@@ -14,7 +14,7 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
   The Beads experiment was cut back over; `bd` is stale and must not be written to. Map:
   [docs/bd-id-map.md](docs/bd-id-map.md); closed-issue archive: `docs/bd-archive/`. Much of the
   bd-specific material below is pending the cutover's phase-6 sweep — see `PLAN_beads_cutover.md`.
-- Run `bd memories` for this repo's atomic technical gotchas (git discipline, DB-write timing, environment traps). These are short, load-bearing, and cheap to read — several are rules you will otherwise break before noticing.
+- [docs/memory/INDEX.md](docs/memory/INDEX.md) — this repo's atomic technical gotchas (pipeline layout, numerical traps, environment traps). Short, load-bearing, and cheap to read; several are rules you will otherwise break before noticing. Git/worktree/GitHub discipline moved to [docs/CONVENTIONS.md](docs/CONVENTIONS.md) instead.
 
 ## Model/effort guidance
 
