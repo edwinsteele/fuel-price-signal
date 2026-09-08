@@ -368,6 +368,35 @@ specific data, and specific tools. Rules for *how we work* belong in
 [docs/CONVENTIONS.md](docs/CONVENTIONS.md); architecture belongs in this file; current model
 state belongs in [docs/STATUS.md](docs/STATUS.md).
 
+### Writing one
+
+**Every agent working here writes new technical memories to `docs/memory/`, not to its own
+private memory store.** A fact filed privately is invisible to the other agent, and to the
+next session of a different tool — which is the entire reason these 53 were moved out of
+Beads. This applies to Claude and Codex identically.
+
+1. **Classify first.** *Would this be true for a different person working on this repo?*
+   Yes → `docs/memory/`. No — it's about the owner (their background, how they like to be
+   taught, their working hours) → an agent's own private memory, not the repo. If it's a
+   rule for *how we work* rather than a trap in a specific thing, it belongs in
+   [docs/CONVENTIONS.md](docs/CONVENTIONS.md) instead.
+2. **Check for an existing file** — `grep -l <term> docs/memory/*.md`. Update it rather than
+   adding a near-duplicate; the corpus is only cheap to read while it stays small.
+3. **One fact per file**, named in kebab-case after the fact, with `name` / `description` /
+   `type` frontmatter (`project` for code/data gotchas, `reference` for tool and environment
+   traps, `feedback` for working-practice guidance). `description` is what a reader scans to
+   decide whether to open the file, so make it the claim, not the topic.
+4. **Add a one-line hook to [INDEX.md](docs/memory/INDEX.md)** under the right heading. A file
+   with no index line will not be found.
+5. **Link related facts** with `[[name]]`. Nothing resolves these automatically — they are
+   breadcrumbs for the next reader, so a link to a file that doesn't exist yet is fine.
+6. **Delete a memory that turns out to be wrong.** A stale memory is worse than a missing one:
+   `github-issue-state-meaningless-post-migration` inverted rather than decayed, and would have
+   broken the worker routine if it had been migrated unread.
+
+**No PR needed** — `docs/memory/**` is exempt, like the experiments lab book. Commit **and
+push**; a memory sitting on a local `main` is not filed.
+
 These were `bd remember` entries until 2026-09-08 —
 [docs/memory/MIGRATION.md](docs/memory/MIGRATION.md) accounts for all 53.
 

@@ -14,6 +14,10 @@ paths, specific data, and specific tools.
 the one file you need. Each hook is written to be enough to tell you whether you
 need the file, not enough to substitute for it.
 
+**Adding one.** See [AGENTS.md § Technical memories](../../AGENTS.md#technical-memories)
+for the write protocol — classify, check for a duplicate, one fact per file, add a hook
+here. Straight to `main`, no PR.
+
 Provenance: these were `bd remember` entries until 2026-09-08; see
 [MIGRATION.md](MIGRATION.md) for the full accounting of all 53.
 
