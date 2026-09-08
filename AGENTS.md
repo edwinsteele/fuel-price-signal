@@ -353,14 +353,34 @@ Tests are required alongside all implementation. Key areas:
 - DB read/write roundtrips
 - Backtest engine: known price series + known strategy → verify simulated spend
 
+## Technical memories
+
+[docs/memory/](docs/memory/INDEX.md) holds this repo's atomic technical gotchas — one fact
+per file, `name`/`description`/`type` frontmatter, wiki-style `[[name]]` links between related facts, and
+an [INDEX.md](docs/memory/INDEX.md) whose hooks are written to tell you whether you need a
+file without substituting for it. They are short, load-bearing, and cheap to read; several
+are rules you will otherwise break before noticing. Read the index at orientation and `grep
+-l <term> docs/memory/*.md` when you hit something surprising.
+
+They live in the repo rather than in an agent's private memory store **because every agent
+working here must see them** — Claude and Codex both. Scope: traps in specific code paths,
+specific data, and specific tools. Rules for *how we work* belong in
+[docs/CONVENTIONS.md](docs/CONVENTIONS.md); architecture belongs in this file; current model
+state belongs in [docs/STATUS.md](docs/STATUS.md).
+
+These were `bd remember` entries until 2026-09-08 —
+[docs/memory/MIGRATION.md](docs/memory/MIGRATION.md) accounts for all 53.
+
 ## Beads
 
 > **⚠ SUPERSEDED 2026-09-07 — GitHub Issues is the tracker again.** The 24 live issues were
 > migrated to GitHub as **#365–#388** (map: [docs/bd-id-map.md](docs/bd-id-map.md)). **File with
 > `gh issue create`, not `bd create`, and do not write to `bd` — its contents are historical.**
-> The Dolt DB still exists only because `experiments/pipeline/launch.py` has not been ported yet
-> (cutover phase 4). The rest of this section describes the retired setup and is kept until the
-> phase-6 docs sweep rewrites it; read it as history, not instruction.
+> Phase 4 ported `launch.py`/`runner.py` off `bd`, and phase 5 moved the `bd remember`
+> memories to [docs/memory/](docs/memory/INDEX.md) — **nothing in the codebase reads the Dolt
+> DB any more**, and `.beads/` is deleted in phase 6. The rest of this section describes the
+> retired setup and is kept until the phase-6 docs sweep rewrites it; read it as history, not
+> instruction.
 
 Work items (what was previously GitHub Issues) live in [Beads](https://github.com/gastownhall/beads) (`bd`), a git-native, dependency-aware issue tracker. GitHub Issues were retired for this project 2026-08-06; PRs, CI, and reviews still live on GitHub as before — only the backlog moved.
 
