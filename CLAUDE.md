@@ -10,10 +10,11 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
 - [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) — CLI reference for training/evaluating/diagnosing the ML model (dev reference, not day-to-day usage)
 - [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) — ML model design decisions; [docs/feature-pipeline.md](docs/feature-pipeline.md) — the AI-sourced candidate-feature pipeline's machinery
 - `PLAN_ml_signal.md` — active ML-signal plan. **Lives at repo root and is gitignored** (despite some docs saying `docs/PLAN_ml_signal.md` — that path is wrong).
-- **Work items live in GitHub Issues (#365–#388) as of 2026-09-07** — `gh issue list`, not `bd ready`.
-  The Beads experiment was cut back over; `bd` is stale and must not be written to. Map:
-  [docs/bd-id-map.md](docs/bd-id-map.md); closed-issue archive: `docs/bd-archive/`. Much of the
-  bd-specific material below is pending the cutover's phase-6 sweep — see `PLAN_beads_cutover.md`.
+- **Work items live in GitHub Issues** (`gh issue list`); the current backlog opened at #365–#388
+  on 2026-09-07. `fps-*` ids in older prose are Beads issue ids from the 2026-08/09 experiment and
+  resolve by lookup, not by any live command: [docs/bd-id-map.md](docs/bd-id-map.md) for the 24
+  that migrated, [docs/bd-archive/](docs/bd-archive/) for the rest. `bd` is gone — do not try to
+  run it.
 - [docs/memory/INDEX.md](docs/memory/INDEX.md) — this repo's atomic technical gotchas (pipeline layout, numerical traps, environment traps). Short, load-bearing, and cheap to read; several are rules you will otherwise break before noticing. Git/worktree/GitHub discipline moved to [docs/CONVENTIONS.md](docs/CONVENTIONS.md) instead.
 
 ## Model/effort guidance
@@ -27,31 +28,30 @@ The port from the original repos is done. If you ever need to trace original log
 
 ## Automated worker vs interactive session
 
-Work items live in Beads (`bd`), not GitHub Issues — see [AGENTS.md § Beads](AGENTS.md#beads) for the general model. PRs still live on GitHub; only issue tracking moved.
+Work items live in **GitHub Issues** — see [AGENTS.md § Issue tracking](AGENTS.md#issue-tracking)
+for the general model.
 
 ### If you are the scheduled worker routine
 
-> **Status (2026-08-15): this Routine is disabled.** See [docs/automation.md](docs/automation.md) and bd issue `fps-sk0` (`blocked`, P3) for why — a Claude Code Routines platform limitation blocks `bd dolt push` from a Routine sandbox, not something fixable here. This section is left intact in case the Routine is re-enabled once the upstream blocker moves; if you're reading this as an interactive session, don't expect the twice-daily schedule below to actually be firing.
+> **Status: disabled since 2026-08-15, and the reason is now gone.** It was disabled solely
+> because `bd dolt push` could not authenticate from a Routine sandbox (`fps-sk0`,
+> [#384](https://github.com/edwinsteele/fuel-price-signal/issues/384), closed as moot). The
+> Beads→GitHub cutover removed `bd` entirely, and `gh` already authenticates in that sandbox,
+> so the blocker no longer exists. Re-enabling is phase 7 of
+> [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398) and needs a live Routine
+> fire to confirm. Until that lands, don't assume the twice-daily schedule below is firing.
 
-You are a Sonnet worker running as a **Claude Code Routine** (see [docs/automation.md](docs/automation.md)) — this is an actively-running automation on a **twice-daily** schedule (`0 9,20 * * *` UTC — not hourly, despite older wording elsewhere in this doc), and it gets a fresh checkout each run rather than reusing a persistent interactive session's disk. The Dolt database under `.beads/` does not travel via ordinary git commits, so every run must sync explicitly with `bd dolt pull`/`bd dolt push`.
+You are a Sonnet worker running as a **Claude Code Routine** (see [docs/automation.md](docs/automation.md))
+on a **twice-daily** schedule (`0 9,20 * * *` UTC), and you get a fresh checkout each run rather
+than a persistent interactive session's disk. Everything you need lives in GitHub and in git;
+there is no second store to sync.
 
-**Dolt remote push auth:** `bd` shells out to the real `git` binary for git-backed Dolt remotes ([Dolt's git-remote-support announcement](https://www.dolthub.com/blog/2026-02-13-announcing-git-remote-support-in-dolt/)), not a separate HTTP client — so it inherits [a known Dolt bug](https://github.com/dolthub/dolt/issues/10486) where push fails whenever credential resolution would need an interactive prompt, which any bare remote URL with no embedded credential hits in a non-interactive container. Ambient git credential helpers (the ones that make plain `git push` work) aren't guaranteed to reach bd's invocation. `DOLT_REMOTE_USER`/`DOLT_REMOTE_PASSWORD` (documented by `bd dolt push --help`) do **not** fix this — those apply only to Dolt's separate "Hosted Dolt" SaaS remotes, not generic git-backed ones; don't reach for them here.
-
-**Fix, matching Dolt's own documented CI pattern:** embed a token directly in the remote URL instead of relying on ambient credentials. Pickup rule 0 below reconstructs `sync.remote` at the start of every run as `https://x-access-token:$(gh auth token)@github.com/edwinsteele/fuel-price-signal.git`, reusing the token `gh` already has (no new secret provisioned) — in-memory only, never written to `.beads/config.yaml` or any other tracked file. The tracked `sync.remote` stays a plain `https://github.com/...` URL so every other clone (including the owner's Mac, via its own `gh`-backed credential helper — `gh auth setup-git`) authenticates ambiently without this step. Verified working end-to-end live 2026-08-11 (fps-ddf): the Routine claimed an issue, pushed the claim, implemented it, and opened [PR #287](https://github.com/edwinsteele/fuel-price-signal/pull/287) — the first successful pickup cycle since the Beads migration.
-
-**Known gap 2 (bd binary itself, not just its Dolt remote, can be absent):** the Routine's `environment_id` (see [docs/automation.md](docs/automation.md)) is a fixed Anthropic-managed environment — the routine-scheduling API has no field for a custom base image or a setup script, so there is no durable place to pre-bake `bd` into the container. Treat the binary as something you may have to install fresh every run rather than something the environment guarantees. That's what pickup rule 0 below does — do not skip it, and do not try to work around a missing `bd` by falling back to `gh issue` (that workflow was retired with the Beads migration; GitHub Issues are no longer the source of truth).
-
-**bd version pin (deliberate, not a gap):** because the Routine reinstalls `bd` from scratch every run instead of reusing a persisted image, the version it gets is whatever pickup rule 0 asks for — it does not track the owner's Mac automatically. Rule 0 pins an exact version (`@beads/bd@1.1.2` on npm, which tracks the same version numbers as the Homebrew formula and GitHub releases — not a separate release train) rather than installing `@latest`. Reason: `bd`'s Dolt-backed database (`.beads/embeddeddolt/`) can require a schema migration across versions, and bd's own upgrade docs say exactly one designated clone should run `bd migrate` + `bd dolt push` while every other clone just updates its binary and runs `bd bootstrap`. An unattended hourly Routine left on `@latest` risks being the *first* environment to cross a migration boundary, unsupervised, against a database the owner's interactive sessions also write to — the pin prevents that. **When the owner runs `brew upgrade beads` locally and confirms it still works, bump the pinned version in pickup rule 0 below in the same change** — that's the entire sync "dance": one version string, moved deliberately, never automatically.
-
-Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
+Your job is to pick up `chore`- and `polish`-labelled issues and open PRs.
 
 **Pickup rules:**
-0. Ensure `bd` is usable and version-pinned before anything else: `command -v bd >/dev/null 2>&1 || npm install -g @beads/bd@1.1.2`. npm's presence in this environment is confirmed (verified live 2026-08-11 — `bd` installed and pinned at 1.1.2 correctly on the first real run of this rule), so **do not fall back to the unpinned curl install script if the npm install fails** — that would silently run an unvalidated `@latest` `bd` against the shared Dolt database. Fail hard instead: surface the npm failure clearly and stop, do not proceed as if there were no work.
-
-   **CI-env-var gotcha (found 2026-08-15, not yet live-verified):** `@beads/bd`'s npm postinstall skips downloading the native binary entirely when `process.env.CI` is set (`if (!process.env.CI) { install() } else { console.log('Skipping binary download in CI environment') }`), and its `bin/bd.js` wrapper has no fallback — it just prints "bd binary not found" and exits 1 on first real invocation. `command -v bd` only checks that the npm shim file exists, not that the binary actually downloaded, so it cannot catch this. After install, verify with a real invocation (`bd --version`), not just `command -v`. If that fails and `$CI` is set in this environment, retry with `env -u CI npm install -g @beads/bd@1.1.2 --force` before treating it as a hard npm failure.
-
-   Then ensure `gh` is present too — install it if missing (this environment doesn't always have it pre-installed, unlike `bd`):
-   ```
+0. Ensure `gh` is present and authenticated — this environment does not always have it
+   pre-installed:
+   ```bash
    command -v gh >/dev/null 2>&1 || {
      GH_VERSION="2.97.0"
      curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
@@ -59,29 +59,18 @@ Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
        && cp "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
        && chmod +x /usr/local/bin/gh
    }
-   command -v gh >/dev/null 2>&1 || echo "gh install failed — TOKEN below will fall back to \$GH_TOKEN/\$GITHUB_TOKEN, which may be a proxy placeholder, not a real credential (fps-sk0)." >&2
+   gh auth status || { echo "gh cannot authenticate — stopping." >&2; exit 1; }
    ```
-   Pin `GH_VERSION` the same way `bd` is pinned below — bump it by hand when the owner confirms a newer `gh` works, never chase `@latest` here. **Deliberately not `curl`ing `api.github.com/.../releases/latest` to discover the version** (2026-08-15 revision, not yet live-verified): fps-sk0 found `api.github.com` returning 403 in this sandbox while `github.com/.../releases/download/...` — the exact domain+path `@beads/bd`'s own postinstall.js successfully downloads its binary from — was never actually confirmed blocked. The old two-step version showed a 404 on the *download*, but that's the predictable result of the *version-lookup* step against `api.github.com` failing silently and feeding an empty version into the download URL (`.../download/v/gh__linux_amd64.tar.gz`), not evidence that release downloads themselves are blocked. Pinning the version removes the `api.github.com` call entirely, sidestepping that failure mode regardless of which diagnosis is right.
+   Pin `GH_VERSION`, and bump it by hand once the owner confirms a newer `gh` works — never
+   chase `@latest`. **Deliberately do not `curl` `api.github.com/.../releases/latest` to
+   discover the version:** that host has returned 403 in this sandbox, and the failure is
+   silent — it feeds an empty version into the download URL and 404s the download itself.
 
-   This matters because of fps-sk0 (root-caused 2026-08-14): Dolt has a documented upstream bug where its internal git push can't complete an interactive-style (STDIN/askpass) credential prompt — https://www.dolthub.com/blog/2026-02-13-announcing-git-remote-support-in-dolt/ says plainly "there is a bug in Dolt ... which prevents using Git remotes as Dolt remotes if your Git binary requires username and password credential inputs via STDIN, so you must use a Git authentication method that does not require these." This environment's ambient git auth uses exactly that interactive-style mechanism (`GIT_ASKPASS`) — which is why plain `git push` works fine but `bd dolt push` 403s regardless of network/proxy state. The only way around Dolt's bug is a token embedded directly in the URL, which needs `gh auth token` to actually resolve a real credential — hence installing `gh` here rather than treating its absence as tolerable.
-
-   Once `bd` and `gh` are confirmed present, reconstruct the Dolt remote with a live token so `bd dolt push` can authenticate (see "Dolt remote auth" above — this is required every run, not a one-time setup step):
-   ```
-   TOKEN="$(gh auth token 2>/dev/null || echo "${GH_TOKEN:-$GITHUB_TOKEN}")"
-   case "$TOKEN" in
-     gho_*|ghp_*|ghs_*|ghu_*|github_pat_*) ;;
-     *)
-       echo "Token doesn't look like a real GitHub token (got '${TOKEN}', length ${#TOKEN}) — likely a proxy placeholder, not a usable secret. Skipping explicit Dolt remote reconfiguration rather than embedding a bogus credential — bd dolt push will still hit Dolt's askpass bug (fps-sk0) without a real token, so expect it to fail this run; report it, don't retry in a loop." >&2
-       TOKEN=""
-       ;;
-   esac
-   if [ -n "$TOKEN" ]; then
-     bd dolt remote remove origin >/dev/null 2>&1 || true
-     bd dolt remote add origin "https://x-access-token:${TOKEN}@github.com/edwinsteele/fuel-price-signal.git"
-   fi
-   ```
-   Then run `bd dolt pull`.
-1. Close out bd issues resolved by your own merged PRs since the last run: `gh pr list --label claude-authored --state merged --json number,body,mergedAt` (recent ones), pull the `Resolves: <id>` line out of each body, `bd close <id>` for each, then `bd dolt push`.
+   Verify with a real invocation (`gh auth status`), not just `command -v` — a shim on `PATH`
+   is not a working binary with working credentials. If it fails, fail hard and say so; do not
+   proceed as though there were no work.
+1. **There is nothing to close out.** A merged PR whose body carries `Closes #<N>` closes its
+   issue by itself, so a run no longer starts by reconciling merged PRs against the tracker.
 2. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers:
    ```bash
    gh pr list --label claude-authored --state open --json number | jq -r '.[].number'
@@ -92,25 +81,66 @@ Your job is to pick up `chore` and `polish` labelled bd issues and open PRs.
 
    If any PR qualifies, perform maintenance (see **PR maintenance** below), then exit.
 3. Check for open `claude-authored` PRs (any). If any exist, **exit immediately** — one at a time.
-4. **Recover stale claims.** A prior run can crash between claiming an issue (rule 6) and opening its PR (rule 3 of "For each PR"), leaving it `in_progress` forever and invisible to `bd ready`. This rule runs sequentially, before any new claim is made in *this* run, so there's no race with rule 6 below — a "fresh" claim is always at least one full rule-4-pass old by the time rule 6 runs again next run.
-   1. List candidates: `bd list --status in_progress --label-any chore,polish --json`.
-   2. For each issue, check whether it has a live branch (`git ls-remote --heads origin 'worker/<id>-*'`) or an open PR referencing it (`gh pr list --label claude-authored --state open --json number,body` and grep bodies for `Resolves: <id>`).
-   3. If neither exists **and** the issue's `updated_at` is more than 90 minutes old (long enough to cover a normal claim→PR cycle within one run, short enough that a crash isn't lost for days), the claim is orphaned.
-   4. Release each orphaned issue found: `bd assign <id> ""`, `bd update <id> --status open`, then `bd dolt push`.
-5. Query `bd ready --label chore --unassigned --sort oldest -n 1`; if empty, `bd ready --label polish --unassigned --sort oldest -n 1`. Take the first result.
-6. `bd update <id> --claim` to mark it in_progress, then `bd dolt push`.
-7. Create a branch `worker/<id>-<slug>` for the issue.
+4. **Recover stale claims.** A prior run can crash between claiming an issue (rule 6) and
+   opening its PR (rule 3 of "For each PR"), leaving it assigned forever and invisible to the
+   claim query. This rule runs sequentially, before any new claim is made in *this* run, so
+   there is no race with rule 6 — a "fresh" claim is always at least one full rule-4 pass old
+   by the time rule 6 runs again next run.
+   1. List candidates with the plain label listing and filter client-side (never `--search` or
+      `--assignee` — see the warning under rule 5):
+      ```bash
+      gh issue list --label chore  --state open --limit 200 --json number,title,labels,assignees,createdAt,updatedAt
+      gh issue list --label polish --state open --limit 200 --json number,title,labels,assignees,createdAt,updatedAt
+      ```
+      Keep the issues assigned to **your own login** (`gh api user --jq .login`) and not
+      carrying the `blocked` label. **"Has an assignee" is not the test** — the assignee is an
+      identity, not a status, so that wider filter sweeps the owner's own parked work as if it
+      were a crashed claim. Compare logins.
+   2. For each, check whether it has a live branch (`git ls-remote --heads origin 'worker/<N>-*'`)
+      or an open PR referencing it (`gh pr list --label claude-authored --state open --json number,body`,
+      grepping bodies for `Closes #<N>`).
+   3. If neither exists **and** `updatedAt` is more than 90 minutes old (long enough to cover a
+      normal claim→PR cycle within one run, short enough that a crash isn't lost for days), the
+      claim is orphaned.
+   4. Release each orphaned issue: `gh issue edit <N> --remove-assignee "@me"`.
+5. Claim the next issue. Using the same plain-`--label` listing as rule 4, take `chore` first
+   and fall back to `polish` if `chore` yields nothing; keep the issues with **no** assignee and
+   without the `blocked` label; take the oldest by `createdAt`.
+
+   ⚠️ **List by `--label`, not `--search` or `--assignee`.** Those two are search-index backed
+   and lag a mutation by 2–4s, so a claim or a release this run just made can be invisible to
+   the very next read — which is exactly the shape of rules 4 and 5. The plain `--label`
+   listing reflects a mutation on the first read. Details and measurements:
+   [docs/memory/gh-issue-list-consistency.md](docs/memory/gh-issue-list-consistency.md).
+6. Claim it: `gh issue edit <N> --add-assignee "@me"`. **The assignee is the claim** — there is
+   no separate status to set, and none to forget to clear.
+7. Create a branch `worker/<N>-<slug>` for the issue.
 
 **For each PR:**
 1. Implement the minimal change — do not scope-creep.
 2. Run `uv run ruff check . && uv run pytest -q` locally before pushing. Fix any failures.
-3. Open PR titled `fix: <issue title> (bd-<id>)` for a `chore` issue, `feat: <issue title> (bd-<id>)` for a `polish` issue — targeting `main` (`--base main`) with labels `claude-authored` + the issue's original label. For a `chore` issue, also add `auto-merge-ok` — this is what makes the auto-merge workflow (see below) actually fire; without it the PR sits green forever waiting for a manual merge (fps-hg7). PR body must include a 3–5 bullet plan (what changed, what didn't, what test was added) **and a `Resolves: <id>` line** — pickup rule 1 of the *next* run depends on finding it.
-4. After opening the PR, do other useful sequenced work (update memory, file any follow-up issues via `bd create`). Once ≈270s of real elapsed time has passed, run `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` to check for reviews. If there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available in `/loop` mode — do not attempt it here.) Act on any actionable comments found in `reviews[].body`. If CodeRabbit is rate-limited or absent, skip and move on — do not reschedule. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
+3. Open PR titled `fix: <issue title> (#<N>)` for a `chore` issue, `feat: <issue title> (#<N>)`
+   for a `polish` issue — targeting `main` (`--base main`) with labels `claude-authored` + the
+   issue's original label. For a `chore` issue, also add `auto-merge-ok` — this is what makes
+   the auto-merge workflow (see below) actually fire; without it the PR sits green forever
+   waiting for a manual merge (`fps-hg7`). PR body must include a 3–5 bullet plan (what changed,
+   what didn't, what test was added) **and a `Closes #<N>` line** — that line is what closes the
+   issue when the PR merges.
+4. After opening the PR, do other useful sequenced work (write a memory to `docs/memory/`, file
+   any follow-up issues with `gh issue create`). Once ≈270s of real elapsed time has passed, run
+   `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` to check for reviews. If
+   there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only
+   available in `/loop` mode — do not attempt it here.) Act on any actionable comments found in
+   `reviews[].body`. If CodeRabbit is rate-limited or absent, skip and move on — do not
+   reschedule. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat
+   until no actionable comments remain.
 
-Note: this run does **not** close the bd issue — merging is gated by the separate `auto-merge.yml` workflow (≥900s age + green checks), which this run doesn't wait for. Closure happens in pickup rule 1 of a later run, once the PR shows up as merged.
+Note: this run does not wait for the merge — that is gated by the separate `auto-merge.yml`
+workflow (≥900s age + green checks). Nothing is left over for a later run to finish: the
+`Closes #<N>` line closes the issue when the merge lands.
 
 **PR maintenance:**
-When pickup rule 1 triggers, for each qualifying PR:
+When pickup rule 2 triggers, for each qualifying PR:
 
 *Merge conflicts:*
 1. Check out the branch locally.
@@ -131,30 +161,37 @@ Handle conflicts first, then review threads, in a single pass per PR.
 
 ### If you are an interactive session
 
-- **Do not pick up `chore` or `polish` issues yourself.** File a `bd create` instead (see below). If the user explicitly directs you to work one anyway, it's yours to finish — including closing it (next bullet) — don't leave it for the worker.
-- **`design` issues are fair game** for interactive work. `bd update <id> --claim` when you start, `bd close <id>` when done, `bd dolt push` after either.
+- **Do not pick up `chore` or `polish` issues yourself.** File one instead (see below). If the
+  user explicitly directs you to work one anyway, it's yours to finish — including closing it —
+  don't leave it for the worker.
+- **`design` issues are fair game** for interactive work. `gh issue edit <N> --add-assignee "@me"`
+  when you start; the `Closes #<N>` line in the PR body closes it on merge.
 - **Post-merge checklist — the instant you have direct merge confirmation, run all of this in the same turn, unprompted.** "Direct confirmation" means you ran `gh pr merge` yourself, or the user just told you it merged. Don't wait to be asked for any of these, and don't split them across turns:
-  1. `bd close <id>` + `bd dolt push`, for the `Resolves: <id>` line in the PR body. Do this regardless of the issue's label (`design`, `chore`, `polish`) and regardless of whether the worker routine is running — the worker's pickup-rule-1 auto-closure only scans `claude-authored` PRs, a label interactive sessions never use, so it structurally cannot see a PR you opened. Its "close next run" deferral is a workaround for *its own* async merge wait; it doesn't apply once you've confirmed the merge synchronously yourself.
-  2. `git branch -D <branch>` for the now-local-only branch. Squash-merge means git won't recognize it as an ordinary merge (`branch -d` refuses), but the content is already in the squash commit on `main`, so force-deleting the local pointer loses nothing. The remote copy is usually already gone — this repo auto-deletes head branches on merge (`bd recall github-auto-deletes-merged-branch` if a manual delete surprises you with "remote ref does not exist").
+  1. **Confirm the issue actually closed** (`gh issue view <N> --json state`). A `Closes #<N>`
+     line in the PR body closes it automatically on merge, so this is a check, not a step —
+     but only that exact syntax works, and a PR body that referenced the issue any other way
+     leaves it open. Close it by hand if so: `gh issue close <N>`.
+  2. `git branch -D <branch>` for the now-local-only branch. Squash-merge means git won't recognize it as an ordinary merge (`branch -d` refuses), but the content is already in the squash commit on `main`, so force-deleting the local pointer loses nothing. The remote copy is usually already gone — this repo auto-deletes head branches on merge, so don't treat a failed manual delete ("remote ref does not exist") as an error.
      - **If the branch is checked out in the worktree this session is running from** (rather than a different, already-idle worktree), `branch -D` fails — git refuses to delete a branch checked out anywhere, including from another worktree's shell. This isn't rare: it's the normal case for a per-issue worktree session finishing its own PR. Don't force past it, and **don't ask the user how to proceed** — the owner's standing answer is always "leave it for a later cleanup session" (asked and answered 2026-08-23; removing your own worktree mid-session is disruptive and was never actually wanted). Just note in your final summary that the branch/worktree is stale and merged, and move on — no question needed.
   3. `git pull --ff-only` in any other worktree (including the primary one) that's now behind `main` and has a clean `git status --short` — a bare fast-forward on a clean tree can't lose anything.
-  4. **Sweep other idle worktrees you notice, not just your own.** Worktree directory names are stale by design (see `bd recall worktree-slot-reuse` / `feedback_worktree_slot_reuse` in memory) — the harness reuses a slot's directory name across unrelated later branches, so a name never tells you what's actually checked out there or whether it's still live. Run `git worktree list`, then for every worktree that ISN'T the one this session is in: check its actual branch (`git -C <dir> branch --show-current`), confirm that branch is merged into `main` (`git branch --merged main` after `git fetch --prune`, or its remote shows `[gone]`) and has no open PR, and confirm `git -C <dir> status --short` is empty. If all three hold, `git worktree remove --force <dir>` and `git branch -D <branch>`. **If a worktree has any uncommitted changes, leave it alone** — note it in your summary instead of discarding someone else's in-progress work.
+  4. **Sweep other idle worktrees you notice, not just your own.** Worktree directory names are stale by design (see [docs/CONVENTIONS.md § Worktrees](docs/CONVENTIONS.md#worktrees)) — the harness reuses a slot's directory name across unrelated later branches, so a name never tells you what's actually checked out there or whether it's still live. Run `git worktree list`, then for every worktree that ISN'T the one this session is in: check its actual branch (`git -C <dir> branch --show-current`), confirm that branch's work has actually landed, and confirm `git -C <dir> status --short` is empty. **Confirm "landed" by content, not by ancestry** — a squash-merged branch never reads as merged to `git branch --merged main`, so use `git diff HEAD origin/main -- $(git -C <dir> diff --name-only origin/main...HEAD)` and require it empty. Then check there's no open PR for it. If all of that holds, `git worktree remove --force <dir>` and `git branch -D <branch>`. **If a worktree has any uncommitted changes, leave it alone** — note it in your summary instead of discarding someone else's in-progress work.
 
   This checklist is scoped to branches/worktrees confirmed merged with no uncommitted changes — never force-remove a worktree that still has staged/unstaged changes without flagging it first, and it is not a general license for `branch -D`/force operations elsewhere.
 - Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
 - After each commit + push, open a PR immediately without asking.
 - After submitting a PR, wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, push, repeat until no actionable comments remain.
-- **`experiments/**` is exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs) and `experiments/INDEX.md` may be committed **and pushed** directly to `main` without a PR. This is the only path that bypasses review; all other paths still require one. **Direct-to-`main` includes the push** — a commit left on the local `main` is not landed, and unattended routines are exactly where that goes unnoticed (see [docs/CONVENTIONS.md](docs/CONVENTIONS.md) § the exemption for the 2026-08-26 incident). End any session that writes to `main` with `git status --short` empty and `git log --oneline origin/main..main` empty.
+- **`experiments/**` and `docs/memory/**` are exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs), `experiments/INDEX.md`, and technical memory files may be committed **and pushed** directly to `main` without a PR. Those are the only paths that bypass review; everything else still requires one, and a commit touching an exempt path *and* code is not exempt — split it. **Direct-to-`main` includes the push** — a commit left on the local `main` is not landed, and unattended routines are exactly where that goes unnoticed (see [docs/CONVENTIONS.md](docs/CONVENTIONS.md) § Git workflow for the 2026-08-26 incident). End any session that writes to `main` with `git status --short` empty and `git log --oneline origin/main..main` empty.
 
-## spawn_task → bd create redirect
+## spawn_task → `gh issue create` redirect
 
-When `mcp__ccd_session__spawn_task` would normally be the right call (you noticed an out-of-scope issue while working), **do not spawn a session**. Instead:
+When `mcp__ccd_session__spawn_task` would normally be the right call (you noticed an out-of-scope
+issue while working), **do not spawn a session**. File an issue instead:
 
 ```bash
-bd create \
+gh issue create \
   --title "Short imperative title" \
-  --labels "chore" \
-  --description "$(cat <<'EOF'
+  --label "chore" \
+  --body "$(cat <<'EOF'
 ## What
 <what needs doing>
 
@@ -168,7 +205,11 @@ bd create \
 - [ ] ...
 EOF
 )"
-bd dolt push
 ```
 
-Use `--labels "polish"` or `--labels "design"` in place of `"chore"` as appropriate.
+Use `--label "polish"` or `--label "design"` in place of `"chore"` as appropriate, and add the
+topic label (`pipeline`, `research`, `data`, `product`, `infra`) alongside it — see
+[AGENTS.md § Issue label taxonomy](AGENTS.md#issue-label-taxonomy).
+
+**Ask the owner before filing.** The backlog needs active triage, so a new issue is a decision,
+not a side effect — propose it and let them say yes.

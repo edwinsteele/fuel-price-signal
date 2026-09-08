@@ -1,13 +1,14 @@
 # AI-sourced feature engineering pipeline
 
-Overview of the machinery under `experiments/pipeline/` — written once it settled (bd
-`fps-3jj.8`, all of `.1`–`.7` and `.9` shipped). For design rationale and the full decision
-history, read `bd show fps-3jj` and its children (`fps-3jj.1` … `.11`); this doc is the map,
-not the territory.
+Overview of the machinery under `experiments/pipeline/` — written once it settled
+(`fps-3jj.8`, all of `.1`–`.7` and `.9` shipped). For design rationale and the full decision
+history, read [#368](https://github.com/edwinsteele/fuel-price-signal/issues/368) and its
+sub-issues, plus the closed `fps-3jj.*` children in [docs/bd-archive/](bd-archive/); this doc is
+the map, not the territory.
 
 ## Why this exists
 
-Two aims, both stated in the parent bead:
+Two aims, both stated in the parent design issue:
 
 - **(a)** Find features that clear the realised-CPL arbiter without a human hand-designing
   and hand-running every candidate one at a time.
@@ -55,9 +56,8 @@ closes it out.
 
 **Two things are nightly scheduled tasks (Claude Code Routines); the rest are event-triggered
 interactive sessions.** Launch and dossier are the nightly pair — see
-`docs/automation.md` for the mechanics of running Claude as a Routine, including the known
-`bd dolt push` auth gap that currently has the worker routine disabled (unrelated to this
-pipeline's own routines, but the same platform). The generator and retrospective are invoked
+`docs/automation.md` for the mechanics of running Claude as a Routine, including why the worker
+routine is currently disabled (unrelated to this pipeline's own routines, but the same platform). The generator and retrospective are invoked
 by a human (or an interactive Claude session) at batch boundaries, not on a timer —
 `docs/routines/generator.md` and `docs/routines/retrospective.md` both say so explicitly.
 
@@ -103,7 +103,7 @@ the judgement session can crash and resume without losing the facts.
   that, and both were invisible in the run artifacts that recorded them until fingerprinted.
 - **Fingerprint everything.** `baseline_fingerprint()` / `LOCKED_FEATURE_FINGERPRINT` stamp a
   run's baseline identity into its meta so two runs' comparability is a mechanical `==` check,
-  not an eyeball one (`bd recall baseline-fingerprint-before-comparing-runs`).
+  not an eyeball one ([docs/memory/baseline-fingerprint-before-comparing-runs.md](memory/baseline-fingerprint-before-comparing-runs.md)).
 - **Outcome-status taxonomy** (`experiments/pipeline/runner.py`): `graded` /
   `disqualified` / `aborted_candidate` are TERMINAL — the candidate got a fair hearing.
   `aborted_pipeline` / `aborted_environment` are RETRYABLE — it didn't, and the claim goes
@@ -344,9 +344,9 @@ arity that can legally grade a batch1 candidate. At arity 3 the width narrowing 
 width.
 
 `batch_freeze.py` (now including the noise floor) and `runner.py`'s realised stage are both
-heavy (single-arm or paired full walk-forward fits, ~10–25 min) — see `bd recall` /
-`feedback_user_runs_pipeline` if invoking interactively: hand the command to the user rather
-than shelling out to a long-running process from within a session.
+heavy (single-arm or paired full walk-forward fits, ~10–25 min). If invoking interactively, hand
+the command to the user rather than shelling out to a long-running process from within a
+session.
 
 ## Further reading
 
@@ -357,4 +357,5 @@ than shelling out to a long-running process from within a session.
 - `docs/routines/retrospective.md` — batch-level rollup, invocation timing, known gaps.
 - `docs/routines/worker.md` — the separate chore/polish worker Routine (not part of this
   pipeline, but the same Claude Code Routines mechanism — see `docs/automation.md`).
-- `bd show fps-3jj` — parent design bead, full rationale for every decision above.
+- [#368](https://github.com/edwinsteele/fuel-price-signal/issues/368) — the parent design issue,
+  full rationale for every decision above.

@@ -2,7 +2,7 @@
 
 The Beads → GitHub cutover's phase 5 (issue
 [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398)). The 53 `bd
-remember` entries were frozen at `migration/snapshot/memories.json` in phase 1 and
+remember` entries were frozen at `docs/bd-archive/memories.json` in phase 1 and
 sorted here on 2026-09-08. **No `bd` command was run** — bd no longer reflects
 reality and is not to be invoked, read or write.
 
@@ -96,5 +96,5 @@ written to the private dir by default.
 
 The `fps-*` citations throughout this repo (1,439 across 119 files) are
 deliberately **not** rewritten. They resolve by lookup in [../bd-id-map.md](../bd-id-map.md) and the frozen
-corpus under `migration/snapshot/` (phase 6 promotes it to `docs/bd-archive/`);
+corpus at `docs/bd-archive/`;
 rewriting lab-book entries would falsify a record. Settled 2026-09-07.

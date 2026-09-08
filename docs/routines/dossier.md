@@ -30,7 +30,7 @@ for any `failed, skipping` lines and flag them rather than silently ignoring.
 
 **Retryable aborts are skipped entirely, before anything is written (fps-g31).** `find_pending_runs`
 excludes any run whose `results.json` carries a `RETRYABLE_STATUSES` status (`aborted_pipeline` /
-`aborted_environment`). Those runs never got a fair hearing, their bd claim goes back on the queue,
+`aborted_environment`). Those runs never got a fair hearing, their claim goes back on the queue,
 and the re-run **reuses the same directory** — so a `facts.json`/`README.md` written for a
 retryable status is exactly the wrong content to leave behind (the run never reached the scoring
 stages; there is no real verdict to write up), regardless of what the successful re-run's
@@ -41,8 +41,8 @@ up normally.
 
 **Stale-claim recovery is NOT this routine's job.** It runs entirely inside the launch routine
 (`fps-3jj.5`, merged) as part of every nightly `launch` invocation — `recover_stale_claims()`
-checks `bd list --status in_progress --label experiment` for issues whose `run.log` ends in a
-traceback and releases them. An earlier version of `dossier_tables.py` had its own,
+checks the open `experiment`-labelled issues it has claimed for ones whose `run.log` ends in a
+traceback, and releases them. An earlier version of `dossier_tables.py` had its own,
 weaker, parallel stale-claim mechanism keyed on a `claim.json` file nothing ever wrote — removed
 once launch.py's real implementation was confirmed to already cover this correctly. Don't
 reintroduce it here.
@@ -67,7 +67,7 @@ the run is still going" case, just one step later in the pipeline.
 Everything in this step is judgement, and everything you write must trace back to a `facts.json`
 field or be visibly marked as your own reasoning. **Do not compute or restate a number that isn't
 already in facts.json** — if a number you want isn't there, that's a gap in `dossier_tables.py`
-worth a follow-up bead (`bd create`), not something to compute in-session.
+worth a follow-up issue (`gh issue create`), not something to compute in-session.
 
 1. **Read `facts.json` in full**, including `plots` (the list of PNG filenames actually written for
    this run — reference only those, don't assume one exists).
@@ -134,7 +134,7 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    an explicit **Facts / Judgement split**:
 
    - **Facts** (traceable to `facts.json`, verbatim or lightly tabulated — no new numbers):
-     provenance (candidate, batch, snapshot date, git SHA, seeds, bead) — and state plainly
+     provenance (candidate, batch, snapshot date, git SHA, seeds, issue) — and state plainly
      that those seeds are the **WFCV screen only**, while the realised arbiter ran on the
      single seed at `facts["provenance"]["realised_seed"]` (fps-qbv — distinct from the
      `seeds` list beside it). Do **not** gloss that as "one draw with no error bar": the
@@ -394,10 +394,10 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
             recommends waiting for something that will never arrive.
        2. **Check before you write.** Before any line of the form "Y would resolve this": look
           for Y. Enumerate the batch directory rather than assuming the canonical filename is
-          the only artifact (`fps-30p`), and read the **current status and close reason** of any
-          bead you cite — not just its ID. **Never stake a recommendation on the outcome of a
-          bead filed in this same session**: you do not know how it will close, and "worth a
-          second look once `<bead>` lands" is worthless if it lands as "won't build".
+          the only artifact (`fps-30p`), and read the **current state and close reason** of any
+          issue you cite — not just its number. **Never stake a recommendation on the outcome of
+          an issue filed in this same session**: you do not know how it will close, and "worth a
+          second look once `#<N>` lands" is worthless if it lands as "won't build".
 
        Worked failure, `stickiness_phase_saddle` (`fps-6yi`, batch1, dossiered 2026-08-27):
        all three of its `not_tested` lines were wrong, one per failure mode. It filed `fps-1l1`
@@ -416,7 +416,7 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
        session) interrogating it further, not to close the question. A conditional recommendation
        is only as good as its condition: gate on something checkable (data coverage, a run that
        has not happened) and verify the condition is actually still open before you write it —
-       never on a bead outcome you have not read, per rule 2 above.
+       never on an issue outcome you have not read, per rule 2 above.
    - Embed the plots that exist for this run (`![](per_fold_delta_bars.png)` etc. — only ones
      listed in `facts["plots"]`).
 
@@ -537,41 +537,26 @@ worth a follow-up bead (`bd create`), not something to compute in-session.
    the exemption), and this routine is unattended, so a commit it leaves behind is a commit
    nobody is watching for.
 
-7. **Close the candidate's bead: `bd close <bead_id>` (from `facts["provenance"]["bead_id"]`),
-   then `bd dolt push`.** Mechanical, every time step 6 fires — this is not a judgement about the
-   candidate's merit, only a record that the run is finished and written up (a rejected or
+7. **Close the candidate's issue: `gh issue close <N>`**, where `N` is
+   `facts["provenance"]["bead_id"]` (the field name predates the tracker cutover and now carries a
+   GitHub issue number). Mechanical, every time step 6 fires — this is not a judgement about the
+   candidate's merit, only a record that the run is finished and written up. A rejected or
    inconclusive candidate gets closed exactly the same as any other; `outcome` in the ledger is
-   the merit verdict, bead status is not). Found missing 2026-08-24 (fps-2l9 sat `in_progress`
-   after being fully dossiered, with no close step anywhere) — a real process hole, not tidiness:
-   a batch's retrospective bead (`fps-3jj.18.1`-style, one per batch — see § batch parent bead
-   below) is `blocks`-blocked on every candidate bead being CLOSED, not on its README existing on
-   disk, so a missed close here silently leaves the retrospective looking blocked forever even
-   once every candidate has actually run. Skip this step only in the arity-refusal case above,
-   where step 6 itself is skipped (no README, no ledger entry, no bead touch — the run goes back
-   in the queue, not to closure).
+   the merit verdict, issue state is not.
 
-   **`bd close` also writes a `field_change` row to the git-tracked
-   `.beads/interactions.jsonl`** (`bd dolt push` syncs the separate Dolt remote — a different
-   system, see `feedback_beads_commit_tracked_state` — and does not touch git at all). Step 6's
-   commit already landed before this bead close happens, so that row is left as an uncommitted
-   change in the primary worktree at the end of every run unless committed separately. Found
-   2026-08-25 (fps-6to's close left `.beads/interactions.jsonl` dirty, caught only by the owner
-   checking `git status` after the run) — until now this was patched after the fact by a human or
-   a later session noticing and pushing a standalone `chore: record <id> closure in the
-   interaction log` commit (see git history for several examples). Fold that into this step
-   instead of leaving it dangling: immediately after `bd close` (and whether or not `bd dolt push`
-   succeeds — the two are independent), run
-   `git add .beads/interactions.jsonl && git commit -m "chore: record <id> closure in the
-   interaction log" && git push`. If several candidates are dossiered in one session, one commit
-   per close (or a single trailing commit covering all of them) both work — just don't let the run
-   end with `.beads/interactions.jsonl` dirty.
+   **Why it is a step at all:** found missing 2026-08-24 (fps-2l9 sat claimed after being fully
+   dossiered, with no close step anywhere). A batch's retrospective issue (one per batch — see
+   `docs/routines/generator.md` § Filing) is blocked on every candidate issue being CLOSED, not on its README
+   existing on disk, so a missed close here silently leaves the retrospective looking blocked
+   forever even once every candidate has actually run.
 
-   **The push belongs in this step too, for the reason the step itself demonstrates.** The
-   revision that added the commit half above (2026-08-25) was written, committed to a local
-   `main`, and never pushed — so the instruction telling this routine not to leave work dangling
-   was itself left dangling, and shipped only on 2026-08-26 when the eight-commit backlog was
-   found. A rule about finishing that doesn't itself get finished is the sharpest possible
-   demonstration that "commit" and "landed" are different things.
+   Skip this step only in the arity-refusal case above, where step 6 itself is skipped — no
+   README, no ledger entry, no issue touched; the run goes back in the queue, not to closure.
+
+   Closing an issue touches GitHub only and leaves the working tree clean. (Under bd it also wrote
+   a row to a git-tracked interaction log, which had to be committed separately or the run ended
+   dirty. That whole failure mode went away with the tracker cutover; step 6's commit is the only
+   git write this routine makes.)
 
 ### Step 2 — summary
 
@@ -579,19 +564,18 @@ Print one line per run processed (candidate name, outcome, one-clause verdict) a
 run the deterministic scan logged as `failed, skipping`.
 
 **Before printing that summary, verify the run actually landed** — `git status --short` empty
-(nothing left dirty, including a `bd`-written `.beads/interactions.jsonl` row) and
-`git log --oneline origin/main..main` empty (nothing left unpushed). Both are one command and
-neither depends on remembering what this run happened to touch, which is the point: the two
-failures this routine has actually had — a dirty interactions log (2026-08-25) and an unpushed
-backlog (2026-08-26) — are each caught by one of them. Report the run as done only once both are
+(nothing left dirty) and `git log --oneline origin/main..main` empty (nothing left unpushed).
+Both are one command and neither depends on remembering what this run happened to touch, which is
+the point: the two failures this routine has actually had — a dirty tracker-written file
+(2026-08-25) and an unpushed backlog (2026-08-26) — are each caught by one of them. Report the run as done only once both are
 clean; if either isn't, finish the commit/push before summarising rather than noting it as a
 caveat.
 
 No PR, no further action — the next thing
-that touches this candidate is either a human reading the README, or (once every candidate bead in
-a batch is closed) the batch's retrospective bead — see `docs/routines/generator.md` § Filing for
-the current parent/child bead structure; earlier revisions of this doc named a standalone
-`fps-3jj.8`, superseded by the per-batch parent-bead convention.
+that touches this candidate is either a human reading the README, or (once every candidate issue
+in a batch is closed) the batch's retrospective issue — see `docs/routines/generator.md` § Filing
+for the current parent/child issue structure; earlier revisions of this doc named a standalone
+`fps-3jj.8`, superseded by the per-batch parent-issue convention.
 
 ## Known gaps to flag, not silently work around
 

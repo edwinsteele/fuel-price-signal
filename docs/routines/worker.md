@@ -9,7 +9,7 @@ Before this file, the actual pickup/PR rules were duplicated into two places out
 1. The Routine's stored `job_config` message (edited only through the Routines UI/API).
 2. A dormant local `~/.claude/scheduled-tasks/fuel-price-signal-worker/SKILL.md` on the owner's Mac.
 
-Both copies predated the Beads migration (2026-08-06, PR #278) and both drifted: they told the worker to use `gh issue list`, `gh issue edit --add-label design`, and `closes #N` commit messages — none of which match CLAUDE.md's current `bd`/Dolt-based pickup rules. Two untracked copies of the same instructions are two places to forget to update.
+Both drifted out of step with CLAUDE.md, in opposite directions across a year: they were written against GitHub Issues, went stale when the 2026-08-06 Beads migration moved the tracker to `bd`, and are stale again now the 2026-09-07 cutover moved it back. Two untracked copies of the same instructions are two places to forget to update — twice over, here.
 
 The fix is to keep exactly **one tracked copy of the shim text**, here. The scheduler's stored prompt — remote `job_config` or local `SKILL.md` — should hold nothing but a pointer to CLAUDE.md, never the rules themselves. When the pickup/PR process changes, only CLAUDE.md's ["If you are the scheduled worker routine"](../../CLAUDE.md#if-you-are-the-scheduled-worker-routine) section needs editing; a three-line shim has nothing substantive left to go stale.
 
@@ -31,4 +31,4 @@ Three lines, nothing else: who you are, where the repo is, where the rules live.
 
 - **Remote Routine** (`trig_01Mhkd4YLBpuGLhcXLMHaZVQ`): needs to be updated via the Routines UI (or `update_trigger`) with `prompt` set to the shim above. **Not done as part of this change** — the trigger was created via the Routines UI directly (`created_via: "http_api"`), and `update_trigger` only permits an agent session to modify a trigger it created itself via `create_trigger`. This is an owner action.
 - **Local scheduled task** (`~/.claude/scheduled-tasks/fuel-price-signal-worker/SKILL.md` on the owner's Mac): not reachable from a repo PR or a cloud session — needs the owner to delete it (it's currently orphaned/non-firing) or replace its body with the shim above.
-- Once both are updated, trigger one live run (`fire_trigger` or wait for the next scheduled fire) and confirm the transcript follows only CLAUDE.md's `bd`-based pickup rules, with no `gh issue` calls.
+- Once both are updated, trigger one live run (`fire_trigger` or wait for the next scheduled fire) and confirm the transcript follows CLAUDE.md's pickup rules and nothing else. This is phase 7 of [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398) — the Routine has been disabled since 2026-08-15 and re-enabling it needs exactly this live fire to confirm.

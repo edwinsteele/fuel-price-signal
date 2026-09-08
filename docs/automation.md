@@ -1,10 +1,10 @@
 # Automation workflow
 
-> **Status (2026-08-15): the Cloud Routine is disabled.** `bd dolt push` from inside a Routine sandbox hits an HTTP 403 pushing to Dolt's git-ref namespace — a Claude Code Routines platform limitation (sandboxed git credentials can't push non-standard refs), not something fixable from this repo. Root cause, live reproduction, and an upstream report are documented in bd issue `fps-sk0` (status `blocked`, P3). The mechanics below remain accurate and this doc doesn't need rewriting if the Routine is re-enabled later — check `fps-sk0` first to see if the upstream blocker has moved.
+> **Status: the Cloud Routine has been disabled since 2026-08-15, and its blocker is gone.** It was disabled solely because `bd dolt push` could not authenticate from a Routine sandbox — a Dolt bug the sandbox's credential setup triggered (`fps-sk0`, [#384](https://github.com/edwinsteele/fuel-price-signal/issues/384), closed as moot). The 2026-09 tracker cutover removed `bd` and its second store entirely; the routine now needs only `gh`, which already authenticates there. Re-enabling it is phase 7 of [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398) and needs a live Routine fire to confirm. The mechanics below are current.
 
 This document describes how `chore` and `polish` issues flow from filing to merged PR with minimal owner involvement, while `design` issues stay manual.
 
-Issues referenced below live in Beads (`bd`), not GitHub Issues — see [AGENTS.md § Beads](../AGENTS.md#beads). PRs, CI, and review threads are still on GitHub; only issue tracking moved.
+Issues referenced below are GitHub Issues, worked through `gh` — see [AGENTS.md § Issue tracking](../AGENTS.md#issue-tracking).
 
 ## Routine prompts live in `docs/routines/`, not in the scheduler
 
@@ -22,11 +22,11 @@ Not every file under `docs/routines/` has a scheduler entry, though — `docs/ro
 | `claude-authored` | Applied by worker automatically | — | Identifies worker-opened PRs |
 | `auto-merge-ok` | Applied by worker to `chore` PRs on open | — | Triggers `.github/workflows/auto-merge.yml` |
 
-`experiment` doesn't fit the table above — it's a bd-issue label only, with no PR path (the
-runner it triggers never opens a PR). It marks a candidate-feature bead for the separate local
-launch routine (fps-3jj.5, [docs/routines/launch.md](routines/launch.md)) and exists so the
-chore/polish worker's `bd ready --label chore`/`--label polish` queries never claim one and try to
-implement it in a cloud container with no data.
+`experiment` doesn't fit the table above — it has no PR path (the runner it triggers never opens
+a PR). It marks a candidate-feature issue for the separate local launch routine (fps-3jj.5,
+[docs/routines/launch.md](routines/launch.md)), and exists so the chore/polish worker's
+`gh issue list --label chore`/`--label polish` queries never claim one and try to implement it in
+a cloud container with no data.
 
 ## State machine
 
