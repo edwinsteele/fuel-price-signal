@@ -63,7 +63,7 @@ syntax, expanded from the checkout's git remote — write it literally.
   ```bash
   gh api "repos/{owner}/{repo}/issues?labels=<label>&state=open&per_page=100" --paginate \
     | jq '[.[] | select(has("pull_request")|not)
-             | {number,title,labels,assignees,body,createdAt:.created_at,updatedAt:.updated_at}]'
+             | {number,title,labels,assignees,createdAt:.created_at,updatedAt:.updated_at}]'
   ```
 - **List open PRs by label** (same endpoint, keep only entries that *are* PRs):
   ```bash
