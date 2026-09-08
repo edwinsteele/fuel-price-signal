@@ -168,8 +168,15 @@ def parse_tgptables_series(html: str) -> pd.Series:
         m = _TGPTABLES_DATE_RE.search(cell.get_text(" ", strip=True))
         dates.append(datetime.datetime.strptime(m.group(1), "%d %B %Y").date() if m else None)
 
+    cells = sydney_row.find_all("td")[1:]
+    if len(cells) != len(dates):
+        raise RuntimeError(
+            f"tgpTables Sydney row has {len(cells)} cells but header has "
+            f"{len(dates)} dated columns — layout may have changed"
+        )
+
     data: dict[datetime.date, float] = {}
-    for date, cell in zip(dates, sydney_row.find_all("td")[1:]):
+    for date, cell in zip(dates, cells):
         if date is None:
             continue
         try:
@@ -193,9 +200,7 @@ def merge_tgp_series(base: pd.Series, tail: pd.Series) -> pd.Series:
     yet. Every date only ``base`` covers (i.e. all pre-tail history) is left
     untouched.
     """
-    merged = base.combine_first(tail)
-    merged.update(tail)
-    return merged.sort_index()
+    return tail.combine_first(base).sort_index()
 
 
 def publish_date_from_name(name: str) -> datetime.date | None:

@@ -188,12 +188,27 @@ def test_parse_tgptables_series_raises_when_no_table():
 
 def test_parse_tgptables_series_raises_when_no_sydney_row():
     html = """
+    <h3>Petrol (ULP, cents per litre, inclusive of GST)</h3>
     <table class="table table-striped">
       <tr><th>City</th><th>Monday<br/>17 August 2026</th></tr>
       <tr><td><a href="http://api.aip.com.au/public/melbourneUlp">Melbourne</a></td><td>119.1</td></tr>
     </table>
     """
     with pytest.raises(RuntimeError, match="Sydney"):
+        parse_tgptables_series(html)
+
+
+def test_parse_tgptables_series_raises_on_cell_count_mismatch():
+    """A header row with more dated columns than the Sydney row has cells must
+    raise, not silently zip-truncate and pair dates with the wrong day's price."""
+    html = """
+    <h3>Petrol (ULP, cents per litre, inclusive of GST)</h3>
+    <table class="table table-striped">
+      <tr><th>City</th><th>Monday<br/>17 August 2026</th><th>Tuesday<br/>18 August 2026</th></tr>
+      <tr><td><a href="http://api.aip.com.au/public/sydneyUlp">Sydney</a></td><td>123.4</td></tr>
+    </table>
+    """
+    with pytest.raises(RuntimeError, match="cells"):
         parse_tgptables_series(html)
 
 
