@@ -36,3 +36,13 @@ that could not see the issue it had just blocked, and a stale sweep that could n
 Mocked tests were green through both -- 30/30 on the mocked-equivalent paths, then 9/30 on the
 first live run. See [[worktree-missing-gitignored-batch-data]] for the other flavour of "the test
 environment is not the real one".
+
+**Addendum, 2026-09-08 (worker Routine re-enable, phase 7 of #398):** all the measurements above
+are for `gh issue list --label` under an unrestricted token — that call resolves through GraphQL
+in this `gh` version. The worker Routine's cloud environment authenticates with a token scoped to
+"a pinned set of PR-review operations" and 403s on that GraphQL query entirely, so CLAUDE.md's
+pickup rules were rewritten to hit the REST issues endpoint directly
+(`gh api repos/{owner}/{repo}/issues?labels=<label>&state=open`) instead. **That REST endpoint's
+consistency behaviour after a mutation has not been measured** — it may or may not share the
+plain-`--label` GraphQL path's fast (~0.7s) reflection. Re-measure it the way this file's table
+was built if a claim/release race is ever observed from the worker.

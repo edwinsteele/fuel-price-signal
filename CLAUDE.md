@@ -33,13 +33,18 @@ for the general model.
 
 ### If you are the scheduled worker routine
 
-> **Status: disabled since 2026-08-15, and the reason is now gone.** It was disabled solely
-> because `bd dolt push` could not authenticate from a Routine sandbox (`fps-sk0`,
-> [#384](https://github.com/edwinsteele/fuel-price-signal/issues/384), closed as moot). The
-> Beads→GitHub cutover removed `bd` entirely, and `gh` already authenticates in that sandbox,
-> so the blocker no longer exists. Re-enabling is phase 7 of
-> [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398) and needs a live Routine
-> fire to confirm. Until that lands, don't assume the twice-daily schedule below is firing.
+> **Status: disabled, blocked on a second live fire.** The `fps-sk0` blocker (`bd dolt push`
+> couldn't authenticate from a Routine sandbox) is gone — `bd` is deleted. The first live fire
+> after re-enabling (2026-09-08) surfaced a *different* blocker: this Routine's environment
+> authenticates with a token scoped to "a pinned set of PR-review operations" and returns `403`
+> on any other GraphQL query — and `gh issue/pr list/view --json ...` and `gh issue/pr edit ...`
+> all resolve through GraphQL in this `gh` version, so every pickup-rule command that used them
+> failed outright. The rules below are rewritten to use REST (`gh api`) instead, per the error's
+> own suggestion, but **that rewrite is untested against the real restricted token** — it's
+> verified only by running the equivalent REST calls from an unrestricted session. Re-enabling
+> is phase 7 of [#398](https://github.com/edwinsteele/fuel-price-signal/issues/398) and needs a
+> second live fire to confirm the rewrite actually works under the restriction. Until that
+> lands, don't assume the twice-daily schedule below is firing.
 
 You are a Sonnet worker running as a **Claude Code Routine** (see [docs/automation.md](docs/automation.md))
 on a **twice-daily** schedule (`0 9,20 * * *` UTC), and you get a fresh checkout each run rather
@@ -47,6 +52,38 @@ than a persistent interactive session's disk. Everything you need lives in GitHu
 there is no second store to sync.
 
 Your job is to pick up `chore`- and `polish`-labelled issues and open PRs.
+
+**REST query helpers — use these, not `gh issue/pr list/view --json` or `gh issue/pr edit`.**
+Those all resolve through GraphQL in this `gh` version, and this environment's token serves
+only a pinned set of PR-review GraphQL operations — everything else 403s, even though `gh api`
+(plain REST) works fine on the same token. `{owner}/{repo}` below is `gh api`'s own placeholder
+syntax, expanded from the checkout's git remote — write it literally.
+
+- **List issues by label** (the REST issues endpoint also returns PRs, so filter those out):
+  ```bash
+  gh api "repos/{owner}/{repo}/issues?labels=<label>&state=open&per_page=100" --paginate \
+    | jq '[.[] | select(has("pull_request")|not)
+             | {number,title,labels,assignees,createdAt:.created_at,updatedAt:.updated_at}]'
+  ```
+- **List open PRs by label** (same endpoint, keep only entries that *are* PRs):
+  ```bash
+  gh api "repos/{owner}/{repo}/issues?labels=<label>&state=open&per_page=100" --paginate \
+    | jq '[.[] | select(has("pull_request")) | {number,body}]'
+  ```
+- **PR review/CI snapshot for PR `<N>`** (replaces `gh pr view N --json comments,reviews,mergeable,statusCheckRollup`):
+  ```bash
+  gh api repos/{owner}/{repo}/pulls/<N> --jq '{mergeable, mergeable_state, sha: .head.sha}'
+  gh api repos/{owner}/{repo}/pulls/<N>/reviews --paginate                    # → reviews[]
+  gh api repos/{owner}/{repo}/issues/<N>/comments --paginate                  # → comments[] (PR conversation, not inline)
+  gh api "repos/{owner}/{repo}/commits/<sha>/check-runs" --paginate --jq '.check_runs'  # → CI rollup
+  ```
+  `mergeable_state == "dirty"` is REST's equivalent of GraphQL's `mergeable: CONFLICTING`.
+- **Claim/release an issue** (replaces `gh issue edit --add-assignee`/`--remove-assignee`):
+  ```bash
+  LOGIN=$(gh api user --jq .login)
+  gh api repos/{owner}/{repo}/issues/<N>/assignees -f "assignees[]=$LOGIN"           # claim
+  gh api -X DELETE repos/{owner}/{repo}/issues/<N>/assignees -f "assignees[]=$LOGIN" # release
+  ```
 
 **Pickup rules:**
 0. Ensure `gh` is present and authenticated — this environment does not always have it
@@ -71,13 +108,11 @@ Your job is to pick up `chore`- and `polish`-labelled issues and open PRs.
    proceed as though there were no work.
 1. **There is nothing to close out.** A merged PR whose body carries `Closes #<N>` closes its
    issue by itself, so a run no longer starts by reconciling merged PRs against the tracker.
-2. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers:
-   ```bash
-   gh pr list --label claude-authored --state open --json number | jq -r '.[].number'
-   ```
+2. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers with the
+   **list open PRs by label** helper (`<label>` = `claude-authored`), then `jq -r '.[].number'`.
    For each number N, a PR qualifies if either:
-   - `gh pr view N --json mergeable | jq -r '.mergeable'` returns `CONFLICTING`, **or**
-   - `gh pr view N --json reviews | jq '[.reviews[] | select(.body | length > 20)] | length'` is >0 **and** `gh pr view N --json comments | jq '[.comments[] | select(.body | startswith("[worker]"))] | length'` is 0 (reviews exist but worker hasn't replied yet).
+   - the **PR review/CI snapshot** helper's `mergeable_state` is `dirty`, **or**
+   - `reviews[] | select(.body | length > 20)` is non-empty **and** `comments[] | select(.body | startswith("[worker]"))` is empty (reviews exist but worker hasn't replied yet).
 
    If any PR qualifies, perform maintenance (see **PR maintenance** below), then exit.
 3. Check for open `claude-authored` PRs (any). If any exist, **exit immediately** — one at a time.
@@ -86,34 +121,32 @@ Your job is to pick up `chore`- and `polish`-labelled issues and open PRs.
    claim query. This rule runs sequentially, before any new claim is made in *this* run, so
    there is no race with rule 6 — a "fresh" claim is always at least one full rule-4 pass old
    by the time rule 6 runs again next run.
-   1. List candidates with the plain label listing and filter client-side (never `--search` or
-      `--assignee` — see the warning under rule 5):
-      ```bash
-      gh issue list --label chore  --state open --limit 200 --json number,title,labels,assignees,createdAt,updatedAt
-      gh issue list --label polish --state open --limit 200 --json number,title,labels,assignees,createdAt,updatedAt
-      ```
+   1. List candidates with the **list issues by label** helper (never `--search` or `--assignee`
+      filtering — see the warning under rule 5) for both `chore` and `polish`.
       Keep the issues assigned to **your own login** (`gh api user --jq .login`) and not
       carrying the `blocked` label. **"Has an assignee" is not the test** — the assignee is an
       identity, not a status, so that wider filter sweeps the owner's own parked work as if it
       were a crashed claim. Compare logins.
    2. For each, check whether it has a live branch (`git ls-remote --heads origin 'worker/<N>-*'`)
-      or an open PR referencing it (`gh pr list --label claude-authored --state open --json number,body`,
+      or an open PR referencing it (**list open PRs by label** helper, `<label>` = `claude-authored`,
       grepping bodies for `Closes #<N>`).
    3. If neither exists **and** `updatedAt` is more than 90 minutes old (long enough to cover a
       normal claim→PR cycle within one run, short enough that a crash isn't lost for days), the
       claim is orphaned.
-   4. Release each orphaned issue: `gh issue edit <N> --remove-assignee "@me"`.
-5. Claim the next issue. Using the same plain-`--label` listing as rule 4, take `chore` first
-   and fall back to `polish` if `chore` yields nothing; keep the issues with **no** assignee and
-   without the `blocked` label; take the oldest by `createdAt`.
+   4. Release each orphaned issue with the **claim/release an issue** helper's release call.
+5. Claim the next issue. Using the same **list issues by label** helper as rule 4, take `chore`
+   first and fall back to `polish` if `chore` yields nothing; keep the issues with **no**
+   assignee and without the `blocked` label; take the oldest by `createdAt`.
 
-   ⚠️ **List by `--label`, not `--search` or `--assignee`.** Those two are search-index backed
+   ⚠️ **List by label, not `--search` or `--assignee`.** Those two are search-index backed
    and lag a mutation by 2–4s, so a claim or a release this run just made can be invisible to
-   the very next read — which is exactly the shape of rules 4 and 5. The plain `--label`
-   listing reflects a mutation on the first read. Details and measurements:
-   [docs/memory/gh-issue-list-consistency.md](docs/memory/gh-issue-list-consistency.md).
-6. Claim it: `gh issue edit <N> --add-assignee "@me"`. **The assignee is the claim** — there is
-   no separate status to set, and none to forget to clear.
+   the very next read — which is exactly the shape of rules 4 and 5. The plain label listing
+   reflects a mutation on the first read (measured against `gh issue list --label`, GraphQL —
+   the REST endpoint used by the helper here hasn't been separately measured; treat it as
+   presumptively the same class of read and re-verify if a claim/release race is ever observed).
+   Details and measurements: [docs/memory/gh-issue-list-consistency.md](docs/memory/gh-issue-list-consistency.md).
+6. Claim it with the **claim/release an issue** helper's claim call. **The assignee is the
+   claim** — there is no separate status to set, and none to forget to clear.
 7. Create a branch `worker/<N>-<slug>` for the issue.
 
 **For each PR:**
@@ -128,8 +161,8 @@ Your job is to pick up `chore`- and `polish`-labelled issues and open PRs.
    issue when the PR merges.
 4. After opening the PR, do other useful sequenced work (write a memory to `docs/memory/`, file
    any follow-up issues with `gh issue create`). Once ≈270s of real elapsed time has passed, run
-   `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` to check for reviews. If
-   there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only
+   the **PR review/CI snapshot** helper to check for reviews. If there is no other useful work,
+   run `sleep 270` then check. (`ScheduleWakeup` is only
    available in `/loop` mode — do not attempt it here.) Act on any actionable comments found in
    `reviews[].body`. If CodeRabbit is rate-limited or absent, skip and move on — do not
    reschedule. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat
@@ -149,7 +182,7 @@ When pickup rule 2 triggers, for each qualifying PR:
 4. `git push --force-with-lease`.
 
 *Unresolved review threads:*
-1. Run `gh pr view N --json comments,reviews,mergeable,statusCheckRollup` and inspect each review body for actionable inline comments not yet addressed (i.e. no `[worker]` reply in `comments`).
+1. Run the **PR review/CI snapshot** helper and inspect each review body for actionable inline comments not yet addressed (i.e. no `[worker]` reply in `comments`).
 2. Read all such threads together to understand the full set of requested changes.
 3. For any thread that is ambiguous or requires a design decision: reply `[worker] Needs owner input — <question>` and skip it. Do not make changes for that thread.
 4. Make the minimal changes to address the remaining threads.
