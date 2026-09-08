@@ -13,9 +13,9 @@ on:
     # each adding exactly 5 weekday rows — so data_lag_days climbs from 0 right
     # after a Friday refresh up to 6 by the following Thursday before resetting.
     # The daily cron still makes sense (it picks up the new file the day it
-    # lands), but T-1 is NOT reliably present at this slot; the fresher
-    # api.aip.com.au/public/tgpTables endpoint (~1-2 day lag) is tracked in
-    # fps-3fn as a lower-latency source to backfill the gap.
+    # lands); T-1 is now usually backfilled anyway, since fuel_signal/tgp.py
+    # also fetches api.aip.com.au/public/tgpTables (~1-2 day lag) and merges
+    # its Sydney tail over the xlsx-derived series (#367).
     - cron: "0 17 * * *"
   workflow_dispatch:
 
