@@ -18,9 +18,17 @@ fetches confirmed the publish date jumping every Friday (24/31 Jul, 7/14 Aug
 2026), each adding exactly 5 new weekday rows. So despite the daily fetch
 cron, the latest available row lags "today" by 0-6 days depending on where in
 the week the job runs — see the cron comment in
-``.github/workflows/tgp-fetch.yml``. ``api.aip.com.au/public/tgpTables`` is a
-lower-latency (~1-2 day lag) HTML source AIP also serves, not yet ingested
-here; tracked as fps-3fn.
+``.github/workflows/tgp-fetch.yml``.
+
+To reduce that tail lag, ``api.aip.com.au/public/tgpTables`` — a
+server-rendered HTML page AIP also serves, refreshed more often (~1-2 day
+lag) but showing only a rolling 5-weekday window per city, with no deep
+history — is fetched alongside the xlsx. Its Sydney row overrides/extends the
+xlsx-derived series for the tail dates where the two overlap or it has data
+the xlsx doesn't yet (see ``merge_tgp_series``); the full-history xlsx stays
+the sole source of truth for anything older than that window (#271 still
+holds). A tgpTables fetch/parse failure degrades to xlsx-only rather than
+failing the job — it's a lag-reduction extra, not a dependency.
 
 Storage rationale (#271): the source always serves the *full* history, so the
 daily action downloads it, parses the Sydney column, and **overwrites**
@@ -53,12 +61,24 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 LANDING_URL = "https://aip.com.au/resources/historical-ulp-and-diesel-tgp-data/"
+# The only endpoint AIP has been confirmed to serve this page on is plain HTTP
+# (no TLS, confirmed live 2026-08-20). HTTPS is tried first regardless, since a
+# network intermediary could otherwise tamper with the page in transit and
+# have this write bogus Sydney TGP values into the canonical CSV; falling
+# back to the documented HTTP URL only if the HTTPS attempt fails outright.
+TGP_TABLES_HTTPS_URL = "https://api.aip.com.au/public/tgpTables"
+TGP_TABLES_URL = "http://api.aip.com.au/public/tgpTables"
 
 # The weekly history file. Matches ``AIP_TGP_Data_19-Jun-2026.xlsx`` but NOT the
 # separate ``AIP_Annual_TGP_Data.xlsx`` summary file on the same page.
 _TGP_FILE_RE = re.compile(r"AIP_TGP_Data_[^/\"']*\.xlsx", re.IGNORECASE)
 # Publish date embedded in the filename, e.g. ``19-Jun-2026``.
 _PUBLISH_DATE_RE = re.compile(r"(\d{1,2}-[A-Za-z]{3}-\d{4})")
+# tgpTables column header, e.g. ``Wednesday 12 August 2026`` (weekday name is
+# discarded — only the trailing "12 August 2026" is parsed).
+_TGPTABLES_DATE_RE = re.compile(
+    r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})"
+)
 
 SHEET = "Petrol TGP"
 CITY = "Sydney"
@@ -91,6 +111,96 @@ def download_xlsx(url: str) -> bytes:
     r = requests.get(url, timeout=120)
     r.raise_for_status()
     return r.content
+
+
+def download_tgptables_html() -> str:
+    """Download the rolling 5-weekday-window tgpTables HTML page.
+
+    Tries the HTTPS URL first, falling back to the documented plain-HTTP one
+    only if the HTTPS attempt fails outright (connection refused, TLS error,
+    HTTP error status, etc.) — see the ``TGP_TABLES_URL`` comment.
+    """
+    last_exc: requests.exceptions.RequestException | None = None
+    for url in (TGP_TABLES_HTTPS_URL, TGP_TABLES_URL):
+        try:
+            logger.info("Downloading TGP tables page %s", url)
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            return r.text
+        except requests.exceptions.RequestException as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
+def parse_tgptables_series(html: str) -> pd.Series:
+    """Parse the Sydney ULP row from the tgpTables rolling-window HTML page.
+
+    tgpTables renders one ``table-striped`` table per fuel type (petrol,
+    diesel, ...); the petrol/ULP table is identified by its Sydney row's
+    ``sydneyUlp`` href, not by table order, since AIP's own ordering of the
+    per-fuel tables isn't guaranteed.
+
+    Returns a date-indexed, sorted ``pd.Series`` named ``tgp_cents`` covering
+    whichever of the ~5 weekday columns parsed. Raises ``RuntimeError`` if no
+    Sydney ULP table/row or dated column can be found — the page layout may
+    have changed.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    table = None
+    sydney_row = None
+    for candidate in soup.find_all("table", class_="table-striped"):
+        for tr in candidate.find_all("tr"):
+            anchor = tr.find("a", href=True)
+            if anchor and "sydneyulp" in anchor["href"].lower():
+                table, sydney_row = candidate, tr
+                break
+        if table is not None:
+            break
+    if table is None or sydney_row is None:
+        raise RuntimeError("No Sydney ULP tgpTables table found — layout may have changed")
+
+    header_row = table.find("tr")
+    if header_row is None:
+        raise RuntimeError("tgpTables table has no header row")
+    dates: list[datetime.date | None] = []
+    for cell in header_row.find_all(["th", "td"])[1:]:
+        m = _TGPTABLES_DATE_RE.search(cell.get_text(" ", strip=True))
+        dates.append(datetime.datetime.strptime(m.group(1), "%d %B %Y").date() if m else None)
+
+    cells = sydney_row.find_all("td")[1:]
+    if len(cells) != len(dates):
+        raise RuntimeError(
+            f"tgpTables Sydney row has {len(cells)} cells but header has "
+            f"{len(dates)} dated columns — layout may have changed"
+        )
+
+    data: dict[datetime.date, float] = {}
+    for date, cell in zip(dates, cells):
+        if date is None:
+            continue
+        try:
+            data[date] = float(cell.get_text(strip=True))
+        except ValueError:
+            continue
+    if not data:
+        raise RuntimeError("No parseable Sydney TGP values found in tgpTables")
+
+    series = pd.Series(data, name="tgp_cents").sort_index()
+    series.index = pd.to_datetime(series.index)
+    series.index.name = "date"
+    return series
+
+
+def merge_tgp_series(base: pd.Series, tail: pd.Series) -> pd.Series:
+    """Merge tgpTables' fresher tail into the xlsx-derived ``base`` series.
+
+    ``tail`` values win wherever present — both correcting dates the two
+    sources overlap on and extending with newer dates the xlsx doesn't have
+    yet. Every date only ``base`` covers (i.e. all pre-tail history) is left
+    untouched.
+    """
+    return tail.combine_first(base).sort_index()
 
 
 def publish_date_from_name(name: str) -> datetime.date | None:
@@ -166,7 +276,13 @@ def _log_lag(publish_date: datetime.date | None, series: pd.Series) -> None:
     show_default=True,
     help="Canonical Sydney TGP CSV to (over)write.",
 )
-def main(from_xlsx: pathlib.Path | None, csv_path: pathlib.Path) -> None:
+@click.option(
+    "--skip-tgptables",
+    is_flag=True,
+    default=False,
+    help="Skip the tgpTables tail-lag fetch and use the weekly xlsx alone.",
+)
+def main(from_xlsx: pathlib.Path | None, csv_path: pathlib.Path, skip_tgptables: bool) -> None:
     """Fetch the AIP Sydney TGP series and refresh the canonical CSV."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -179,6 +295,18 @@ def main(from_xlsx: pathlib.Path | None, csv_path: pathlib.Path) -> None:
         publish_date = publish_date_from_name(url)
 
     series = parse_sydney_series(source)
+
+    # --from-xlsx is for offline/backfill use, which stays network-free even
+    # without --skip-tgptables; a fetch/parse failure degrades to xlsx-only.
+    if from_xlsx is None and not skip_tgptables:
+        try:
+            tail = parse_tgptables_series(download_tgptables_html())
+            series = merge_tgp_series(series, tail)
+        except Exception:
+            logger.warning(
+                "tgpTables fetch/parse failed; using xlsx-only series", exc_info=True
+            )
+
     _log_lag(publish_date, series)
     n_new = write_series_csv(series, csv_path)
     logger.info("Wrote %s (%d rows, %d new)", csv_path, len(series), n_new)
