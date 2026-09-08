@@ -519,15 +519,15 @@ Hard-gates a full `make update` (pull, db, fill, classify, lga-leadership) and p
 data. Aborts loudly on refresh failure rather than freeze stale data. Run this before filing any
 candidate against `<batch-name>`.
 
-**Per candidate — write the module and file the bd issue:**
+**Per candidate — write the module and file the issue:**
 
 1. Copy `experiments/candidates/TEMPLATE.py` to `experiments/candidates/<batch-name>/<NAME>.py` and
    fill in `NAME`, `HYPOTHESIS`, `PREDICTED_SIGNATURE`, `CONFIDENCE_EFFECT`, `CONFIDENCE_ZONE`,
    `TARGET`, `MECHANISM_FAMILY`, `PRIOR_ART`, `COLUMNS`, `INPUTS`, `add_columns` (and optional
    `add_axis`). Commit straight to `main` — `experiments/**` is exempt from the PR rule.
-2. File the candidate bead:
+2. File the candidate issue:
    ```bash
-   bd create --title "<NAME> candidate" --labels experiment --description "$(cat <<'EOF'
+   gh issue create --title "<NAME> candidate" --label experiment --body "$(cat <<'EOF'
    HYPOTHESIS: ...
    TARGET: ...
    PREDICTED_SIGNATURE: ...
@@ -540,14 +540,14 @@ candidate against `<batch-name>`.
    Module: experiments/candidates/<batch-name>/<NAME>.py
    EOF
    )"
-   bd dolt push
    ```
    The last two lines are machine-parsed by `launch.py` — line-anchored, exact text, no extra
-   whitespace. The bead needs the `experiment` label so the chore/polish worker can't see it and
-   the launch routine can.
+   whitespace. The issue needs the `experiment` label so the chore/polish worker can't see it and
+   the launch routine can. Allow ~7s before assuming a freshly filed issue is visible to
+   `gh issue list`.
 
 **Running it:** the `fuel-price-signal-launch` scheduled task (nightly, ~9:00 PM local) claims the
-oldest ready `experiment` bead, validates its candidate module (differential PIT test, restricted-
+oldest ready `experiment` issue, validates its candidate module (differential PIT test, restricted-
 frame `INPUTS` check, NaN-rate assert), and launches the hours-long runner detached — one candidate
 per night. To run immediately instead of waiting for the schedule:
 

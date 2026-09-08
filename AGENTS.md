@@ -158,7 +158,7 @@ Within a single station's `fuel_signal.db` history this mostly self-heals: `fill
 
 **A structurally different, non-alarming gap also exists in 2017.** Several months in 2017 (03-27–03-31, 05-19–05-31, 06-18–06-30, 07-19–07-31, 09-05–09-30, 10-14–10-31 — 5 to 26 days each) show **exactly zero** `prices` rows for the tail of the month, resuming cleanly on the 1st of the next month. Unlike March 2022 this is not mid-month and not partial — it lines up precisely with month boundaries in both directions, which is the signature of an early-history bulk-CSV resource that simply didn't cover the full calendar month, not a reporting collapse. The longest (Sept 2017, 26 days) sits just under `fill.py`'s 28-day cap, so it forward-fills without tripping the `fps-ghr` exclusion chain. No other window in 2016-2026 shows either signature — the remaining single- and double-day dips found by the same scan (holidays, weekends) sit at normal-baseline magnitude and don't warrant documentation here.
 
-Composition-drift measurement (the panel-size question this event also raised, originally filed as `fps-ghr`): **answered and closed**, see `fps-tpy`'s bd description or `bd show fps-tpy` — chain-linked index test over 2021-11-05..2025-04-17 (1,260 dates × 714 stations) found total drift +0.461 c/L over 3.4 years, daily |drift change| median exactly 0, concentrated in ~8 days, largest single-day move 0.567 c/L on 2022-06-29 (a different event, not this one). Small and bounded; feeds `station_minus_sydney_avg_cents` and the LGA/brand-mean derivatives on those specific days but is not a first-order threat. Do not re-investigate.
+Composition-drift measurement (the panel-size question this event also raised, originally filed as `fps-ghr`): **answered and closed**, see `fps-tpy` in the archive (`jq -r '.[] | select(.id=="fps-tpy") | .description' docs/bd-archive/issues.json`) — chain-linked index test over 2021-11-05..2025-04-17 (1,260 dates × 714 stations) found total drift +0.461 c/L over 3.4 years, daily |drift change| median exactly 0, concentrated in ~8 days, largest single-day move 0.567 c/L on 2022-06-29 (a different event, not this one). Small and bounded; feeds `station_minus_sydney_avg_cents` and the LGA/brand-mean derivatives on those specific days but is not a first-order threat. Do not re-investigate.
 
 ### Aggregation
 `sydney_average_series` / `average_price_series` is a temporary convenience for cycle detection. Future analyses will need flexible groupings — by region, corridor, LGA cluster, etc. Don't treat it as permanent infrastructure; don't patch it when new groupings are needed, design a proper aggregation layer instead.
@@ -400,26 +400,51 @@ push**; a memory sitting on a local `main` is not filed.
 These were `bd remember` entries until 2026-09-08 —
 [docs/memory/MIGRATION.md](docs/memory/MIGRATION.md) accounts for all 53.
 
-## Beads
+## Issue tracking
 
-> **⚠ SUPERSEDED 2026-09-07 — GitHub Issues is the tracker again.** The 24 live issues were
-> migrated to GitHub as **#365–#388** (map: [docs/bd-id-map.md](docs/bd-id-map.md)). **File with
-> `gh issue create`, not `bd create`, and do not write to `bd` — its contents are historical.**
-> Phase 4 ported `launch.py`/`runner.py` off `bd`, and phase 5 moved the `bd remember`
-> memories to [docs/memory/](docs/memory/INDEX.md) — **nothing in the codebase reads the Dolt
-> DB any more**, and `.beads/` is deleted in phase 6. The rest of this section describes the
-> retired setup and is kept until the phase-6 docs sweep rewrites it; read it as history, not
-> instruction.
+Work items live in **GitHub Issues**, driven from the `gh` CLI. The live backlog opened at
+**#365–#388** on 2026-09-07, when the Beads (`bd`) experiment — the tracker here from
+2026-08-06 — was cut back over. PRs, CI, and reviews never moved.
 
-Work items (what was previously GitHub Issues) live in [Beads](https://github.com/gastownhall/beads) (`bd`), a git-native, dependency-aware issue tracker. GitHub Issues were retired for this project 2026-08-06; PRs, CI, and reviews still live on GitHub as before — only the backlog moved.
-
-- `.beads/` holds bd's config (git-tracked) and its Dolt database (`.beads/embeddeddolt/`, gitignored — it does not travel via ordinary `git push`). Cross-checkout sync is `bd dolt pull` / `bd dolt push` against the `origin` Dolt remote, not git.
-- Finding work: `bd ready` (open, unblocked), `bd show <id>` (full detail + deps), `bd search <query>`.
-- Working an issue: `bd update <id> --claim` (marks in_progress), `bd close <id>` when done — there is no GitHub auto-close-on-merge equivalent, closing is always an explicit step. Run `bd dolt push` after any write you want visible elsewhere.
-- Filing work: `bd create --title "..." --description "..." --labels chore|polish|design` — see [§ Issue label taxonomy](#issue-label-taxonomy) below for which label. The `spawn_task` redirect in [CLAUDE.md](CLAUDE.md) uses this.
-- The 12 open design issues carried over from GitHub keep their original number as `external_ref` (e.g. `https://github.com/edwinsteele/fuel-price-signal/issues/271`) for traceability into old PR/commit history. New issues created directly in bd have no GitHub counterpart.
-- **Decision pointer convention:** when a closed `design` issue represents a settled decision (an approach tried and accepted/rejected), file a thin `bd create --type=decision` — title + one-line takeaway + `--deps discovered-from:<resolved-issue-id>` + a reference to the doc section with the actual argument (e.g. "see ML_SIGNAL.md § TGP leading indicator"). The bd record is a queryable pointer so `bd search`/`bd find-duplicates` can catch re-litigation of settled ground; it is **not** a second copy of the argument. Two things make that pointer actually work: **close it on filing** (an open record means work outstanding and pollutes `bd ready` forever — closed records stay findable via `bd search <word> --status all`), and **put the searchable words in the title**, because `bd search` matches a contiguous substring of the *title* only and does not read descriptions (`--desc-contains` does). First use: `fps-bsb`. [docs/STATUS.md](docs/STATUS.md)/[docs/ML_SIGNAL.md](docs/ML_SIGNAL.md)/`PLAN_ml_signal.md` remain the only place the reasoning itself lives — see [docs/CONVENTIONS.md § One source of truth](docs/CONVENTIONS.md#one-source-of-truth-for-current-model-state). Backfill lazily as decisions come up in conversation, not as a batch project.
-- **Ignore bd's own generic priming advice where it conflicts with this project's conventions.** `bd prime` (bd's built-in AI-context command) tells agents to stop using TodoWrite/TaskCreate and to stop keeping MEMORY.md files, in favour of `bd remember`. That's bd's generic pitch for projects adopting it as the *sole* state layer; this project made a deliberate narrower choice instead — bd holds work items plus a handful of atomic technical gotchas (`bd memories`), while process rules stay in CLAUDE.md/CONVENTIONS.md, decision narratives stay in docs, and Claude's own per-user memory (preferences, teaching style) stays in its private memory system outside this repo. Follow this file's conventions over `bd prime`'s generic ones when they conflict.
+- **Finding work:** `gh issue list --label <label>` (open-only by default),
+  `gh issue view <N>` for one issue, `gh issue list --search "<query>"` to search titles
+  *and* bodies. Dependencies are native: `gh issue list --json number,blockedBy,parent,subIssues`.
+- **Working an issue: the assignee IS the claim.** `gh issue edit <N> --add-assignee "@me"`
+  to take it; there is no separate in-progress state to set and none to forget to clear.
+  `gh issue edit <N> --remove-assignee "@me"` puts it back. Park an issue nobody should
+  pick up with the `blocked` label — see [docs/routines/launch.md](docs/routines/launch.md)
+  for why self-assignment is *not* the way to do that.
+- **Closing:** put `Closes #<N>` in the PR body and the squash merge closes it. Only an
+  issue with no PR needs `gh issue close <N>` by hand.
+- **Filing work:** `gh issue create --title "..." --body "..." --label chore|polish|design` —
+  see [§ Issue label taxonomy](#issue-label-taxonomy) below for which label. The `spawn_task`
+  redirect in [CLAUDE.md](CLAUDE.md) uses this.
+- **`--label` and `--search` do not have the same consistency**, and automation that mutates
+  an issue then re-reads a list must use the plain `--label` listing and filter client-side.
+  See [docs/memory/gh-issue-list-consistency.md](docs/memory/gh-issue-list-consistency.md).
+- **Decision pointer convention:** when a closed `design` issue represents a settled decision
+  (an approach tried and accepted or rejected), file a thin pointer issue — title + one-line
+  takeaway + a link to the doc section carrying the actual argument (e.g. "see ML_SIGNAL.md
+  § TGP leading indicator") + a `Discovered from #<N>` body line — and **close it on filing**,
+  so it never sits in a queue. The record is a searchable pointer that catches re-litigation
+  of settled ground; it is **not** a second copy of the argument. Find them with
+  `gh issue list --state closed --search "<word>"`, which reads bodies as well as titles.
+  [docs/STATUS.md](docs/STATUS.md) / [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) /
+  `PLAN_ml_signal.md` remain the only place the reasoning itself lives — see
+  [docs/CONVENTIONS.md § One source of truth](docs/CONVENTIONS.md#one-source-of-truth-for-current-model-state).
+  Backfill lazily as decisions come up in conversation, not as a batch project.
+- **Which layer a fact belongs in.** Work items are issues; atomic technical gotchas are
+  [docs/memory/](docs/memory/INDEX.md); process rules are
+  [docs/CONVENTIONS.md](docs/CONVENTIONS.md) and [CLAUDE.md](CLAUDE.md); decision narratives
+  are the docs above. An agent's own private memory holds only what is about the *owner*
+  (preferences, teaching style), never a repo fact — see [§ Technical memories](#technical-memories).
+- **`fps-*` IDs in older prose are Beads issue IDs and resolve by archive lookup, not by any
+  live command.** The 24 issues that were still open at cutover are mapped to their GitHub
+  numbers in [docs/bd-id-map.md](docs/bd-id-map.md); the full frozen corpus — all 161 issues,
+  their comments and edges — is [docs/bd-archive/](docs/bd-archive/). `grep fps-xxx
+  docs/bd-archive/issues.json`, or `jq` it. Those citations were deliberately not rewritten:
+  most are lab-book and test-docstring records of what was known at the time, and editing
+  them would falsify the record.
 
 ## Automation workflow
 
@@ -433,10 +458,14 @@ See [docs/automation.md](docs/automation.md) for the full state machine and oper
 | `polish` | Small contained features, test additions, minor refactors | Automated worker |
 | `design` | Cycle detection, signal logic, ML work, architecture decisions | Owner only — never automated |
 | `claude-authored` | PR was opened by the automated worker | Identifies worker-opened PRs |
-| `experiment` | One candidate feature, run unattended by the local nightly runner | Local runner (`bd ready --label experiment`) — never the remote worker |
+| `experiment` | One candidate feature, run unattended by the local nightly runner | Local runner (`gh issue list --label experiment`) — never the remote worker |
 | `auto-merge-ok` | Safe to auto-merge once CI passes | Applied by worker to `chore` PRs |
 
-The labels above are the **routing** axis: they decide *who* picks an issue up. They say nothing about what it is about, which is why a backlog of ~35 was unreadable by 2026-09-02 (every item `design` or `chore`, 20 of 38 at P2, and `bd ready` opening with eight never-scoped wishlist items).
+Two more labels carry run state rather than routing: `blocked` (a fault a human must clear —
+also the way to park an issue so no routine touches it) and `retried` (this claim has spent its
+one retry). See [docs/routines/launch.md](docs/routines/launch.md).
+
+The labels above are the **routing** axis: they decide *who* picks an issue up. They say nothing about what it is about, which is why a backlog of ~35 was unreadable by 2026-09-02 (every item `design` or `chore`, 20 of 38 at P2, and the top of the queue holding eight never-scoped wishlist items).
 
 **Topic labels — the second, orthogonal axis.** Every issue carries exactly one, alongside its routing label:
 
@@ -449,9 +478,9 @@ The labels above are the **routing** axis: they decide *who* picks an issue up. 
 | `product` | The end-user signal itself — delivery, CLI, what the owner actually acts on |
 | `infra` | CI, scheduled tasks, the worker Routine, `.github/**` |
 
-`bd list --label research` is now the way to read one thread; `bd ready` is the way to read across them.
+`gh issue list --label research` is the way to read one thread; an unfiltered `gh issue list` is the way to read across them.
 
-**Priority is a queue position, not a severity.** P1 is reserved for the current focus's critical path and should hold under ~6 issues — if everything is P1, nothing is. P2 is real work with a near-term claim, P3 is real work that is not now, P4 is a parking lot that should be periodically emptied by closing rather than by demoting further.
+**Priority is a `P0`–`P4` label** (GitHub has no priority field; the labels carry what bd's field held). **It is a queue position, not a severity.** P1 is reserved for the current focus's critical path and should hold under ~6 issues — if everything is P1, nothing is. P2 is real work with a near-term claim, P3 is real work that is not now, P4 is a parking lot that should be periodically emptied by closing rather than by demoting further.
 
 **Classification examples:**
 - `chore`: add a missing type hint, bump a dev dependency, fix a typo in a docstring, delete unused import
@@ -460,14 +489,14 @@ The labels above are the **routing** axis: they decide *who* picks an issue up. 
 
 **Escape hatch — polish → design upgrade:**
 If while implementing a `polish` issue you discover it actually requires design work:
-1. Relabel the issue: `bd update <id> --add-label design --remove-label polish`
-2. `bd note <id> "<why you stopped and what the design question is>"`, then `bd dolt push`.
+1. Relabel the issue: `gh issue edit <N> --add-label design --remove-label polish`
+2. `gh issue comment <N> --body "<why you stopped and what the design question is>"`.
 3. Do not write any code.
 
 ### Branch and PR conventions
 
-- Branch naming: `worker/<bd-id>-<short-slug>` (e.g. `worker/fps-1785999730120-5-048485f0-add-type-hints`)
-- PR title: `fix: <issue title> (bd-<id>)` for chore; `feat: <issue title> (bd-<id>)` for polish — plus a `Resolves: <id>` line in the PR body (no GitHub auto-close magic on a bd issue; see [CLAUDE.md](CLAUDE.md#automated-worker-vs-interactive-session))
+- Branch naming: `worker/<issue-number>-<short-slug>` (e.g. `worker/381-add-type-hints`)
+- PR title: `fix: <issue title> (#<N>)` for chore; `feat: <issue title> (#<N>)` for polish — plus a `Closes #<N>` line in the PR body, which is what actually closes the issue on merge (see [CLAUDE.md](CLAUDE.md#automated-worker-vs-interactive-session))
 - PR body: 3–5 bullet plan (what changed, what didn't, what test was added)
 - Target branch: always `main` (`--base main`)
 - Run `uv run ruff check . && uv run pytest -q` before pushing; fix any failures

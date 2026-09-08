@@ -578,9 +578,7 @@ reading a copy of this file that still states that order as a precondition, it i
 
 ## Filing
 
-> **Tracker: GitHub Issues, via `gh`.** The bd→GitHub cutover landed 2026-09-07
-> (phase 4, `223d0be`). `bd` is stale — do not file to it. The commands below are the
-> ported ones; where older prose elsewhere still says `bd create`, it is stale.
+> **Tracker: GitHub Issues, via `gh`** — see [AGENTS.md § Issue tracking](../../AGENTS.md#issue-tracking).
 
 **Create the batch's parent issue FIRST** (decided 2026-08-23, batch1). Every batch gets
 one tracking issue — labelled `design` and **never** `experiment` (an issue carrying that

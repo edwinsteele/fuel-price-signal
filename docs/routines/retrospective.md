@@ -15,8 +15,8 @@ against it (`experiments/candidates/<batch>/*.py`) has reached a terminal dossie
 this by running Step 0 below and confirming `outcome_tally.never_run == 0`,
 `outcome_tally.retryable_incomplete == 0`, and `outcome_tally.pending_dossier == 0`. If any
 of those are nonzero, the batch isn't finished: some candidates never ran, are still
-cycling through the launch routine's retry budget (or exhausted it and sit `blocked` in
-bd — this module reads disk only and can't tell those two apart, see "Known gaps" below),
+cycling through the launch routine's retry budget (or exhausted it and carry the `blocked`
+label — this module reads disk only and can't tell those two apart, see "Known gaps" below),
 or finished but haven't been dossiered yet. Don't write up a retrospective around a hole in
 the data; wait, or go find out why a candidate is stuck.
 
@@ -40,7 +40,7 @@ be referenced elsewhere.
 
 ### Step 1 — read `retrospective_facts.json` in full
 
-Four sections, matching the parent bead's acceptance criteria:
+Four sections, matching the parent issue's acceptance criteria:
 
 1. **`leaderboard`** — every DOSSIERED candidate, ranked by `noise_band_percentile`
    (higher = better) when the batch has a noise floor, else by raw `delta_cpl_held`
@@ -60,7 +60,7 @@ Four sections, matching the parent bead's acceptance criteria:
    of DOSSIERED candidates in this batch, on a t-distributed critical value in
    band-standard-deviation space rather than percentile space — with N candidates graded
    against the same noise band, picking the best of N is a different, easier-to-satisfy-by-
-   chance question than grading one candidate alone (order statistics) — the bead body calls
+   chance question than grading one candidate alone (order statistics) — the issue body calls
    this out explicitly ("the ranking step is exactly where a noise delta gets promoted to a
    finding"). Each leaderboard row's `clears_family_wise_threshold` uses this corrected bar
    against `noise_band_z`, not `noise_band_percentile`. **`family_wise_percentile_threshold`
@@ -115,7 +115,7 @@ candidate dossier:
 - **Judgement**: did the batch's standout candidate(s) hold up against noise at the
   batch-corrected bar? Did the generator's confidence priors predict what happened, to
   the extent the data supports saying anything? **One-at-a-time additive screening never
-  validates a *combination*** (bead body's own caution) — if several candidates in this
+  validates a *combination*** (the issue body's own caution) — if several candidates in this
   batch each look promising alone, say so, but recommend a combined run before
   "graduate all of them," not instead of it. `not_tested` — adjacent ground this
   retrospective doesn't settle.
@@ -134,8 +134,9 @@ one is invisible to everyone but this machine.
 - **Retryable-vs-blocked ambiguity.** `retrospective.py` reads disk only (`results.json`'s
   status), so a candidate in `RETRYABLE_STATUSES` reads as `retryable_incomplete` whether
   it's still cycling through the launch routine's retry budget or has exhausted it and sits
-  permanently `blocked` in bd (`fps-rtd`'s mechanism). Telling these apart needs
-  `bd show <id>` on the candidate's bead. Don't assume either state without checking.
+  permanently blocked (`fps-rtd`'s mechanism). Telling these apart needs
+  `gh issue view <N>` on the candidate's issue — a blocked one is assigned and carries the
+  `blocked` label. Don't assume either state without checking.
 - **Small-N leaderboards are still correct, just not very informative.** Batch 0 has one
   candidate; `family_wise_percentile_threshold(1)` reduces to the plain 95th percentile, and
   `family_wise_z_threshold(1, n_draws)` reduces to the plain one-tailed critical value at the

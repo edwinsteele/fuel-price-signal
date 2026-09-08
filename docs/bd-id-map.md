@@ -1,6 +1,6 @@
 # bd → GitHub issue map
 
-Written by the Beads → GitHub cutover, 2026-09-07 (`migration/migrate_to_github.py`, PLAN_beads_cutover.md phase 3).
+Written by the Beads → GitHub cutover, 2026-09-07 (PLAN_beads_cutover.md phase 3). The one-shot migration scripts were removed with `.beads/` in phase 6; the corpus they produced is what survives, at [docs/bd-archive/](bd-archive/).
 
 GitHub issue and PR numbers share one sequence, so these numbers start at 365 — well clear of the pre-Beads issues (#1–#273) that some of these reference.
 
