@@ -67,9 +67,29 @@ Add a one-line comment when an invariant is non-obvious (e.g. why the YYYY-DD-MM
 
 ## Tests
 
+### Required coverage areas
+Tests are required alongside all implementation. Key areas:
+- Transformer cleaning logic (date format bug, postcode corrections, dedup)
+- Cycle detection correctness (synthetic price series with known cycle lengths)
+- Signal threshold logic (edge cases at cycle boundaries)
+- Gap-filling / forward-fill behaviour
+- DB read/write roundtrips
+- Backtest engine: known price series + known strategy → verify simulated spend
+
 ### DB fixture and CliRunner pattern
 
-See [AGENTS.md § Test patterns](../AGENTS.md#test-patterns) for the standard `conn` fixture and `CliRunner().invoke(main, [...])` pattern for module tests.
+Standard fixture for DB-backed tests:
+```python
+@pytest.fixture
+def conn(tmp_path):
+    c = open_db(tmp_path / "test.db")
+    create_schema(c)
+    yield c
+    c.close()
+```
+
+Insert gap-filled test data with `upsert_daily_prices(conn, [(station_code, fuel_code, date_str, price_cents), ...])`. For standalone command tests, invoke via `CliRunner().invoke(main, [...])` where `main` is imported from the module under test.
+
 
 ### Time-window tests use today-relative dates
 
@@ -95,7 +115,7 @@ Default decision rule: if any single fold regresses by more than the median impr
 
 Override is allowed when the regressing fold is known to be anomalous (a price-shock period, a labelling artefact, a regime explicitly out of scope). State the override reason in the PR body — a considered exception is fine; silently ignoring the rule is not.
 
-**Pre-registered instance:** the fold whose val window is `2022-02-03 to 2022-05-03` spans the unrecoverable NSW source-data hole of 2022-03-12 to 2022-03-21 (`fps-tpy`; see [AGENTS.md § Known source data limitations](../AGENTS.md#known-source-data-limitations)). Decided 2026-08-27: flag it if it regresses, don't exclude it from the harness — the effect is small, partial, and confined to one fold, and this window already overlaps the Ukraine-invasion shock most regime-segmented runs treat as elevated-variance.
+**Pre-registered instance:** the fold whose val window is `2022-02-03 to 2022-05-03` spans the unrecoverable NSW source-data hole of 2022-03-12 to 2022-03-21 (`fps-tpy`; see [data-semantics.md § Known source data limitations](data-semantics.md#known-source-data-limitations)). Decided 2026-08-27: flag it if it regresses, don't exclude it from the harness — the effect is small, partial, and confined to one fold, and this window already overlaps the Ukraine-invasion shock most regime-segmented runs treat as elevated-variance.
 
 **Why:** on 2026-06-03, `station_minus_last_max_cents` looked like a clean drop on one val window (5-seed Δ −0.0112 ± 0.0043), but a 14-fold paired walk-forward CV showed 7/14 fold-wins, mean Δ +0.0104, with fold 9 (2023-10→2024-01) regressing by +0.103. See `experiments/2026-06-03_drop_redundant_pair/`.
 
@@ -215,6 +235,16 @@ The convention spread is a **bias** term: it does not shrink with more stations,
 
 **The tell (impossible negatives) is often missing.** It only worked for #262 because the comparison was against an oracle, which cannot lose. The same defect measured against always-buy produces no impossible value at all — absence of an impossible value is not evidence of identification. Enumerate the free conventions and measure the spread; don't wait for the quantity to embarrass itself. (The 2026-06-18 gate-1 per-regime saving% sat unchallenged for two months for exactly this reason — withdrawn 2026-08-21, `experiments/2026-08-21_path_coupling_audit/`, bd `fps-grp`.)
 
+## Multi-seed test-logloss policy
+
+At **lock time** (phase boundaries, results you will compare future changes against), run `score_phase2.py` with `--seeds 1,7,42,99,2024`. This banks a per-seed raw (uncalibrated) LightGBM test-logloss vector in `experiments/results.csv` columns `seed_test_logloss_vector`, `seed_test_logloss_mean`, `seed_test_logloss_std`.
+
+For **development sniff-tests**, omit `--seeds`. Single-seed is sufficient for checking direction; multi-seeding every experiment defeats the 3×std comparison gate.
+
+Comparison gate: a new model's delta vs the baseline must exceed `3 × seed_test_logloss_std` of the baseline to be considered real (not seed noise).
+
+Metric is always **raw (uncalibrated)** LightGBM test logloss so that the calibration choice doesn't confound the comparison. The `holdout_logloss` column in the same row records the final (possibly calibrated) model score and is a separate quantity.
+
 ## Definition of done
 
 Before considering a change complete, in this order:
@@ -250,11 +280,19 @@ Notes about completed work are fine briefly, then purge unless they inform futur
 
 This rule applies to this file too — see [§ Noise floor & placebo arity](#noise-floor--placebo-arity) for where its own forensic history was moved out to (2026-09-02).
 
+**[AGENTS.md](../AGENTS.md) is the one doc with a hard size limit, and it is not a style rule.**
+Codex reads it eagerly up to 32 KiB and silently drops everything past that — no warning, no log
+line. It reached 43,994 bytes by 2026-09-10, which had been costing it the last 11 KB (the memory
+write protocol, issue tracking, the label taxonomy and the PR-review section) for an unknown
+period. `tests/test_agents_md_budget.py` now fails the build on an overrun. The fix is always to
+move a section into this file, [data-semantics.md](data-semantics.md), [memory/](memory/INDEX.md)
+or [STATUS.md](STATUS.md) and leave a pointer — a linked doc costs nothing.
+
 ## Git workflow
 
 - **Fresh branch per PR.** Branch off `main` for each PR; do not continue committing to a previously merged branch even though GitHub diffs against `main` would still work.
 - **Open the PR immediately** after the first commit+push — no need to ask first.
-- Branch naming, PR title format, and PR body shape: see [AGENTS.md § Branch and PR conventions](../AGENTS.md#branch-and-pr-conventions).
+- Branch naming, PR title format, and PR body shape: see [§ Branch and PR conventions](#branch-and-pr-conventions).
 - **Experiments lab book is exempt.** Changes confined to `experiments/**` may be committed **and pushed** directly to `main` without a PR. Each experiment dir is a self-contained lab book entry; iterate freely. `experiments/results.csv` (the formal graduated-experiment log) and `experiments/INDEX.md` (the lab book index) are also direct-to-`main`. Anything touching `fuel_signal/`, `tests/`, `docs/`, or top-level config still goes through a PR even if an experiment motivated it.
 - **`docs/memory/**` is exempt too.** Technical memories are filed straight to `main`, no PR — they are notes, not code, and a review round-trip is enough friction to stop them being written at all. Same postcondition as the lab book: committed **and pushed**. The write protocol (classify, check for a duplicate, index it) is in [AGENTS.md § Technical memories](../AGENTS.md#technical-memories). A commit that touches a memory **and code** is not exempt — split it. (Memories alongside other *docs* are fine; that is the doc-only path, not the code path.)
 - **"Direct to `main`" means committed AND pushed — a commit sitting on a local `main` is not landed.** The PR path can't get this wrong (you cannot open a PR without pushing), so every place the word "commit" appears alone is on an exempt path, and the exempt paths are the ones unattended routines use. That asymmetry bit us for real: on 2026-08-26 eight commits — two candidate dossiers, a post-hoc script, ledger/INDEX rows, and two interaction-log entries — were found sitting unpushed on the primary worktree's local `main`, the oldest two days old. One of them was itself the fix for the *commit* half of this same gap, written and then never pushed, so the fix reproduced the bug it fixed. **Postcondition for any routine or session that writes to `main`: `git status --short` is empty AND `git log --oneline origin/main..main` is empty before you report the work done.** Check it, don't remember it.
@@ -279,6 +317,109 @@ This repo's worktrees live *inside* the primary checkout at `.claude/worktrees/*
   - **This makes the post-merge worktree sweep unsafe as written.** CLAUDE.md's checklist says to confirm a branch is merged with `git branch --merged main`, which is the same ancestry test and gives the same false negative — a squash-merged worktree reads as "3 commits ahead, unmerged work, leave it alone" indefinitely. Hit live 2026-09-08 on `handover-beads-github-cutover-42114a`, whose three commits were PR #394, merged; `git rev-list --count origin/main..HEAD` said 3 while `git diff HEAD origin/main -- <the five files it touched>` was empty. **Sweep on the content check, not the count.** `git diff --name-only origin/main...HEAD` gives you the file list to check against.
 - **A worktree that cut a *temp* PR branch mid-session is a different case, and that one can fast-forward.** When a session in a per-issue worktree branches off its own identity branch, then cuts a fresh PR branch from `origin/main` mid-session (per the rule above, because `origin/main` moved), merging and deleting the temp branch leaves the worktree either on nothing or on its own identity branch several commits behind. The post-merge checklist is phrased for *other* worktrees and misses this one. After any PR merge from a per-issue worktree, run `git branch --show-current`; if it's the temp branch or behind `origin/main`, check out the identity branch and `git pull --ff-only origin main` — safe when `git merge-base --is-ancestor <identity-branch> origin/main` is true. The user had to ask for this explicitly after PR #330.
 - **The harness can recycle a worktree mid-session, and the replacement is stale.** A session can be moved to a brand-new worktree directory (a new random slug) checked out to the *same* branch at the *same commit it had when the session started* — so if you merged a PR earlier in that session, the new worktree comes back pointing at your pre-squash commit, behind `origin/main` and "1 ahead" of it. Nothing warns you, `git status` is clean, and the stale checkout looks exactly like a healthy one. Anything uncommitted in the old directory is gone, and absolute paths into the old worktree no longer resolve. Hit live 2026-09-10 after PR #407: the replacement worktree sat at the pre-merge commit, 2 behind `origin/main`. **After any mid-session worktree swap, re-run `git fetch origin` and `git rev-list --left-right --count origin/main...HEAD` before doing anything else.** If the branch's work has landed (content check, per the bullet above) `git reset --hard origin/main` is the safe resync — the branch is squash-merged and its remote copy is already auto-deleted, so there is nothing to lose.
+
+## Issue tracking
+
+Work items live in **GitHub Issues**, driven from the `gh` CLI. The live backlog opened at
+**#365–#388** on 2026-09-07, when the Beads (`bd`) experiment — the tracker here from
+2026-08-06 — was cut back over. PRs, CI, and reviews never moved.
+
+- **Finding work:** `gh issue list --label <label>` (open-only by default),
+  `gh issue view <N>` for one issue, `gh issue list --search "<query>"` to search titles
+  *and* bodies. Dependencies are native: `gh issue list --json number,blockedBy,parent,subIssues`.
+- **Working an issue: the assignee IS the claim.** `gh issue edit <N> --add-assignee "@me"`
+  to take it; there is no separate in-progress state to set and none to forget to clear.
+  `gh issue edit <N> --remove-assignee "@me"` puts it back. Park an issue nobody should
+  pick up with the `blocked` label — see [docs/routines/launch.md](routines/launch.md)
+  for why self-assignment is *not* the way to do that.
+- **Closing:** put `Closes #<N>` in the PR body and the squash merge closes it. Only an
+  issue with no PR needs `gh issue close <N>` by hand.
+- **Filing work:** `gh issue create --title "..." --body "..." --label chore|polish|design` —
+  see [§ Issue label taxonomy](#issue-label-taxonomy) below for which label. The `spawn_task`
+  redirect in [CLAUDE.md](../CLAUDE.md) uses this.
+- **`--label` and `--search` do not have the same consistency**, and automation that mutates
+  an issue then re-reads a list must use the plain `--label` listing and filter client-side.
+  See [docs/memory/gh-issue-list-consistency.md](memory/gh-issue-list-consistency.md).
+- **Decision pointer convention:** when a closed `design` issue represents a settled decision
+  (an approach tried and accepted or rejected), file a thin pointer issue — title + one-line
+  takeaway + a link to the doc section carrying the actual argument (e.g. "see ML_SIGNAL.md
+  § TGP leading indicator") + a `Discovered from #<N>` body line — and **close it on filing**,
+  so it never sits in a queue. The record is a searchable pointer that catches re-litigation
+  of settled ground; it is **not** a second copy of the argument. Find them with
+  `gh issue list --state closed --search "<word>"`, which reads bodies as well as titles.
+  [docs/STATUS.md](STATUS.md) / [docs/ML_SIGNAL.md](ML_SIGNAL.md) /
+  `PLAN_ml_signal.md` remain the only place the reasoning itself lives — see
+  [docs/CONVENTIONS.md § One source of truth](#one-source-of-truth-for-current-model-state).
+  Backfill lazily as decisions come up in conversation, not as a batch project.
+- **Which layer a fact belongs in.** Work items are issues; atomic technical gotchas are
+  [docs/memory/](memory/INDEX.md); process rules are
+  this document and [CLAUDE.md](../CLAUDE.md); decision narratives
+  are the docs above. An agent's own private memory holds only what is about the *owner*
+  (preferences, teaching style), never a repo fact — see [§ Technical memories](../AGENTS.md#technical-memories).
+- **`fps-*` IDs in older prose are Beads issue IDs and resolve by archive lookup, not by any
+  live command.** The 24 issues that were still open at cutover are mapped to their GitHub
+  numbers in [docs/bd-id-map.md](bd-id-map.md); the full frozen corpus — all 161 issues,
+  their comments and edges — is [docs/bd-archive/](bd-archive/). `grep fps-xxx
+  docs/bd-archive/issues.json`, or `jq` it. Those citations were deliberately not rewritten:
+  most are lab-book and test-docstring records of what was known at the time, and editing
+  them would falsify the record.
+
+
+### Issue label taxonomy
+
+| Label | Meaning | Who works it |
+|-------|---------|--------------|
+| `chore` | Formatting, dead code, doc fixes, dependency bumps, trivial cleanup | Automated worker |
+| `polish` | Small contained features, test additions, minor refactors | Automated worker |
+| `design` | Cycle detection, signal logic, ML work, architecture decisions | Owner only — never automated |
+| `claude-authored` | PR was opened by the automated worker | Identifies worker-opened PRs |
+| `experiment` | One candidate feature, run unattended by the local nightly runner | Local runner (`gh issue list --label experiment`) — never the remote worker |
+| `auto-merge-ok` | Safe to auto-merge once CI passes | Applied by worker to `chore` PRs |
+
+Two more labels carry run state rather than routing: `blocked` (a fault a human must clear —
+also the way to park an issue so no routine touches it) and `retried` (this claim has spent its
+one retry). See [docs/routines/launch.md](routines/launch.md).
+
+The labels above are the **routing** axis: they decide *who* picks an issue up. They say nothing about what it is about, which is why a backlog of ~35 was unreadable by 2026-09-02 (every item `design` or `chore`, 20 of 38 at P2, and the top of the queue holding eight never-scoped wishlist items).
+
+**Topic labels — the second, orthogonal axis.** Every issue carries exactly one, alongside its routing label:
+
+| Label | Scope |
+|-------|-------|
+| `batch1` | The batch1 close-out chain, and only that. Empty it and retire the label; do not repurpose it for batch2 — file `batch2` |
+| `pipeline` | Experiment-pipeline machinery: `experiments/pipeline/**`, `experiments/lib/**`, dossier/retrospective/noise-floor defects and hoists |
+| `research` | Feature and analysis tracks — candidate features, the phase axis, arbiter design, anything whose deliverable is a finding rather than code |
+| `data` | Ingest and frame quality: FuelCheck/TGP sources, `fill.py`, panel membership |
+| `product` | The end-user signal itself — delivery, CLI, what the owner actually acts on |
+| `infra` | CI, scheduled tasks, the worker Routine, `.github/**` |
+
+`gh issue list --label research` is the way to read one thread; an unfiltered `gh issue list` is the way to read across them.
+
+**Priority is a `P0`–`P4` label** (GitHub has no priority field; the labels carry what bd's field held). **It is a queue position, not a severity.** P1 is reserved for the current focus's critical path and should hold under ~6 issues — if everything is P1, nothing is. P2 is real work with a near-term claim, P3 is real work that is not now, P4 is a parking lot that should be periodically emptied by closing rather than by demoting further.
+
+**Classification examples:**
+- `chore`: add a missing type hint, bump a dev dependency, fix a typo in a docstring, delete unused import
+- `polish`: add a missing test for an existing function, extract a helper that duplicates two callers, add a `--verbose` flag to an existing CLI command
+- `design`: change cycle detection algorithm, add a new signal class, modify the DB schema, anything that touches `cycle.py`, `signal.py`, or ML work
+
+**Escape hatch — polish → design upgrade:**
+If while implementing a `polish` issue you discover it actually requires design work:
+1. Relabel the issue: `gh issue edit <N> --add-label design --remove-label polish`
+2. `gh issue comment <N> --body "<why you stopped and what the design question is>"`.
+3. Do not write any code.
+
+### Branch and PR conventions
+
+- Branch naming: `worker/<issue-number>-<short-slug>` (e.g. `worker/381-add-type-hints`)
+- PR title: `fix: <issue title> (#<N>)` for chore; `feat: <issue title> (#<N>)` for polish — plus a `Closes #<N>` line in the PR body, which is what actually closes the issue on merge (see [CLAUDE.md](../CLAUDE.md#automated-worker-vs-interactive-session))
+- PR body: 3–5 bullet plan (what changed, what didn't, what test was added)
+- Target branch: always `main` (`--base main`)
+- Run `uv run ruff check . && uv run pytest -q` before pushing; fix any failures
+
+### Reviewing PRs
+
+- PR branches authored in this repo are usually checked out under `.claude/worktrees/<slug>`. Before fetching anything, run `git worktree list`, match the PR's head branch name, and verify `git -C <path> rev-parse HEAD` equals the PR head sha. If it matches, review files directly from the worktree — far cheaper than paging `gh pr diff` or `git show FETCH_HEAD:<path>` per file. Fetch only if no worktree matches or it's stale.
+- When reading PR metadata, skip comments unless they're actually needed (e.g. `gh pr view --json title,body,files` rather than a full view) — review bots (CodeRabbit et al.) attach large noise blobs.
 
 ## Filing and finding issues
 

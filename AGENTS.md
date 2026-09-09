@@ -11,9 +11,15 @@ WAIT | Day 12/46 of cycle | E10 @ Caltex Springwood: 179.2c | Trough est. ~34 da
 
 See [docs/STATUS.md](docs/STATUS.md) for current build status and pending phases.
 See [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) for ML model design decisions and results.
-See [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for code style, test patterns, definition-of-done, and git workflow rules.
+See [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for code style, test patterns, definition-of-done, git workflow, issue tracking and the label taxonomy.
 See [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) for the ML model training/evaluation CLI reference (README.md covers setup and day-to-day signal usage only).
 See [docs/feature-pipeline.md](docs/feature-pipeline.md) for the AI-sourced candidate-feature pipeline's machinery.
+See [docs/data-semantics.md](docs/data-semantics.md) for station classification, price-data shape, and the traps in filtering on class.
+
+**This file has a byte budget.** Codex loads `AGENTS.md` eagerly up to 32 KiB and silently
+drops the remainder, so it stays architecture, module layout and review rules only — everything
+else goes in the docs above and is reached by link. `tests/test_agents_md_budget.py` enforces
+the limit; when it fails, move content out rather than deleting it.
 
 ## Module structure
 
@@ -97,20 +103,6 @@ Which shape depends on how far SQL has already aggregated — memory is the bind
 
 Backfills also commit per snapshot; batch commits in range mode only, where the fsync cost is disproportionate on Viking's storage.
 
-## Test patterns
-
-Standard fixture for DB-backed tests:
-```python
-@pytest.fixture
-def conn(tmp_path):
-    c = open_db(tmp_path / "test.db")
-    create_schema(c)
-    yield c
-    c.close()
-```
-
-Insert gap-filled test data with `upsert_daily_prices(conn, [(station_code, fuel_code, date_str, price_cents), ...])`. For standalone command tests, invoke via `CliRunner().invoke(main, [...])` where `main` is imported from the module under test.
-
 ## Project setup
 
 - Package manager: **uv** (`uv init`, `uv add`, `uv run`)
@@ -148,77 +140,16 @@ When a new bulk CSV is released that overlaps `data/snapshots/` dates, run `uv r
 
 ### Known source data limitations
 
-**2022-03-12 to 2022-03-21: NSW source data collapses ~85-98%, unrecoverable.** `prices` row counts (raw event log, all fuel grades, all NSW stations) drop from a ~3,500-1,100/day baseline to double- and triple-digit counts (e.g. 2022-03-20: 49 rows), with the surrounding week each side (2022-03-10 to 2022-04-01) also thinner than normal. P95/P98 grades hit **zero events statewide** 2022-03-11 to 2022-03-29 while E10/U91 continued at reduced volume, so this is a genuine source-side reporting collapse, not a real 19-day market freeze — the network E10 median kept moving through the window (183.9 → 176.9 → 185.8 → 198.9 c/L). The 2022-03-30/31 spike (515/549 stations repricing E10 in two days) is the federal fuel excise cut (~22 c/L, effective 2022-03-30), not stations reopening after a genuine pause.
-
-Checked 2026-08-25, no alternative source exists: data.nsw.gov.au's one March-2022 resource (`d707be7a-dbb9-47a7-ae57-599428731fac`) has never been revised since 2022-04-04; rows-per-MB of the published XLSX is consistent with neighbouring months (Feb 19.6k/MB, Mar 19.0k/MB, Apr 19.8k/MB), so this project's extraction is complete — the *source file itself* is short, not our parsing of it. data.gov.au only mirrors the same resource. The NSW real-time Fuel API is snapshot-only and cannot be queried retrospectively. `data/snapshots/` starts 2026-08. **The gap is permanent; plan around it, don't try to fill it.**
-
-Within a single station's `fuel_signal.db` history this mostly self-heals: `fill.py`'s `MAX_GAP_FILL_DAYS = 28` forward-fills across the ~10-19 day hole without triggering exclusion. It becomes a much bigger problem in combination with `labels.py`'s exclusion window for the minority of stations that also have a gap on the *other* side of March 2022 — tracked separately as `fps-ghr` (turns a 2-3 week source hole into a 125+ day exclusion for 81 stations). This entry is the underlying data fact; `fps-ghr` is the code defect it interacts with.
-
-**Evaluation treatment (decided 2026-08-27, `fps-tpy`): flag, don't exclude.** The canonical train/val/test split (`docs/STATUS.md` § Canonical split) never scores this window directly — Val and Test both start in 2025. It only touches the pre-test `walk_forward_folds()` used for feature-change CV (`docs/CONVENTIONS.md` § Changing the production feature set): with the project's standard `train_min_days=1825, val_days=90, step_days=90`, exactly one fold's **val window** is `2022-02-03 to 2022-05-03` (its train window for any later fold that reaches this far also absorbs the hole via forward-filled rows, same as any other station gap). Only ~10-19 of that fold's 90 val days are degraded, `fill.py`'s cap keeps `val_df` non-empty (so `cv_report.py`'s `if val_df.empty: continue` skip does not fire), and the same window already coincides with the Ukraine-invasion price shock (2022-02-24) that regime-segmented CV runs treat as elevated-variance. Given the effect is small, partial, and confined to one fold of many, excluding it would be special-casing evaluation logic for a bounded, already-measured effect — proportionate response is to treat a March-2022-spanning fold the same way `docs/CONVENTIONS.md`'s existing override clause treats any other "known price-shock period": eligible for the fold-regression override, not a reason to rebuild the CV harness. Don't re-litigate this; if a specific CV run shows a March-2022 fold behaving anomalously, cite this note rather than re-deriving the cause.
-
-**A structurally different, non-alarming gap also exists in 2017.** Several months in 2017 (03-27–03-31, 05-19–05-31, 06-18–06-30, 07-19–07-31, 09-05–09-30, 10-14–10-31 — 5 to 26 days each) show **exactly zero** `prices` rows for the tail of the month, resuming cleanly on the 1st of the next month. Unlike March 2022 this is not mid-month and not partial — it lines up precisely with month boundaries in both directions, which is the signature of an early-history bulk-CSV resource that simply didn't cover the full calendar month, not a reporting collapse. The longest (Sept 2017, 26 days) sits just under `fill.py`'s 28-day cap, so it forward-fills without tripping the `fps-ghr` exclusion chain. No other window in 2016-2026 shows either signature — the remaining single- and double-day dips found by the same scan (holidays, weekends) sit at normal-baseline magnitude and don't warrant documentation here.
-
-Composition-drift measurement (the panel-size question this event also raised, originally filed as `fps-ghr`): **answered and closed**, see `fps-tpy` in the archive (`jq -r '.[] | select(.id=="fps-tpy") | .description' docs/bd-archive/issues.json`) — chain-linked index test over 2021-11-05..2025-04-17 (1,260 dates × 714 stations) found total drift +0.461 c/L over 3.4 years, daily |drift change| median exactly 0, concentrated in ~8 days, largest single-day move 0.567 c/L on 2022-06-29 (a different event, not this one). Small and bounded; feeds `station_minus_sydney_avg_cents` and the LGA/brand-mean derivatives on those specific days but is not a first-order threat. Do not re-investigate.
+The NSW source data has holes and quirks that will otherwise look like bugs in our code — most
+consequentially the unrecoverable 2022-03-12 → 2022-03-21 gap. Full list, with what each one
+does to a fold or a series: [docs/data-semantics.md § Known source data limitations](docs/data-semantics.md#known-source-data-limitations).
 
 ### Aggregation
 `sydney_average_series` / `average_price_series` is a temporary convenience for cycle detection. Future analyses will need flexible groupings — by region, corridor, LGA cluster, etc. Don't treat it as permanent infrastructure; don't patch it when new groupings are needed, design a proper aggregation layer instead.
 
 ### Station classification (Competitive / Discount / Sticky)
 
-LGA- and Brand-level mean features used by the ML model must reflect **current pricing that buyers can actually act on**. Stations fall into three behavioural classes; aggregation policy depends on which class they're in. The classifier is built (`classify.py` → `station_class` table); [issue #108](https://github.com/edwinsteele/fuel-price-signal/issues/108) (closed) holds the original design discussion.
-
-**The three classes:**
-
-| Class | Description | Examples |
-|---|---|---|
-| **Competitive** | Price tracks the cycle; sits within ±10c of the LGA competitive cluster | Metro Tuggerah, Pearl Energy Wyong North, most BP/Caltex/Ampol metro stations |
-| **Sticky** | Set-and-forget pricing; sits persistently above the competitive cluster | Shell Reddy Express Woy Woy, EG Ampol Umina, Ampol Foodary motorway sites, BP Berowra |
-| **Discount** | Sits persistently below the competitive cluster; real, accessible cheap prices | Costco, Powerfuel, Speedway, Budget Petroleum |
-
-**Aggregation policy:** blended Competitive + Discount means **exclude Sticky only**. Discount stations stay in because their low prices are real and accessible to a buyer; Sticky stations leave because their stale peak prices don't reflect what buyers are currently being offered.
-
-**Why blended (not Competitive-only):** the level shift introduced by including Discount stations (LGAs with discounters look cheaper) reflects real prices buyers can access. Competitive-only would be a cleaner cycle-position signal but discards level information that matters for a purchasing decision.
-
-**Brand aggregates use the same classification.** Brand mean is computed Sydney-wide across stations of brand B where `class != Sticky` (using the same per-LGA-derived classification). One classifier, one `station_class` table; LGA and Brand aggregates are just different slicings. The principle "ML features for pricing decisions must exclude stations that aren't informative about current pricing" applies regardless of slicing dimension — a Sticky Shell in Woy Woy is stale whether you aggregate it by LGA or by brand.
-
-**Out of scope here:** Members-only stations (e.g. Costco) have prices that aren't accessible to a non-member. A separate accessibility filter may be warranted before they enter any "available to buyer" feature — deferred.
-
-**The classifier (1D on premium):**
-
-| Setting | Value |
-|---|---|
-| Classification axis | Median price-vs-cluster premium |
-| Window | 45 days (NSW mean cycle length) |
-| Band | ±10c (Sticky if median premium > +10c; Discount if < −10c; else Competitive) |
-| Frequency role | Bootstrap seeding of the initial cluster only. Not in the classifier itself, and not a recency filter at aggregation time (see below). |
-
-The classifier is deliberately 1D on premium, not 2D on (frequency, premium). Frequency was a noisy proxy for the property premium measures directly — Sticky stations update less because they're set-and-forget at high prices. A high-frequency station with persistently high premium (e.g. BP Berowra) is still Sticky.
-
-The 45-day window is the empirical mean NSW cycle length. The classifier does **not** try to model cycle-length variation (cycles run 35–70 days) — cycle modelling is out of scope for the current ML model.
-
-**PIT discipline:** The classification window for a training row at date D ends at D−1. Past price classifying past behaviour is not target leakage; the prediction target (future price) is not in the classification window.
-
-**Median is computed in Python**, not SQL — SQLite has no native MEDIAN. Classification is a batch step (daily re-computation across ~800 stations), so the per-call cost doesn't matter.
-
-**Materialisation:** classifications are pre-computed and stored in a `station_class` table:
-
-```sql
-CREATE TABLE station_class (
-    station_code             INTEGER NOT NULL REFERENCES stations(station_code),
-    snapshot_date            INTEGER NOT NULL,   -- YYYYMMDD; classification valid as of this date
-    class                    TEXT    NOT NULL,   -- 'Competitive' | 'Sticky' | 'Discount'
-    median_premium_decicents INTEGER NOT NULL,   -- median (station_price − cluster_mean) over 45d
-    PRIMARY KEY (station_code, snapshot_date)
-);
-```
-
-**Daily cadence.** Each day's classification uses the 45-day window ending at `snapshot_date − 1`. Daily (rather than monthly) snapshots avoid step-changes in LGA aggregates when borderline stations flip class — the rolling window smooths drift, so daily materialisation just propagates that smoothness into the feature. Storage cost is trivial (~290k rows/year × 5 years ≈ 1.5M rows). Compute cost is sub-second per day.
-
-**No active-reporter recency filter.** An earlier design floated a 14d "last raw observation" filter at aggregation time as a guard against stale forward-filled prices. It was dropped (2026-05-19) for KISS reasons: empirical measurement showed it would exclude 5–10% of non-Sticky stations during peak plateaus where the forward-fill is *correct* (price genuinely unchanged), in exchange for limited protection against downcycle staleness that the 28d forward-fill cap and the classifier already partially handle. If model artefacts traceable to ramp-day staleness appear later, revisit — likely with a phase-aware filter rather than a static threshold.
-
-**Aggregation floor:** if fewer than 3 non-Sticky stations are available for a given LGA/brand/date, emit NULL rather than fall back. A silently-thin aggregate is worse than a gap. The floor protects against *thin samples* (high-variance aggregates from few stations); it does **not** protect against staleness — staleness protection lives entirely in the 28d forward-fill cap and the classifier.
-
-**Cold-start handling:** a station gets a classification entry as soon as it has at least one raw observation in the 45-day window. No minimum-observation threshold, no `is_classified` boolean, no default class. Stations with zero observations in the window have no entry and are excluded from aggregates (consistent with their absence from `daily_prices`). Because the pooled ML model uses numeric features only — no station/brand/suburb categorical (the locked baseline is 54 features; see § Canonical feature set) — there is no OOV problem at inference for a brand-new station: its numeric features can be computed from a single observation and the model produces a prediction without special handling. The LGA/brand mean features may be NULL (NaN) if fewer than 3 non-Sticky stations are available; the model handles NaN natively.
+Every station carries one of three classes in the `station_class` table, assigned by `classify.py`. Definitions, thresholds, the sticky-exclusion rule and the traps in filtering on class live in [docs/data-semantics.md § Station classification](docs/data-semantics.md#station-classification-competitive--discount--sticky). Read it before touching `classify.py` or filtering on class.
 
 ### Snapshot CSV schema
 
@@ -336,22 +267,11 @@ To reproduce the locked 54-feat model: `uv run python -m fuel_signal.features` (
 
 ## Multi-seed test-logloss policy
 
-At **lock time** (phase boundaries, results you will compare future changes against), run `score_phase2.py` with `--seeds 1,7,42,99,2024`. This banks a per-seed raw (uncalibrated) LightGBM test-logloss vector in `experiments/results.csv` columns `seed_test_logloss_vector`, `seed_test_logloss_mean`, `seed_test_logloss_std`.
-
-For **development sniff-tests**, omit `--seeds`. Single-seed is sufficient for checking direction; multi-seeding every experiment defeats the 3×std comparison gate.
-
-Comparison gate: a new model's delta vs the baseline must exceed `3 × seed_test_logloss_std` of the baseline to be considered real (not seed noise).
-
-Metric is always **raw (uncalibrated)** LightGBM test logloss so that the calibration choice doesn't confound the comparison. The `holdout_logloss` column in the same row records the final (possibly calibrated) model score and is a separate quantity.
+See [docs/CONVENTIONS.md § Multi-seed test-logloss policy](docs/CONVENTIONS.md#multi-seed-test-logloss-policy) — when to pass `--seeds`, which metric is banked, and the 3×std comparison gate.
 
 ## Testing
-Tests are required alongside all implementation. Key areas:
-- Transformer cleaning logic (date format bug, postcode corrections, dedup)
-- Cycle detection correctness (synthetic price series with known cycle lengths)
-- Signal threshold logic (edge cases at cycle boundaries)
-- Gap-filling / forward-fill behaviour
-- DB read/write roundtrips
-- Backtest engine: known price series + known strategy → verify simulated spend
+
+Tests are required alongside all implementation. Required coverage areas and the DB fixture / `CliRunner` patterns: [docs/CONVENTIONS.md § Tests](docs/CONVENTIONS.md#tests).
 
 ## Technical memories
 
@@ -402,105 +322,68 @@ These were `bd remember` entries until 2026-09-08 —
 
 ## Issue tracking
 
-Work items live in **GitHub Issues**, driven from the `gh` CLI. The live backlog opened at
-**#365–#388** on 2026-09-07, when the Beads (`bd`) experiment — the tracker here from
-2026-08-06 — was cut back over. PRs, CI, and reviews never moved.
+Work items live in **GitHub Issues**, driven from the `gh` CLI. The live backlog opened at **#365–#388** on 2026-09-07, when the Beads (`bd`) experiment was cut back over; PRs, CI and reviews never moved. Two rules carry most of the weight: **the assignee IS the claim** (no separate in-progress state), and **`Closes #<N>` in the PR body** is what closes an issue on merge.
 
-- **Finding work:** `gh issue list --label <label>` (open-only by default),
-  `gh issue view <N>` for one issue, `gh issue list --search "<query>"` to search titles
-  *and* bodies. Dependencies are native: `gh issue list --json number,blockedBy,parent,subIssues`.
-- **Working an issue: the assignee IS the claim.** `gh issue edit <N> --add-assignee "@me"`
-  to take it; there is no separate in-progress state to set and none to forget to clear.
-  `gh issue edit <N> --remove-assignee "@me"` puts it back. Park an issue nobody should
-  pick up with the `blocked` label — see [docs/routines/launch.md](docs/routines/launch.md)
-  for why self-assignment is *not* the way to do that.
-- **Closing:** put `Closes #<N>` in the PR body and the squash merge closes it. Only an
-  issue with no PR needs `gh issue close <N>` by hand.
-- **Filing work:** `gh issue create --title "..." --body "..." --label chore|polish|design` —
-  see [§ Issue label taxonomy](#issue-label-taxonomy) below for which label. The `spawn_task`
-  redirect in [CLAUDE.md](CLAUDE.md) uses this.
-- **`--label` and `--search` do not have the same consistency**, and automation that mutates
-  an issue then re-reads a list must use the plain `--label` listing and filter client-side.
-  See [docs/memory/gh-issue-list-consistency.md](docs/memory/gh-issue-list-consistency.md).
-- **Decision pointer convention:** when a closed `design` issue represents a settled decision
-  (an approach tried and accepted or rejected), file a thin pointer issue — title + one-line
-  takeaway + a link to the doc section carrying the actual argument (e.g. "see ML_SIGNAL.md
-  § TGP leading indicator") + a `Discovered from #<N>` body line — and **close it on filing**,
-  so it never sits in a queue. The record is a searchable pointer that catches re-litigation
-  of settled ground; it is **not** a second copy of the argument. Find them with
-  `gh issue list --state closed --search "<word>"`, which reads bodies as well as titles.
-  [docs/STATUS.md](docs/STATUS.md) / [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) /
-  `PLAN_ml_signal.md` remain the only place the reasoning itself lives — see
-  [docs/CONVENTIONS.md § One source of truth](docs/CONVENTIONS.md#one-source-of-truth-for-current-model-state).
-  Backfill lazily as decisions come up in conversation, not as a batch project.
-- **Which layer a fact belongs in.** Work items are issues; atomic technical gotchas are
-  [docs/memory/](docs/memory/INDEX.md); process rules are
-  [docs/CONVENTIONS.md](docs/CONVENTIONS.md) and [CLAUDE.md](CLAUDE.md); decision narratives
-  are the docs above. An agent's own private memory holds only what is about the *owner*
-  (preferences, teaching style), never a repo fact — see [§ Technical memories](#technical-memories).
-- **`fps-*` IDs in older prose are Beads issue IDs and resolve by archive lookup, not by any
-  live command.** The 24 issues that were still open at cutover are mapped to their GitHub
-  numbers in [docs/bd-id-map.md](docs/bd-id-map.md); the full frozen corpus — all 161 issues,
-  their comments and edges — is [docs/bd-archive/](docs/bd-archive/). `grep fps-xxx
-  docs/bd-archive/issues.json`, or `jq` it. Those citations were deliberately not rewritten:
-  most are lab-book and test-docstring records of what was known at the time, and editing
-  them would falsify the record.
+Command reference, the decision-pointer convention, the `--label` vs `--search` consistency trap, and `fps-*` archive lookup: [docs/CONVENTIONS.md § Issue tracking](docs/CONVENTIONS.md#issue-tracking). Filing discipline: [§ Filing and finding issues](docs/CONVENTIONS.md#filing-and-finding-issues).
 
 ## Automation workflow
 
-See [docs/automation.md](docs/automation.md) for the full state machine and operational details.
+See [docs/automation.md](docs/automation.md) for the full state machine and operational details, and [docs/CONVENTIONS.md § Issue label taxonomy](docs/CONVENTIONS.md#issue-label-taxonomy) for the routing/topic/priority labels that decide who picks an issue up.
 
-### Issue label taxonomy
+## Code Review Rules
 
-| Label | Meaning | Who works it |
-|-------|---------|--------------|
-| `chore` | Formatting, dead code, doc fixes, dependency bumps, trivial cleanup | Automated worker |
-| `polish` | Small contained features, test additions, minor refactors | Automated worker |
-| `design` | Cycle detection, signal logic, ML work, architecture decisions | Owner only — never automated |
-| `claude-authored` | PR was opened by the automated worker | Identifies worker-opened PRs |
-| `experiment` | One candidate feature, run unattended by the local nightly runner | Local runner (`gh issue list --label experiment`) — never the remote worker |
-| `auto-merge-ok` | Safe to auto-merge once CI passes | Applied by worker to `chore` PRs |
+For `@codex review`. General correctness review needs no instruction here — these are the
+repository-specific rules.
 
-Two more labels carry run state rather than routing: `blocked` (a fault a human must clear —
-also the way to park an issue so no routine touches it) and `retried` (this claim has spent its
-one retry). See [docs/routines/launch.md](docs/routines/launch.md).
+**Do not report:**
 
-The labels above are the **routing** axis: they decide *who* picks an issue up. They say nothing about what it is about, which is why a backlog of ~35 was unreadable by 2026-09-02 (every item `design` or `chore`, 20 of 38 at P2, and the top of the queue holding eight never-scoped wishlist items).
+- **Missing or incomplete docstrings.** This repo uses WHY-comments over formal docstrings; a
+  docstring written to clear a coverage threshold fights the convention. Comment when an
+  invariant is non-obvious, not otherwise.
+- **Style, formatting, or import order.** `ruff` owns these and gates every PR in CI.
+- **Anything in `experiments/**` that predates `experiments/lib/`.** Those dirs are frozen
+  lab-book records of what was run, not the template. Review them only when the diff changes them.
 
-**Topic labels — the second, orthogonal axis.** Every issue carries exactly one, alongside its routing label:
+**Verify before reporting.** Every reviewer this repo has had — CodeRabbit, Sourcery, and an
+independent Claude session — has filed a confident false positive, and each was caught by one
+of these two checks:
 
-| Label | Scope |
-|-------|-------|
-| `batch1` | The batch1 close-out chain, and only that. Empty it and retire the label; do not repurpose it for batch2 — file `batch2` |
-| `pipeline` | Experiment-pipeline machinery: `experiments/pipeline/**`, `experiments/lib/**`, dossier/retrospective/noise-floor defects and hoists |
-| `research` | Feature and analysis tracks — candidate features, the phase axis, arbiter design, anything whose deliverable is a finding rather than code |
-| `data` | Ingest and frame quality: FuelCheck/TGP sources, `fill.py`, panel membership |
-| `product` | The end-user signal itself — delivery, CLI, what the owner actually acts on |
-| `infra` | CI, scheduled tasks, the worker Routine, `.github/**` |
+- **Read the whole function a hunk lives in, not just the changed lines.** A review of PR #301
+  flagged a test fixture's `price_date` dtype as mismatched against `runner.py`; the
+  `pd.to_datetime()` that made it correct was in the unchanged lines just above the hunk.
+- **Never cite prose as authority for a code constant.** `snapshot_retire.py`'s
+  `DEFAULT_TOLERANCE = 0.05` was flagged as "should be 5.0 cents" on the strength of a nearby
+  doc sentence reading "agrees within 5c". The prose was the imprecise one. Check what the code
+  does, not how a doc rounds it off in words.
 
-`gh issue list --label research` is the way to read one thread; an unfiltered `gh issue list` is the way to read across them.
+**Report these — each has shipped a real bug here:**
 
-**Priority is a `P0`–`P4` label** (GitHub has no priority field; the labels carry what bd's field held). **It is a queue position, not a severity.** P1 is reserved for the current focus's critical path and should hold under ~6 issues — if everything is P1, nothing is. P2 is real work with a near-term claim, P3 is real work that is not now, P4 is a parking lot that should be periodically emptied by closing rather than by demoting further.
+- **`std > 0` guards on float arrays.** `np.std` of identical floats is `1.78e-18`, not `0.0`,
+  so the guard reads a degenerate band as a confident result. Safe path: pair it with a
+  `np.ptp(...) == 0` exactness check. Shipped twice (#377, #406).
+- **A `pandas` equality assertion in a leakage or point-in-time test without
+  `check_exact=True`.** The default `rtol=1e-5` silently passes a real leak at YYYYMMDD
+  magnitudes.
+- **A column appended to `LOCKED_FEATURE_COLUMNS` without being deleted from
+  `NON_MODEL_COLUMNS`.** Graduating a feature is both edits in one change, or
+  `resolve_baseline_columns()` raises. The order of the locked list is part of the contract —
+  never sort it.
+- **A new feature family wired into `features.py` but not into `backtest.py`'s `decide()`.**
+  `decide()` recomputes features independently of `features.py`; wiring only one aborts the
+  realised backtest.
+- **`Closes #<N>` in a PR body naming an issue not meant to close.** GitHub matches the keyword
+  as a substring anywhere in the body, including inside a sentence disclaiming it.
 
-**Classification examples:**
-- `chore`: add a missing type hint, bump a dev dependency, fix a typo in a docstring, delete unused import
-- `polish`: add a missing test for an existing function, extract a helper that duplicates two callers, add a `--verbose` flag to an existing CLI command
-- `design`: change cycle detection algorithm, add a new signal class, modify the DB schema, anything that touches `cycle.py`, `signal.py`, or ML work
+**How to report:**
 
-**Escape hatch — polish → design upgrade:**
-If while implementing a `polish` issue you discover it actually requires design work:
-1. Relabel the issue: `gh issue edit <N> --add-label design --remove-label polish`
-2. `gh issue comment <N> --body "<why you stopped and what the design question is>"`.
-3. Do not write any code.
+- **P0 and P1 only, at most five findings, most severe first.** This repo already runs Sourcery
+  and CodeRabbit; a third source of nits is worse than none.
+- **If you are not confident it is a real defect, do not file it.** A false positive costs more
+  here than a missed nit.
+- **State the safe path**, not only the objection.
 
-### Branch and PR conventions
-
-- Branch naming: `worker/<issue-number>-<short-slug>` (e.g. `worker/381-add-type-hints`)
-- PR title: `fix: <issue title> (#<N>)` for chore; `feat: <issue title> (#<N>)` for polish — plus a `Closes #<N>` line in the PR body, which is what actually closes the issue on merge (see [CLAUDE.md](CLAUDE.md#automated-worker-vs-interactive-session))
-- PR body: 3–5 bullet plan (what changed, what didn't, what test was added)
-- Target branch: always `main` (`--base main`)
-- Run `uv run ruff check . && uv run pytest -q` before pushing; fix any failures
-### Reviewing PRs
-
-- PR branches authored in this repo are usually checked out under `.claude/worktrees/<slug>`. Before fetching anything, run `git worktree list`, match the PR's head branch name, and verify `git -C <path> rev-parse HEAD` equals the PR head sha. If it matches, review files directly from the worktree — far cheaper than paging `gh pr diff` or `git show FETCH_HEAD:<path>` per file. Fetch only if no worktree matches or it's stale.
-- When reading PR metadata, skip comments unless they're actually needed (e.g. `gh pr view --json title,body,files` rather than a full view) — review bots (CodeRabbit et al.) attach large noise blobs.
+This list samples a larger corpus rather than replacing it: the false-positive case studies are
+in [docs/CONVENTIONS.md § Code review caution](docs/CONVENTIONS.md#code-review-caution), and the
+numerical, pipeline and tooling traps are one hook each in
+[docs/memory/INDEX.md](docs/memory/INDEX.md). Read those when a diff touches ground this section
+does not cover.

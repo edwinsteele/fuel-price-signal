@@ -30,7 +30,7 @@ A common mistake: treating label=0 as the "positive" class (waiting). Don't. BUY
 
 ## Pooled model — one model for all stations
 
-Per-station models were considered and rejected on data volume grounds. One model, all stations contribute training rows. The model uses **numeric features only** — station/brand/suburb do **not** enter as categoricals (the early plan proposed this; the built model went numeric-only). See [AGENTS.md § Station classification](../AGENTS.md#station-classification-competitive--discount--sticky) cold-start note.
+Per-station models were considered and rejected on data volume grounds. One model, all stations contribute training rows. The model uses **numeric features only** — station/brand/suburb do **not** enter as categoricals (the early plan proposed this; the built model went numeric-only). See [data-semantics.md § Station classification](data-semantics.md#station-classification-competitive--discount--sticky) cold-start note.
 
 ## Station classification and aggregate features
 
