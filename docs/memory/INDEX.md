@@ -52,7 +52,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 
 ## Numerical and test traps
 
-- [np-std-float-degeneracy](np-std-float-degeneracy.md) — `np.std` of identical floats is 1.78e-18, not 0.0. A `std > 0` guard reads a degenerate band as a confident **reject**. Pair with `np.ptp`.
+- [np-std-float-degeneracy](np-std-float-degeneracy.md) — `np.std` of identical floats is 1.78e-18, not 0.0. A `std > 0` guard reads a degenerate band as a confident **reject**. Pair with `np.ptp`. The artefact is length-dependent (n=20 yes, n=50 no), so a test at the wrong n is vacuous.
 - [pandas-assert-equal-default-tolerance-hides-leaks](pandas-assert-equal-default-tolerance-hides-leaks.md) — default `rtol=1e-5` silently passes a real leak at YYYYMMDD magnitudes. Leak tests need `check_exact=True`.
 - [float-reformulation-not-strictly-more-accurate](float-reformulation-not-strictly-more-accurate.md) — a "more exact" path trades rounding failure modes rather than removing them. Check against exact rational arithmetic before claiming equivalence.
 - [default-flip-breaks-contrast-tests](default-flip-breaks-contrast-tests.md) — flipping a default silently disarms every test that used the new value as its contrast arm. Five of six kept passing while comparing a value to itself.
@@ -74,4 +74,5 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [gh-issue-list-consistency](gh-issue-list-consistency.md) — `gh issue list --search`/`--assignee` are search-index backed and lag a mutation 2–4s; plain `--label` does not. Every form lags *creation* ~7s.
 - [gh-auth-status-false-negative-restricted-token](gh-auth-status-false-negative-restricted-token.md) — `gh auth status` reports the worker Routine's restricted token as invalid (it isn't — that check is GraphQL too). Verify with `gh api user` instead.
 - [github-closes-keyword-substring-match](github-closes-keyword-substring-match.md) — `Closes #N` closes the issue even inside a sentence saying it's deliberately *not* a closing reference. Never put the keyword directly before a `#N` you don't mean to close.
+- [github-closes-can-silently-not-fire](github-closes-can-silently-not-fire.md) — the converse: a merged PR's `Closes #N` can fail to close the issue while GitHub still shows the reference registered. Check the issue's `state`, not the link.
 - [icloud-conflict-copies](icloud-conflict-copies.md) — **obsolete** since the repo moved out of `~/Documents`. Kept only so nobody re-derives the detection recipe.
