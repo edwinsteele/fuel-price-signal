@@ -601,6 +601,14 @@ class StationPriceSource(Protocol):
         every nearby date in either case."""
         ...
 
+    def last_observed(self, station_code: int) -> str | None:
+        """The latest date this station has EVER reported, or `None` if it has never
+        reported at all. `first_observed` alone cannot bound the mid-series-gap case from
+        above: a fill dated after a station's LAST real observation has no later observation
+        backing "the gap eventually closes," so it is a trailing/permanently-dark tail, not a
+        resumable gap, however far after `first_observed` it falls."""
+        ...
+
 
 def _weighted_mean(values: pd.Series, weights: pd.Series) -> float | None:
     """Litres-weighted mean, or None when the arm carries no litres.
@@ -703,8 +711,8 @@ def summarise_regret(
     is still the cleaner option where it's available.
 
     `prices` is any object with `price_at(station_code, as_of) -> float | None`,
-    `is_observed(station_code, as_of) -> bool`, and `first_observed(station_code) -> str |
-    None`; the window is walked on the run's OWN
+    `is_observed(station_code, as_of) -> bool`, `first_observed(station_code) -> str | None`
+    and `last_observed(station_code) -> str | None`; the window is walked on the run's OWN
     `cadence_days` grid anchored at the fill date (a fill only ever lands on an evaluation
     date), because those are the days the strategy could actually have bought on.
 
@@ -750,10 +758,20 @@ def summarise_regret(
             # that genuinely happened mid-series — dropping those ASYMMETRICALLY
             # across arms (fps-6yi: 42 candidate vs 14 baseline) reintroduces the
             # disjoint-basket defect this function exists to prevent.
-            # `first_observed` (fps-77s) resolves the ambiguity directly.
+            # `first_observed`/`last_observed` (fps-77s) resolve the ambiguity directly: a
+            # gap only counts as mid-series (bounded on BOTH sides by a real observation) when
+            # `as_of` falls within them. A fill after `last_observed` has no later real price
+            # backing "the gap eventually closes" — it is a trailing/permanently-dark tail,
+            # not a resumable gap, and reviewers must not treat it as one (PR #405 review).
             first_obs = prices.first_observed(station)
+            last_obs = prices.last_observed(station)
             as_of_str = as_of.strftime("%Y-%m-%d")
-            if first_obs is None or as_of_str < first_obs:
+            out_of_range = (
+                first_obs is None
+                or as_of_str < first_obs
+                or (last_obs is not None and as_of_str > last_obs)
+            )
+            if out_of_range:
                 # (a) genuinely out of range: score nothing rather than guess.
                 gap_fallback_rows.append(False)
                 regrets.append(None)

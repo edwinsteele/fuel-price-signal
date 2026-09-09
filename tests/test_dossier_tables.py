@@ -3147,6 +3147,10 @@ class _CsvPrices:
         dates = self._dates.get(int(station_code))
         return dates[0] if dates else None
 
+    def last_observed(self, station_code):
+        dates = self._dates.get(int(station_code))
+        return dates[-1] if dates else None
+
 
 def _fps_6yi_flips() -> pd.DataFrame:
     """The 303 real flip rows, in diff_fills' own output shape."""
@@ -3278,6 +3282,9 @@ class _FixedPrice:
 
     def first_observed(self, station_code):
         return "2000-01-01"
+
+    def last_observed(self, station_code):
+        return None  # every date prices the same, so there is no known upper bound
 
 
 def test_attach_regret_success_path_writes_graded_db_not_source_db(tmp_path, monkeypatch):

@@ -509,6 +509,10 @@ class FakePrices:
         series = self._observed.get(int(station_code)) or {}
         return min(series) if series else None
 
+    def last_observed(self, station_code):
+        series = self._observed.get(int(station_code)) or {}
+        return max(series) if series else None
+
 
 def _flip(fold, station, date, price, litres, bought_by):
     return {"fold": fold, "station_code": station, "date": date, "price": price,
@@ -719,6 +723,9 @@ def test_summarise_regret_does_not_flag_a_mismatch_when_the_fill_day_is_unpriced
         def first_observed(self, station_code):
             return "2026-01-10"
 
+        def last_observed(self, station_code):
+            return None  # keeps reporting indefinitely in this fixture
+
     flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 150.0, 10.0, "baseline")])
     out = summarise_regret(flips, LateStart(), set(), horizon_days=13, cadence_days=1, window_days=7)
     assert out["n_price_mismatch"] == 0
@@ -748,6 +755,9 @@ def test_summarise_regret_reports_per_fold_unscored_so_decision_counts_reconcile
         def first_observed(self, station_code):
             return "2026-02-01"
 
+        def last_observed(self, station_code):
+            return None  # keeps reporting indefinitely in this fixture
+
     flips = pd.DataFrame([
         _flip(1, 100, "2020-01-01", 180.0, 10.0, "baseline"),   # window entirely before any price
         _flip(1, 100, "2026-02-01", 160.0, 10.0, "candidate"),
@@ -774,6 +784,9 @@ def test_summarise_regret_scores_a_mid_series_gap_flip_instead_of_dropping_it():
         def first_observed(self, station_code):
             return "2025-01-01"  # long before the flip below
 
+        def last_observed(self, station_code):
+            return "2026-06-01"  # long after the flip below — genuinely bounds both sides
+
     flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 180.0, 10.0, "baseline")])
     out = summarise_regret(
         flips, GappedMidSeries(), set(), horizon_days=13, cadence_days=1, window_days=7
@@ -782,6 +795,30 @@ def test_summarise_regret_scores_a_mid_series_gap_flip_instead_of_dropping_it():
     assert out["n_gap_fallback"] == 1
     assert out["gap_fallback_folds"] == [1]
     assert out["all"]["regret_cpl_baseline"] == pytest.approx(0.0)
+
+
+def test_summarise_regret_treats_a_flip_after_the_stations_last_observation_as_out_of_range():
+    """`first_observed` alone cannot bound the gap from above: a flip after a station's LAST
+    real observation has no later observation backing "the gap eventually closes" — it is a
+    trailing/permanently-dark tail, not a resumable mid-series gap, however far after
+    `first_observed` it falls (Sourcery review on PR #405, issue #376)."""
+    class GoneQuiet:
+        def price_at(self, station_code, as_of):
+            return None
+
+        def is_observed(self, station_code, as_of):
+            return False
+
+        def first_observed(self, station_code):
+            return "2025-01-01"
+
+        def last_observed(self, station_code):
+            return "2025-06-01"  # station stopped reporting well before the flip below
+
+    flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 180.0, 10.0, "baseline")])
+    out = summarise_regret(flips, GoneQuiet(), set(), horizon_days=13, cadence_days=1, window_days=7)
+    assert out["n_scored"] == 0 and out["n_unscored"] == 1
+    assert out["n_gap_fallback"] == 0
 
 
 def test_regret_cpl_field_names_carry_the_marker_the_fps_15c_backstop_matches_on():
