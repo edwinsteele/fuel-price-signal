@@ -21,11 +21,13 @@ which 403s under this token's PR-review-only scope restriction exactly like ever
 call does — it's the same blocker CLAUDE.md's pickup rules were already rewritten around, just
 hitting a command the rewrite didn't touch.
 
-This matters because CLAUDE.md's rule 0 for the scheduled worker literally runs `gh auth status`
-as its "is gh usable" check and says: *"If it fails, fail hard and say so; do not proceed as though
-there were no work."* Taken literally, that stops every run in this environment before it starts,
+This mattered because CLAUDE.md's rule 0 for the scheduled worker ran `gh auth status` as its
+"is gh usable" check and said: *"If it fails, fail hard and say so; do not proceed as though there
+were no work."* Taken literally, that stopped every run in this environment before it started,
 even though the token works fine for everything the rest of the routine actually does.
 
 **What actually confirms gh works here:** `gh api user` returning a real login, not `gh auth
-status` exiting 0. Rule 0 should be read (or rewritten) that way until it's updated to swap the
-check. Filed as a follow-up: see the issue this memory's commit references.
+status` exiting 0. Rule 0 was rewritten to check exactly that (#403, 2026-09-10), so the
+false negative no longer stops a run — but the trap generalises: any `gh` subcommand that is
+GraphQL-backed will misreport under this token, and `gh auth status` is the one that lies about
+*authentication itself*, which is the most misleading place for it.

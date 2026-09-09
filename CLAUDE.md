@@ -44,13 +44,11 @@ for the general model.
 > under the real restricted token: claimed #367, implemented it, opened PR #402 via REST, checked
 > for reviews via REST, addressed Sourcery's findings, and the PR merged clean.
 >
-> One residual gap found on that run, not yet fixed: **rule 0's `gh auth status` check itself
-> also 403s under this token** (it's GraphQL too) and reports "invalid" even though the token
-> works fine for everything else — `gh api user` is what actually confirms `gh` is usable here.
-> The run treated this correctly as a false negative rather than failing hard, but rule 0's text
-> below still says to fail hard on it. See
-> [docs/memory/gh-auth-status-false-negative-restricted-token.md](docs/memory/gh-auth-status-false-negative-restricted-token.md)
-> and [#403](https://github.com/edwinsteele/fuel-price-signal/issues/403).
+> One residual gap found on that run, **fixed in #403**: rule 0's own liveness check was
+> `gh auth status`, which is GraphQL too — it 403s under this token and reports "invalid"
+> even though the token works fine for everything else. The run treated that correctly as a
+> false negative rather than failing hard; rule 0 below now checks `gh api user` instead. See
+> [docs/memory/gh-auth-status-false-negative-restricted-token.md](docs/memory/gh-auth-status-false-negative-restricted-token.md).
 
 You are a Sonnet worker running as a **Claude Code Routine** (see [docs/automation.md](docs/automation.md))
 on a **twice-daily** schedule (`0 9,20 * * *` UTC), and you get a fresh checkout each run rather
@@ -102,16 +100,22 @@ syntax, expanded from the checkout's git remote — write it literally.
        && cp "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
        && chmod +x /usr/local/bin/gh
    }
-   gh auth status || { echo "gh cannot authenticate — stopping." >&2; exit 1; }
+   gh api user --jq .login >/dev/null || { echo "gh cannot authenticate — stopping." >&2; exit 1; }
    ```
    Pin `GH_VERSION`, and bump it by hand once the owner confirms a newer `gh` works — never
    chase `@latest`. **Deliberately do not `curl` `api.github.com/.../releases/latest` to
    discover the version:** that host has returned 403 in this sandbox, and the failure is
    silent — it feeds an empty version into the download URL and 404s the download itself.
 
-   Verify with a real invocation (`gh auth status`), not just `command -v` — a shim on `PATH`
-   is not a working binary with working credentials. If it fails, fail hard and say so; do not
-   proceed as though there were no work.
+   Verify with a real invocation, not just `command -v` — a shim on `PATH` is not a working
+   binary with working credentials. **Use `gh api user` (REST) as that invocation, never
+   `gh auth status`:** `gh auth status` validates the token through GraphQL under the hood, so
+   under this environment's PR-review-only token it 403s and reports the token as *invalid*
+   even though every REST call the routine actually makes succeeds with it — a false negative
+   that would stop every run before it starts. `gh api user` returning a real login is what
+   confirms `gh` is usable here. If *that* fails, fail hard and say so; do not proceed as
+   though there were no work. See
+   [docs/memory/gh-auth-status-false-negative-restricted-token.md](docs/memory/gh-auth-status-false-negative-restricted-token.md).
 1. **There is nothing to close out.** A merged PR whose body carries `Closes #<N>` closes its
    issue by itself, so a run no longer starts by reconciling merged PRs against the tracker.
 2. Check for open `claude-authored` PRs that need maintenance. Get all open PR numbers with the
