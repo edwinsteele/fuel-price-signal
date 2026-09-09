@@ -3305,6 +3305,55 @@ def test_attach_regret_success_path_writes_graded_db_not_source_db(tmp_path, mon
     assert "source_db" not in out
 
 
+class _UnreachableMidSeries:
+    """A price source whose station has observations bracketing every flip but answers `None`
+    at every offset — the shape a gap-capped source takes against a ledger of a different
+    vintage, and the only shape that produces `n_gap_fallback` rows."""
+
+    def price_at(self, station_code, as_of):
+        return None
+
+    def is_observed(self, station_code, as_of):
+        return False
+
+    def first_observed(self, station_code):
+        return "2000-01-01"
+
+    def last_observed(self, station_code):
+        return "2099-12-31"
+
+
+def test_attach_regret_refuses_rather_than_publish_a_gap_fallback_contaminated_table(
+    tmp_path, monkeypatch
+):
+    """`summarise_regret` scores an unreachable flip at the price paid (regret exactly 0) so
+    it is not dropped ASYMMETRICALLY across arms — right inside the library, since dropping
+    reintroduces the disjoint-basket defect regret exists to prevent. But those fabricated
+    zeros enter both arms' litres-weighted means, the dispersion and the SE at full weight,
+    so the published levels and delta are shifted while `n_scored`/`n_unscored` still read
+    clean (fps-6yi fixture, station 414 gap-capped: delta -0.644 -> -0.498 c/L with n_scored
+    still 303). The dossier layer therefore withholds the table instead of rendering a
+    known-shifted number, and says which DB disagreed and how much of the ledger it covers
+    (PR #405 review)."""
+    (tmp_path / dt.FROZEN_DB_FILENAME).touch()
+    (tmp_path / dt.FREEZE_MANIFEST_FILENAME).write_text(json.dumps({"source_db": "fuel_signal.db"}))
+    monkeypatch.setattr(dt._db, "open_db", lambda path: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(dt, "_DbStationPrices", lambda conn, codes: _UnreachableMidSeries())
+
+    out = dt._attach_regret(_regret_fills(), "50/3.571/1d/10%", 7, frozenset({4}), tmp_path)
+
+    assert out["computed"] is False
+    assert "Regenerate the ledger" in out["reason"]
+    # Not a bare refusal: the reason has to be actionable, so the count, the affected folds
+    # and the DB that disagreed all survive it.
+    assert out["n_gap_fallback"] > 0
+    assert out["gap_fallback_folds"]
+    assert out["graded_db"] == str((tmp_path / dt.FROZEN_DB_FILENAME).resolve())
+    # The contaminated numbers themselves must NOT leak into facts.json — a reader who
+    # ignores `computed` would otherwise quote a shifted delta.
+    assert "all" not in out and "per_fold" not in out
+
+
 # ---------------------------------------------------------------------------
 # _DbStationPrices must not drift from PriceHistory.station_price_at (fps-2i4
 # review finding #5) — both reproduce the same gap-capped forward-fill against

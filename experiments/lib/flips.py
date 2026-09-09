@@ -729,7 +729,9 @@ def summarise_regret(
     clean-looking count, so it is a containment stopgap, NOT a licence to re-score a stale
     ledger: regenerate it (re-run the candidate's backtest) first. `n_gap_fallback` is the
     tell — on a ledger and price source that match it is 0, and any non-zero value means the
-    two disagree about which station-days are priceable.
+    two disagree about which station-days are priceable. `dossier_tables._attach_regret`
+    enforces that: it refuses to publish the table at all when the count is non-zero, so this
+    function's job is to score the row and COUNT it honestly, not to decide publishability.
 
     `prices` is any object with `price_at(station_code, as_of) -> float | None`,
     `is_observed(station_code, as_of) -> bool`, `first_observed(station_code) -> str | None`
@@ -871,7 +873,12 @@ def summarise_regret(
         # at a real carried price, this is "no price was reachable at all, so paid stood in".
         # NON-ZERO IS A DATA-INTEGRITY SIGNAL, not a routine caveat: a ledger and a price
         # source that agree produce no unreachable fills at all, so any count here means the
-        # regret levels and delta are shifted by fabricated zeros (see the docstring).
+        # regret levels and delta are shifted by fabricated zeros (see the docstring). This
+        # field has a named consumer that acts on it, not just a reader: `dossier_tables.
+        # _attach_regret` REFUSES to publish the table (`computed: false`) whenever it is
+        # non-zero, so the shifted numbers never reach facts.json. Scoring the row is still
+        # this function's job — dropping it is the asymmetric defect — but deciding the
+        # result is unpublishable is the caller's.
         "n_gap_fallback": int(scored["gap_fallback"].sum()),
         "gap_fallback_folds": sorted(
             int(f) for f in scored.loc[scored["gap_fallback"], "fold"].unique()
