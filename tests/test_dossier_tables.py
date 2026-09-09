@@ -3143,6 +3143,10 @@ class _CsvPrices:
         idx = bisect.bisect_left(dates, as_of)
         return idx < len(dates) and dates[idx] == as_of
 
+    def first_observed(self, station_code):
+        dates = self._dates.get(int(station_code))
+        return dates[0] if dates else None
+
 
 def _fps_6yi_flips() -> pd.DataFrame:
     """The 303 real flip rows, in diff_fills' own output shape."""
@@ -3271,6 +3275,9 @@ class _FixedPrice:
 
     def is_observed(self, station_code, as_of):
         return True
+
+    def first_observed(self, station_code):
+        return "2000-01-01"
 
 
 def test_attach_regret_success_path_writes_graded_db_not_source_db(tmp_path, monkeypatch):

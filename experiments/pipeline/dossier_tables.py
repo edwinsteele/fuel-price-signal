@@ -704,6 +704,10 @@ class _DbStationPrices:
         idx = bisect.bisect_left(dates, as_of)
         return idx < len(dates) and dates[idx] == as_of
 
+    def first_observed(self, station_code: int) -> str | None:
+        dates = self._dates.get(int(station_code))
+        return dates[0] if dates else None
+
 
 def _attach_run_contributions(
     summary: dict, fills: pd.DataFrame, breakdown_per_fold: list[dict], delta_cpl_held: float,

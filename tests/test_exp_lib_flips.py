@@ -505,6 +505,10 @@ class FakePrices:
     def is_observed(self, station_code, as_of):
         return as_of in (self._observed.get(int(station_code)) or {})
 
+    def first_observed(self, station_code):
+        series = self._observed.get(int(station_code)) or {}
+        return min(series) if series else None
+
 
 def _flip(fold, station, date, price, litres, bought_by):
     return {"fold": fold, "station_code": station, "date": date, "price": price,
@@ -712,6 +716,9 @@ def test_summarise_regret_does_not_flag_a_mismatch_when_the_fill_day_is_unpriced
         def is_observed(self, station_code, as_of):
             return as_of >= "2026-01-10"
 
+        def first_observed(self, station_code):
+            return "2026-01-10"
+
     flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 150.0, 10.0, "baseline")])
     out = summarise_regret(flips, LateStart(), set(), horizon_days=13, cadence_days=1, window_days=7)
     assert out["n_price_mismatch"] == 0
@@ -738,6 +745,9 @@ def test_summarise_regret_reports_per_fold_unscored_so_decision_counts_reconcile
         def is_observed(self, station_code, as_of):
             return as_of >= "2026-02-01"
 
+        def first_observed(self, station_code):
+            return "2026-02-01"
+
     flips = pd.DataFrame([
         _flip(1, 100, "2020-01-01", 180.0, 10.0, "baseline"),   # window entirely before any price
         _flip(1, 100, "2026-02-01", 160.0, 10.0, "candidate"),
@@ -747,6 +757,31 @@ def test_summarise_regret_reports_per_fold_unscored_so_decision_counts_reconcile
     assert out["n_unscored"] == 1
     assert row["n_unscored"] == 1
     assert row["n_decisions"] == 1          # only the scored candidate flip
+
+
+def test_summarise_regret_scores_a_mid_series_gap_flip_instead_of_dropping_it():
+    """fps-77s: a gap-capped station can return None at every offset for a flip that
+    genuinely happened mid-series (fps-2i4 review finding #3). `first_observed` says this
+    station's series started well before the flip, so it must be scored — via the paid-price
+    fallback (0 regret) — rather than silently dropped through the `not reachable` branch."""
+    class GappedMidSeries:
+        def price_at(self, station_code, as_of):
+            return None  # every offset is unreachable, as if the gap cap swallowed them all
+
+        def is_observed(self, station_code, as_of):
+            return False
+
+        def first_observed(self, station_code):
+            return "2025-01-01"  # long before the flip below
+
+    flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 180.0, 10.0, "baseline")])
+    out = summarise_regret(
+        flips, GappedMidSeries(), set(), horizon_days=13, cadence_days=1, window_days=7
+    )
+    assert out["n_scored"] == 1 and out["n_unscored"] == 0
+    assert out["n_gap_fallback"] == 1
+    assert out["gap_fallback_folds"] == [1]
+    assert out["all"]["regret_cpl_baseline"] == pytest.approx(0.0)
 
 
 def test_regret_cpl_field_names_carry_the_marker_the_fps_15c_backstop_matches_on():
