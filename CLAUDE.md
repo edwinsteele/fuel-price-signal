@@ -7,6 +7,7 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
 - [AGENTS.md](AGENTS.md) — architecture, CLI pattern, data strategy, signal logic
 - [docs/STATUS.md](docs/STATUS.md) — current build state; what's shipped vs pending
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — code & workflow rules (the changeable how-we-do-things layer)
+- [docs/data-semantics.md](docs/data-semantics.md) — station classification, price-data shape, class-filtering traps
 - [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) — CLI reference for training/evaluating/diagnosing the ML model (dev reference, not day-to-day usage)
 - [docs/ML_SIGNAL.md](docs/ML_SIGNAL.md) — ML model design decisions; [docs/feature-pipeline.md](docs/feature-pipeline.md) — the AI-sourced candidate-feature pipeline's machinery
 - `PLAN_ml_signal.md` — active ML-signal plan. **Lives at repo root and is gitignored** (despite some docs saying `docs/PLAN_ml_signal.md` — that path is wrong).
@@ -252,7 +253,7 @@ EOF
 
 Use `--label "polish"` or `--label "design"` in place of `"chore"` as appropriate, and add the
 topic label (`pipeline`, `research`, `data`, `product`, `infra`) alongside it — see
-[AGENTS.md § Issue label taxonomy](AGENTS.md#issue-label-taxonomy).
+[docs/CONVENTIONS.md § Issue label taxonomy](docs/CONVENTIONS.md#issue-label-taxonomy).
 
 **Ask the owner before filing.** The backlog needs active triage, so a new issue is a decision,
 not a side effect — propose it and let them say yes.
