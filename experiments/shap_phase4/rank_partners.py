@@ -22,6 +22,7 @@ import pandas as pd
 
 from fuel_signal import evaluate as _ev
 from fuel_signal.features import FEATURE_COLUMNS, LGA_FEATURE_COLUMNS
+from fuel_signal.shap_report import is_degenerate
 
 OUT = pathlib.Path(__file__).parent
 FEATURES_CSV = pathlib.Path("data/features.csv")
@@ -48,7 +49,7 @@ def approx_interaction_scores(main_idx: int, sv: np.ndarray, X: np.ndarray) -> n
                 continue
             a = a[mask]
             b = b[mask]
-            if np.std(a) == 0 or np.std(b) == 0:
+            if is_degenerate(a) or is_degenerate(b):
                 continue
             s += abs(np.corrcoef(a, b)[0, 1])
         scores[j] = s
