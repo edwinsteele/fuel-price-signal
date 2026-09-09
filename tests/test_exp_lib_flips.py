@@ -724,7 +724,7 @@ def test_summarise_regret_does_not_flag_a_mismatch_when_the_fill_day_is_unpriced
             return "2026-01-10"
 
         def last_observed(self, station_code):
-            return None  # keeps reporting indefinitely in this fixture
+            return "2099-12-31"  # keeps reporting indefinitely in this fixture
 
     flips = pd.DataFrame([_flip(1, 100, "2026-01-01", 150.0, 10.0, "baseline")])
     out = summarise_regret(flips, LateStart(), set(), horizon_days=13, cadence_days=1, window_days=7)
@@ -756,7 +756,7 @@ def test_summarise_regret_reports_per_fold_unscored_so_decision_counts_reconcile
             return "2026-02-01"
 
         def last_observed(self, station_code):
-            return None  # keeps reporting indefinitely in this fixture
+            return "2099-12-31"  # keeps reporting indefinitely in this fixture
 
     flips = pd.DataFrame([
         _flip(1, 100, "2020-01-01", 180.0, 10.0, "baseline"),   # window entirely before any price
@@ -794,6 +794,11 @@ def test_summarise_regret_scores_a_mid_series_gap_flip_instead_of_dropping_it():
     assert out["n_scored"] == 1 and out["n_unscored"] == 0
     assert out["n_gap_fallback"] == 1
     assert out["gap_fallback_folds"] == [1]
+    # Per fold too: `gap_fallback_folds` names the fold but not how many of its rows are
+    # fabricated zeros, and a fold row's `n_unscored` stays 0 for exactly these rows, so
+    # without this field nothing at fold level reconciles `n_decisions` against them.
+    assert out["per_fold"][0]["n_gap_fallback"] == 1
+    assert out["per_fold"][0]["n_unscored"] == 0
     assert out["all"]["regret_cpl_baseline"] == pytest.approx(0.0)
 
 

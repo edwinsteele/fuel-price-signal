@@ -606,7 +606,14 @@ class StationPriceSource(Protocol):
         reported at all. `first_observed` alone cannot bound the mid-series-gap case from
         above: a fill dated after a station's LAST real observation has no later observation
         backing "the gap eventually closes," so it is a trailing/permanently-dark tail, not a
-        resumable gap, however far after `first_observed` it falls."""
+        resumable gap, however far after `first_observed` it falls.
+
+        **`None` here is read as UNBOUNDED ABOVE, not as "unknown."** `summarise_regret`
+        skips the trailing-tail guard entirely when this returns `None`, so an implementation
+        that cannot determine an upper bound must NOT signal that by returning `None` — every
+        fill after the station went permanently dark would then be scored at a fabricated 0
+        instead of dropped. The only conforming `None` is the never-reported case, where
+        `first_observed` returns `None` too and the earlier guard has already fired."""
         ...
 
 
@@ -700,15 +707,29 @@ def summarise_regret(
     run (a `flips` ledger produced by a post-fps-2i4 simulator) should only ever reflect short
     (≤MAX_GAP_FILL_DAYS) reporting gaps.
 
-    **Re-running this against a `flips` ledger produced BEFORE fps-2i4 landed used to be
-    unsafe** (fps-2i4 review finding #3) — its dark-day fills WILL still be present (the old
-    simulator transacted through the closure), but `prices.price_at` now can't resolve a
-    price near them at all (not even at offset 0, the fill's own date), so `reachable` comes
-    back empty. Since fps-77s, `first_observed` (below) lets the `not reachable` branch tell
-    that mid-series-gap case apart from a fill genuinely outside the station's series, and
-    scores the former at the price paid instead of dropping it — closing the asymmetric-drop
-    hole this docstring used to warn about. Regenerating the ledger with the current simulator
-    is still the cleaner option where it's available.
+    **`dark_fill_days` is a superset of `n_gap_fallback`, and the sentence above holds only
+    for the difference.** A dark day is `is_observed == False`, which is also true of every
+    gap-fallback row, but those were NOT scored at a forward-filled carried price — no price
+    was reachable at all, so `paid` stood in (see the `not reachable` branch). Read
+    `dark_fill_days - n_gap_fallback` as "scored at the price the simulator actually faced";
+    only that part is the unbiased-but-thinning case this paragraph describes.
+
+    **Do not re-run this against a `flips` ledger produced BEFORE fps-2i4 landed** (fps-2i4
+    review finding #3) — its dark-day fills WILL still be present (the old simulator
+    transacted through the closure), but `prices.price_at` now can't resolve a price near them
+    at all (not even at offset 0, the fill's own date), so `reachable` comes back empty. Since
+    fps-77s, `first_observed`/`last_observed` (below) let the `not reachable` branch tell that
+    mid-series-gap case apart from a fill genuinely outside the station's series, and score
+    the former at the price paid rather than dropping it — which stops the ASYMMETRIC DROP but
+    replaces it with an asymmetric exact-zero injection, because a fallback row enters the
+    litres-weighted arm means, `_dispersion` and `_effective_n` at regret 0 with full weight.
+    Measured on the fps-6yi fixture with station 414 gap-capped (118 flips: 82 candidate, 36
+    baseline): baseline 10.026 → 8.130 c/L, candidate 9.382 → 7.631, delta -0.644 → -0.498,
+    with `n_scored` still 303 and `n_unscored` still 0. That is a biased number wearing a
+    clean-looking count, so it is a containment stopgap, NOT a licence to re-score a stale
+    ledger: regenerate it (re-run the candidate's backtest) first. `n_gap_fallback` is the
+    tell — on a ledger and price source that match it is 0, and any non-zero value means the
+    two disagree about which station-days are priceable.
 
     `prices` is any object with `price_at(station_code, as_of) -> float | None`,
     `is_observed(station_code, as_of) -> bool`, `first_observed(station_code) -> str | None`
@@ -816,6 +837,13 @@ def summarise_regret(
             "n_unscored": int(
                 len(scored[(scored["fold"] == fold) & scored["regret"].isna()])
             ),
+            # Beside `n_unscored` for the same reason it exists: a gap-fallback row is
+            # SCORED (so it raises `n_decisions` and moves this fold's regret) without
+            # raising `n_unscored`, so the run-level `gap_fallback_folds` list — which
+            # names folds but not counts — is not enough to reconcile a fold row.
+            "n_gap_fallback": int(
+                len(scored[(scored["fold"] == fold) & scored["gap_fallback"]])
+            ),
         })
         per_fold.append(row)
 
@@ -832,12 +860,18 @@ def summarise_regret(
         "cadence_days": cadence_days,
         "n_scored": int(len(resolvable)),
         "n_unscored": int(len(scored) - len(resolvable)),
+        # SUPERSET of `n_gap_fallback` below — a gap-fallback fill is unobserved too, so it
+        # lands in both counts. `dark_fill_days - n_gap_fallback` is the count the docstring's
+        # "scored at the forward-filled price the simulator itself bought at" claim covers.
         "dark_fill_days": int(scored["dark"].sum()),
         "dark_fill_folds": sorted(int(f) for f in scored.loc[scored["dark"], "fold"].unique()),
         # A mid-series gap fill scored via the paid-price fallback (0 regret) rather than
         # dropped — see the `not reachable` branch above. Reported separately from
         # `dark_fill_days` because it is a stronger statement: dark days are forward-filled
         # at a real carried price, this is "no price was reachable at all, so paid stood in".
+        # NON-ZERO IS A DATA-INTEGRITY SIGNAL, not a routine caveat: a ledger and a price
+        # source that agree produce no unreachable fills at all, so any count here means the
+        # regret levels and delta are shifted by fabricated zeros (see the docstring).
         "n_gap_fallback": int(scored["gap_fallback"].sum()),
         "gap_fallback_folds": sorted(
             int(f) for f in scored.loc[scored["gap_fallback"], "fold"].unique()

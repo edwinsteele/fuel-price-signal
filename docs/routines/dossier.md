@@ -300,6 +300,20 @@ worth a follow-up issue (`gh issue create`), not something to compute in-session
            one station's outage). Those fills ARE scored, at the forward-filled price the tank
            simulator itself bought at — the outage does not bias the estimate, but it thins and
            tilts specific folds, so a fold's evidence weight is not what its row count suggests.
+         - **`n_gap_fallback` non-zero STOPS the table.** It counts flips for which NO price
+           was reachable at any offset, scored at the price paid (regret exactly 0) so they
+           are not dropped asymmetrically. Unlike `dark_fill_days` those zeros are fabricated:
+           they enter both arms' litres-weighted means, the dispersion and the SE, so the
+           levels and the delta are shifted by an amount that depends on how the unreachable
+           flips split across arms. On the fps-6yi ledger with its one gap-capped station
+           that is 118 of 303 rows and moves the delta -0.644 → -0.498 c/L while `n_scored`
+           still reads 303 and `n_unscored` 0. A non-zero count means the `flips` ledger and
+           the price DB disagree about which station-days are priceable (a pre-fps-2i4
+           ledger, or any later price-semantics change), so **regenerate the ledger — re-run
+           the candidate's backtest — and re-score; do not render or cite the regret table
+           off a fallback-contaminated run.** `dark_fill_days` is a superset of this count,
+           so subtract it before applying the bullet above. Per-fold counts are in
+           `per_fold[].n_gap_fallback`; `gap_fallback_folds` lists the affected folds.
          - When `decision_flips["regret"]["computed"]` is `false`, state its `reason` verbatim
            (usually: the price DB is gitignored and absent from this checkout) and render the
            rest of the table normally — it is not a reason to skip the flip section.

@@ -3284,7 +3284,7 @@ class _FixedPrice:
         return "2000-01-01"
 
     def last_observed(self, station_code):
-        return None  # every date prices the same, so there is no known upper bound
+        return "2099-12-31"  # every date prices the same, so the series never ends
 
 
 def test_attach_regret_success_path_writes_graded_db_not_source_db(tmp_path, monkeypatch):
