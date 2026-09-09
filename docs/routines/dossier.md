@@ -300,9 +300,29 @@ worth a follow-up issue (`gh issue create`), not something to compute in-session
            one station's outage). Those fills ARE scored, at the forward-filled price the tank
            simulator itself bought at — the outage does not bias the estimate, but it thins and
            tilts specific folds, so a fold's evidence weight is not what its row count suggests.
+         - **`n_gap_fallback` non-zero is REFUSED for you, not flagged.** It counts flips for
+           which NO price was reachable at any offset; `summarise_regret` scores those at the
+           price paid (regret exactly 0) so they are not dropped asymmetrically across arms,
+           but unlike `dark_fill_days` those zeros are fabricated — they enter both arms'
+           litres-weighted means, the dispersion and the SE, so the levels and the delta are
+           shifted by an amount set by how the unreachable flips split across arms. On the
+           fps-6yi ledger with its one gap-capped station that is 118 of 303 rows and moves
+           the delta -0.644 → -0.498 c/L while `n_scored` still reads 303 and `n_unscored` 0.
+           `_attach_regret` therefore returns `computed: false` rather than publishing the
+           table, so **`facts.json` carries no regret numbers at all in this case** — there is
+           nothing to render and nothing to cite. Its `reason` names the count and the folds;
+           `n_gap_fallback`, `gap_fallback_folds` and `graded_db` survive beside it so you can
+           act. **The action is to regenerate the ledger — re-run the candidate's backtest —
+           and re-score.** A non-zero count means the `flips` ledger and the price DB disagree
+           about which station-days are priceable (a pre-fps-2i4 ledger, or any later
+           price-semantics change re-scored without regenerating); it is a data-integrity
+           signal, never a caveat to write up. When the table IS published, `dark_fill_days`
+           is a superset of this count, so subtract it before applying the bullet above, and
+           per-fold counts are in `per_fold[].n_gap_fallback`.
          - When `decision_flips["regret"]["computed"]` is `false`, state its `reason` verbatim
-           (usually: the price DB is gitignored and absent from this checkout) and render the
-           rest of the table normally — it is not a reason to skip the flip section.
+           (usually: the price DB is gitignored and absent from this checkout; or the
+           gap-fallback refusal above) and render the rest of the table normally — it is not a
+           reason to skip the flip section.
        - `flip_cpl_delta` — **kept in `facts.json`, no longer rendered in the table** (fps-2js).
          `flip_cpl_baseline` and `flip_cpl_candidate` pool DISJOINT fills on different days at
          different points in the price cycle: their difference has no stable denominator, so it

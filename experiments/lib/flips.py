@@ -593,6 +593,29 @@ class StationPriceSource(Protocol):
 
     def is_observed(self, station_code: int, as_of: str) -> bool: ...
 
+    def first_observed(self, station_code: int) -> str | None:
+        """The earliest date this station has EVER reported, or `None` if it has never
+        reported at all. Lets a caller tell "before this station's series starts" (a fill
+        date that predates any observation) apart from a mid-series gap, which otherwise
+        present identically to `price_at`/`is_observed` — both return `None`/`False` for
+        every nearby date in either case."""
+        ...
+
+    def last_observed(self, station_code: int) -> str | None:
+        """The latest date this station has EVER reported, or `None` if it has never
+        reported at all. `first_observed` alone cannot bound the mid-series-gap case from
+        above: a fill dated after a station's LAST real observation has no later observation
+        backing "the gap eventually closes," so it is a trailing/permanently-dark tail, not a
+        resumable gap, however far after `first_observed` it falls.
+
+        **`None` here is read as UNBOUNDED ABOVE, not as "unknown."** `summarise_regret`
+        skips the trailing-tail guard entirely when this returns `None`, so an implementation
+        that cannot determine an upper bound must NOT signal that by returning `None` — every
+        fill after the station went permanently dark would then be scored at a fabricated 0
+        instead of dropped. The only conforming `None` is the never-reported case, where
+        `first_observed` returns `None` too and the earlier guard has already fired."""
+        ...
+
 
 def _weighted_mean(values: pd.Series, weights: pd.Series) -> float | None:
     """Litres-weighted mean, or None when the arm carries no litres.
@@ -684,16 +707,35 @@ def summarise_regret(
     run (a `flips` ledger produced by a post-fps-2i4 simulator) should only ever reflect short
     (≤MAX_GAP_FILL_DAYS) reporting gaps.
 
+    **`dark_fill_days` is a superset of `n_gap_fallback`, and the sentence above holds only
+    for the difference.** A dark day is `is_observed == False`, which is also true of every
+    gap-fallback row, but those were NOT scored at a forward-filled carried price — no price
+    was reachable at all, so `paid` stood in (see the `not reachable` branch). Read
+    `dark_fill_days - n_gap_fallback` as "scored at the price the simulator actually faced";
+    only that part is the unbiased-but-thinning case this paragraph describes.
+
     **Do not re-run this against a `flips` ledger produced BEFORE fps-2i4 landed** (fps-2i4
     review finding #3) — its dark-day fills WILL still be present (the old simulator
-    transacted through the closure), but `prices.price_at` now can't resolve a price near
-    them at all (not even at offset 0, the fill's own date), so `reachable` comes back empty
-    and they get dropped via the `not reachable` branch below — asymmetrically across arms,
-    reintroducing exactly the defect this docstring argues against. Regenerate the ledger
-    (re-run the candidate's backtest) with the current simulator before re-scoring regret.
+    transacted through the closure), but `prices.price_at` now can't resolve a price near them
+    at all (not even at offset 0, the fill's own date), so `reachable` comes back empty. Since
+    fps-77s, `first_observed`/`last_observed` (below) let the `not reachable` branch tell that
+    mid-series-gap case apart from a fill genuinely outside the station's series, and score
+    the former at the price paid rather than dropping it — which stops the ASYMMETRIC DROP but
+    replaces it with an asymmetric exact-zero injection, because a fallback row enters the
+    litres-weighted arm means, `_dispersion` and `_effective_n` at regret 0 with full weight.
+    Measured on the fps-6yi fixture with station 414 gap-capped (118 flips: 82 candidate, 36
+    baseline): baseline 10.026 → 8.130 c/L, candidate 9.382 → 7.631, delta -0.644 → -0.498,
+    with `n_scored` still 303 and `n_unscored` still 0. That is a biased number wearing a
+    clean-looking count, so it is a containment stopgap, NOT a licence to re-score a stale
+    ledger: regenerate it (re-run the candidate's backtest) first. `n_gap_fallback` is the
+    tell — on a ledger and price source that match it is 0, and any non-zero value means the
+    two disagree about which station-days are priceable. `dossier_tables._attach_regret`
+    enforces that: it refuses to publish the table at all when the count is non-zero, so this
+    function's job is to score the row and COUNT it honestly, not to decide publishability.
 
-    `prices` is any object with `price_at(station_code, as_of) -> float | None` and
-    `is_observed(station_code, as_of) -> bool`; the window is walked on the run's OWN
+    `prices` is any object with `price_at(station_code, as_of) -> float | None`,
+    `is_observed(station_code, as_of) -> bool`, `first_observed(station_code) -> str | None`
+    and `last_observed(station_code) -> str | None`; the window is walked on the run's OWN
     `cadence_days` grid anchored at the fill date (a fill only ever lands on an evaluation
     date), because those are the days the strategy could actually have bought on.
 
@@ -715,7 +757,7 @@ def summarise_regret(
     per_fold: list[dict] = []
     scored = flips.copy()
     regrets: list[float | None] = []
-    dark_rows, mismatches = [], 0
+    dark_rows, gap_fallback_rows, mismatches = [], [], 0
     for _, row in flips.iterrows():
         station, paid = int(row["station_code"]), float(row["price"])
         as_of = pd.Timestamp(row["date"])
@@ -731,31 +773,42 @@ def summarise_regret(
                 reachable.append(float(price))
             offset += cadence_days
         if not reachable:
-            # Two DIFFERENT things collapse into this branch, and the Protocol as it
-            # stands cannot tell them apart (fps-2i4 review finding #3, investigated
-            # and left unresolved rather than silently papered over):
-            #  (a) the original, intended case — a fill dated entirely outside the
-            #      station's known series (before its first-ever observation, or a
-            #      genuinely corrupted ledger row). Score nothing rather than guess.
-            #  (b) fps-2i4's gap cap means `prices.price_at` can now ALSO return None
-            #      at every offset (including 0, the fill's own date) for a flip that
-            #      genuinely happened — scored against a `flips` ledger a PRE-fps-2i4
-            #      simulator produced, re-scored against a POST-fps-2i4 `prices`
-            #      source. The fill is real (`paid` is ground truth), but this
-            #      function can't reach a real price near it any more, so it drops —
-            #      and does so ASYMMETRICALLY across arms (fps-6yi: 42 candidate vs
-            #      14 baseline dark-day flips), reintroducing the disjoint-basket
-            #      defect this function exists to prevent.
-            # Distinguishing (a) from (b) needs knowing whether `as_of` falls between
-            # the station's actual first and last observations, which `price_at`/
-            # `is_observed` don't expose and a naive `paid`-as-fallback fix breaks (a)
-            # silently — see fuel-price-signal issue tracker (bd) for the fps-2i4
-            # follow-up. Until resolved: DO NOT re-run `summarise_regret`/`_attach_regret`
-            # against a `fills.parquet` produced before fps-2i4 landed — regenerate it
-            # (re-run the candidate's backtest) first, or its regret numbers are
-            # silently biased by exactly this mechanism.
-            regrets.append(None)
+            # Two DIFFERENT things used to collapse into this branch indistinguishably
+            # (fps-2i4 review finding #3): (a) a fill dated entirely outside the
+            # station's known series (before its first-ever observation, or a
+            # genuinely corrupted ledger row), and (b) fps-2i4's gap cap making
+            # `prices.price_at` return None at every offset (including 0) for a flip
+            # that genuinely happened mid-series — dropping those ASYMMETRICALLY
+            # across arms (fps-6yi: 42 candidate vs 14 baseline) reintroduces the
+            # disjoint-basket defect this function exists to prevent.
+            # `first_observed`/`last_observed` (fps-77s) resolve the ambiguity directly: a
+            # gap only counts as mid-series (bounded on BOTH sides by a real observation) when
+            # `as_of` falls within them. A fill after `last_observed` has no later real price
+            # backing "the gap eventually closes" — it is a trailing/permanently-dark tail,
+            # not a resumable gap, and reviewers must not treat it as one (PR #405 review).
+            first_obs = prices.first_observed(station)
+            last_obs = prices.last_observed(station)
+            as_of_str = as_of.strftime("%Y-%m-%d")
+            out_of_range = (
+                first_obs is None
+                or as_of_str < first_obs
+                or (last_obs is not None and as_of_str > last_obs)
+            )
+            if out_of_range:
+                # (a) genuinely out of range: score nothing rather than guess.
+                gap_fallback_rows.append(False)
+                regrets.append(None)
+                continue
+            # (b) mid-series gap: the fill is real (`paid` is ground truth) but no
+            # nearby price is reachable, so there is nothing to compare it against.
+            # Floor it at the price paid (0 regret) rather than drop it — the same
+            # paid-price fallback the issue that added this branch proposed. This is
+            # a stopgap, not a scoring-policy decision: it stops the asymmetric drop,
+            # it does not claim to know how well the fill actually timed.
+            gap_fallback_rows.append(True)
+            regrets.append(0.0)
             continue
+        gap_fallback_rows.append(False)
         # Explicitly the OFFSET-0 price, not reachable[0]: `reachable` skips None lookups, so
         # on a fill dated before its station's first price reachable[0] is some later
         # evaluation date's price, and comparing the ledger against that would report a
@@ -765,6 +818,7 @@ def summarise_regret(
         regrets.append(paid - min(paid, min(reachable)))
     scored["regret"] = regrets
     scored["dark"] = dark_rows
+    scored["gap_fallback"] = gap_fallback_rows
     resolvable = scored[scored["regret"].notna()]
 
     for fold in sorted(flips["fold"].unique()) if not flips.empty else []:
@@ -785,6 +839,13 @@ def summarise_regret(
             "n_unscored": int(
                 len(scored[(scored["fold"] == fold) & scored["regret"].isna()])
             ),
+            # Beside `n_unscored` for the same reason it exists: a gap-fallback row is
+            # SCORED (so it raises `n_decisions` and moves this fold's regret) without
+            # raising `n_unscored`, so the run-level `gap_fallback_folds` list — which
+            # names folds but not counts — is not enough to reconcile a fold row.
+            "n_gap_fallback": int(
+                len(scored[(scored["fold"] == fold) & scored["gap_fallback"]])
+            ),
         })
         per_fold.append(row)
 
@@ -801,8 +862,27 @@ def summarise_regret(
         "cadence_days": cadence_days,
         "n_scored": int(len(resolvable)),
         "n_unscored": int(len(scored) - len(resolvable)),
+        # SUPERSET of `n_gap_fallback` below — a gap-fallback fill is unobserved too, so it
+        # lands in both counts. `dark_fill_days - n_gap_fallback` is the count the docstring's
+        # "scored at the forward-filled price the simulator itself bought at" claim covers.
         "dark_fill_days": int(scored["dark"].sum()),
         "dark_fill_folds": sorted(int(f) for f in scored.loc[scored["dark"], "fold"].unique()),
+        # A mid-series gap fill scored via the paid-price fallback (0 regret) rather than
+        # dropped — see the `not reachable` branch above. Reported separately from
+        # `dark_fill_days` because it is a stronger statement: dark days are forward-filled
+        # at a real carried price, this is "no price was reachable at all, so paid stood in".
+        # NON-ZERO IS A DATA-INTEGRITY SIGNAL, not a routine caveat: a ledger and a price
+        # source that agree produce no unreachable fills at all, so any count here means the
+        # regret levels and delta are shifted by fabricated zeros (see the docstring). This
+        # field has a named consumer that acts on it, not just a reader: `dossier_tables.
+        # _attach_regret` REFUSES to publish the table (`computed: false`) whenever it is
+        # non-zero, so the shifted numbers never reach facts.json. Scoring the row is still
+        # this function's job — dropping it is the asymmetric defect — but deciding the
+        # result is unpublishable is the caller's.
+        "n_gap_fallback": int(scored["gap_fallback"].sum()),
+        "gap_fallback_folds": sorted(
+            int(f) for f in scored.loc[scored["gap_fallback"], "fold"].unique()
+        ),
         "n_price_mismatch": mismatches,
         "per_fold": per_fold,
         "all": all_row,

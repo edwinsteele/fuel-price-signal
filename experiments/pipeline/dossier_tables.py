@@ -561,8 +561,10 @@ def _attach_regret(
     batch_dir: pathlib.Path | None, *, exact_fields: dict | None = None,
 ) -> dict:
     """The timing-regret table (fps-2js) — `experiments/lib/flips.summarise_regret` over this
-    run's flipped fills, or an explicit `computed: false` + reason when the price DB this run
-    was graded against isn't reachable from where the dossier is being built.
+    run's flipped fills, or an explicit `computed: false` + reason when the table cannot be
+    published: the price DB this run was graded against isn't reachable from where the dossier
+    is being built, or that DB and the `flips` ledger disagree about which station-days are
+    priceable (`n_gap_fallback` non-zero — see the refusal below, PR #405 review).
 
     Optional-with-a-reason rather than fatal, deliberately: every other input to facts.json is
     a run artifact sitting beside results.json, but regret needs the ~500 MB gitignored price
@@ -606,6 +608,47 @@ def _attach_regret(
         cadence_days=cadence_days,
         window_days=window_days,
     )
+    if summary["n_gap_fallback"]:
+        # REFUSE rather than publish a contaminated table (PR #405 review). A gap-fallback
+        # row is one `summarise_regret` could not reach a price for at any offset, scored at
+        # the price paid (regret exactly 0) so it is not DROPPED asymmetrically across arms.
+        # That is the right call inside the library — dropping reintroduces the disjoint-
+        # basket defect regret exists to prevent — but the fabricated zeros still enter both
+        # arms' litres-weighted means, `_dispersion` and `_effective_n` at full weight, so
+        # the levels and the delta shift by an amount set by how the unreachable flips split
+        # across arms. Measured on the fps-6yi fixture with its one gap-capped station (118
+        # of 303 flips, 82 candidate vs 36 baseline): baseline 10.026 -> 8.130 c/L, candidate
+        # 9.382 -> 7.631, delta -0.644 -> -0.498 — while `n_scored` still read 303 and
+        # `n_unscored` still read 0. A number that wrong wearing counts that clean is worse
+        # than no number, and this table's whole purpose is to stop unreadable numbers being
+        # read (the same argument as the `cadence_days > horizon_days` refusal upstream).
+        #
+        # Non-zero here is a DATA-INTEGRITY signal, never a routine caveat: a post-fps-2i4
+        # simulator skips station-days it cannot price rather than transacting through them,
+        # so a `flips` ledger and the price DB it was graded against can only disagree about
+        # which station-days are priceable when the two have different vintages — a pre-
+        # fps-2i4 ledger, or any later price-semantics change re-scored without regenerating.
+        # The fix is to regenerate the ledger, not to reinterpret the number, so this is a
+        # refusal and not a flag on an otherwise-rendered table.
+        return {
+            "computed": False,
+            "reason": (
+                f"{summary['n_gap_fallback']} of {len(flips)} flipped fills had no price "
+                f"reachable at any offset (folds {summary['gap_fallback_folds']}), so they "
+                "were scored at the price paid — fabricated zeros that shift both arms' "
+                "regret and the delta by an arm-asymmetric amount while leaving n_scored "
+                "and n_unscored looking clean. This means the flips ledger and the price DB "
+                "disagree about which station-days are priceable (a ledger produced before "
+                "a price-semantics change, re-scored after it). Regenerate the ledger — "
+                "re-run the candidate's backtest — and re-score; the regret table is "
+                "withheld rather than published with a known-shifted delta."
+            ),
+            # Provenance and counts kept so the refusal is actionable: which DB disagreed,
+            # and how much of the ledger it disagreed about.
+            "graded_db": str(db_path.resolve()),
+            "n_gap_fallback": summary["n_gap_fallback"],
+            "gap_fallback_folds": summary["gap_fallback_folds"],
+        }
     summary["computed"] = True
     # Resolved, not the raw relative "fuel_signal.db" from freeze.json — facts.json is read
     # long after and from elsewhere, so a CWD-relative path is not provenance. Named
@@ -703,6 +746,14 @@ class _DbStationPrices:
         dates = self._dates.get(int(station_code)) or []
         idx = bisect.bisect_left(dates, as_of)
         return idx < len(dates) and dates[idx] == as_of
+
+    def first_observed(self, station_code: int) -> str | None:
+        dates = self._dates.get(int(station_code))
+        return dates[0] if dates else None
+
+    def last_observed(self, station_code: int) -> str | None:
+        dates = self._dates.get(int(station_code))
+        return dates[-1] if dates else None
 
 
 def _attach_run_contributions(
