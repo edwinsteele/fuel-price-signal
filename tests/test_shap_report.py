@@ -16,6 +16,7 @@ from fuel_signal.shap_report import (
     build_summary,
     compute_partner_scores,
     compute_shap,
+    is_degenerate,
     main,
     run_shap_report,
     save_dependence_plots,
@@ -162,6 +163,27 @@ def test_compute_shap_returns_ndarray(tmp_path):
     X = val[_FEATURES].to_numpy(dtype=float)
     sv = compute_shap(model, X)
     assert isinstance(sv, np.ndarray)
+
+
+# ---------------------------------------------------------------------------
+# is_degenerate
+# ---------------------------------------------------------------------------
+
+def test_is_degenerate_true_for_constant_array():
+    assert is_degenerate(np.full(20, 0.01)) is True
+
+
+def test_is_degenerate_false_for_varying_array():
+    rng = np.random.default_rng(0)
+    assert is_degenerate(rng.normal(size=50)) is False
+
+
+def test_is_degenerate_catches_float_rounding_near_constant():
+    # np.std of many identical 0.01s is ~1.78e-18, not exactly 0.0 (binary rounding) —
+    # the exact failure `np.std(arr) == 0` alone misses (fps-tnz). np.ptp is exact.
+    arr = np.full(20, 0.01)
+    assert np.std(arr) != 0.0
+    assert is_degenerate(arr) is True
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
+from fuel_signal.shap_report import is_degenerate  # noqa: E402
 
 OUT = pathlib.Path(__file__).parent
 FEATURES_CSV = pathlib.Path("data/features.csv")
@@ -81,7 +82,7 @@ def main() -> None:
 
         mean_abs = float(np.mean(np.abs(s)))
         # Pearson; guard against zero variance (all values identical)
-        if np.std(v) == 0 or np.std(s) == 0:
+        if is_degenerate(v) or is_degenerate(s):
             r = float("nan")
         else:
             r = float(np.corrcoef(v, s)[0, 1])

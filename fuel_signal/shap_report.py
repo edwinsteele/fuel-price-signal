@@ -67,6 +67,18 @@ def compute_shap(model: object, X: pd.DataFrame | np.ndarray) -> np.ndarray:
     return raw
 
 
+def is_degenerate(arr: np.ndarray) -> bool:
+    """True iff `arr` has no usable variance for a Pearson r.
+
+    `np.std(arr) == 0` alone misses a sample that is truly constant but whose computed
+    std lands on a tiny nonzero float instead of exact 0.0 (binary rounding — e.g. np.std
+    of many identical 0.01s is ~1.78e-18, not 0.0). Pairing it with the exact
+    `np.ptp(arr) == 0` (zero iff every value is truly identical) catches that case too, the
+    same fix `_band_std_usable` applies in experiments/pipeline/dossier_tables.py.
+    """
+    return bool(np.std(arr) == 0 or np.ptp(arr) == 0)
+
+
 def build_summary(
     feature_columns: list[str],
     X: np.ndarray,
@@ -88,7 +100,7 @@ def build_summary(
         nan_fracs.append(float(nan_mask.mean()))
         v = vals[~nan_mask]
         s = shap_values[~nan_mask, i]
-        if len(v) < 2 or np.std(v) == 0 or np.std(s) == 0:
+        if len(v) < 2 or is_degenerate(v) or is_degenerate(s):
             r_values.append(float("nan"))
         else:
             r_values.append(float(np.corrcoef(v, s)[0, 1]))
@@ -127,7 +139,7 @@ def approx_interaction_scores(main_idx: int, sv: np.ndarray, X: np.ndarray) -> n
                 continue
             a = a[mask]
             b = b[mask]
-            if np.std(a) == 0 or np.std(b) == 0:
+            if is_degenerate(a) or is_degenerate(b):
                 continue
             s += abs(np.corrcoef(a, b)[0, 1])
         scores[j] = s
