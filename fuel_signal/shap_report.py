@@ -70,13 +70,31 @@ def compute_shap(model: object, X: pd.DataFrame | np.ndarray) -> np.ndarray:
 def is_degenerate(arr: np.ndarray) -> bool:
     """True iff `arr` has no usable variance for a Pearson r.
 
-    `np.std(arr) == 0` alone misses a sample that is truly constant but whose computed
-    std lands on a tiny nonzero float instead of exact 0.0 (binary rounding — e.g. np.std
-    of many identical 0.01s is ~1.78e-18, not 0.0). Pairing it with the exact
-    `np.ptp(arr) == 0` (zero iff every value is truly identical) catches that case too, the
-    same fix `_band_std_usable` applies in experiments/pipeline/dossier_tables.py.
+    All three checks are load-bearing:
+
+    - empty `arr` — degenerate by definition, and the guard also keeps this predicate
+      total: `np.ptp` RAISES on a zero-size array ("no identity"), where the bare
+      `np.std(...) == 0` it replaces merely returned False.
+    - non-finite — a ±inf or NaN element makes `np.std` NaN, and NaN fails BOTH equality
+      tests below, so without this an unusable sample reads as usable and `np.corrcoef`
+      feeds NaN into the caller's running sum instead of being skipped. Tested on the
+      elements (not just on `std`) so `np.std` is never handed a value it warns on; `std`
+      is re-checked because it can overflow to inf on finite-but-huge input.
+    - `std == 0 or np.ptp(arr) == 0` — `std == 0` alone misses a sample that is truly
+      constant but whose computed std lands on a tiny nonzero float instead of exact 0.0
+      (binary rounding — np.std of many identical 0.01s is ~1.78e-18, not 0.0), letting
+      corrcoef divide by a near-zero std and produce a spurious/inflated r. `np.ptp` is
+      exact and zero iff every value is truly identical, so it catches that case.
+
+    This is the exact negation of `_band_std_usable` (experiments/pipeline/dossier_tables.py)
+    and `_finite_positive_spread` (experiments/lib/flips.py) — the two other copies of this
+    predicate (fps-tnz). Keep all three in step; drifting apart is the bug fps-tnz was.
     """
-    return bool(np.std(arr) == 0 or np.ptp(arr) == 0)
+    values = np.asarray(arr)
+    if values.size == 0 or not np.isfinite(values).all():
+        return True
+    std = np.std(values)
+    return bool(not np.isfinite(std) or std == 0 or np.ptp(values) == 0)
 
 
 def build_summary(

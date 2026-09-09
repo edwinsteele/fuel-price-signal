@@ -21,6 +21,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from fuel_signal import evaluate as _ev  # noqa: E402
+from fuel_signal.shap_report import is_degenerate  # noqa: E402
 
 OUT = pathlib.Path(__file__).parent
 FEATURES_CSV = pathlib.Path("data/features.csv")
@@ -107,10 +108,10 @@ def main() -> None:
 
         ax.axhline(0, color="k", lw=0.5, alpha=0.4)
         mean_abs = stats[rank][1]
-        if np.std(v) and np.std(s):
-            r = float(np.corrcoef(v, s)[0, 1])
-        else:
+        if is_degenerate(v) or is_degenerate(s):
             r = float("nan")
+        else:
+            r = float(np.corrcoef(v, s)[0, 1])
         ax.set_title(f"{rank + 1}. {slug}\nr={r:+.2f}  |S|={mean_abs:.3f}", fontsize=7)
         ax.tick_params(labelsize=6)
 

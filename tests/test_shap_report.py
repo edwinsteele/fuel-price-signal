@@ -186,6 +186,48 @@ def test_is_degenerate_catches_float_rounding_near_constant():
     assert is_degenerate(arr) is True
 
 
+def test_is_degenerate_true_for_empty_array():
+    # np.ptp RAISES on a zero-size array, so the size guard is what keeps the predicate
+    # total for a helper now shared by four call sites.
+    assert is_degenerate(np.array([])) is True
+
+
+@pytest.mark.parametrize("bad", [np.inf, -np.inf, np.nan])
+def test_is_degenerate_true_for_non_finite_element(bad):
+    # np.std goes NaN, and NaN fails BOTH `== 0` tests — without the isfinite check the
+    # sample reads as usable and corrcoef returns NaN into the caller's sum.
+    arr = np.concatenate([np.arange(10, dtype=float), [bad]])
+    assert is_degenerate(arr) is True
+
+
+def test_build_summary_r_is_nan_for_float_rounding_constant_feature():
+    # The mechanism at the production call site, not just the helper: a feature column of
+    # identical 0.01s has a nonzero np.std, so the pre-fps-tnz `np.std(v) == 0` gate let it
+    # through to corrcoef. r must come back NaN, not a spurious value.
+    rng = np.random.default_rng(6)
+    n = 20  # the length at which np.std of identical 0.01s rounds to 1.78e-18, not 0.0
+    X = np.column_stack([rng.normal(size=n), np.full(n, 0.01)])
+    assert np.std(X[:, 1]) != 0.0
+    sv = rng.normal(size=(n, 2))
+    summary = build_summary(["varies", "constant"], X, sv)
+    const_row = summary[summary["feature"] == "constant"].iloc[0]
+    assert np.isnan(const_row["r"])
+
+
+def test_approx_interaction_scores_skips_non_finite_bins():
+    # A partner column carrying +inf must not poison the whole partner's score: the bin is
+    # skipped, so the score stays finite and reflects the remaining bins.
+    rng = np.random.default_rng(7)
+    n = 200
+    X = np.column_stack([np.arange(n, dtype=float), rng.normal(size=n)])
+    sv = rng.normal(size=(n, 2))
+    clean = approx_interaction_scores(0, sv, X)
+    X[5, 1] = np.inf
+    with_inf = approx_interaction_scores(0, sv, X)
+    assert np.isfinite(with_inf[1])
+    assert with_inf[1] < clean[1]  # exactly one bin dropped
+
+
 # ---------------------------------------------------------------------------
 # build_summary
 # ---------------------------------------------------------------------------
