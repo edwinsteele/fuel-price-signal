@@ -42,6 +42,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [tau-selector-is-cadence-blind](tau-selector-is-cadence-blind.md) — the selector never sees the tank, so an unmoved τ after a cadence re-lock proves nothing. Harmless by measurement, not by construction.
 - [pbuy-is-station-relative](pbuy-is-station-relative.md) — `P(BUY)` is measured against each station's **own** trailing percentile, so it cannot rank stations. Sorting by it points at the dearest pump.
 - [noise-floor-force-vs-cadence-relock](noise-floor-force-vs-cadence-relock.md) — `--force` recovers a floor after a *column* re-lock, but is refused after a *cadence* re-lock. Freeze a new batch instead.
+- [check-freeze-cadence-lives-in-batch-freeze](check-freeze-cadence-lives-in-batch-freeze.md) — the guard moved from `noise_floor.py` to `batch_freeze.py` (#382) so `runner.py` could call it too, without a circular import.
 
 ## Pipeline layout and plumbing
 
