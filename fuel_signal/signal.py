@@ -391,6 +391,15 @@ DIVERSION_WORTH_CENTS = 3.0
 # Window for measuring which way the network is moving.
 _DRIFT_WINDOW_DAYS = 7
 
+# How far behind the last real observation normally sits, in days, before
+# anything is wrong. `daily-snapshot.yml` runs at 10:00 UTC — 8pm AEST / 9pm
+# AEDT — so the snapshot for day D is collected on the evening of D and a run
+# during the morning decision window on D+1 legitimately sees D as the newest
+# real reading. Warning at age 1 would fire every single morning of normal
+# operation, and a banner that is always on cannot signal an outage (Codex
+# review, PR #410). Age 2+ means a run was actually missed.
+EXPECTED_LAG_DAYS = 1
+
 _WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 # Every date question this module asks is a Sydney question: which weekday the
@@ -636,7 +645,7 @@ def _freshness_note(as_of: str, last_real: str | None, today: datetime.date) -> 
         return f"  (historical view; DB holds data to {last_real})"
     newest = last_real or as_of
     age = (today - datetime.date.fromisoformat(newest)).days
-    if age <= 0:
+    if age <= EXPECTED_LAG_DAYS:
         return ""
     plural = "day" if age == 1 else "days"
     real = f", last real reading {newest}" if newest != as_of else ""

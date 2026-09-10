@@ -634,6 +634,25 @@ def test_staleness_is_measured_from_the_last_real_row_not_the_filled_one(signal_
     assert f"last real reading {series[-1][0]}" in output
 
 
+def test_one_day_behind_is_normal_and_not_flagged(signal_db):
+    """daily-snapshot.yml collects at ~8-9pm, so the morning window legitimately
+    sees yesterday as the newest real reading. Warning then would fire every day
+    of normal operation and could no longer signal a real outage."""
+    conn, series, _ = signal_db
+    as_of = series[-1][0]
+    tomorrow = datetime.date.fromisoformat(as_of) + datetime.timedelta(days=1)
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, now=tomorrow)
+    assert "stale" not in output
+
+
+def test_two_days_behind_means_a_run_was_missed_and_is_flagged(signal_db):
+    conn, series, _ = signal_db
+    as_of = series[-1][0]
+    later = datetime.date.fromisoformat(as_of) + datetime.timedelta(days=2)
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, now=later)
+    assert "!! 2 days stale" in output
+
+
 def test_same_day_prices_carry_no_staleness_banner(signal_db):
     conn, series, _ = signal_db
     as_of = series[-1][0]
