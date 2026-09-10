@@ -131,6 +131,7 @@ from experiments.pipeline.batch_freeze import (
     FROZEN_DB_FILENAME,
     BaselineContractMismatch,
     check_baseline_contract,
+    check_freeze_cadence,
 )
 from experiments.pipeline.shock_folds import load_cached_shock_folds
 from experiments.pipeline.validate import (
@@ -144,6 +145,7 @@ from experiments.pipeline.validate import (
     validate_candidate,
 )
 from fuel_signal import evaluate as _ev
+from fuel_signal.backtest import TankParams
 from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.features import TARGET_COLUMNS, baseline_fingerprint, load_features
 
@@ -358,10 +360,22 @@ def run_candidate(
     station_universe_spec: dict | None = None,
     station_universe_pool_digest: str | None = None,
     min_row_cell_n: int = DEFAULT_MIN_ROW_CELL_N,
+    tank: TankParams | None = None,
     bead_id: str | None = None,
     verbose: bool = True,
 ) -> RunResult:
-    """Validate, fit, and score one candidate against a frozen batch. Never retries."""
+    """Validate, fit, and score one candidate against a frozen batch. Never retries.
+
+    tank (fps-ie0/fps-oqz): the TankParams this run is graded at. None (default)
+    resolves to `TankParams()`, the canonical cadence — same default every other
+    call in this pipeline resolves to when not overridden. Checked against the
+    batch's own declared cadence (`batch_freeze.check_freeze_cadence`) before any
+    fitting happens: a batch frozen at a different cadence than `tank` resolves to
+    would otherwise silently grade this candidate against a floor stamped for a
+    cadence the batch's freeze.json does not declare (see check_freeze_cadence's
+    docstring). Passed through to `run_paired_realised_backtest` so the realised
+    backtest itself runs at this cadence, not just the check.
+    """
     t0 = time.perf_counter()
     batch_dir = pathlib.Path(batch_dir)
     candidate_path = pathlib.Path(candidate_path)
@@ -371,6 +385,7 @@ def run_candidate(
     # a workable train_min_days rather than silently falling back to the library
     # default that cannot fit inside outer fold 1. See DEFAULT_INNER_FOLD_PARAMS.
     inner_fold_params = {**DEFAULT_INNER_FOLD_PARAMS, **(inner_fold_params or {})}
+    tank = tank or TankParams()
 
     # Fail in a second, not ~9 minutes in. Raised rather than _finish()'d: a run
     # this misconfigured shouldn't leave a results.json at all, because that
@@ -391,6 +406,16 @@ def run_candidate(
     # like what it is: started, no verdict yet.
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / RESULTS_FILENAME).unlink(missing_ok=True)
+
+    # Same reasoning as the fold-geometry check above: a cadence disagreement is
+    # a run misconfiguration, not anything about the candidate, so it's raised
+    # here rather than routed through _finish() into a results.json (fps-oqz).
+    # AFTER the unlink above, not before (PR #411 review): a re-run whose
+    # cadence now disagrees (e.g. the default re-locked since the last run
+    # against this out_dir) must not leave a stale PRIOR verdict on disk
+    # looking like this attempt's outcome — the same reasoning the unlink's
+    # own comment gives, just for a raise instead of a completed run.
+    check_freeze_cadence(batch_dir, tank)
 
     try:
         candidate = load_candidate_module(candidate_path)
@@ -572,6 +597,7 @@ def run_candidate(
         seed=realised_seed, station_codes=station_codes,
         outer_fold_params=outer_fold_params, inner_fold_params=inner_fold_params,
         fold_subset=fold_subset, db_path=db_path, collect_fills=True, verbose=verbose,
+        tank=tank,
     )
     try:
         try:

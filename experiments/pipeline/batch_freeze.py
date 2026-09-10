@@ -43,7 +43,7 @@ import click
 import numpy as np
 import pandas as pd
 
-from fuel_signal.backtest import TankParams, require_tank_stamp
+from fuel_signal.backtest import TankParams, format_tank_params, require_tank_stamp
 from fuel_signal.dates import date_from_int
 from fuel_signal.db import DEFAULT_DB_PATH
 from fuel_signal.features import (
@@ -438,6 +438,48 @@ def check_baseline_contract(batch_dir: pathlib.Path, df: pd.DataFrame) -> None:
         added=sorted(current_set - frozen_set),
         removed=sorted(frozen_set - current_set),
     )
+
+
+def check_freeze_cadence(batch_dir: pathlib.Path, tank: TankParams) -> None:
+    """Refuse to grade/write an artifact at a cadence the batch does not declare (fps-oqz).
+
+    `freeze.json`'s `tank_params` is the batch's declared cadence contract — the
+    same role `baseline_fingerprint` plays for column identity. `freeze_batch`
+    guarantees the two agree when it computes the noise floor itself, but both
+    `noise_floor.py`'s CLI (`--force`) and `runner.py`'s candidate runner can
+    resolve `tank` from the CURRENT `TankParams()` default. After a re-lock that
+    can differ from what the batch declares, leaving it split-brained: `freeze.json`
+    still declaring 7d beside artifacts stamped 1d, with no reader to notice —
+    nothing consumes `freeze.json`'s stamp, and `dossier_tables._noise_band()`
+    (fps-v8o) compares only run-vs-floor, so a 1d run would then grade cleanly
+    against what every doc calls a 7-day batch.
+
+    This closes that triangle: fps-15c stamps the writers, fps-v8o guards run-vs-floor,
+    and this guards run/floor-vs-freeze. Silent on a batch with no stamp (pre-fps-15c
+    freeze manifests) — an absent declaration is not a disagreement.
+
+    Lives here (not in noise_floor.py, its original home) because runner.py needs it
+    too, and noise_floor.py already imports from runner.py at module load time — a
+    runner.py -> noise_floor.py import would be circular. Both already import from
+    this module.
+    """
+    freeze_path = batch_dir / FREEZE_MANIFEST_FILENAME
+    if not freeze_path.exists():
+        return
+    declared = json.loads(freeze_path.read_text()).get("tank_params")
+    actual = format_tank_params(tank)
+    if declared and declared != actual:
+        raise ValueError(
+            f"{batch_dir.name} declares tank_params {declared!r} in "
+            f"{FREEZE_MANIFEST_FILENAME}, but this run would be computed at "
+            f"{actual!r} — refusing (fps-oqz). A batch's runs and its freeze manifest "
+            "must agree on cadence, or every candidate graded against it is "
+            "compared to a ruler the batch does not declare. This batch was frozen "
+            "before the cadence re-lock; freeze a NEW batch at the current cadence "
+            "rather than running this one at it (docs/CONVENTIONS.md "
+            "§ The decision cadence is a lock parameter). To run deliberately "
+            "at the batch's own declared cadence, pass that tank explicitly."
+        )
 
 
 @click.command("batch_freeze")

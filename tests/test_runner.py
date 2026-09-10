@@ -57,6 +57,7 @@ from experiments.pipeline.runner import (
 )
 from experiments.pipeline.validate import load_candidate_module, validate_candidate
 from fuel_signal import evaluate as _ev
+from fuel_signal.backtest import TankParams
 from fuel_signal.features import (
     FEATURE_COLUMNS,
     LGA_FEATURE_COLUMNS,
@@ -1316,6 +1317,68 @@ def test_run_candidate_records_the_tank_params_it_was_graded_at(tmp_path, monkey
 
     assert result.status == STATUS_GRADED
     assert result.results["meta"]["tank_params"] == "50/3.571/7d/10%"
+
+
+# ── check_freeze_cadence wired into the candidate runner (fps-ie0/#382) ──────
+
+def _write_freeze(batch_dir: pathlib.Path, tank_params: str | None) -> None:
+    payload = {"snapshot_date": "2026-08-01"}
+    if tank_params is not None:
+        payload["tank_params"] = tank_params
+    (batch_dir / batch_freeze.FREEZE_MANIFEST_FILENAME).write_text(json.dumps(payload))
+
+
+def test_run_candidate_refuses_a_cadence_the_batch_does_not_declare(tmp_path):
+    """fps-ie0: unlike noise_floor.py, the runner never called check_freeze_cadence at
+    all, so a candidate run against a batch frozen at a different cadence than the
+    CURRENT TankParams() default silently graded at the wrong cadence instead of
+    refusing — exactly the split-brain check_freeze_cadence exists to catch."""
+    df = _baseline_features_df()
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _write_freeze(batch_dir, "50/3.571/7d/10%")
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_CANDIDATE)
+
+    with pytest.raises(ValueError, match="refusing"):
+        run_candidate(batch_dir, candidate_path, out_dir=tmp_path / "out", verbose=False)
+
+
+def test_run_candidate_allows_the_batchs_own_declared_cadence(tmp_path, monkeypatch):
+    """The refusal is about DISAGREEMENT, not about being non-default: running a
+    7-day batch's candidates at 7 days (tank passed explicitly) is the legitimate
+    case and must still grade."""
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _write_freeze(batch_dir, "50/3.571/7d/10%")
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    monkeypatch.setattr(
+        runner_module, "run_paired_realised_backtest", lambda *a, **k: _FakeRealisedFull(None)
+    )
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+        tank=TankParams(evaluation_interval_days=7),
+    )
+
+    assert result.status == STATUS_GRADED
+    assert result.results["meta"]["tank_params"] == "50/3.571/7d/10%"
+
+
+def test_run_candidate_is_silent_when_the_freeze_predates_the_stamp(tmp_path, monkeypatch):
+    """A pre-fps-15c freeze.json carries no tank_params. An absent declaration is not
+    a disagreement — refusing there would block every legacy batch."""
+    df = _full_baseline_df(n_days=1930, n_stations=1)
+    batch_dir = _write_batch_dir(tmp_path, df)
+    _write_freeze(batch_dir, None)
+    candidate_path = _write_candidate(tmp_path, PIT_SAFE_STRING_DATE_CANDIDATE)
+    monkeypatch.setattr(
+        runner_module, "run_paired_realised_backtest", lambda *a, **k: _FakeRealisedFull(None)
+    )
+
+    result = run_candidate(
+        batch_dir, candidate_path, out_dir=tmp_path / "out", seeds=(1, 2), verbose=False,
+    )
+
+    assert result.status == STATUS_GRADED
 
 
 def test_run_candidate_persists_realised_deltas_into_results_json(tmp_path, monkeypatch):
