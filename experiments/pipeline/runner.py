@@ -394,11 +394,6 @@ def run_candidate(
     # they can act on, not a status code buried in an artifact.
     _check_fold_geometry(outer_fold_params, inner_fold_params)
 
-    # Same reasoning as the fold-geometry check above: a cadence disagreement is
-    # a run misconfiguration, not anything about the candidate, so it's raised
-    # here rather than routed through _finish() into a results.json (fps-oqz).
-    check_freeze_cadence(batch_dir, tank)
-
     # A run dir is keyed on the candidate, so a re-run reuses it — and a
     # retryable abort now sends candidates back for exactly that (fps-g31).
     # Nothing else clears this file: run_candidate only ever WRITES results.json
@@ -411,6 +406,16 @@ def run_candidate(
     # like what it is: started, no verdict yet.
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / RESULTS_FILENAME).unlink(missing_ok=True)
+
+    # Same reasoning as the fold-geometry check above: a cadence disagreement is
+    # a run misconfiguration, not anything about the candidate, so it's raised
+    # here rather than routed through _finish() into a results.json (fps-oqz).
+    # AFTER the unlink above, not before (PR #411 review): a re-run whose
+    # cadence now disagrees (e.g. the default re-locked since the last run
+    # against this out_dir) must not leave a stale PRIOR verdict on disk
+    # looking like this attempt's outcome — the same reasoning the unlink's
+    # own comment gives, just for a raise instead of a completed run.
+    check_freeze_cadence(batch_dir, tank)
 
     try:
         candidate = load_candidate_module(candidate_path)
