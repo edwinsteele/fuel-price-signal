@@ -1143,16 +1143,19 @@ def run_oracle_backtest(
 # DB loader
 # ---------------------------------------------------------------------------
 
-def _since_clause(since_date: str | None) -> str:
-    """SQL fragment bounding a daily_prices scan, or empty when unbounded."""
-    return "" if since_date is None else "   AND dp.price_date >= ?"
+def _since_floor(since_date: str | None) -> int:
+    """`price_date` floor as a bind value: the date, or 0 for unbounded.
 
-
-def _since_args(fid: int, since_date: str | None) -> tuple:
-    """Bind parameters matching _since_clause's placeholder count."""
-    if since_date is None:
-        return (fid,)
-    return (fid, _date_to_int(since_date))
+    Returned as a PARAMETER rather than a conditionally-concatenated SQL clause
+    so the queries below stay single constant strings. `price_date` is a positive
+    YYYYMMDD integer, so `>= 0` admits every row and the unbounded case needs no
+    separate query text. Besides being harder to get wrong, this keeps the SQL
+    out of reach of string concatenation entirely — opengrep flags a built-up
+    query as an injection risk on sight, and it is right to: this instance only
+    ever concatenated two hard-coded constants, but the shape invites a future
+    edit to interpolate a value.
+    """
+    return 0 if since_date is None else _date_to_int(since_date)
 
 
 def load_history(
@@ -1229,10 +1232,10 @@ def load_history(
             "   AND dp.price_date = sc.snapshot_date"
             " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
             "   AND s.council IS NOT NULL"
-            + _since_clause(since_date)
-            + " GROUP BY dp.price_date, s.council"
+            "   AND dp.price_date >= ?"
+            " GROUP BY dp.price_date, s.council"
             " HAVING COUNT(*) >= 3",
-            _since_args(fid, since_date),
+            (fid, _since_floor(since_date)),
         )
     }
 
@@ -1246,10 +1249,10 @@ def load_history(
             "   AND dp.price_date = sc.snapshot_date"
             " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
             "   AND s.brand IS NOT NULL"
-            + _since_clause(since_date)
-            + " GROUP BY dp.price_date, s.brand"
+            "   AND dp.price_date >= ?"
+            " GROUP BY dp.price_date, s.brand"
             " HAVING COUNT(*) >= 3",
-            _since_args(fid, since_date),
+            (fid, _since_floor(since_date)),
         )
     }
 
