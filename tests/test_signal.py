@@ -287,7 +287,7 @@ def test_as_of_date_in_output(signal_db):
     conn, series, _ = signal_db
     as_of = series[3 * _CYCLE_LENGTH + _CYCLE_LENGTH // 2][0]
     output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
-    assert f"[as of {as_of}]" in output
+    assert f"E10 - {as_of}" in output
 
 
 def test_station_label_in_output(signal_db):
@@ -301,14 +301,13 @@ def test_price_in_output(signal_db):
     conn, series, _ = signal_db
     as_of = series[3 * _CYCLE_LENGTH + _CYCLE_LENGTH // 2][0]
     output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
-    assert "c" in output
-    assert "E10 @ Shell Springwood:" in output
+    assert re.search(r"Shell Springwood\s+\d+\.\dc", output)
 
 
 def test_per_signal_reasons_in_output(signal_db):
     conn, series, _ = signal_db
     as_of = series[3 * _CYCLE_LENGTH + _CYCLE_LENGTH // 2][0]
-    output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, explain=True)
     assert "AverageCycleTimeSignal" in output
     assert "AverageGradientAfterPeakSignal" in output
     assert "AverageNearPreviousMinMaxSignal" in output
@@ -323,31 +322,31 @@ def test_buy_verdict_near_trough(signal_db):
     """Late in cycle + price near min → BUY."""
     conn, series, _ = signal_db
     as_of = series[180][0]   # day 180: pct ~0.85, price ~152 (near min)
-    output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
-    assert "BUY " in output
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, explain=True)
+    assert "legacy rule signals: BUY" in output
 
 
 def test_wait_verdict_mid_cycle(signal_db):
     """Mid cycle + price in middle range → WAIT."""
     conn, series, _ = signal_db
     as_of = series[164][0]   # day 164: pct ~0.5, price ~161
-    output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
-    assert "WAIT" in output
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, explain=True)
+    assert "legacy rule signals: WAIT" in output
 
 
 def test_dont_buy_verdict_just_after_peak(signal_db):
     """Early in cycle + price near max → DONT_BUY."""
     conn, series, _ = signal_db
     as_of = series[146][0]   # day 146: pct ~0.11, price ~172 (near max)
-    output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
-    assert "DONT" in output
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, explain=True)
+    assert "legacy rule signals: DON'T BUY" in output
 
 
 def test_day_and_cycle_format(signal_db):
     conn, series, _ = signal_db
     as_of = series[3 * _CYCLE_LENGTH + _CYCLE_LENGTH // 2][0]
     output = build_signals(conn, as_of, preferred_stations=_PREFERRED)
-    assert re.search(r"Day \d+\+?/\d+ of cycle", output)
+    assert re.search(r"cycle day \d+\+?/\d+", output)
 
 
 def test_day_number_exceeds_cycle_len_shows_plus_suffix(tmp_path):
@@ -381,8 +380,8 @@ def test_day_number_exceeds_cycle_len_shows_plus_suffix(tmp_path):
 
     as_of = series[-1][0]
     output = build_signals(conn, as_of, preferred_stations={9001: "Shell Springwood"})
-    assert re.search(r"Day \d+\+/\d+ of cycle", output), (
-        f"Expected 'Day N+/N of cycle' when cycle exceeds mean, got:\n{output}"
+    assert re.search(r"cycle day \d+\+/\d+", output), (
+        f"Expected 'cycle day N+/N' when cycle exceeds mean, got:\n{output}"
     )
     conn.close()
 
@@ -481,5 +480,165 @@ def test_cli_output_structure(signal_db):
     runner = CliRunner()
     result = runner.invoke(signal_cli, ["--as-of", as_of, "--db", str(db_path)])
     assert result.exit_code == 0
-    assert f"[as of {as_of}]" in result.output
-    assert ("BUY " in result.output) or ("WAIT" in result.output) or ("DONT" in result.output)
+    assert f"E10 - {as_of}" in result.output
+    assert ("FILL UP" in result.output) or ("WORTH A STOP" in result.output) or (
+        "WAIT if you can" in result.output
+    ) or ("No price data" in result.output)
+
+
+# ---------------------------------------------------------------------------
+# Decision layer — route awareness, ordering, staleness
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def two_station_db(tmp_path):
+    """Two stations on the same synthetic series, priced apart on the last day."""
+    db_path = tmp_path / "two_station.db"
+    conn = db.open_db(db_path)
+    db.create_schema(conn)
+    for code, name in ((9001, "Daily Servo"), (9002, "Weekly Servo")):
+        conn.execute(
+            "INSERT INTO stations"
+            " (station_code, address_normalized, suburb, postcode, name, brand)"
+            f" VALUES ({code}, '{code} main street', 'Springwood', '2777', ?, 'Shell')",
+            (name,),
+        )
+    series = _sawtooth_series(n_cycles=4.0, start="2020-01-01")
+    fid = db.fuel_type_id(conn, "E10")
+    rows = []
+    for code, offset in ((9001, 0.0), (9002, -8.0)):
+        rows += [
+            (code, fid, db._date_to_int(d), round((p + offset) * 10)) for d, p in series
+        ]
+    conn.executemany(
+        "INSERT INTO daily_prices (station_code, fuel_type_id, price_date,"
+        " price_decicents) VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+    yield conn, series
+    conn.close()
+
+
+_TWO = {9001: "Daily Servo", 9002: "Weekly Servo"}
+
+
+def test_off_route_station_is_excluded_from_the_on_route_table(two_station_db, monkeypatch):
+    """A station not passed today must not be offered as today's answer."""
+    conn, series = two_station_db
+    # Weekly Servo is passed Wednesdays only; evaluate on a Monday.
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    monday = datetime.date(2026, 9, 7)
+    assert monday.weekday() == 0
+    output = build_signals(
+        conn, as_of, preferred_stations=_TWO, today=monday
+    )
+    # Cheaper, but unreachable → it cannot be the headline recommendation.
+    assert "OFF ROUTE" in output
+    assert "next pass in 2d, Wed" in output
+    headline = [ln for ln in output.splitlines() if "FILL UP" in ln or "WAIT" in ln]
+    assert all("Weekly Servo" not in ln for ln in headline)
+
+
+def test_off_route_station_joins_the_table_on_a_day_it_is_passed(two_station_db, monkeypatch):
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    wednesday = datetime.date(2026, 9, 9)
+    assert wednesday.weekday() == 2
+    output = build_signals(conn, as_of, preferred_stations=_TWO, today=wednesday)
+    assert "OFF ROUTE" not in output
+    # 8c cheaper and reachable → it is the marked pick.
+    assert re.search(r"->\s+Weekly Servo", output)
+
+
+def test_stations_are_ranked_by_price_not_by_probability(two_station_db, monkeypatch):
+    """The trap: P(BUY) is station-relative and must never drive the ordering.
+
+    labels.py condition 2 measures cheapness against each station's OWN trailing
+    percentile, so the dearest pump routinely carries the highest P(BUY). Sorting
+    by it would send the driver to the expensive one.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr("fuel_signal.signal.STATION_ROUTE_DAYS", {})
+    # Give the EXPENSIVE station the high probability.
+    monkeypatch.setattr(
+        "fuel_signal.signal.model_probabilities",
+        lambda *a, **k: {9001: 0.95, 9002: 0.30},
+    )
+    as_of = series[180][0]
+    output = build_signals(
+        conn, as_of, preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+    )
+    # Table rows only — the headline sentence also names a station.
+    table = [ln for ln in output.splitlines() if re.search(r"Servo\s+\d+\.\dc", ln)]
+    # Weekly Servo is 8c cheaper, so it leads despite the lower probability.
+    assert "Weekly Servo" in table[0]
+    assert table[0].lstrip().startswith("->")
+    assert "0.30" in table[0]
+    assert "Daily Servo" in table[1]
+    assert "0.95" in table[1]
+
+
+def test_stale_prices_are_flagged_with_their_age(signal_db):
+    conn, series, _ = signal_db
+    as_of = series[180][0]
+    later = datetime.date.fromisoformat(as_of) + datetime.timedelta(days=5)
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, today=later)
+    assert "!! 5 days stale" in output
+
+
+def test_same_day_prices_carry_no_staleness_banner(signal_db):
+    conn, series, _ = signal_db
+    as_of = series[180][0]
+    same_day = datetime.date.fromisoformat(as_of)
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, today=same_day)
+    assert "stale" not in output
+
+
+def test_missing_model_artifact_degrades_to_prices_and_cycle(signal_db, tmp_path):
+    conn, series, _ = signal_db
+    as_of = series[180][0]
+    output = build_signals(
+        conn,
+        as_of,
+        preferred_stations=_PREFERRED,
+        model_path=tmp_path / "definitely-absent.joblib",
+        today=datetime.date.fromisoformat(as_of),
+    )
+    assert "no model artifact" in output
+    # The column is gone from the table header; only the explanatory note names it.
+    header = [ln for ln in output.splitlines() if "STATION" in ln and "PRICE" in ln]
+    assert header and all("P(BUY)" not in ln for ln in header)
+
+
+def test_diversion_advice_fires_only_when_the_gap_is_worth_it(two_station_db, monkeypatch):
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    output = build_signals(
+        conn, as_of, preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+    )
+    # 8c gap clears DIVERSION_WORTH_CENTS (3.0).
+    assert "worth timing a fill for" in output
+    assert "no reason to divert" not in output
+
+
+def test_network_drift_survives_a_forward_filled_flat_last_day():
+    """A repeated final value must not read as 'flat' — that is the stale case."""
+    from fuel_signal.signal import _network_drift
+
+    series = [
+        (f"2026-09-{d:02d}", 200.0 - d) for d in range(1, 9)
+    ]  # falling 1c/day
+    series.append(("2026-09-09", series[-1][1]))  # forward-filled repeat
+    drift = _network_drift(series, "2026-09-09")
+    assert drift is not None
+    assert drift < -0.5, f"expected a clear fall, got {drift}"
