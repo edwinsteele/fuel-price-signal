@@ -16,12 +16,30 @@ FUELAPI_PRICES_URL = f"{FUELAPI_BASE_URL}/FuelPriceCheck/v1/fuel/prices"
 
 # Preferred stations: fill in station_code → label after first live.py run.
 # station_code values come from the FuelCheck API (integer, stable across rebrands).
+#
+# Labels are display-only. The grading identity that experiments stamp
+# (`experiments.lib.universe.station_codes_digest`) hashes the sorted CODES and
+# never reads the labels, so correcting a label cannot move a noise floor or
+# invalidate a banked result — but changing a KEY would.
 PREFERRED_STATIONS: dict[int, str] = {
-    414: "BP Valley Heights",
+    414: "BP Springwood",
     18517: "Shell Blaxland",
     429: "United East Blaxland",
-    585: "Ampol Emu Heights",
-    261: "7-Eleven near Church",
+    585: "EG Ampol Emu Heights",
+    261: "7-Eleven Penrith South",
+}
+
+# Days of the week each station is actually reachable, as Python weekday numbers
+# (`date.weekday()`: Mon=0 … Sun=6). A station ABSENT from this map is on the
+# daily commute and reachable every day; only the exceptions are listed.
+#
+# This is a routing fact, not a price fact, and it belongs here rather than in the
+# label: `labels.py` deliberately excludes station availability from the training
+# target ("the user's preferred station may not be on their route today") and
+# leaves it to the decision layer. `signal.py` is that decision layer.
+STATION_ROUTE_DAYS: dict[int, frozenset[int]] = {
+    # Passed on the Penrith run, not the daily commute — typically Wed and Sun.
+    261: frozenset({2, 6}),
 }
 
 # Station codes known to share a normalised address with another code and always

@@ -207,28 +207,69 @@ If a name search matches multiple stations, a list of `station:CODE` alternative
 ## Getting the signal
 
 ```bash
-# Signal as of today (latest date in DB)
+# The morning decision table (latest date in DB)
 uv run python -m fuel_signal.signal
 
-# Signal as of a specific historical date (useful for validation)
+# As of a specific historical date (useful for validation)
 uv run python -m fuel_signal.signal --as-of 2026-02-15
 
-# Custom DB path
+# Custom DB / model path
 uv run python -m fuel_signal.signal --db /path/to/fuel_signal.db
+uv run python -m fuel_signal.signal --model data/models/lgbm_calibrated.joblib
+
+# Also print the legacy four-rule breakdown
+uv run python -m fuel_signal.signal --explain
 ```
 
-Output is the combined verdict (one line per preferred station) followed by the contributing signals:
+Output ranks the preferred stations you can actually reach today, calls the fill
+size, and reports off-route stations separately with the arithmetic needed to
+decide whether they're worth a detour:
 
 ```
-[as of 2026-01-10]
-BUY  | Day 27/35 of cycle | E10 @ BP Valley Heights: 159.9c
-BUY  | Day 27/35 of cycle | E10 @ Shell Blaxland: 157.5c
-Combined: BUY (mean signal +1.00)
-  AverageCycleTimeSignal: BUY — cycle ending soon (73% through cycle; day 26 / 35.5)
-  AverageGradientAfterPeakSignal: NEUTRAL — price has not flatlined
-  AverageNearPreviousMinMaxSignal: BUY — price close to low in last cycle
-  FavouriteServiceStationPriceGradientSignal: NEUTRAL — no preferred stations raising sharply
+E10 - 2026-09-04  !! 6 days stale, last real reading 2026-09-03
+Network 202.1c, rising 0.2c/day  |  cycle day 11/35  |  last cycle 193.8-204.1c
+
+  FILL UP — Shell Blaxland @ 195.9c, brim it.
+  Model says buy and the network is not falling: no cheaper fuel in sight.
+
+     STATION                    PRICE   VS NET   P(BUY)
+  -> Shell Blaxland            195.9c     -6.2     0.42
+     BP Springwood             204.9c     +2.8     0.10
+     United East Blaxland      206.9c     +4.8     0.84
+     EG Ampol Emu Heights      206.9c     +4.8     0.79
+
+  OFF ROUTE (Wed/Sun) - next pass in 3d, Sun
+     7-Eleven Penrith South    197.9c     -4.2     0.34
+     +2.0c vs Shell Blaxland - no reason to divert.
 ```
+
+Three things worth knowing about how to read it:
+
+- **Rows are ordered by price, never by `P(BUY)`.** The label's cheapness test is
+  each station's *own* trailing percentile (`labels.py` condition 2), so `P(BUY)`
+  is station-relative and not comparable across stations — the sample above has
+  the dearest two pumps carrying the highest probabilities. `P(BUY)` answers
+  *should I buy at all*; price answers *where*.
+- **`P(BUY)` comes from the locked artifact** (54-feat isotonic-calibrated LGBM,
+  τ=0.25 — see [docs/STATUS.md](docs/STATUS.md)), scored live. With no model file
+  present the command still prints prices, cycle state and the fill call, and says
+  so. Scoring costs ~20s, nearly all of it loading history and importing LightGBM.
+- **Staleness is measured against real observations, not `daily_prices`.**
+  `fill.py` forward-fills that table, so its newest date is fabricated whenever the
+  snapshot job has missed a run; the banner reports the last row in `prices`.
+
+Which stations are on the daily commute versus passed only on certain weekdays is
+configured in `STATION_ROUTE_DAYS` (`fuel_signal/config.py`). A station absent from
+that map is treated as reachable every day. Routing uses the **Sydney** date, not the
+host's, so a UTC box does not read Wednesday morning as Tuesday; with an explicit
+`--as-of` it routes by that date so historical renders are reproducible.
+
+**Caveat on the fill-size call.** Brim-vs-bridge turns on
+`FALLING_CENTS_PER_DAY = -0.5`, which is reasoned rather than measured and sits on
+the median of the drift distribution, splitting days ~49/51. Treat "brim it" vs
+"bridge it" as the weakest line in the output — the station choice and the buy/wait
+call are both backed by measurement, this is not. See
+[docs/memory/brim-bridge-threshold-unvalidated.md](docs/memory/brim-bridge-threshold-unvalidated.md).
 
 ## Makefile shortcuts
 

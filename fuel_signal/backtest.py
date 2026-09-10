@@ -40,6 +40,7 @@ from fuel_signal.brand_leadership import (
 from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.cycle import CycleDetector, CycleState
 from fuel_signal.dates import date_from_int as _date_from_int
+from fuel_signal.dates import date_to_int as _date_to_int
 from fuel_signal.features import (
     DELTA_LAG_DAYS,
     FEATURE_COLUMNS,
@@ -347,16 +348,26 @@ class ModelStrategy:
             self._pipeline = loaded
             self._feature_columns = list(FEATURE_COLUMNS)
 
-    def decide(self, as_of: str, station_code: int, history: PriceHistory) -> bool:
+    def probability(
+        self, as_of: str, station_code: int, history: PriceHistory
+    ) -> float | None:
+        """P(BUY) for this station/date, or None when a required input is missing.
+
+        Split out of ``decide`` so a caller can *display* the probability. The
+        None return is why this is not just ``decide``'s internals: ``decide``
+        collapses missing inputs to True (default-buy), which is right for a
+        backtest but would render as a confident BUY in the CLI. None keeps
+        "no opinion" distinguishable from "low probability".
+        """
         state = history.cycle_state(as_of)
         if state is None:
-            return True
+            return None
         station_price = history.station_price_at(station_code, as_of)
         if station_price is None:
-            return True
+            return None
         avg_price = history.avg_price_at(as_of)
         if avg_price is None:
-            return True
+            return None
         lga_mean = history.lga_mean_at(station_code, as_of)
         brand_mean = history.brand_mean_at(station_code, as_of)
         stickiness = history.stickiness_score_at(station_code, as_of)
@@ -397,7 +408,12 @@ class ModelStrategy:
                 f"feature {e.args[0]!r} is in feature_columns but no value was produced "
                 f"for it (extra_feature_provider must supply every added column)."
             ) from e
-        prob = float(self._pipeline.predict_proba(X)[0][1])
+        return float(self._pipeline.predict_proba(X)[0][1])
+
+    def decide(self, as_of: str, station_code: int, history: PriceHistory) -> bool:
+        prob = self.probability(as_of, station_code, history)
+        if prob is None:
+            return True  # insufficient data → default buy
         return prob >= self.threshold
 
 
@@ -1127,11 +1143,27 @@ def run_oracle_backtest(
 # DB loader
 # ---------------------------------------------------------------------------
 
+def _since_floor(since_date: str | None) -> int:
+    """`price_date` floor as a bind value: the date, or 0 for unbounded.
+
+    Returned as a PARAMETER rather than a conditionally-concatenated SQL clause
+    so the queries below stay single constant strings. `price_date` is a positive
+    YYYYMMDD integer, so `>= 0` admits every row and the unbounded case needs no
+    separate query text. Besides being harder to get wrong, this keeps the SQL
+    out of reach of string concatenation entirely — opengrep flags a built-up
+    query as an injection risk on sight, and it is right to: this instance only
+    ever concatenated two hard-coded constants, but the shape invites a future
+    edit to interpolate a value.
+    """
+    return 0 if since_date is None else _date_to_int(since_date)
+
+
 def load_history(
     conn: sqlite3.Connection,
     station_codes: list[int],
     eval_dates: list[str] | None = None,
     detector_factory: Callable[[list[tuple[str, float]]], CycleDetector] = CycleDetector,
+    since_date: str | None = None,
 ) -> PriceHistory:
     """Load avg series, per-station prices, and Phase 4 feature caches from DB once.
 
@@ -1146,6 +1178,20 @@ def load_history(
     qualifying_brands(conn) itself is cheap (one aggregate query) and always run,
     mirroring LGA_FEATURE_COUNCILS being an always-available module constant —
     only the per-date trough lookup is gated on eval_dates.
+
+    since_date: optional YYYY-MM-DD lower bound on the three per-date aggregate
+    caches (lga_mean, brand_mean, network_px_std). Each of those groups by date,
+    so bounding drops whole keys and leaves every surviving key's value
+    bit-identical — a caller that reads only recent dates gets exactly the same
+    numbers for far less scanning (the live CLI reads one date and spends ~11s of
+    a ~29s load on these three). It does NOT bound avg_series (the cycle detector
+    needs full history to locate peaks) or the PIT trough lookups (they scan back
+    to find trough events). Callers that read dates before the bound will see
+    None/NaN, so leave it None — the default — for backtests.
+
+    The 3-day deltas derived from these caches are calendar-lagged, so a bound
+    must clear the date of interest by more than DELTA_LAG_DAYS for the delta at
+    that date to survive; give it a generous margin, not the exact date.
     """
     avg_series = db.average_price_series(conn)
     station_prices: dict[int, list[tuple[str, float]]] = {}
@@ -1186,9 +1232,10 @@ def load_history(
             "   AND dp.price_date = sc.snapshot_date"
             " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
             "   AND s.council IS NOT NULL"
+            "   AND dp.price_date >= ?"
             " GROUP BY dp.price_date, s.council"
             " HAVING COUNT(*) >= 3",
-            (fid,),
+            (fid, _since_floor(since_date)),
         )
     }
 
@@ -1202,9 +1249,10 @@ def load_history(
             "   AND dp.price_date = sc.snapshot_date"
             " WHERE dp.fuel_type_id = ? AND sc.class != 'Sticky'"
             "   AND s.brand IS NOT NULL"
+            "   AND dp.price_date >= ?"
             " GROUP BY dp.price_date, s.brand"
             " HAVING COUNT(*) >= 3",
-            (fid,),
+            (fid, _since_floor(since_date)),
         )
     }
 
@@ -1231,7 +1279,7 @@ def load_history(
     )
 
     avg_date_strs: list[str] = [d for d, _ in avg_series]
-    network_px_std_by_date = _network_px_std_per_date(conn, fid)
+    network_px_std_by_date = _network_px_std_per_date(conn, fid, since_date=since_date)
     network_px_std_delta_3d_by_date = _calendar_delta(
         network_px_std_by_date, avg_date_strs, DELTA_LAG_DAYS
     )

@@ -418,6 +418,7 @@ def _brand_mean_on_date(
 def _network_px_std_per_date(
     conn: sqlite3.Connection,
     fuel_type_id: int,
+    since_date: str | None = None,
 ) -> dict[str, float]:
     """Per-date sample std of E10 prices (cents) over the canonical Competitive cohort.
 
@@ -431,14 +432,21 @@ def _network_px_std_per_date(
     joined to station_class; aggregation is in Python because SQLite lacks a
     native STDDEV.
     """
+    # since_date bounds the scan for callers that only read a recent date (the
+    # live CLI). Each date's std is computed from that date's rows alone, so
+    # excluding older dates leaves every surviving date's value bit-identical —
+    # it drops keys, it does not change them. Passed as a bind value rather than
+    # a conditional clause so this stays one constant query: price_date is a
+    # positive YYYYMMDD integer, so a floor of 0 admits everything.
     cur = conn.execute(
         "SELECT dp.price_date, dp.price_decicents"
         " FROM daily_prices dp"
         " JOIN station_class sc ON dp.station_code = sc.station_code"
         "   AND dp.price_date = sc.snapshot_date"
         " WHERE dp.fuel_type_id = ?"
-        "   AND sc.class = 'Competitive'",
-        (fuel_type_id,),
+        "   AND sc.class = 'Competitive'"
+        "   AND dp.price_date >= ?",
+        (fuel_type_id, 0 if since_date is None else _db._date_to_int(since_date)),
     )
     by_date: dict[int, list[float]] = {}
     for date_int, decicents in cur:
