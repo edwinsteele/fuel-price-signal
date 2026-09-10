@@ -137,3 +137,36 @@ by suppression, and removes the shape that invites a later edit to interpolate.
 manual reviews, and it refuses with a `COMMENTED` review saying so. Same handling as a
 CodeRabbit rate-limit: skip and move on, do not reschedule. Related:
 [[gh-issue-list-consistency]].
+
+## A third clean-pass channel: a bare 👍 reaction, no comment or review at all
+
+PR #412 (worker run, 2026-09-10, owner confirmed this was an **"Exhaustive review"**
+depth setting on Codex's side) added a THIRD observed clean-pass signal, distinct from
+both channels above:
+
+- Findings → review + inline comments (documented above).
+- Clean pass, "normal" depth → an issue comment: "Codex Review: Didn't find any major
+  issues."
+- Clean pass, **this run** → **no review, no inline comments, no issue comment at
+  all** — just a `+1` reaction from `chatgpt-codex-connector[bot]` left directly on
+  the PR body. No dedicated Codex check-run showed up either (only `signal-diff`,
+  `test`, and `Sourcery review` on this commit) — the reaction was the *only* trace
+  Codex had looked at the PR.
+
+Check for it explicitly; a status check that only reads comments/reviews/check-runs
+will report "no Codex activity" on a PR Codex has actually cleared:
+
+```bash
+gh api repos/{owner}/{repo}/issues/<N>/reactions --paginate \
+  --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]")'
+```
+
+**Timing on #412:** the reaction landed 2m17s after the last commit was pushed
+(`a811ccf` authored 21:19:08Z → reaction at 21:21:25Z, ~10s after the `test` check
+finished at 21:21:15Z) — i.e. it waited for CI before reacting, or its own pass just
+happened to land right after. Measuring from the *original* PR-open time (21:10:53Z)
+instead gives 10m32s, but that span includes an intervening Sourcery finding and a
+fixup push, so it overstates Codex's own latency — **use the latest pushed commit's
+timestamp as the baseline, not PR-open, whenever a PR had a mid-review fixup.** One
+sample; re-measure before trusting either figure generally, and note whether
+"Exhaustive" vs. default review depth is configured when comparing across PRs.
