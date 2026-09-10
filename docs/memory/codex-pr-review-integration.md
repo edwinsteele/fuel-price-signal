@@ -50,10 +50,16 @@ Missing this on PR #410 meant reporting "no substantive review yet" while six P1
 findings sat on the diff. Also check `.[].line` — some findings come back with
 `line: null` (outdated/file-level) and are easy to skip when eyeballing.
 
-**Codex re-reviews every push**, one pass per head commit, ~4-6 min behind. A
-pass whose "Reviewed commit" is not HEAD has not seen your latest fix — absence of
-new findings there means "hasn't looked", not "clean". Check the reviewed sha
-against HEAD before concluding anything:
+**Codex re-reviews pushes, but NOT indefinitely — do not assume it will catch up.**
+On PR #410 it ran six automatic passes (~4-6 min behind each push) and then stopped,
+leaving the last three commits unreviewed with no notice. Whether that is a
+re-review cap like Sourcery's five, or a rate limit, is not established; what is
+established is that "it will get to it" is not safe. `@codex review` re-triggers it
+and is the documented way to cover commits it skipped.
+
+A pass whose "Reviewed commit" is not HEAD has not seen your latest fix — absence of
+new findings there means "hasn't looked", not "clean". **Check the reviewed sha
+against HEAD before concluding anything, and say which of the two you mean:**
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<N>/reviews --paginate \
