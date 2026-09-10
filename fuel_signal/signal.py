@@ -277,10 +277,41 @@ def _latest_daily_date(conn: sqlite3.Connection) -> str:
     return db._date_from_int(row[0])
 
 
+def _station_price_on(
+    conn: sqlite3.Connection, station_code: int, as_of_date: str
+) -> float | None:
+    """E10 price (cents) for this station ON as_of_date, or None.
+
+    Exact date, deliberately — NOT `_station_price_at`'s "at or before". Ranking
+    stations means a stale carried price can win the comparison and send the
+    driver to a station that is not reporting: BP Springwood has a 268-day hole in
+    `daily_prices` (2022-08-31 -> 2023-05-26), and mid-gap the "at or before"
+    lookup happily returns 185.9c from up to 134 days earlier.
+
+    Exact-date is the right test because `daily_prices` is the FILLED table:
+    fill.py has already applied MAX_GAP_FILL_DAYS all-or-nothing per gap when
+    writing it, so a row existing on this date *is* fill.py's ruling that the
+    date is legitimately covered. That keeps accepted forward fills and drops
+    exactly the spans fill.py refused — no second copy of the cap logic, which
+    `PriceHistory.station_price_at` warns is easy to get subtly wrong.
+    """
+    fid = db.fuel_type_id(conn, "E10")
+    row = conn.execute(
+        """SELECT price_decicents FROM daily_prices
+           WHERE station_code = ? AND fuel_type_id = ? AND price_date = ?""",
+        (station_code, fid, db._date_to_int(as_of_date)),
+    ).fetchone()
+    return row[0] / 10 if row else None
+
+
 def _station_price_at(
     conn: sqlite3.Connection, station_code: int, as_of_date: str
 ) -> float | None:
-    """Most recent E10 price (cents) at or before as_of_date."""
+    """Most recent E10 price (cents) at or before as_of_date.
+
+    Retained for the legacy rule path; prefer `_station_price_on` for anything
+    that ranks or recommends a station.
+    """
     fid = db.fuel_type_id(conn, "E10")
     as_of_int = db._date_to_int(as_of_date)
     row = conn.execute(
@@ -450,13 +481,20 @@ def model_probabilities(
         return {}
     try:
         from fuel_signal.backtest import ModelStrategy, load_history
+        from fuel_signal.features import DELTA_LAG_DAYS
 
-        since = (
-            datetime.date.fromisoformat(as_of)
-            - datetime.timedelta(days=MODEL_LOOKBACK_DAYS)
-        ).isoformat()
+        as_of_date = datetime.date.fromisoformat(as_of)
+        since = (as_of_date - datetime.timedelta(days=MODEL_LOOKBACK_DAYS)).isoformat()
+        # The lag date must be in eval_dates, not just within since_date's window.
+        # load_history builds lga_phase_std ONLY for eval_dates, and _calendar_delta
+        # then needs both `as_of` and `as_of - DELTA_LAG_DAYS` present to produce
+        # lga_phase_std_delta_3d — the last column of the locked 54-feat set. With
+        # eval_dates=[as_of] the lag date is absent, the delta comes back None, and
+        # every live score silently feeds the model NaN for a graduated feature
+        # (LightGBM accepts NaN natively, so nothing raises).
+        lag = (as_of_date - datetime.timedelta(days=DELTA_LAG_DAYS)).isoformat()
         history = load_history(
-            conn, station_codes, eval_dates=[as_of], since_date=since
+            conn, station_codes, eval_dates=[lag, as_of], since_date=since
         )
         strategy = ModelStrategy(model_path=model_path, threshold=MODEL_THRESHOLD)
         scored: dict[int, float] = {}
@@ -471,9 +509,12 @@ def model_probabilities(
 
 
 def _fill_advice(
-    best: StationView,
+    on_route: list[StationView],
     drift: float | None,
     threshold: float,
+    *,
+    scored: bool,
+    rule_verdict: CombinedVerdict,
 ) -> tuple[str, str]:
     """(headline, reason) — the buy/wait call and how much to put in.
 
@@ -481,31 +522,74 @@ def _fill_advice(
     was trained and backtested for). How much is the network's: a falling network
     means cheaper fuel is coming, so bridge to it; a flat or rising one means
     today is as good as it gets, so brim.
-    """
-    buying = best.prob is not None and best.prob >= threshold
-    falling = drift is not None and drift < FALLING_CENTS_PER_DAY
 
+    Two things this must not do:
+
+    * **Manufacture a model verdict with no model.** With the artifact absent
+      every ``prob`` is None, and treating that as "fails the threshold" prints a
+      confident WAIT sourced from nothing. Fall back to the legacy rules and say
+      so, so the reader knows which signal is talking.
+    * **Contradict its own table.** The verdict is about the station you would
+      actually drive to (the cheapest reachable one), but a dearer station may
+      well carry a higher P(BUY) — that is normal, since the probability is
+      measured against each station's own history, not across stations. Saying
+      "nothing clears the buy bar" while the table shows something that does is
+      a straight falsehood, so check before claiming it.
+    """
+    best = on_route[0]
+    falling = drift is not None and drift < FALLING_CENTS_PER_DAY
+    bridge_note = (
+        f" Network falling {abs(drift):.1f}c/day, so bridge rather than brim."
+        if falling
+        else ""
+    )
+
+    if not scored:
+        verdict = rule_verdict.long_label
+        if verdict == "BUY":
+            return (
+                f"FILL UP (rules) — {best.label} @ {best.price:.1f}c"
+                f"{', bridge' if falling else ', brim it'}.",
+                "No model artifact, so this is the legacy rule signal, not the "
+                f"trained model.{bridge_note}",
+            )
+        return (
+            f"WAIT if you can (rules) — legacy signal says {verdict}.",
+            "No model artifact, so there is no trained-model opinion today. "
+            f"If you must fill: {best.label} @ {best.price:.1f}c.{bridge_note}",
+        )
+
+    buying = best.prob is not None and best.prob >= threshold
     if buying and not falling:
         return (
             f"FILL UP — {best.label} @ {best.price:.1f}c, brim it.",
             "Model says buy and the network is not falling: no cheaper fuel in sight.",
         )
-    if buying and falling:
+    if buying:
         return (
             f"WORTH A STOP — {best.label} @ {best.price:.1f}c, but bridge, don't brim.",
             f"Good local price, but the network is falling {abs(drift):.1f}c/day — "
             "buy enough to get by and keep some tank for later.",
         )
-    if falling:
+
+    # Not buying at the cheapest. Does anything else reachable clear the bar?
+    others = [
+        v
+        for v in on_route[1:]
+        if v.prob is not None and v.prob >= threshold
+    ]
+    if others:
+        alt = others[0]
         return (
             "WAIT if you can.",
-            f"Network falling {abs(drift):.1f}c/day and no station clears the buy "
-            f"bar. If you must fill: {best.label} @ {best.price:.1f}c, minimum only.",
+            f"{best.label} @ {best.price:.1f}c is the cheapest on route but doesn't "
+            f"clear its own buy bar. {alt.label} does, at +{alt.price - best.price:.1f}c "
+            "— P(BUY) is measured per station, so it is not a reason to drive there.",
         )
     return (
         "WAIT if you can.",
-        f"No station clears the buy bar today. If you must fill: {best.label} "
-        f"@ {best.price:.1f}c, minimum only.",
+        f"Nothing on route clears the buy bar today. If you must fill: "
+        f"{best.label} @ {best.price:.1f}c, minimum only.{bridge_note}",
     )
 
 
@@ -582,7 +666,7 @@ def build_signals(
         StationView(
             code=code,
             label=label,
-            price=_station_price_at(conn, code, as_of_date),
+            price=_station_price_on(conn, code, as_of_date),
             prob=probs.get(code),
             route_days=STATION_ROUTE_DAYS.get(code),
         )
@@ -621,8 +705,24 @@ def build_signals(
     ]
 
     # --- the call ---------------------------------------------------------
+    # Always computed: it is the fallback verdict when no model artifact exists
+    # (needing no model itself), and --explain reuses it below.
+    station_gradients: dict[str, float] = {}
+    for code, label in stations.items():
+        g = _station_latest_gradient(conn, code, as_of_date)
+        if g is not None:
+            station_gradients[label] = g
+    evaluations = evaluate_all_signals(state, avg_current_price, station_gradients)
+    rule_verdict = combine_signals(evaluations)
+
     if on_route:
-        headline, reason = _fill_advice(on_route[0], drift, MODEL_THRESHOLD)
+        headline, reason = _fill_advice(
+            on_route,
+            drift,
+            MODEL_THRESHOLD,
+            scored=bool(probs),
+            rule_verdict=rule_verdict,
+        )
         lines += [f"  {headline}", f"  {reason}", ""]
     elif off_route:
         # Priced stations exist, just none reachable today — a routing answer.
@@ -698,17 +798,15 @@ def build_signals(
         ]
 
     if explain:
-        station_gradients: dict[str, float] = {}
-        for code, label in stations.items():
-            g = _station_latest_gradient(conn, code, as_of_date)
-            if g is not None:
-                station_gradients[label] = g
-        evaluations = evaluate_all_signals(state, avg_current_price, station_gradients)
-        verdict = combine_signals(evaluations)
         mean_str = (
-            "n/a" if np.isnan(verdict.mean_value) else f"{verdict.mean_value:+.2f}"
+            "n/a"
+            if np.isnan(rule_verdict.mean_value)
+            else f"{rule_verdict.mean_value:+.2f}"
         )
-        lines += ["", f"  legacy rule signals: {verdict.long_label} (mean {mean_str})"]
+        lines += [
+            "",
+            f"  legacy rule signals: {rule_verdict.long_label} (mean {mean_str})",
+        ]
         for ev in evaluations:
             lines.append(f"    {ev.name}: {ev.recommendation.name} - {ev.description}")
 

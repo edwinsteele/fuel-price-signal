@@ -683,3 +683,152 @@ def test_network_drift_survives_a_forward_filled_flat_last_day():
     drift = _network_drift(series, "2026-09-09")
     assert drift is not None
     assert drift < -0.5, f"expected a clear fall, got {drift}"
+
+
+# ---------------------------------------------------------------------------
+# Codex review findings (PR #410)
+# ---------------------------------------------------------------------------
+
+def test_absent_model_does_not_manufacture_a_buy_bar_verdict(signal_db, tmp_path):
+    """With no artifact every prob is None; that is 'no opinion', not 'fails'.
+
+    Treating it as a threshold failure printed a confident WAIT sourced from
+    nothing, and claimed no station cleared a bar that did not exist.
+    """
+    conn, series, _ = signal_db
+    as_of = series[180][0]
+    output = build_signals(
+        conn,
+        as_of,
+        preferred_stations=_PREFERRED,
+        model_path=tmp_path / "absent.joblib",
+        today=datetime.date.fromisoformat(as_of),
+    )
+    assert "clear" not in output.split("STATION")[0], (
+        f"no-model path must not talk about a buy bar:\n{output}"
+    )
+    assert "(rules)" in output, "the fallback verdict must be labelled as rules-based"
+
+
+def test_absent_model_falls_back_to_the_legacy_rule_verdict(signal_db, tmp_path):
+    """Near-trough is a legacy BUY; the fallback must report BUY, not WAIT."""
+    conn, series, _ = signal_db
+    as_of = series[180][0]           # legacy rules say BUY here
+    output = build_signals(
+        conn,
+        as_of,
+        preferred_stations=_PREFERRED,
+        model_path=tmp_path / "absent.joblib",
+        today=datetime.date.fromisoformat(as_of),
+        explain=True,
+    )
+    assert "legacy rule signals: BUY" in output
+    assert "FILL UP (rules)" in output, (
+        f"fallback contradicted the rules it fell back to:\n{output}"
+    )
+
+
+def test_wait_does_not_claim_nothing_clears_when_something_does(
+    two_station_db, monkeypatch
+):
+    """The cheapest station routinely carries the LOWEST P(BUY).
+
+    P(BUY) is measured against each station's own history, so a dearer station
+    clearing tau while the cheapest does not is the common case, not an edge one.
+    Saying 'nothing on route clears the buy bar' then contradicts the table.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr("fuel_signal.signal.STATION_ROUTE_DAYS", {})
+    # Cheapest (Weekly Servo, -8c) below tau; the dearer one well above it.
+    monkeypatch.setattr(
+        "fuel_signal.signal.model_probabilities",
+        lambda *a, **k: {9002: 0.10, 9001: 0.90},
+    )
+    output = build_signals(
+        conn, series[180][0], preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+    )
+    assert "Nothing on route clears" not in output
+    assert "doesn't clear its own buy bar" in output
+    assert "Daily Servo does" in output
+
+
+def test_wait_may_say_nothing_clears_when_truly_nothing_does(
+    two_station_db, monkeypatch
+):
+    conn, series = two_station_db
+    monkeypatch.setattr("fuel_signal.signal.STATION_ROUTE_DAYS", {})
+    monkeypatch.setattr(
+        "fuel_signal.signal.model_probabilities",
+        lambda *a, **k: {9001: 0.10, 9002: 0.05},
+    )
+    output = build_signals(
+        conn, series[180][0], preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+    )
+    assert "Nothing on route clears the buy bar" in output
+
+
+def test_a_station_dark_beyond_the_fill_cap_is_not_ranked(two_station_db, monkeypatch):
+    """fill.py leaves gaps wider than MAX_GAP_FILL_DAYS empty on purpose.
+
+    An 'at or before' lookup carries the last pre-gap price forward indefinitely,
+    so a closed station's stale cheap price wins the ranking and gets recommended.
+    Real instance: BP Springwood has a 268-day hole in daily_prices.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr("fuel_signal.signal.STATION_ROUTE_DAYS", {})
+    fid = db.fuel_type_id(conn, "E10")
+    as_of = series[-1][0]
+    # 9002 is the cheap one; delete its recent rows so it is dark at as_of while
+    # retaining an old, cheap observation that a '<=' lookup would happily use.
+    cutoff = db._date_to_int(
+        (datetime.date.fromisoformat(as_of) - datetime.timedelta(days=40)).isoformat()
+    )
+    conn.execute(
+        "DELETE FROM daily_prices WHERE station_code = 9002 AND fuel_type_id = ?"
+        " AND price_date > ?",
+        (fid, cutoff),
+    )
+    conn.commit()
+    output = build_signals(
+        conn,
+        as_of,
+        preferred_stations=_TWO,
+        today=datetime.date.fromisoformat(as_of),
+    )
+    assert "-> Daily Servo" in output.replace("->  ", "-> ")
+    assert "Weekly Servo" in output          # still listed...
+    assert "no price data" in output         # ...but as unpriced, not as the pick
+
+
+def test_live_scoring_requests_the_delta_lag_date(signal_db, tmp_path, monkeypatch):
+    """lga_phase_std_delta_3d needs as_of AND as_of-3d in eval_dates.
+
+    load_history builds lga_phase_std only for eval_dates, so with [as_of] alone
+    the delta resolves to None and the model silently scores the last column of
+    the locked 54-feat set as NaN.
+    """
+    import fuel_signal.signal as sig
+    from fuel_signal.features import DELTA_LAG_DAYS
+
+    conn, series, _ = signal_db
+    as_of = series[180][0]
+    artifact = tmp_path / "present.joblib"
+    artifact.write_bytes(b"not-a-real-model")   # exists, so scoring is attempted
+
+    seen = {}
+
+    def fake_load_history(conn, codes, eval_dates=None, since_date=None, **kw):
+        seen["eval_dates"] = eval_dates
+        raise RuntimeError("stop here — we only need the call arguments")
+
+    monkeypatch.setattr("fuel_signal.backtest.load_history", fake_load_history)
+    sig.model_probabilities(conn, as_of, [9001], artifact)
+
+    lag = (
+        datetime.date.fromisoformat(as_of) - datetime.timedelta(days=DELTA_LAG_DAYS)
+    ).isoformat()
+    assert seen["eval_dates"] is not None
+    assert as_of in seen["eval_dates"]
+    assert lag in seen["eval_dates"], (
+        f"lag date {lag} missing from {seen['eval_dates']} — delta feature will be NaN"
+    )
