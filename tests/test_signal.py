@@ -535,7 +535,7 @@ def test_off_route_station_is_excluded_from_the_on_route_table(two_station_db, m
     monday = datetime.date(2026, 9, 7)
     assert monday.weekday() == 0
     output = build_signals(
-        conn, as_of, preferred_stations=_TWO, today=monday
+        conn, as_of, preferred_stations=_TWO, routing_day=monday
     )
     # Cheaper, but unreachable → it cannot be the headline recommendation.
     assert "OFF ROUTE" in output
@@ -552,7 +552,7 @@ def test_off_route_station_joins_the_table_on_a_day_it_is_passed(two_station_db,
     as_of = series[180][0]
     wednesday = datetime.date(2026, 9, 9)
     assert wednesday.weekday() == 2
-    output = build_signals(conn, as_of, preferred_stations=_TWO, today=wednesday)
+    output = build_signals(conn, as_of, preferred_stations=_TWO, routing_day=wednesday)
     assert "OFF ROUTE" not in output
     # 8c cheaper and reachable → it is the marked pick.
     assert re.search(r"->\s+Weekly Servo", output)
@@ -574,7 +574,7 @@ def test_stations_are_ranked_by_price_not_by_probability(two_station_db, monkeyp
     )
     as_of = series[180][0]
     output = build_signals(
-        conn, as_of, preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+        conn, as_of, preferred_stations=_TWO, routing_day=datetime.date(2026, 9, 7)
     )
     # Table rows only — the headline sentence also names a station.
     table = [ln for ln in output.splitlines() if re.search(r"Servo\s+\d+\.\dc", ln)]
@@ -592,7 +592,7 @@ def test_stale_prices_are_flagged_with_their_age(signal_db):
     # the query is "latest available", not a historical view.
     as_of = series[-1][0]
     later = datetime.date.fromisoformat(as_of) + datetime.timedelta(days=5)
-    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, today=later)
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, now=later)
     assert "!! 5 days stale" in output
 
 
@@ -604,7 +604,7 @@ def test_historical_as_of_is_not_reported_as_stale(signal_db):
         conn,
         as_of,
         preferred_stations=_PREFERRED,
-        today=datetime.date.fromisoformat(series[-1][0]),
+        routing_day=datetime.date.fromisoformat(series[-1][0]),
     )
     assert "stale" not in output
     assert "historical view" in output
@@ -628,7 +628,7 @@ def test_staleness_is_measured_from_the_last_real_row_not_the_filled_one(signal_
     )
     conn.commit()
     today = datetime.date.fromisoformat(filled) + datetime.timedelta(days=1)
-    output = build_signals(conn, filled, preferred_stations=_PREFERRED, today=today)
+    output = build_signals(conn, filled, preferred_stations=_PREFERRED, now=today)
     # 5 days behind the last REAL row, not the 1 day behind the filled one.
     assert "!! 5 days stale" in output
     assert f"last real reading {series[-1][0]}" in output
@@ -638,7 +638,7 @@ def test_same_day_prices_carry_no_staleness_banner(signal_db):
     conn, series, _ = signal_db
     as_of = series[-1][0]
     same_day = datetime.date.fromisoformat(as_of)
-    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, today=same_day)
+    output = build_signals(conn, as_of, preferred_stations=_PREFERRED, now=same_day)
     assert "stale" not in output
 
 
@@ -650,7 +650,7 @@ def test_missing_model_artifact_degrades_to_prices_and_cycle(signal_db, tmp_path
         as_of,
         preferred_stations=_PREFERRED,
         model_path=tmp_path / "definitely-absent.joblib",
-        today=datetime.date.fromisoformat(as_of),
+        routing_day=datetime.date.fromisoformat(as_of),
     )
     assert "no model artifact" in output
     # The column is gone from the table header; only the explanatory note names it.
@@ -665,7 +665,7 @@ def test_diversion_advice_fires_only_when_the_gap_is_worth_it(two_station_db, mo
     )
     as_of = series[180][0]
     output = build_signals(
-        conn, as_of, preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+        conn, as_of, preferred_stations=_TWO, routing_day=datetime.date(2026, 9, 7)
     )
     # 8c gap clears DIVERSION_WORTH_CENTS (3.0), and the advice names the day
     # it can be acted on rather than repeating the "next pass" phrasing.
@@ -703,7 +703,7 @@ def test_absent_model_does_not_manufacture_a_buy_bar_verdict(signal_db, tmp_path
         as_of,
         preferred_stations=_PREFERRED,
         model_path=tmp_path / "absent.joblib",
-        today=datetime.date.fromisoformat(as_of),
+        routing_day=datetime.date.fromisoformat(as_of),
     )
     assert "clear" not in output.split("STATION")[0], (
         f"no-model path must not talk about a buy bar:\n{output}"
@@ -720,7 +720,7 @@ def test_absent_model_falls_back_to_the_legacy_rule_verdict(signal_db, tmp_path)
         as_of,
         preferred_stations=_PREFERRED,
         model_path=tmp_path / "absent.joblib",
-        today=datetime.date.fromisoformat(as_of),
+        routing_day=datetime.date.fromisoformat(as_of),
         explain=True,
     )
     assert "legacy rule signals: BUY" in output
@@ -746,7 +746,7 @@ def test_wait_does_not_claim_nothing_clears_when_something_does(
         lambda *a, **k: {9002: 0.10, 9001: 0.90},
     )
     output = build_signals(
-        conn, series[180][0], preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+        conn, series[180][0], preferred_stations=_TWO, routing_day=datetime.date(2026, 9, 7)
     )
     assert "Nothing on route clears" not in output
     assert "doesn't clear its own buy bar" in output
@@ -763,7 +763,7 @@ def test_wait_may_say_nothing_clears_when_truly_nothing_does(
         lambda *a, **k: {9001: 0.10, 9002: 0.05},
     )
     output = build_signals(
-        conn, series[180][0], preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
+        conn, series[180][0], preferred_stations=_TWO, routing_day=datetime.date(2026, 9, 7)
     )
     assert "Nothing on route clears the buy bar" in output
 
@@ -794,7 +794,7 @@ def test_a_station_dark_beyond_the_fill_cap_is_not_ranked(two_station_db, monkey
         conn,
         as_of,
         preferred_stations=_TWO,
-        today=datetime.date.fromisoformat(as_of),
+        routing_day=datetime.date.fromisoformat(as_of),
     )
     assert "-> Daily Servo" in output.replace("->  ", "-> ")
     assert "Weekly Servo" in output          # still listed...
@@ -871,7 +871,67 @@ def test_sydney_date_keeps_a_wednesday_station_on_route_from_a_utc_host(
         conn,
         series[180][0],
         preferred_stations=_TWO,
-        today=datetime.date(2026, 9, 9),      # Wednesday in Sydney
+        routing_day=datetime.date(2026, 9, 9),      # Wednesday in Sydney
     )
     assert "OFF ROUTE" not in output
     assert re.search(r"->\s+Weekly Servo", output)
+
+
+def test_historical_as_of_routes_reproducibly_whatever_day_it_is_run(
+    two_station_db, monkeypatch
+):
+    """A fixed --as-of must render identically regardless of when it is run.
+
+    Routing off the current weekday moved the Wed/Sun station on and off route
+    depending on the hour, which makes signal-regression.yml's fixed historical
+    invocations diff against the wall clock rather than against the code.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    def routing_of(render: str) -> str:
+        # Everything except the freshness banner, which SHOULD track the real
+        # clock — data genuinely ages between runs. Routing must not.
+        return "\n".join(
+            ln for ln in render.splitlines() if not ln.startswith("E10 - ")
+        )
+
+    renders = {
+        routing_of(
+            build_signals(
+                conn,
+                as_of,
+                preferred_stations=_TWO,
+                now=datetime.date(2026, 9, 7) + datetime.timedelta(days=offset),
+            )
+        )
+        for offset in range(7)          # every weekday the command might be run
+    }
+    assert len(renders) == 1, (
+        "historical routing varied with the day it was run:\n\n"
+        + "\n\n---\n\n".join(sorted(renders))
+    )
+
+
+def test_live_mode_routes_by_today_not_by_a_stale_as_of(two_station_db, monkeypatch):
+    """Live use must route by today even when the DB is days behind.
+
+    The inverse of the reproducibility case: deriving the routing day from a
+    stale as_of would ask which stations were reachable last Thursday.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    assert datetime.date.fromisoformat(as_of).weekday() != 2   # as_of is not a Wed
+    output = build_signals(
+        conn,
+        as_of,
+        preferred_stations=_TWO,
+        routing_day=datetime.date(2026, 9, 9),      # today IS a Wednesday
+        now=datetime.date(2026, 9, 9),
+    )
+    assert "OFF ROUTE" not in output

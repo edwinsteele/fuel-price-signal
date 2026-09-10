@@ -649,7 +649,8 @@ def build_signals(
     preferred_stations: dict[int, str] | None = None,
     *,
     model_path: pathlib.Path | None = None,
-    today: datetime.date | None = None,
+    routing_day: datetime.date | None = None,
+    now: datetime.date | None = None,
     explain: bool = False,
 ) -> str:
     """Render the morning decision table for the given date.
@@ -657,6 +658,21 @@ def build_signals(
     Ranks stations by today's price among those actually reachable today, calls
     the fill size, and reports off-route stations with the arithmetic needed to
     decide whether they are worth a detour.
+
+    Two separate dates, deliberately not one (Codex review, PR #410):
+
+    * ``routing_day`` — whose weekday decides which stations are reachable.
+      Defaults to ``as_of_date``'s own day so the output is a pure function of
+      the inputs: a historical ``--as-of`` must render identically whenever it is
+      run, or `signal-regression.yml`'s fixed historical invocations diff against
+      the wall clock instead of against the code. The CLI overrides it with the
+      current Sydney date for live use, where "what day is it" really is today's
+      question and ``as_of`` may be several days stale.
+    * ``now`` — the reference for how old the data is. Always the real current
+      date; a historical ``as_of`` does not make the DB fresher.
+
+    Collapsing these into one date is the bug that made a historical signal move
+    the Wed/Sun station on and off route depending on the hour it was run.
 
     Station ordering is by PRICE, never by P(BUY). The label's cheapness test is
     each station's OWN trailing percentile (labels.py condition 2), so P(BUY) is
@@ -667,7 +683,8 @@ def build_signals(
     stations = (
         preferred_stations if preferred_stations is not None else PREFERRED_STATIONS
     )
-    today = today or _today_in_sydney()
+    now = now or _today_in_sydney()
+    today = routing_day or datetime.date.fromisoformat(as_of_date)
     model_path = model_path or DEFAULT_MODEL_PATH
 
     series = db.average_price_series(conn)
@@ -721,7 +738,7 @@ def build_signals(
         drift_str = "flat"
 
     lines = [
-        f"E10 - {as_of_date}{_freshness_note(as_of_date, _last_real_price_date(conn), today)}",
+        f"E10 - {as_of_date}{_freshness_note(as_of_date, _last_real_price_date(conn), now)}",
         f"Network {avg_current_price:.1f}c, {drift_str}"
         f"  |  cycle day {day_str}/{cycle_len}"
         f"  |  last cycle {state.last_cycle_min:.1f}-{state.last_cycle_max:.1f}c",
@@ -900,8 +917,15 @@ def main(
                 err=True,
             )
 
+        # Live use (no --as-of): route by today, since as_of may be stale by days.
+        # Explicit --as-of: leave routing_day None so build_signals derives it
+        # from that date and the render is reproducible.
         output = build_signals(
-            conn, as_of_date, model_path=model_path, explain=explain
+            conn,
+            as_of_date,
+            model_path=model_path,
+            routing_day=None if as_of else _today_in_sydney(),
+            explain=explain,
         )
         click.echo(output)
     finally:
