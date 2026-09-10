@@ -39,6 +39,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 
 - [cadence-not-a-free-knob](cadence-not-a-free-knob.md) — oracle-vs-model headroom is only meaningful at **1, 2 and 7 days**; 3–6 and 8–14 are invalid (run-dry paths diverge between the two engines).
 - [tau-selector-is-cadence-blind](tau-selector-is-cadence-blind.md) — the selector never sees the tank, so an unmoved τ after a cadence re-lock proves nothing. Harmless by measurement, not by construction.
+- [pbuy-is-station-relative](pbuy-is-station-relative.md) — `P(BUY)` is measured against each station's **own** trailing percentile, so it cannot rank stations. Sorting by it points at the dearest pump.
 - [noise-floor-force-vs-cadence-relock](noise-floor-force-vs-cadence-relock.md) — `--force` recovers a floor after a *column* re-lock, but is refused after a *cadence* re-lock. Freeze a new batch instead.
 
 ## Pipeline layout and plumbing
