@@ -265,6 +265,19 @@ worth a follow-up issue (`gh issue create`), not something to compute in-session
          spend-weighted, so a 3.57 L top-up and a 42.86 L fill count identically in a flip count
          but not in the CPL; a large litres gap between arms (fps-6yi: 2064 vs 2982, a 44%
          difference) is itself worth surfacing, not just a weighting detail.
+       - **`n_volume_only` / `litres_volume_baseline` / `litres_volume_candidate` /
+         `litres_volume_delta` — same-date volume-only changes** (#380). `flips`/`decns` above
+         only see a divergence when it changes WHICH DATE a station bought on; a fold where both
+         arms buy on the same date but at a different litres (deferred buying — fewer, larger,
+         later fills on one arm) is invisible to them and can print `flips: 0, decns: 0` while
+         still describing a real divergence. Report this count and its net litres shift
+         (`litres_volume_delta`, candidate minus baseline) alongside `flips`/`decns`, never
+         folded into them or into `flip_cpl_baseline`/`flip_cpl_candidate` — a same-date volume
+         shift has no `bought_by` side to cost, so there is nothing for the flip CPL pools to
+         attribute it to (`experiments/lib/flips.py`'s `diff_volume_only` docstring). Run-level
+         `n_volume_only` and `rows_volume_only` (the row detail) sit beside `n_flips`/`n_decisions`
+         at the top of `decision_flips` for the same reason those two are reported run-wide, not
+         just summed from the per-fold column.
        - **`regret_cpl_baseline` / `regret_cpl_candidate` from `decision_flips["regret"]` — the
          rendered timing column** (fps-2js). Regret is `price paid − the cheapest price that
          same station reached inside the tank's feasible wait`; `0` means the arm bought the
@@ -338,7 +351,11 @@ worth a follow-up issue (`gh issue create`), not something to compute in-session
          section** — "favourable flips dominate, N of M folds" is a vote count over cells that
          cannot resolve their own numbers, not corroboration (this is exactly how fps-6yi's
          original Judgement went wrong; see that run's post-dossier review addendum). Whenever
-         a delta is `None`, state its `_reason` verbatim (`"no flips"` / `"one arm only"`)
+         a delta is `None`, state its `_reason` verbatim (`"no flips"` / `"one arm only"`, now
+         possibly suffixed with a "plus N same-date volume-only change(s)..." clause when the
+         fold had any — #380: that clause is exactly what stops a fold like fps-gzz's fold 1
+         (0 candidate-only fills, 0 `flip_cpl_delta`) reading as "candidate did nothing
+         different" when it actually deferred volume onto a shared buy date)
          rather than a blank cell; when a delta exists but no interval could be estimated,
          state its `_interval_reason` verbatim instead of printing a hairline interval — both
          are honest "unmeasurable," never the same as a resolved zero-width one.
