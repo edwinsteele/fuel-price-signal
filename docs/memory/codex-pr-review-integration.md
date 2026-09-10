@@ -54,6 +54,12 @@ own `Reviewed commit:` line — and no review at all. So polling `pulls/N/review
 for the sha to advance waits forever on a clean pass. Check both, or just check the
 issue comments for the newest `Reviewed commit:` line:
 
+Confirmed again on PR #411 (`@codex review` → "Codex Review: Didn't find any major
+issues. You're on a roll." as an issue comment, no review). The flavor text after
+"Didn't find any major issues." varies between runs (":rocket:" on #410, "You're on
+a roll." on #411) — match on the "Codex Review: Didn't find any major issues"
+prefix and the `Reviewed commit:` line, not the exact sentence.
+
 ```bash
 gh api repos/{owner}/{repo}/issues/<N>/comments --paginate \
   --jq '.[] | select(.user.login|startswith("chatgpt")) | .body' | grep -o 'Reviewed commit:.*`'
