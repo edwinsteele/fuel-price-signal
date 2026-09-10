@@ -587,15 +587,55 @@ def test_stations_are_ranked_by_price_not_by_probability(two_station_db, monkeyp
 
 def test_stale_prices_are_flagged_with_their_age(signal_db):
     conn, series, _ = signal_db
-    as_of = series[180][0]
+    # signal_db's newest real `prices` row is the last series date; ask for it so
+    # the query is "latest available", not a historical view.
+    as_of = series[-1][0]
     later = datetime.date.fromisoformat(as_of) + datetime.timedelta(days=5)
     output = build_signals(conn, as_of, preferred_stations=_PREFERRED, today=later)
     assert "!! 5 days stale" in output
 
 
+def test_historical_as_of_is_not_reported_as_stale(signal_db):
+    """A deliberate --as-of into the past is a view choice, not stale data."""
+    conn, series, _ = signal_db
+    as_of = series[180][0]           # well before the newest real observation
+    output = build_signals(
+        conn,
+        as_of,
+        preferred_stations=_PREFERRED,
+        today=datetime.date.fromisoformat(series[-1][0]),
+    )
+    assert "stale" not in output
+    assert "historical view" in output
+
+
+def test_staleness_is_measured_from_the_last_real_row_not_the_filled_one(signal_db):
+    """as_of defaults to daily_prices' MAX, which fill.py may have fabricated.
+
+    Measuring age from as_of would understate it by exactly the forward-filled
+    days — the case the banner exists to catch.
+    """
+    conn, series, _ = signal_db
+    fid = db.fuel_type_id(conn, "E10")
+    filled = (
+        datetime.date.fromisoformat(series[-1][0]) + datetime.timedelta(days=4)
+    ).isoformat()
+    conn.execute(
+        "INSERT INTO daily_prices (station_code, fuel_type_id, price_date,"
+        " price_decicents) VALUES (9001, ?, ?, 1600)",
+        (fid, db._date_to_int(filled)),
+    )
+    conn.commit()
+    today = datetime.date.fromisoformat(filled) + datetime.timedelta(days=1)
+    output = build_signals(conn, filled, preferred_stations=_PREFERRED, today=today)
+    # 5 days behind the last REAL row, not the 1 day behind the filled one.
+    assert "!! 5 days stale" in output
+    assert f"last real reading {series[-1][0]}" in output
+
+
 def test_same_day_prices_carry_no_staleness_banner(signal_db):
     conn, series, _ = signal_db
-    as_of = series[180][0]
+    as_of = series[-1][0]
     same_day = datetime.date.fromisoformat(as_of)
     output = build_signals(conn, as_of, preferred_stations=_PREFERRED, today=same_day)
     assert "stale" not in output

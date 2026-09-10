@@ -509,13 +509,29 @@ def _fill_advice(
     )
 
 
-def _staleness_note(as_of: str, last_real: str | None, today: datetime.date) -> str:
-    """Banner text when the prices being shown are not today's."""
-    age = (today - datetime.date.fromisoformat(as_of)).days
+def _freshness_note(as_of: str, last_real: str | None, today: datetime.date) -> str:
+    """Banner text about how much to trust the date being shown.
+
+    Two different situations that must not be conflated:
+
+    * The DB has newer real data than the date asked for — the caller passed a
+      historical ``--as-of`` on purpose. Nothing is stale; say which vintage the
+      DB is at and move on.
+    * The newest real observation is itself behind today — the snapshot job has
+      missed runs and the prices really are old. That is the warning.
+
+    Age is measured from the last REAL observation, not from ``as_of``: `as_of`
+    defaults to the newest row in `daily_prices`, which fill.py forward-fills, so
+    measuring against it understates the age by exactly the fabricated days.
+    """
+    if last_real is not None and last_real > as_of:
+        return f"  (historical view; DB holds data to {last_real})"
+    newest = last_real or as_of
+    age = (today - datetime.date.fromisoformat(newest)).days
     if age <= 0:
         return ""
-    real = f", last real reading {last_real}" if last_real and last_real != as_of else ""
     plural = "day" if age == 1 else "days"
+    real = f", last real reading {newest}" if newest != as_of else ""
     return f"  !! {age} {plural} stale{real}"
 
 
@@ -597,7 +613,7 @@ def build_signals(
         drift_str = "flat"
 
     lines = [
-        f"E10 - {as_of_date}{_staleness_note(as_of_date, _last_real_price_date(conn), today)}",
+        f"E10 - {as_of_date}{_freshness_note(as_of_date, _last_real_price_date(conn), today)}",
         f"Network {avg_current_price:.1f}c, {drift_str}"
         f"  |  cycle day {day_str}/{cycle_len}"
         f"  |  last cycle {state.last_cycle_min:.1f}-{state.last_cycle_max:.1f}c",
