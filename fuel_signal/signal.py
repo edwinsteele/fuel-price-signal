@@ -670,7 +670,9 @@ def build_signals(
             # station with no route_days is never off-route in the first place).
             nxt = v.next_reachable(today)
             assert nxt is not None and nxt[1] >= 1
-            when = f"in {nxt[1]}d, {_WEEKDAY_NAMES[nxt[0].weekday()]}"
+            day_name = _WEEKDAY_NAMES[nxt[0].weekday()]
+            when = f"in {nxt[1]}d, {day_name}"           # "next pass in 3d, Sun"
+            on_day = f"{day_name} ({nxt[1]}d away)"      # "...a fill for Sun (3d away)"
             lines.append(f"  OFF ROUTE ({v.route_label()}) - next pass {when}")
             lines.append(row(v, ""))
             if on_route:
@@ -678,7 +680,7 @@ def build_signals(
                 if gap <= -DIVERSION_WORTH_CENTS:
                     lines.append(
                         f"     {abs(gap):.1f}c cheaper than {on_route[0].label}"
-                        f" - worth timing a fill for {when}."
+                        f" - worth timing a fill for {on_day}."
                     )
                 else:
                     lines.append(

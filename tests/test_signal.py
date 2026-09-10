@@ -666,8 +666,9 @@ def test_diversion_advice_fires_only_when_the_gap_is_worth_it(two_station_db, mo
     output = build_signals(
         conn, as_of, preferred_stations=_TWO, today=datetime.date(2026, 9, 7)
     )
-    # 8c gap clears DIVERSION_WORTH_CENTS (3.0).
-    assert "worth timing a fill for" in output
+    # 8c gap clears DIVERSION_WORTH_CENTS (3.0), and the advice names the day
+    # it can be acted on rather than repeating the "next pass" phrasing.
+    assert "worth timing a fill for Wed (2d away)" in output
     assert "no reason to divert" not in output
 
 
