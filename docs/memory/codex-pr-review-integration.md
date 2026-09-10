@@ -16,6 +16,25 @@ for this repo". That comment is not a review and does not mean the integration i
 `@codex` alone also worked. It answers questions and can push fixes with
 `@codex address that feedback` when it has push permission.
 
+**The PR-open auto-trigger is NOT reliable — never assume it already ran.** Confirmed
+firing automatically on #410 (review posted 4m44s after PR open, no comment asked for
+it). Confirmed NOT firing on #409 and #411 — both sat completely silent (no comment, no
+review, no reaction, no check-run) until a manual `@codex review`, and in both cases the
+repo's Codex environment was already configured (no "create an environment" nag either,
+which is the tell for that separate failure mode). So: after opening a PR, check for
+Codex activity same as you'd check for Sourcery's — do not wait indefinitely on the
+assumption it auto-fired, and do not read an early SILENCE as "still running" versus
+"never triggered". If nothing shows up within a few minutes, post `@codex review`
+yourself rather than waiting longer.
+
+**Standard practice: announce Codex's status the same way you already announce
+Sourcery's.** When you see Codex has posted (a review with findings, or the "Codex
+Review: Didn't find any major issues" comment), say so in your own PR-status narration —
+"Codex has started a review" / "Codex hasn't found any issues" / "Codex found N issues,
+addressing them" — exactly the same register as "checking for Sourcery's review". This
+was requested explicitly (2026-09-10, PR #411 aftermath) after a review where Codex's
+clean pass wasn't surfaced to the user at all.
+
 **Measured latency: 254s** (PR #408, `@codex` at 21:47:34Z → review posted at 21:51:48Z).
 That matters because `.github/workflows/auto-merge.yml` merges a green worker `chore` PR
 at `MIN_AGE_SECONDS=900`, and a reviewer slower than that would land its findings on an
