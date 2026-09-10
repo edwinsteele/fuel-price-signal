@@ -22,8 +22,10 @@ from click.testing import CliRunner
 
 from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
 from experiments.lib.flips import summarise_regret
+from experiments.lib.realised import run_paired_realised_backtest
 from experiments.pipeline import dossier_tables as dt
 from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM, RETRYABLE_STATUSES
+from tests.test_realised import _cache_test_setup, _install_fakes
 
 SHOCK = {1, 4}
 FOLDS = [1, 2, 3, 4]
@@ -1244,6 +1246,49 @@ def test_decision_flips_tau_diverges_any_none_for_a_legacy_run_without_realised_
 
     assert facts["breakdowns"]["per_fold"][0]["tau_diverges"] is None
     assert facts["decision_flips"]["tau_diverges_any"] is None
+
+
+def test_tau_diverges_column_contract_holds_end_to_end_from_realised_py(tmp_path, monkeypatch):
+    """#386: every other tau_diverges test above hand-builds its `realised_deltas` fixture,
+    so none of them would notice if experiments/lib/realised.py's `deltas` DataFrame ever
+    renamed or dropped `fold`/`arm`/`tau_diverges` — the column names `_breakdowns` reads by.
+    This one runs the REAL run_paired_realised_backtest (DB/fit mocked out, per
+    tests.test_realised's own fixture) and threads its `.deltas` through the exact
+    `to_dict(orient="records")` call runner.py makes, then through `dt.build_facts` reading
+    it back off disk — the actual end-to-end path, not two independently-fixtured halves.
+    Renaming `tau_diverges` at realised.py's `deltas` construction (realised.py:~628) makes
+    `_breakdowns` KeyError on this test, which is the gap PR #354 review finding #4 flagged."""
+    fit_calls, load_history_calls, agg_calls = [], [], []
+    _install_fakes(monkeypatch, fit_calls=fit_calls, load_history_calls=load_history_calls, agg_calls=agg_calls)
+    arms, baseline_cols, outer, inner = _cache_test_setup()
+
+    result = run_paired_realised_backtest(
+        arms, baseline_cols, station_codes=[1], seed=42,
+        outer_fold_params=outer, inner_fold_params=inner, verbose=False,
+    )
+
+    # Pin the column contract itself: dossier_tables._breakdowns indexes `deltas` records by
+    # these three names.
+    assert {"fold", "arm", "tau_diverges"} <= set(result.deltas.columns)
+    # _cache_test_setup's candidate own-tau (0.35) differs from the baseline's (0.30) — see
+    # _install_fakes's fake_train_calibrate — so every fold is a real True, not a
+    # fixture-only stand-in.
+    assert result.deltas["tau_diverges"].all()
+    assert set(result.deltas["fold"]) >= {1, 2, 3, 4}
+
+    # The exact serialization runner.py performs before dossier_tables.py ever sees it.
+    real_realised_deltas = result.deltas.to_dict(orient="records")
+
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        realised_deltas=real_realised_deltas,
+    )
+    facts = dt.build_facts(run_dir)
+
+    per_fold = {row["fold"]: row for row in facts["breakdowns"]["per_fold"]}
+    assert set(per_fold) == set(FOLDS)
+    assert all(per_fold[f]["tau_diverges"] is True for f in FOLDS)
+    assert facts["decision_flips"]["tau_diverges_any"] is True
 
 
 def test_decision_flips_refuses_for_a_legacy_run_without_shock_folds(tmp_path):
