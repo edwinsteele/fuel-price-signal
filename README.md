@@ -260,7 +260,16 @@ Three things worth knowing about how to read it:
 
 Which stations are on the daily commute versus passed only on certain weekdays is
 configured in `STATION_ROUTE_DAYS` (`fuel_signal/config.py`). A station absent from
-that map is treated as reachable every day.
+that map is treated as reachable every day. Routing uses the **Sydney** date, not the
+host's, so a UTC box does not read Wednesday morning as Tuesday; with an explicit
+`--as-of` it routes by that date so historical renders are reproducible.
+
+**Caveat on the fill-size call.** Brim-vs-bridge turns on
+`FALLING_CENTS_PER_DAY = -0.5`, which is reasoned rather than measured and sits on
+the median of the drift distribution, splitting days ~49/51. Treat "brim it" vs
+"bridge it" as the weakest line in the output — the station choice and the buy/wait
+call are both backed by measurement, this is not. See
+[docs/memory/brim-bridge-threshold-unvalidated.md](docs/memory/brim-bridge-threshold-unvalidated.md).
 
 ## Makefile shortcuts
 

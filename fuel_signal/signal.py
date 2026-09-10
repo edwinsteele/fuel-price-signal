@@ -382,7 +382,23 @@ MODEL_THRESHOLD = 0.25
 # it must clear the 3-day calendar lag on the delta features by a wide margin.
 MODEL_LOOKBACK_DAYS = 120
 
-# Network drift (cents/day, over a week) past which waiting is worth something.
+# Network drift (cents/day over a week) below which the tool says "cheaper fuel is
+# coming, bridge" rather than "today is as good as it gets, brim".
+#
+# UNVALIDATED, AND SITTING IN THE WORST PLACE. This was reasoned, not measured:
+# roughly 3.5 c/L over a week felt like the point where waiting earns its
+# inconvenience. Measured against 3287 days of the Sydney average afterwards, the
+# drift distribution has p50 = -0.47 — so this cut lands within 0.03 of the MEDIAN
+# and splits days 49/51. That is the densest part of the distribution and hence the
+# least stable place to cut: the verdict flips on noise, and the sensitivity is
+# steep (a cut of -0.75 bridges on 39.9% of days, -0.25 on 55.6%).
+#
+# A distribution-derived cut would be defensible — p25 = -1.12 gives "genuinely
+# falling" on ~30% of days rather than "very slightly below average" on half. The
+# principled fix is to score brim-vs-bridge policies against realised CPL with the
+# tank engine in backtest.py, which is what every other lock parameter in this
+# project had to clear. Do not tune this by eye; see
+# docs/memory/brim-bridge-threshold-unvalidated.md.
 FALLING_CENTS_PER_DAY = -0.5
 
 # How much cheaper an off-route station must be before a detour is worth it.

@@ -37,6 +37,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 
 ## Cadence, tau and the tank
 
+- [brim-bridge-threshold-unvalidated](brim-bridge-threshold-unvalidated.md) — `FALLING_CENTS_PER_DAY = -0.5` was reasoned, not measured, and lands on the **median** of the drift distribution (p50 = -0.47), splitting days 49/51. Least stable cut available.
 - [cadence-not-a-free-knob](cadence-not-a-free-knob.md) — oracle-vs-model headroom is only meaningful at **1, 2 and 7 days**; 3–6 and 8–14 are invalid (run-dry paths diverge between the two engines).
 - [tau-selector-is-cadence-blind](tau-selector-is-cadence-blind.md) — the selector never sees the tank, so an unmoved τ after a cadence re-lock proves nothing. Harmless by measurement, not by construction.
 - [pbuy-is-station-relative](pbuy-is-station-relative.md) — `P(BUY)` is measured against each station's **own** trailing percentile, so it cannot rank stations. Sorting by it points at the dearest pump.
