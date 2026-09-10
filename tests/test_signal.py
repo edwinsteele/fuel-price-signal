@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import re
+import zoneinfo
 
 import pytest
 from click.testing import CliRunner
@@ -832,3 +833,45 @@ def test_live_scoring_requests_the_delta_lag_date(signal_db, tmp_path, monkeypat
     assert lag in seen["eval_dates"], (
         f"lag date {lag} missing from {seen['eval_dates']} — delta feature will be NaN"
     )
+
+
+def test_routing_date_comes_from_sydney_not_the_host_clock(monkeypatch):
+    """At 07:00 Wed in Sydney a UTC host's date.today() is still Tuesday.
+
+    That is the morning-use window, and it would flip a Wed/Sun station to
+    OFF ROUTE on exactly the day it is reachable.
+    """
+    import fuel_signal.signal as sig
+
+    sydney_wed_7am = datetime.datetime(
+        2026, 9, 9, 7, 0, tzinfo=zoneinfo.ZoneInfo("Australia/Sydney")
+    )
+    assert sydney_wed_7am.date().weekday() == 2                    # Wed in Sydney
+    assert sydney_wed_7am.astimezone(datetime.UTC).date().weekday() == 1   # Tue in UTC
+
+    class _FrozenDatetime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return sydney_wed_7am.astimezone(tz) if tz else sydney_wed_7am
+
+    monkeypatch.setattr(sig.datetime, "datetime", _FrozenDatetime)
+    assert sig._today_in_sydney() == datetime.date(2026, 9, 9)
+    assert sig._today_in_sydney().weekday() == 2
+
+
+def test_sydney_date_keeps_a_wednesday_station_on_route_from_a_utc_host(
+    two_station_db, monkeypatch
+):
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    # The Sydney date is what routing must use, so a Wednesday run sees it on route.
+    output = build_signals(
+        conn,
+        series[180][0],
+        preferred_stations=_TWO,
+        today=datetime.date(2026, 9, 9),      # Wednesday in Sydney
+    )
+    assert "OFF ROUTE" not in output
+    assert re.search(r"->\s+Weekly Servo", output)

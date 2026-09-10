@@ -17,6 +17,7 @@ import logging
 import pathlib
 import sqlite3
 import statistics
+import zoneinfo
 from dataclasses import dataclass
 from enum import Enum
 
@@ -392,6 +393,29 @@ _DRIFT_WINDOW_DAYS = 7
 
 _WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
+# Every date question this module asks is a Sydney question: which weekday the
+# driver is passing which station, and how old NSW price data (stamped in local
+# dates) is. `date.today()` answers in the HOST's zone, so on a UTC box — CI, or
+# a server — the Sydney morning window before 10:00 AEST / 11:00 AEDT still reads
+# as yesterday. At 07:00 Wednesday in Sydney a UTC host computes Tuesday, and a
+# Wed/Sun station reads OFF ROUTE on exactly the morning it is reachable.
+_SYDNEY = "Australia/Sydney"
+
+
+def _today_in_sydney() -> datetime.date:
+    """Today's date in Sydney, whatever the host clock is set to."""
+    try:
+        tz = zoneinfo.ZoneInfo(_SYDNEY)
+    except zoneinfo.ZoneInfoNotFoundError as exc:   # pragma: no cover - bare container
+        # Deliberately fatal rather than falling back to date.today(): a silent
+        # fallback reintroduces exactly the off-by-one-day routing bug this
+        # exists to prevent, and it would do so invisibly.
+        raise click.ClickException(
+            f"No timezone database for {_SYDNEY} ({exc}). Install system tzdata "
+            "(or `uv pip install tzdata`) — routing needs the Sydney date."
+        ) from exc
+    return datetime.datetime.now(tz).date()
+
 
 @dataclass
 class StationView:
@@ -643,7 +667,7 @@ def build_signals(
     stations = (
         preferred_stations if preferred_stations is not None else PREFERRED_STATIONS
     )
-    today = today or datetime.date.today()
+    today = today or _today_in_sydney()
     model_path = model_path or DEFAULT_MODEL_PATH
 
     series = db.average_price_series(conn)
