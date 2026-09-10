@@ -612,7 +612,8 @@ def build_signals(
         # Priced stations exist, just none reachable today — a routing answer.
         nearest = off_route[0]
         nxt = nearest.next_reachable(today)
-        when = f"in {nxt[1]}d" if nxt and nxt[1] else "today"
+        assert nxt is not None and nxt[1] >= 1   # off-route ⇒ not today
+        when = f"in {nxt[1]}d"
         lines += [
             "  Nothing on your route today.",
             f"  Cheapest preferred station is {nearest.label} @ "
@@ -644,11 +645,16 @@ def build_signals(
 
     if off_route:
         lines.append("")
+        if not on_route:
+            # No on-route table printed above, so this section carries the header.
+            lines.append(head)
         for v in off_route:
+            # A station lands in off_route precisely because it is NOT reachable
+            # today, so next_reachable is always >= 1 day out and non-None (a
+            # station with no route_days is never off-route in the first place).
             nxt = v.next_reachable(today)
-            when = "today" if nxt and nxt[1] == 0 else (
-                f"in {nxt[1]}d, {_WEEKDAY_NAMES[nxt[0].weekday()]}" if nxt else "?"
-            )
+            assert nxt is not None and nxt[1] >= 1
+            when = f"in {nxt[1]}d, {_WEEKDAY_NAMES[nxt[0].weekday()]}"
             lines.append(f"  OFF ROUTE ({v.route_label()}) - next pass {when}")
             lines.append(row(v, ""))
             if on_route:
