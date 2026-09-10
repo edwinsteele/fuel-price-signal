@@ -46,6 +46,18 @@ gh api repos/{owner}/{repo}/pulls/<N>/comments --paginate
 
 `gh pr view --json comments` returns ISSUE comments (the PR conversation);
 `--json reviews` returns review bodies. Neither includes inline review comments.
+
+**A CLEAN result arrives on a different channel from findings.** When Codex has
+findings it posts a *review* plus inline comments; when it has none it posts an
+**issue comment** — "Codex Review: Didn't find any major issues. :rocket:" with its
+own `Reviewed commit:` line — and no review at all. So polling `pulls/N/reviews`
+for the sha to advance waits forever on a clean pass. Check both, or just check the
+issue comments for the newest `Reviewed commit:` line:
+
+```bash
+gh api repos/{owner}/{repo}/issues/<N>/comments --paginate \
+  --jq '.[] | select(.user.login|startswith("chatgpt")) | .body' | grep -o 'Reviewed commit:.*`'
+```
 Missing this on PR #410 meant reporting "no substantive review yet" while six P1
 findings sat on the diff. Also check `.[].line` — some findings come back with
 `line: null` (outdated/file-level) and are easy to skip when eyeballing.
