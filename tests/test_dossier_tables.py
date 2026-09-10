@@ -22,8 +22,10 @@ from click.testing import CliRunner
 
 from experiments.lib.constants import ROW_AXIS_ECONOMICS_CAVEAT, SHOCK_FOLDS
 from experiments.lib.flips import summarise_regret
+from experiments.lib.realised import run_paired_realised_backtest
 from experiments.pipeline import dossier_tables as dt
 from experiments.pipeline.runner import BASELINE_ARM, CANDIDATE_ARM, RETRYABLE_STATUSES
+from tests.test_realised import _cache_test_setup, _install_fakes
 
 SHOCK = {1, 4}
 FOLDS = [1, 2, 3, 4]
@@ -109,10 +111,11 @@ def _make_results(batch_dir: pathlib.Path, *, status: str = "graded", target=Non
     }
 
 
-def _make_fills(*, low_n_fold: int | None = None, n_per_cell: int = 40) -> pd.DataFrame:
+def _make_fills(*, low_n_fold: int | None = None, n_per_cell: int = 40,
+                 folds: list[int] | None = None) -> pd.DataFrame:
     rng = np.random.default_rng(0)
     rows = []
-    for fold in FOLDS:
+    for fold in (folds if folds is not None else FOLDS):
         n = 10 if fold == low_n_fold else n_per_cell
         for arm in (BASELINE_ARM, CANDIDATE_ARM):
             bump = -1.0 if arm == CANDIDATE_ARM else 0.0  # candidate slightly cheaper
@@ -1244,6 +1247,56 @@ def test_decision_flips_tau_diverges_any_none_for_a_legacy_run_without_realised_
 
     assert facts["breakdowns"]["per_fold"][0]["tau_diverges"] is None
     assert facts["decision_flips"]["tau_diverges_any"] is None
+
+
+def test_tau_diverges_column_contract_holds_end_to_end_from_realised_py(tmp_path, monkeypatch):
+    """#386: every other tau_diverges test above hand-builds its `realised_deltas` fixture,
+    so none of them would notice if experiments/lib/realised.py's `deltas` DataFrame ever
+    renamed or dropped `fold`/`arm`/`tau_diverges` — the column names `_breakdowns` reads by.
+    This one runs the REAL run_paired_realised_backtest (DB/fit mocked out, per
+    tests.test_realised's own fixture) and threads its `.deltas` through the exact
+    `to_dict(orient="records")` call runner.py makes, then through `dt.build_facts` reading
+    it back off disk — the actual end-to-end path, not two independently-fixtured halves.
+    Renaming `tau_diverges` at realised.py's `deltas` construction (realised.py:~628) makes
+    `_breakdowns` KeyError on this test, which is the gap PR #354 review finding #4 flagged."""
+    fit_calls, load_history_calls, agg_calls = [], [], []
+    _install_fakes(monkeypatch, fit_calls=fit_calls, load_history_calls=load_history_calls, agg_calls=agg_calls)
+    arms, baseline_cols, outer, inner = _cache_test_setup()
+
+    result = run_paired_realised_backtest(
+        arms, baseline_cols, station_codes=[1], seed=42,
+        outer_fold_params=outer, inner_fold_params=inner, verbose=False,
+    )
+
+    # Pin the column contract itself: dossier_tables._breakdowns indexes `deltas` records by
+    # these three names.
+    assert {"fold", "arm", "tau_diverges"} <= set(result.deltas.columns)
+    # _cache_test_setup's candidate own-tau (0.35) differs from the baseline's (0.30) — see
+    # _install_fakes's fake_train_calibrate — so every fold is a real True, not a
+    # fixture-only stand-in.
+    assert result.deltas["tau_diverges"].all()
+    real_folds = sorted(int(f) for f in result.deltas["fold"].unique())
+    assert len(real_folds) >= 2, "fixture must produce at least 2 folds for this test to mean anything"
+
+    # The exact serialization runner.py performs before dossier_tables.py ever sees it.
+    real_realised_deltas = result.deltas.to_dict(orient="records")
+
+    # Sourcery review finding on this PR: a fills fixture fixed to a hardcoded fold set
+    # would still pass this test even if run_paired_realised_backtest emitted missing,
+    # extra, or mismatched fold identifiers — the overlap alone would look fine. Deriving
+    # `fills` from the REAL result's own fold ids (rather than the module-level `FOLDS`
+    # constant every other test in this file uses) makes `set(per_fold)` below pin the
+    # actual realised fold set exactly, not a coincidental intersection with it.
+    run_dir, _ = _write_run(
+        tmp_path, columns=["col_a", "col_b"], batch_extras=_wide_noise_floor,
+        fills_df=_make_fills(folds=real_folds), realised_deltas=real_realised_deltas,
+    )
+    facts = dt.build_facts(run_dir)
+
+    per_fold = {row["fold"]: row for row in facts["breakdowns"]["per_fold"]}
+    assert set(per_fold) == set(real_folds)
+    assert all(per_fold[f]["tau_diverges"] is True for f in real_folds)
+    assert facts["decision_flips"]["tau_diverges_any"] is True
 
 
 def test_decision_flips_refuses_for_a_legacy_run_without_shock_folds(tmp_path):
