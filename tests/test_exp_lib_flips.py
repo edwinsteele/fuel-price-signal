@@ -11,6 +11,7 @@ from experiments.lib.flips import (
     MIN_FOLD_LOCAL_DISPERSION_N,
     cascade_window_days,
     diff_fills,
+    diff_volume_only,
     parse_tank_params,
     regret_horizon_days,
     summarise_flips,
@@ -68,6 +69,128 @@ def test_diff_fills_different_station_same_date_both_flip():
     ])
     flips = diff_fills(fills, BASELINE, CANDIDATE)
     assert len(flips) == 2
+
+
+# ── diff_volume_only: same-date, different-litres fills (#380) ─────────────────
+
+def test_diff_volume_only_detects_a_same_date_litres_difference():
+    fills = pd.DataFrame([
+        _fill(1, BASELINE, 100, "2026-01-01", price=150.0, litres=10.0),
+        _fill(1, CANDIDATE, 100, "2026-01-01", price=150.0, litres=15.0),
+    ])
+    volume_only = diff_volume_only(fills, BASELINE, CANDIDATE)
+    assert len(volume_only) == 1
+    row = volume_only.iloc[0]
+    assert row["litres_baseline"] == pytest.approx(10.0)
+    assert row["litres_candidate"] == pytest.approx(15.0)
+    assert row["litres_delta"] == pytest.approx(5.0)
+    # Not a flip — diff_fills must still see this key as matching.
+    assert diff_fills(fills, BASELINE, CANDIDATE).empty
+
+
+def test_diff_volume_only_empty_when_every_common_fill_agrees_on_litres():
+    fills = pd.DataFrame([
+        _fill(1, BASELINE, 100, "2026-01-01", 150.0, litres=10.0),
+        _fill(1, CANDIDATE, 100, "2026-01-01", 150.0, litres=10.0),
+    ])
+    assert diff_volume_only(fills, BASELINE, CANDIDATE).empty
+
+
+def test_diff_volume_only_ignores_genuine_flips():
+    # Baseline-only and candidate-only fills have no counterpart on the other arm's side —
+    # diff_volume_only's inner join must not manufacture a row for either of them.
+    fills = pd.DataFrame([
+        _fill(1, BASELINE, 100, "2026-01-01", 150.0),
+        _fill(1, CANDIDATE, 200, "2026-01-02", 140.0),
+    ])
+    assert diff_volume_only(fills, BASELINE, CANDIDATE).empty
+
+
+def test_summarise_flips_reports_volume_only_separately_from_flip_cpl_pools():
+    # Fold with zero flips (both arms bought the same date), but different litres —
+    # the fps-gzz fold-1 shape this issue was filed from: n_baseline_only/n_candidate_only
+    # stay 0 (no bare "no flips" that hides the real divergence), and the flip CPL pools are
+    # untouched by the volume-only fill (acceptance criterion: documented, tested rule that
+    # volume-only fills are never folded into flip_cpl_baseline/flip_cpl_candidate).
+    fills = pd.DataFrame([
+        _fill(1, BASELINE, 100, "2026-01-01", price=150.0, litres=10.0),
+        _fill(1, CANDIDATE, 100, "2026-01-01", price=150.0, litres=15.0),
+    ])
+    summary = summarise_flips(fills, BASELINE, CANDIDATE, shock_folds=set(), window_days=WINDOW)
+    assert summary["n_flips"] == 0
+    assert summary["n_volume_only"] == 1
+    assert summary["rows_volume_only"][0]["litres_delta"] == pytest.approx(5.0)
+    row = summary["per_fold"][0]
+    assert row["n_baseline_only"] == 0
+    assert row["n_candidate_only"] == 0
+    assert row["n_volume_only"] == 1
+    assert row["litres_volume_baseline"] == pytest.approx(10.0)
+    assert row["litres_volume_candidate"] == pytest.approx(15.0)
+    assert row["litres_volume_delta"] == pytest.approx(5.0)
+    # Flip CPL pools are computed over the flipped fills only — there are none, so both stay
+    # None, exactly as for a fold with no volume-only fills at all.
+    assert row["flip_cpl_baseline"] is None
+    assert row["flip_cpl_candidate"] is None
+    assert row["flip_cpl_delta"] is None
+    # A bare "no flips" would hide the real shape here — the reason must say so.
+    assert row["flip_cpl_delta_reason"] != "no flips"
+    assert "no flips" in row["flip_cpl_delta_reason"]
+    assert "1 same-date volume-only change" in row["flip_cpl_delta_reason"]
+
+
+def test_summarise_flips_volume_only_explains_a_one_arm_only_null():
+    # The fps-gzz fold-1 case as filed: baseline-only fills exist, candidate opens no NEW buy
+    # dates (n_candidate_only == 0) so flip_cpl_delta is a bare null under "one arm only" — but
+    # the candidate DID diverge, by deferring volume onto a shared buy date. The reason must
+    # explain that shape rather than read as "candidate did nothing different."
+    fills = pd.DataFrame([
+        _fill(1, BASELINE, 100, "2026-01-01", price=150.0, litres=10.0),   # baseline-only flip
+        _fill(1, BASELINE, 200, "2026-01-05", price=150.0, litres=10.0),   # matches, same litres
+        _fill(1, CANDIDATE, 200, "2026-01-05", price=150.0, litres=18.0),  # matches, more litres
+    ])
+    summary = summarise_flips(fills, BASELINE, CANDIDATE, shock_folds=set(), window_days=WINDOW)
+    row = summary["per_fold"][0]
+    assert row["n_baseline_only"] == 1
+    assert row["n_candidate_only"] == 0
+    assert row["n_volume_only"] == 1
+    assert row["litres_volume_delta"] == pytest.approx(8.0)
+    assert row["flip_cpl_delta"] is None
+    assert row["flip_cpl_delta_reason"].startswith("one arm only")
+    assert "1 same-date volume-only change" in row["flip_cpl_delta_reason"]
+
+
+def test_summarise_flips_volume_only_with_unequal_total_litres_between_arms():
+    # Two volume-only fills in the same fold, net litres NOT equal between arms (10+10=20
+    # baseline vs 15+8=23 candidate on the shared dates) — litres_volume_delta must reflect the
+    # real net shift, not assume parity.
+    fills = pd.DataFrame([
+        _fill(1, BASELINE, 100, "2026-01-01", price=150.0, litres=10.0),
+        _fill(1, CANDIDATE, 100, "2026-01-01", price=150.0, litres=15.0),
+        _fill(1, BASELINE, 200, "2026-01-02", price=160.0, litres=10.0),
+        _fill(1, CANDIDATE, 200, "2026-01-02", price=160.0, litres=8.0),
+    ])
+    summary = summarise_flips(fills, BASELINE, CANDIDATE, shock_folds=set(), window_days=WINDOW)
+    row = summary["per_fold"][0]
+    assert row["n_volume_only"] == 2
+    assert row["litres_volume_baseline"] == pytest.approx(20.0)
+    assert row["litres_volume_candidate"] == pytest.approx(23.0)
+    assert row["litres_volume_delta"] == pytest.approx(3.0)
+
+
+def test_summarise_flips_volume_only_reason_not_appended_when_delta_is_resolved():
+    # A fold that DOES have a resolvable flip_cpl_delta must not have its reason field
+    # touched by an unrelated volume-only fill elsewhere in the same fold.
+    fills = pd.DataFrame([
+        _fill(1, BASELINE, 100, "2026-01-01", price=200.0, litres=10.0),   # flip
+        _fill(1, CANDIDATE, 100, "2026-01-02", price=150.0, litres=10.0),  # flip
+        _fill(1, BASELINE, 200, "2026-01-05", price=160.0, litres=10.0),   # volume-only pair
+        _fill(1, CANDIDATE, 200, "2026-01-05", price=160.0, litres=12.0),
+    ])
+    summary = summarise_flips(fills, BASELINE, CANDIDATE, shock_folds=set(), window_days=WINDOW)
+    row = summary["per_fold"][0]
+    assert row["n_volume_only"] == 1
+    assert row["flip_cpl_delta"] is not None
+    assert row["flip_cpl_delta_reason"] is None
 
 
 # ── cascade_window_days (fps-e1w change 3) ──────────────────────────────────────

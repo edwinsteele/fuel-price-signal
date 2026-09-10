@@ -37,6 +37,15 @@ can't resolve its own number), cascade-collapsed decision counts, and per-arm
 flip litres. The run-level reconciliation (litres-weighted shift-share against
 `delta_cpl_held`) needs the FULL fold's fills, not just the flipped ones, so it
 is computed one layer up, in `experiments/pipeline/dossier_tables.py`.
+
+#380: a same-date fill both arms made was, until now, invisible even when the
+two arms bought a DIFFERENT litres that day — `diff_fills` matches purely on
+(fold, station_code, date) and pools anything present in both arms as "common,"
+so a fold could show zero baseline-only/candidate-only fills while every one of
+its common fills actually differed in volume (deferred buying, not agreement).
+`diff_volume_only` detects that third category and `summarise_flips` reports it
+alongside, but never inside, the flip CPL pools — see `diff_volume_only`'s
+docstring for why a same-date volume shift has no `bought_by` side to cost.
 """
 from __future__ import annotations
 
@@ -51,6 +60,15 @@ from fuel_signal.backtest import TankParams, format_tank_params
 
 FLIP_KEY_COLUMNS = ["fold", "station_code", "date"]
 FLIP_ROW_COLUMNS = FLIP_KEY_COLUMNS + ["price", "litres", "spend_cents", "bought_by"]
+VOLUME_ONLY_ROW_COLUMNS = FLIP_KEY_COLUMNS + [
+    "price_baseline", "price_candidate", "litres_baseline", "litres_candidate", "litres_delta",
+]
+
+#: Litres are compared with this tolerance, not exact float equality, when detecting a
+#: same-date volume-only change (#380) — two independently-simulated tank states landing on the
+#: same (fold, station_code, date) key can differ by float noise far below any real volume
+#: difference (same tolerance class as `summarise_regret`'s 1e-6 price-mismatch check).
+VOLUME_DIFF_TOLERANCE_LITRES = 1e-6
 
 #: A cell's flip-price standard deviation is trusted fold-local only with at least this many
 #: flip fills (both arms combined) in the fold; thinner folds fall back to the run-wide
@@ -82,6 +100,56 @@ def diff_fills(fills: pd.DataFrame, baseline_arm: str, candidate_arm: str) -> pd
     return pd.concat(
         [only_base[FLIP_ROW_COLUMNS], only_cand[FLIP_ROW_COLUMNS]], ignore_index=True
     )
+
+
+def diff_volume_only(fills: pd.DataFrame, baseline_arm: str, candidate_arm: str) -> pd.DataFrame:
+    """Fills the two arms both executed on the SAME (fold, station_code, date) key, but at a
+    DIFFERENT litres (#380).
+
+    `diff_fills` matches purely on the key, so a fill both arms make on the same date pools as
+    "common" regardless of size — a candidate that buys 15 L where the baseline bought 10 L on
+    the identical date reads as no divergence at all. That silently understates how much the
+    arms actually diverge: a fold can show 0 baseline-only / 0 candidate-only fills and still
+    have every one of its "common" fills differ in volume, which is a description of DEFERRED
+    buying (fewer, larger fills on one arm) rather than of no divergence at all.
+
+    Deliberately reported SEPARATELY from `diff_fills`'s baseline-only/candidate-only split,
+    never folded into `flip_cpl_baseline`/`flip_cpl_candidate` (#380 acceptance criteria): a
+    same-date volume difference has no `bought_by` side to attribute a cost to — both arms
+    bought, on the same date, so `pooled_cpl`'s spend-weighted cost-per-litre has no
+    "the other arm didn't buy this" counterpart to compare it against. `summarise_flips` reports
+    these rows' counts and litres alongside the flip CPL pools, but never pools them into those
+    two numbers.
+
+    One row per differing key, both arms' price/litres side by side plus `litres_delta`
+    (candidate minus baseline), so a caller can see the shift's size without a second join.
+    Returns an empty frame (right columns, zero rows) when every same-key fill agrees on litres
+    within `VOLUME_DIFF_TOLERANCE_LITRES`.
+
+    Each side is summed to one row per key BEFORE the join — not merged raw — so a key that
+    happens to carry more than one row on one arm (never expected from a real tank simulator,
+    which buys at most once per station per evaluation date, but not something this function
+    should assume) compares TOTAL litres on that key rather than exploding into a many-to-many
+    cross product of every same-key row pair, which would wildly overcount `n_volume_only`.
+    """
+    base = (
+        fills.loc[fills["arm"] == baseline_arm, FLIP_KEY_COLUMNS + ["price", "litres"]]
+        .groupby(FLIP_KEY_COLUMNS, as_index=False)
+        .agg(price=("price", "first"), litres=("litres", "sum"))
+    )
+    cand = (
+        fills.loc[fills["arm"] == candidate_arm, FLIP_KEY_COLUMNS + ["price", "litres"]]
+        .groupby(FLIP_KEY_COLUMNS, as_index=False)
+        .agg(price=("price", "first"), litres=("litres", "sum"))
+    )
+    merged = base.merge(cand, on=FLIP_KEY_COLUMNS, suffixes=("_baseline", "_candidate"))
+    diverges = (
+        (merged["litres_baseline"] - merged["litres_candidate"]).abs()
+        > VOLUME_DIFF_TOLERANCE_LITRES
+    )
+    out = merged.loc[diverges].copy()
+    out["litres_delta"] = out["litres_candidate"] - out["litres_baseline"]
+    return out[VOLUME_ONLY_ROW_COLUMNS]
 
 
 def _tank_from_exact_fields(exact_fields: Mapping[str, float], tank_params: str) -> TankParams:
@@ -488,14 +556,30 @@ def summarise_flips(
     differing fills at the same station, so `n_flips` overstates independent decisions — see
     this module's docstring.
 
-    `rows` carries the full flip-level detail (`diff_fills`'s output, as records) so a
-    committed facts.json is self-contained — fills.parquet itself is gitignored and never
-    reaches a reader who didn't run this batch locally.
+    `n_volume_only` (`diff_volume_only`, #380) is a THIRD category, alongside `n_baseline_only`/
+    `n_candidate_only`: same-date fills both arms made but at a different litres, which
+    `diff_fills` pools as "common" and so is otherwise invisible here. It is never folded into
+    `flip_cpl_baseline`/`flip_cpl_candidate` — see `diff_volume_only`'s docstring for why — but
+    when a fold's flip CPL delta is `None` (no flips, or only one arm flipped) and that fold DID
+    have volume-only changes, `flip_cpl_delta_reason` says so, so a fold where the candidate
+    opens no new buy dates but defers volume onto its existing common fills doesn't read as an
+    unexplained null.
+
+    `rows` / `rows_volume_only` carry the full flip-level / volume-only-level detail (`diff_
+    fills`'s and `diff_volume_only`'s output, as records) so a committed facts.json is
+    self-contained — fills.parquet itself is gitignored and never reaches a reader who didn't
+    run this batch locally.
     """
     flips = diff_fills(fills, baseline_arm, candidate_arm)
+    volume_only = diff_volume_only(fills, baseline_arm, candidate_arm)
     per_fold: list[dict] = []
     for fold in sorted(fills["fold"].unique()):
         fold_flips = flips[flips["fold"] == fold]
+        fold_volume_only = volume_only[volume_only["fold"] == fold]
+        n_volume_only = len(fold_volume_only)
+        litres_volume_baseline = float(fold_volume_only["litres_baseline"].sum())
+        litres_volume_candidate = float(fold_volume_only["litres_candidate"].sum())
+        litres_volume_delta = float(fold_volume_only["litres_delta"].sum())
         base_side = fold_flips[fold_flips["bought_by"] == "baseline"]
         cand_side = fold_flips[fold_flips["bought_by"] == "candidate"]
         n_base, n_cand = len(base_side), len(cand_side)
@@ -520,6 +604,19 @@ def summarise_flips(
                 "cost-per-litre is undefined"
             )
             delta = None
+
+        if delta is None and n_volume_only:
+            # #380 acceptance criterion: a fold whose flip CPL delta is a bare null (no flips,
+            # or only one arm flipped) must not read as "no divergence" when the arms in fact
+            # diverged on volume, on dates they both bought — the fps-gzz fold-1 case this
+            # issue was filed from (21 baseline-only, 0 candidate-only, but 16 of 169 common
+            # fills carried different litres — the real shape was deferral, not "candidate
+            # stopped buying").
+            delta_reason = (
+                f"{delta_reason} — plus {n_volume_only} same-date volume-only change(s) "
+                f"(litres_volume_delta={litres_volume_delta:+.3f} L, candidate minus baseline) "
+                "not counted as flips"
+            )
 
         se_diff, interval, inside_own_se, interval_reason = None, None, None, None
         if delta is not None:
@@ -547,6 +644,10 @@ def summarise_flips(
             "regime": "shock" if fold in shock_folds else "normal",
             "n_baseline_only": n_base,
             "n_candidate_only": n_cand,
+            "n_volume_only": n_volume_only,
+            "litres_volume_baseline": litres_volume_baseline,
+            "litres_volume_candidate": litres_volume_candidate,
+            "litres_volume_delta": litres_volume_delta,
             "n_flips": n_base + n_cand,
             "n_decisions": n_decisions,
             "litres_baseline": litres_base,
@@ -562,10 +663,12 @@ def summarise_flips(
         })
     return {
         "n_flips": len(flips),
+        "n_volume_only": len(volume_only),
         "n_decisions": sum(row["n_decisions"] for row in per_fold),
         "cascade_window_days": window_days,
         "per_fold": per_fold,
         "rows": flips.to_dict(orient="records"),
+        "rows_volume_only": volume_only.to_dict(orient="records"),
     }
 
 

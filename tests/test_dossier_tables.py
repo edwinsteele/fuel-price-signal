@@ -1719,7 +1719,12 @@ def test_decision_flips_reproduces_fps_6yi_stickiness_phase_saddle_numbers(tmp_p
         assert row["litres_candidate"] == pytest.approx(lc, abs=1e-3), fold
         if delta is None:
             assert row["flip_cpl_delta"] is None, fold
-            assert row["flip_cpl_delta_reason"] in ("no flips", "one arm only"), fold
+            # #380: the padding fixture's per-fold matching row (same key, both arms) is
+            # deliberately built with unequal litres for every fold except fold 1, so fold 9's
+            # reason now carries a "plus N same-date volume-only change(s)" suffix on top of
+            # the base "one arm only" — startswith, not equality, so this stays a real assertion
+            # on the base reason rather than one on the exact suffix text.
+            assert row["flip_cpl_delta_reason"].startswith(("no flips", "one arm only")), fold
         else:
             assert row["flip_cpl_delta"] == pytest.approx(delta), fold
             # fps-6yi's own finding, quoted in fps-e1w: 0 of 12 resolvable folds print a delta
