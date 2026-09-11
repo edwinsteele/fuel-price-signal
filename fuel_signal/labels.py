@@ -175,12 +175,22 @@ def assemble_training_rows(
     lookback_days: int = 90,
     percentile_pct: float = 33.0,
     station_codes: list[int] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> pd.DataFrame:
     """Build training rows with label for every (station, date) with full forward and lookback data.
 
     Columns: station_code, price_date, today_price_cents, future_min_cents, label.
     No feature columns — those are added in a later phase.
     station_codes=None processes all stations with E10 prices in daily_prices.
+
+    `start_date`/`end_date` (ISO, inclusive) bound the RAW ROW QUERY only — a pure
+    performance knob for a caller that already knows it only needs labels inside some
+    range, not a semantic filter. Pass a range wider than the dates you actually want:
+    the calendar-gap mask needs `lookback_days` real days before, and `horizon_days`
+    real days after, any date whose label you want, so trimming the query to exactly
+    that date range would starve rows at its own edges of the context they need and
+    manufacture gaps that are an artifact of the query, not the data.
     """
     if horizon_days < 1:
         raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
@@ -197,19 +207,28 @@ def assemble_training_rows(
 
     fid = _db.fuel_type_id(conn, "E10")
 
+    date_clause, date_vals = "", []
+    if start_date is not None or end_date is not None:
+        if start_date is not None:
+            date_clause += " AND price_date >= ?"
+            date_vals.append(_to_date_int(start_date))
+        if end_date is not None:
+            date_clause += " AND price_date <= ?"
+            date_vals.append(_to_date_int(end_date))
+
     if station_codes is not None:
         placeholders = ",".join("?" * len(station_codes))
         raw_rows = conn.execute(
             "SELECT station_code, price_date, price_decicents FROM daily_prices"
-            f" WHERE fuel_type_id = ? AND station_code IN ({placeholders})"
+            f" WHERE fuel_type_id = ? AND station_code IN ({placeholders}){date_clause}"
             " ORDER BY station_code, price_date",
-            [fid, *station_codes],
+            [fid, *station_codes, *date_vals],
         ).fetchall()
     else:
         raw_rows = conn.execute(
             "SELECT station_code, price_date, price_decicents FROM daily_prices"
-            " WHERE fuel_type_id = ? ORDER BY station_code, price_date",
-            (fid,),
+            f" WHERE fuel_type_id = ?{date_clause} ORDER BY station_code, price_date",
+            [fid, *date_vals],
         ).fetchall()
 
     frames: list[pd.DataFrame] = []

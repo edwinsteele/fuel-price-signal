@@ -53,13 +53,18 @@ A THIRD axis, and the one that matters most: `daily_prices` coverage is the REPL
 axis (what `aggregate_backtest` / `run_backtest` can walk) — it is NOT a proxy for
 whether the ML feature pipeline actually emits a row there, and the two disagree
 badly on exactly the folds that matter (#387). `fill.py` forward-fills a `daily_prices`
-gap of up to `MAX_GAP_FILL_DAYS = 28` days, but `fuel_signal.labels`'s calendar-gap
-mask — the mechanism `compute_features` / `assemble_feature_rows` build on — strips
-`lookback_days` (90) days before, and `horizon_days` (7) days after, every gap in the
-RAW price history `daily_prices` was filled from. Measured on batch1's frozen
-artifacts: both Blue Mountains stations sit at 0.96 `daily_prices` coverage in fold 1
-and have ZERO feature rows there; station 414 is at 1.00 coverage in fold 8 with only
-8. A coverage gate, however strict, cannot see this — it is watching the wrong table.
+gap of up to `MAX_GAP_FILL_DAYS = 28` days, so a filled gap that short is invisible to
+anything reading `daily_prices` — including `fuel_signal.labels`'s calendar-gap mask,
+the mechanism `compute_features` / `assemble_feature_rows` build on. What the mask DOES
+see is a gap that remains MISSING from `daily_prices` after filling (longer than
+`MAX_GAP_FILL_DAYS`, or past `fill.py`'s trail-fill horizon) — around one of those it
+strips `lookback_days` (90) days before, and `horizon_days` (7) days after, far wider
+than the hole itself. Measured on batch1's frozen artifacts: both Blue Mountains
+stations sit at 0.96 `daily_prices` coverage in fold 1 — a station-window that DOES
+still carry an unfilled gap — and have ZERO feature rows there; station 414 is at 1.00
+coverage in fold 8 with only 8. A coverage gate, however strict, cannot see this — the
+1-in-20 missing day it tolerates at 0.90 min_coverage can, by itself, blank out a whole
+90+7-day stretch of feature rows around it.
 Measured, never filtered — the same policy as `observed_fraction_*` above:
 `describe_universe` reports `worst_window_label_fraction`, the calendar-gap-mask
 analogue of `worst_window_coverage`, for BOTH populations. It counts rows
@@ -101,12 +106,22 @@ import sqlite3
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+import inspect
+from datetime import date, timedelta
 from fractions import Fraction
 
 from fuel_signal.dates import date_to_int
 from fuel_signal.labels import assemble_training_rows
 from fuel_signal.postcode_council import SYDNEY_METRO_COUNCILS
+
+#: `assemble_training_rows`'s own `lookback_days`/`horizon_days` defaults, read via
+#: introspection rather than copied as literals — a copy would silently drift from the
+#: real defaults if `labels.py` ever changed them, which is exactly the class of trap
+#: `_window_label_rows` needs to NOT have: its envelope query below must always bound
+#: exactly as wide as the calendar-gap mask it feeds actually needs.
+_LABEL_PARAMS = inspect.signature(assemble_training_rows).parameters
+_LABEL_LOOKBACK_DAYS: int = _LABEL_PARAMS["lookback_days"].default
+_LABEL_HORIZON_DAYS: int = _LABEL_PARAMS["horizon_days"].default
 
 #: Minimum fraction of days in the evaluation span on which a station must have a
 #: `daily_prices` row to enter a sampled universe. 0.90 is not tuned — it is the
@@ -460,22 +475,45 @@ def _window_label_rows(
     nonzero here: a subset of zero label rows is zero feature rows too, which is the
     case this metric exists to catch.
 
-    Uses `assemble_training_rows`'s DEFAULT `lookback_days`/`horizon_days`/`threshold_cents`
-    /`percentile_pct` — the same defaults `fuel_signal.labels`'s own CLI and
-    `assemble_feature_rows` use — because this reports on the pipeline AS RUN, not a
-    hypothetical differently-configured one.
+    Uses `assemble_training_rows`'s DEFAULT `threshold_cents`/`percentile_pct` — the same
+    defaults `fuel_signal.labels`'s own CLI and `assemble_feature_rows` use — because this
+    reports on the pipeline AS RUN, not a hypothetical differently-configured one.
+    `lookback_days`/`horizon_days` are also its defaults, but READ rather than left
+    implicit (`_LABEL_LOOKBACK_DAYS`/`_LABEL_HORIZON_DAYS`), because this function also
+    needs their VALUES to size the query below.
 
-    One `assemble_training_rows` call over each station's FULL available history, not
-    the span: the calendar-gap mask needs real lookback/horizon days that may fall
-    OUTSIDE `spec`'s span, and pre-filtering to the span would misclassify rows near a
-    window boundary as gapped when they are not. Windowing happens afterward, by
-    slicing the returned `price_date` column — cheap, since the label pass already did
-    the expensive part once.
+    One `assemble_training_rows` call over the EXPANDED ENVELOPE
+    `min(window starts) - lookback_days` .. `max(window ends) + horizon_days`, not the
+    station's full history and not the bare span: the calendar-gap mask needs real
+    lookback/horizon days around every date whose label survives, which can fall OUTSIDE
+    `spec.windows` (even outside `spec`'s span, at its very edges) — querying only the
+    windows themselves would manufacture gaps at their boundaries that are an artifact of
+    the query, not the data. But a raw per-station-row load over a station's ENTIRE
+    history, times every station in a broad universe, is exactly the "~2.2M raw rows for
+    the decade" shape `AGENTS.md`'s memory section warns can OOM Viking — and describing a
+    410-station universe needs exactly that shape without the bound. The envelope is the
+    smallest range that cannot manufacture a boundary gap; windowing the result happens
+    afterward, by slicing the returned `price_date` column.
     """
     if not spec.windows or not codes:
         return {}
     codes = [int(c) for c in codes]
-    label_df = assemble_training_rows(conn, station_codes=codes)
+    envelope_start = (
+        min(date.fromisoformat(w_start) for w_start, _ in spec.windows)
+        - timedelta(days=_LABEL_LOOKBACK_DAYS)
+    ).isoformat()
+    envelope_end = (
+        max(date.fromisoformat(w_end) for _, w_end in spec.windows)
+        + timedelta(days=_LABEL_HORIZON_DAYS)
+    ).isoformat()
+    label_df = assemble_training_rows(
+        conn,
+        station_codes=codes,
+        lookback_days=_LABEL_LOOKBACK_DAYS,
+        horizon_days=_LABEL_HORIZON_DAYS,
+        start_date=envelope_start,
+        end_date=envelope_end,
+    )
     out: dict[int, list[tuple[int, int]]] = {code: [] for code in codes}
     for w_start, w_end in spec.windows:
         w_days = (date.fromisoformat(w_end) - date.fromisoformat(w_start)).days + 1
