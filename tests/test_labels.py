@@ -286,6 +286,36 @@ def test_assemble_invalid_horizon(conn):
         assemble_training_rows(conn, horizon_days=0)
 
 
+def test_start_date_end_date_bound_the_raw_query(conn):
+    """A performance knob only (#387): bounds the raw row query so a caller that only
+    wants labels near a known date range — `experiments/lib/universe.py`'s
+    `_window_label_rows` — need not load a station's entire history to answer it.
+
+    Two independent BUY days, far apart. Passed a range that brackets only the near
+    one WITH its full lookback+horizon context on both sides, only that row comes
+    back — the far day's rows fall outside the query entirely and are invisible, not
+    merely unlabelled.
+    """
+    _station(conn, 1001)
+    _cheap_fixture(conn, 1001, today_price=160.0, forward_prices=[162.0] * 7)
+    far_past = [(200 - LOOKBACK - 7 + i, 200.0) for i in range(LOOKBACK)]
+    far_today = [(200 - 7, 160.0)]
+    far_fwd = [(200 - 6 + i, 162.0) for i in range(7)]
+    _prices(conn, 1001, far_past + far_today + far_fwd)
+
+    full = assemble_training_rows(
+        conn, horizon_days=7, threshold_cents=3.0, lookback_days=LOOKBACK, station_codes=[1001]
+    )
+    assert len(full) == 2
+
+    bounded = assemble_training_rows(
+        conn, horizon_days=7, threshold_cents=3.0, lookback_days=LOOKBACK, station_codes=[1001],
+        start_date=_d(-7 - LOOKBACK), end_date=_d(-7 + 7),
+    )
+    assert list(bounded["price_date"]) == [_d(-7)]
+    assert bounded.iloc[0]["label"] == 1
+
+
 def test_assemble_matches_compute_label_per_row(conn):
     """Vectorised assemble_training_rows must agree row-for-row with compute_label.
 
