@@ -53,6 +53,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [batch-freeze-stale-features](batch-freeze-stale-features.md) — the old "run features before freezing" workaround is obsolete; `refresh_db()` hard-gates both now.
 - [handover-before-results-csv-write](handover-before-results-csv-write.md) — hand over to the user *before* any step that writes `experiments/results.csv`. Running it is the violation.
 - [daily-prices-coverage-not-feature-row-availability](daily-prices-coverage-not-feature-row-availability.md) — high `daily_prices` coverage in a window does not imply the ML feature pipeline emits any row there. Check `describe_universe`'s `worst_window_label_fraction` too.
+- [date-bound-not-enough-for-broad-universe-oom](date-bound-not-enough-for-broad-universe-oom.md) — bounding a per-station query by date range doesn't stop a broad (100s-station) universe from concatenating every station's rows into one resident frame. Check both axes.
 
 ## Numerical and test traps
 
