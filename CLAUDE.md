@@ -218,9 +218,20 @@ Handle conflicts first, then review threads, in a single pass per PR.
   2. `git branch -D <branch>` for the now-local-only branch. Squash-merge means git won't recognize it as an ordinary merge (`branch -d` refuses), but the content is already in the squash commit on `main`, so force-deleting the local pointer loses nothing. The remote copy is usually already gone — this repo auto-deletes head branches on merge, so don't treat a failed manual delete ("remote ref does not exist") as an error.
      - **If the branch is checked out in the worktree this session is running from** (rather than a different, already-idle worktree), `branch -D` fails — git refuses to delete a branch checked out anywhere, including from another worktree's shell. This isn't rare: it's the normal case for a per-issue worktree session finishing its own PR. Don't force past it, and **don't ask the user how to proceed** — the owner's standing answer is always "leave it for a later cleanup session" (asked and answered 2026-08-23; removing your own worktree mid-session is disruptive and was never actually wanted). Just note in your final summary that the branch/worktree is stale and merged, and move on — no question needed.
   3. `git pull --ff-only` in any other worktree (including the primary one) that's now behind `main` and has a clean `git status --short` — a bare fast-forward on a clean tree can't lose anything.
-  4. **Sweep other idle worktrees you notice, not just your own.** Worktree directory names are stale by design (see [docs/CONVENTIONS.md § Worktrees](docs/CONVENTIONS.md#worktrees)) — the harness reuses a slot's directory name across unrelated later branches, so a name never tells you what's actually checked out there or whether it's still live. Run `git worktree list`, then for every worktree that ISN'T the one this session is in: check its actual branch (`git -C <dir> branch --show-current`), confirm that branch's work has actually landed, and confirm `git -C <dir> status --short` is empty. **Confirm "landed" by content, not by ancestry** — a squash-merged branch never reads as merged to `git branch --merged main`, so use `git diff HEAD origin/main -- $(git -C <dir> diff --name-only origin/main...HEAD)` and require it empty. Then check there's no open PR for it. If all of that holds, `git worktree remove --force <dir>` and `git branch -D <branch>`. **If a worktree has any uncommitted changes, leave it alone** — note it in your summary instead of discarding someone else's in-progress work.
+  4. **Do not sweep other worktrees. Ever.** An interactive session must never remove, or offer
+     to remove, any worktree other than the one it's running in — not even one that passes every
+     git-level check (clean `git status`, content landed by diff not just ancestry, no open PR).
+     Passing those checks is not proof of idleness: a live session working in that worktree leaves
+     no git trace of being live at all, and this has cost real, disruptive damage twice — once to
+     the *scheduled* weekly cleanup task (2026-09-08, mid-review worktree removed) and once to an
+     *interactive* session following this exact step (2026-09-11, a live worktree removed out from
+     under another running session). Worktree cleanup is exclusively the job of the owner's weekly
+     scheduled task now. If you notice a worktree that looks idle or stale, say so in your summary
+     and stop there — do not act on it.
 
-  This checklist is scoped to branches/worktrees confirmed merged with no uncommitted changes — never force-remove a worktree that still has staged/unstaged changes without flagging it first, and it is not a general license for `branch -D`/force operations elsewhere.
+  This checklist item is otherwise scoped to your own branch/worktree only: never force-remove
+  *any* worktree that still has staged/unstaged changes without flagging it first, and none of
+  this is a general license for `branch -D`/force operations beyond your own finished branch.
 - Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
 - After each commit + push, open a PR immediately without asking.
 - After submitting a PR, wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, push, repeat until no actionable comments remain.
