@@ -852,6 +852,24 @@ class TestDescribeUniverse:
         assert described["coverage_min"] == pytest.approx(45 / SPAN_DAYS)
         assert described["observed_fraction_min"] == pytest.approx(15 / 45)
 
+    def test_reports_zero_feature_rows_despite_high_daily_prices_coverage(self, conn):
+        """The fold-1 shape (#387): high `daily_prices` coverage does not imply the
+        ML feature pipeline emits any row there. `assemble_training_rows`'s
+        calendar-gap mask needs lookback_days(90) + horizon_days(7) + 1 = 98 days of
+        a station's raw history; this station has only SPAN_DAYS=90, so it produces
+        zero label rows anywhere, however well `daily_prices` covers the window.
+        `worst_window_coverage` cannot see this; `worst_window_label_fraction` must —
+        and REPORTING it rather than gating on it means the station stays eligible.
+        """
+        _seed_station(conn, 1, PC_PARRAMATTA)
+        windows = (("2024-01-01", "2024-01-30"),)
+        spec = _spec(windows=windows)
+        described = describe_universe(conn, [1], spec)
+        assert described["worst_window_coverage"] == pytest.approx(1.0)
+        assert described["worst_window_label_fraction"] == 0.0
+        assert described["n_failing_spec_gates"] == 0
+        assert eligible_stations(conn, spec) != []
+
     def test_flags_a_station_absent_from_the_stations_table(self, conn):
         _seed_station(conn, 1, PC_PARRAMATTA)
         described = describe_universe(conn, [1, 4242], _spec(n=1))

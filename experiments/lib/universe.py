@@ -49,6 +49,26 @@ disproportionately the stalest, so gating on coverage incidentally improves medi
 staleness. The two axes are correlated in the helpful direction; neither is a proxy
 for the other.
 
+A THIRD axis, and the one that matters most: `daily_prices` coverage is the REPLAY
+axis (what `aggregate_backtest` / `run_backtest` can walk) — it is NOT a proxy for
+whether the ML feature pipeline actually emits a row there, and the two disagree
+badly on exactly the folds that matter (#387). `fill.py` forward-fills a `daily_prices`
+gap of up to `MAX_GAP_FILL_DAYS = 28` days, but `fuel_signal.labels`'s calendar-gap
+mask — the mechanism `compute_features` / `assemble_feature_rows` build on — strips
+`lookback_days` (90) days before, and `horizon_days` (7) days after, every gap in the
+RAW price history `daily_prices` was filled from. Measured on batch1's frozen
+artifacts: both Blue Mountains stations sit at 0.96 `daily_prices` coverage in fold 1
+and have ZERO feature rows there; station 414 is at 1.00 coverage in fold 8 with only
+8. A coverage gate, however strict, cannot see this — it is watching the wrong table.
+Measured, never filtered — the same policy as `observed_fraction_*` above:
+`describe_universe` reports `worst_window_label_fraction`, the calendar-gap-mask
+analogue of `worst_window_coverage`, for BOTH populations. It counts rows
+`fuel_signal.labels.assemble_training_rows` would keep, which upper-bounds the true
+`assemble_feature_rows` row count (`compute_features` can drop further rows for
+NETWORK-wide reasons — a missing `CycleDetector` peak pair, an absent Sydney average —
+that this metric does not model). The bound does not blunt the headline case: a
+subset of zero is zero, so fold 1's zero reads as zero here too.
+
 Two consequences, and they point opposite ways. The gate is not overclaiming about
 darkness — it is simply silent about staleness, which is PRE-EXISTING and unchanged by
 this module: the arbiter has always replayed two-thirds forward-filled days. But a
@@ -85,6 +105,7 @@ from datetime import date
 from fractions import Fraction
 
 from fuel_signal.dates import date_to_int
+from fuel_signal.labels import assemble_training_rows
 from fuel_signal.postcode_council import SYDNEY_METRO_COUNCILS
 
 #: Minimum fraction of days in the evaluation span on which a station must have a
@@ -97,6 +118,12 @@ from fuel_signal.postcode_council import SYDNEY_METRO_COUNCILS
 #: the five on an axis unrelated to any candidate feature. Report the coverage
 #: distribution of both populations (`describe_universe`) rather than assuming it
 #: away.
+#:
+#: Plainly: this gates REPLAY continuity (`daily_prices`, what `aggregate_backtest`
+#: walks) and NOTHING ELSE. It is not, and must not be read as, a proxy for whether
+#: the ML feature pipeline emits a row there — the two disagree badly on exactly the
+#: folds that matter (#387; see the module docstring's third axis and
+#: `describe_universe`'s `worst_window_label_fraction`).
 DEFAULT_MIN_COVERAGE = 0.90
 
 #: Maximum fraction of a station's CLASSIFIED days inside the span on which it may
@@ -407,6 +434,67 @@ def _fails_any_window(spec: UniverseSpec, windows: Sequence[tuple[int, int]]) ->
 
 def _worst_window_coverage(windows: Sequence[tuple[int, int]]) -> float | None:
     """Lowest per-window coverage ratio — reporting only, never a gate input."""
+    return min(count / days for count, days in windows) if windows else None
+
+
+def _window_label_rows(
+    conn: sqlite3.Connection, spec: UniverseSpec, codes: Sequence[int]
+) -> dict[int, list[tuple[int, int]]]:
+    """Per-station `(label_row_count, window_days)` for each of `spec.windows`, in order.
+
+    The feature-row-availability analogue of `_window_coverage` (#387) — same shape,
+    a different table. `daily_prices` coverage counts REPLAY days; this counts days
+    `fuel_signal.labels.assemble_training_rows` would actually keep a row for, which
+    is the axis the WFCV screen and `extra_feature_provider` need and the one
+    `min_coverage` cannot see (see the module docstring).
+
+    Deliberately `labels.assemble_training_rows`, not `features.assemble_feature_rows`:
+    the label pass needs only `daily_prices` for the stations in `codes`, so it stays a
+    single cheap query plus per-station numpy work — the same cost class as everything
+    else in this leaf module. The feature pass additionally needs a network-wide
+    `CycleDetector` and Sydney/LGA/brand averages, which this module has no other reason
+    to import. The label-row count is therefore an UPPER BOUND on the true feature-row
+    count, not an exact match — `compute_features` can still drop a row the label pass
+    kept, for reasons that are network-wide rather than per-station (no cycle-detector
+    peak pair yet, no Sydney average that day). That gap cannot turn a real zero into a
+    nonzero here: a subset of zero label rows is zero feature rows too, which is the
+    case this metric exists to catch.
+
+    Uses `assemble_training_rows`'s DEFAULT `lookback_days`/`horizon_days`/`threshold_cents`
+    /`percentile_pct` — the same defaults `fuel_signal.labels`'s own CLI and
+    `assemble_feature_rows` use — because this reports on the pipeline AS RUN, not a
+    hypothetical differently-configured one.
+
+    One `assemble_training_rows` call over each station's FULL available history, not
+    the span: the calendar-gap mask needs real lookback/horizon days that may fall
+    OUTSIDE `spec`'s span, and pre-filtering to the span would misclassify rows near a
+    window boundary as gapped when they are not. Windowing happens afterward, by
+    slicing the returned `price_date` column — cheap, since the label pass already did
+    the expensive part once.
+    """
+    if not spec.windows or not codes:
+        return {}
+    codes = [int(c) for c in codes]
+    label_df = assemble_training_rows(conn, station_codes=codes)
+    out: dict[int, list[tuple[int, int]]] = {code: [] for code in codes}
+    for w_start, w_end in spec.windows:
+        w_days = (date.fromisoformat(w_end) - date.fromisoformat(w_start)).days + 1
+        if label_df.empty:
+            counts: dict[int, int] = {}
+        else:
+            in_window = label_df[
+                (label_df["price_date"] >= w_start) & (label_df["price_date"] <= w_end)
+            ]
+            counts = in_window.groupby("station_code")["label"].count().to_dict()
+        for code in codes:
+            out[code].append((int(counts.get(code, 0)), w_days))
+    return out
+
+
+def _worst_window_label_fraction(windows: Sequence[tuple[int, int]]) -> float | None:
+    """Lowest per-window label-row-availability ratio — reporting only, never a gate
+    input (#387). The `_worst_window_coverage` of the feature-row axis.
+    """
     return min(count / days for count, days in windows) if windows else None
 
 
@@ -807,6 +895,11 @@ def describe_universe(
     `"unknown"` so the counts always sum to `n_stations`, while `n_councils` counts
     real councils and excludes it. `n_unknown_council` is emitted so the two can be
     reconciled without inferring the rule.
+
+    `worst_window_label_fraction` is the feature-row-availability figure `daily_prices`
+    coverage cannot stand in for (#387, see the module docstring): `worst_window_coverage`
+    can read 0.96 on a station-window with zero rows a WFCV screen would ever see. Same
+    None-on-span-only convention as `worst_window_coverage`, and never a gate input.
     """
     codes = [int(c) for c in station_codes]
     duplicates = sorted({c for c in codes if codes.count(c) > 1})
@@ -864,6 +957,7 @@ def describe_universe(
         )
     }
     per_window = _window_coverage(conn, spec, codes)
+    per_window_labels = _window_label_rows(conn, spec, codes)
 
     councils: dict[str, int] = {}
     brands: dict[str, int] = {}
@@ -875,6 +969,11 @@ def describe_universe(
     coverages = [coverage.get(code, 0.0) for code in codes]
     worst_window = [
         w for c in codes if (w := _worst_window_coverage(per_window.get(c, []))) is not None
+    ]
+    worst_window_label = [
+        w
+        for c in codes
+        if (w := _worst_window_label_fraction(per_window_labels.get(c, []))) is not None
     ]
     # Denominator is the station's own replayed days, not the span: a station that is
     # dark for part of the span is not thereby "stale" on the days it does not appear.
@@ -897,6 +996,11 @@ def describe_universe(
         # The span figure's blind spot, made visible: None when the spec gates on the
         # span only, in which case nothing here can rule out a dark val window.
         "worst_window_coverage": min(worst_window) if worst_window else None,
+        # The feature-row-availability axis `daily_prices` coverage cannot see (#387):
+        # None when the spec gates on the span only. A subset-of-zero upper bound on
+        # true `assemble_feature_rows` rows, never a gate input — see the module
+        # docstring and `_window_label_rows`.
+        "worst_window_label_fraction": min(worst_window_label) if worst_window_label else None,
         # Staleness, the axis `coverage` is blind to. ~2/3 of replayed days are
         # forward-filled for EVERY population, so a low number here is normal and is
         # not a defect in the station — it is there so a homogeneity read can compare
