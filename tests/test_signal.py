@@ -459,6 +459,39 @@ def test_compute_signal_payload_is_reusable_across_routing_days(
     assert price_line.search(on_monday).group() == price_line.search(on_wednesday).group()
 
 
+def test_rendering_the_same_payload_at_different_now_moves_only_the_freshness_banner(
+    signal_db,
+):
+    """Mechanical check of the SignalPayload docstring's caching invariant.
+
+    Every field on SignalPayload must be a function of (as_of_date, database)
+    alone — nothing derived from the wall clock. Render one payload at two
+    `now` values five days apart: only the freshness banner (the one line that
+    is legitimately about "how old is this, right now") may differ.
+    """
+    conn, series, _ = signal_db
+    as_of = series[-1][0]   # newest real observation, so age is measured from it
+    payload = compute_signal(conn, as_of, preferred_stations=_PREFERRED)
+    routing_day = datetime.date.fromisoformat(as_of)
+
+    fresh = render_text(payload, routing_day=routing_day, now=routing_day)
+    stale = render_text(
+        payload, routing_day=routing_day, now=routing_day + datetime.timedelta(days=5)
+    )
+
+    def without_freshness_banner(render: str) -> str:
+        return "\n".join(
+            ln for ln in render.splitlines() if not ln.startswith("E10 - ")
+        )
+
+    assert without_freshness_banner(fresh) == without_freshness_banner(stale), (
+        "a field on SignalPayload appears to depend on `now` — everything but "
+        "the freshness banner must be identical across renders of one payload"
+    )
+    assert "stale" not in fresh
+    assert "!! 5 days stale" in stale
+
+
 # ---------------------------------------------------------------------------
 # _station_price_at / _station_latest_gradient
 # ---------------------------------------------------------------------------

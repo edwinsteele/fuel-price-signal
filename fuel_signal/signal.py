@@ -672,21 +672,33 @@ def _freshness_note(as_of: str, last_real: str | None, today: datetime.date) -> 
 class SignalPayload:
     """The expensive, day-stable half of the signal.
 
-    Every field here is a pure function of ``as_of_date`` and the DB —
-    per-station price and P(BUY), cycle state, network average and drift, the
-    freshness fact (last real observation date), and the rule-based verdict.
-    None of it depends on which calendar day the payload is actually read on,
-    which is what makes it safe to precompute once (this is the ~29s
-    `load_history` cost — see `backtest.py:load_history`) and reuse across
-    reads, e.g. a nightly cache.
+    **The invariant, precisely:** every field on this class must be a function
+    of ``(as_of_date, database)`` and *nothing else* — in particular, nothing
+    derived from the wall clock ("now"), directly or transitively. That is the
+    specific, checkable property that makes it safe to precompute once (this is
+    the ~29s `load_history` cost — see `backtest.py:load_history`) and reuse
+    across reads, e.g. a nightly cache read the next morning. A field that
+    reads the clock is unsafe to cache no matter how correct it looks at the
+    moment it was computed. If you add a field, ask which side of that line it
+    is on — if it reads the clock, it belongs in `render_text`'s arguments
+    instead, not here.
+
+    Current fields obey it: per-station price and P(BUY), cycle state, network
+    average and drift, the freshness *fact* (last real observation date — not
+    its age, see below), and the rule-based verdict are all pure functions of
+    ``as_of_date`` and the DB.
 
     Deliberately excluded: station reachability, diversion arithmetic, and
     freshness *age* — those are cheap, but depend on ``routing_day``/``now``,
     which can differ between when a cached payload was built and when it is
     read (station 261 is `frozenset({2, 6})`: a payload built 22:00 Tuesday
     and read 07:00 Wednesday must not report Wednesday's reachable station as
-    off-route). `render_text` takes ``routing_day``/``now`` fresh at read time
-    to compute that half instead.
+    off-route; likewise the staleness banner's *age* must be measured against
+    the real current date at read time, not baked in — only the observation
+    date it is measured from lives here). `render_text` takes
+    ``routing_day``/``now`` fresh at read time to compute that half instead.
+    See `test_rendering_the_same_payload_at_different_now_moves_only_the_freshness_banner`
+    for the mechanical check of this invariant.
     """
 
     as_of_date: str
