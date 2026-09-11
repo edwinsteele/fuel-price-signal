@@ -668,48 +668,66 @@ def _freshness_note(as_of: str, last_real: str | None, today: datetime.date) -> 
     return f"  !! {age} {plural} stale{real}"
 
 
-def build_signals(
+@dataclass
+class SignalPayload:
+    """The expensive, day-stable half of the signal.
+
+    **The invariant, precisely:** every field on this class must be a function
+    of ``(as_of_date, database)`` and *nothing else* — in particular, nothing
+    derived from the wall clock ("now"), directly or transitively. That is the
+    specific, checkable property that makes it safe to precompute once (this is
+    the ~29s `load_history` cost — see `backtest.py:load_history`) and reuse
+    across reads, e.g. a nightly cache read the next morning. A field that
+    reads the clock is unsafe to cache no matter how correct it looks at the
+    moment it was computed. If you add a field, ask which side of that line it
+    is on — if it reads the clock, it belongs in `render_text`'s arguments
+    instead, not here.
+
+    Current fields obey it: per-station price and P(BUY), cycle state, network
+    average and drift, the freshness *fact* (last real observation date — not
+    its age, see below), and the rule-based verdict are all pure functions of
+    ``as_of_date`` and the DB.
+
+    Deliberately excluded: station reachability, diversion arithmetic, and
+    freshness *age* — those are cheap, but depend on ``routing_day``/``now``,
+    which can differ between when a cached payload was built and when it is
+    read (station 261 is `frozenset({2, 6})`: a payload built 22:00 Tuesday
+    and read 07:00 Wednesday must not report Wednesday's reachable station as
+    off-route; likewise the staleness banner's *age* must be measured against
+    the real current date at read time, not baked in — only the observation
+    date it is measured from lives here). `render_text` takes
+    ``routing_day``/``now`` fresh at read time to compute that half instead.
+    See `test_rendering_the_same_payload_at_different_now_moves_only_the_freshness_banner`
+    for the mechanical check of this invariant.
+    """
+
+    as_of_date: str
+    preferred_stations: dict[int, str]
+    state: CycleState
+    avg_current_price: float
+    drift: float | None
+    station_prices: dict[int, float | None]
+    station_probs: dict[int, float]
+    rule_verdict: CombinedVerdict
+    evaluations: list[SignalEvaluation]
+    last_real_price_date: str | None
+
+
+def compute_signal(
     conn: sqlite3.Connection,
     as_of_date: str,
     preferred_stations: dict[int, str] | None = None,
     *,
     model_path: pathlib.Path | None = None,
-    routing_day: datetime.date | None = None,
-    now: datetime.date | None = None,
-    explain: bool = False,
-) -> str:
-    """Render the morning decision table for the given date.
+) -> SignalPayload:
+    """Compute the expensive, day-stable half of the signal — see `SignalPayload`.
 
-    Ranks stations by today's price among those actually reachable today, calls
-    the fill size, and reports off-route stations with the arithmetic needed to
-    decide whether they are worth a detour.
-
-    Two separate dates, deliberately not one (Codex review, PR #410):
-
-    * ``routing_day`` — whose weekday decides which stations are reachable.
-      Defaults to ``as_of_date``'s own day so the output is a pure function of
-      the inputs: a historical ``--as-of`` must render identically whenever it is
-      run, or `signal-regression.yml`'s fixed historical invocations diff against
-      the wall clock instead of against the code. The CLI overrides it with the
-      current Sydney date for live use, where "what day is it" really is today's
-      question and ``as_of`` may be several days stale.
-    * ``now`` — the reference for how old the data is. Always the real current
-      date; a historical ``as_of`` does not make the DB fresher.
-
-    Collapsing these into one date is the bug that made a historical signal move
-    the Wed/Sun station on and off route depending on the hour it was run.
-
-    Station ordering is by PRICE, never by P(BUY). The label's cheapness test is
-    each station's OWN trailing percentile (labels.py condition 2), so P(BUY) is
-    station-relative and is not comparable across stations — sorting by it points
-    at whichever pump has fallen furthest against its own history, which is
-    routinely the dearest one on the list.
+    No formatting concerns: this returns structured data for `render_text` (or
+    any other consumer — an API endpoint, a nightly cache job) to work from.
     """
     stations = (
         preferred_stations if preferred_stations is not None else PREFERRED_STATIONS
     )
-    now = now or _today_in_sydney()
-    today = routing_day or datetime.date.fromisoformat(as_of_date)
     model_path = model_path or DEFAULT_MODEL_PATH
 
     series = db.average_price_series(conn)
@@ -728,15 +746,92 @@ def build_signals(
     drift = _network_drift(series, as_of_date)
     probs = model_probabilities(conn, as_of_date, list(stations), model_path)
 
+    station_prices = {
+        code: _station_price_on(conn, code, as_of_date) for code in stations
+    }
+
+    # Always computed: it is the fallback verdict when no model artifact exists
+    # (needing no model itself), and --explain reuses it in render_text below.
+    station_gradients: dict[str, float] = {}
+    for code, label in stations.items():
+        g = _station_latest_gradient(conn, code, as_of_date)
+        if g is not None:
+            station_gradients[label] = g
+    evaluations = evaluate_all_signals(state, avg_current_price, station_gradients)
+    rule_verdict = combine_signals(evaluations)
+
+    return SignalPayload(
+        as_of_date=as_of_date,
+        preferred_stations=dict(stations),
+        state=state,
+        avg_current_price=avg_current_price,
+        drift=drift,
+        station_prices=station_prices,
+        station_probs=probs,
+        rule_verdict=rule_verdict,
+        evaluations=evaluations,
+        last_real_price_date=_last_real_price_date(conn),
+    )
+
+
+def render_text(
+    payload: SignalPayload,
+    *,
+    routing_day: datetime.date | None = None,
+    now: datetime.date | None = None,
+    explain: bool = False,
+) -> str:
+    """Render the morning decision table from a `SignalPayload`.
+
+    Ranks stations by today's price among those actually reachable today, calls
+    the fill size, and reports off-route stations with the arithmetic needed to
+    decide whether they are worth a detour. This is the cheap, day-sensitive
+    half of the signal — the on/off-route partition, diversion arithmetic, and
+    freshness age all need ``routing_day``/``now`` as they stand at READ time,
+    not whenever `compute_signal` happened to run.
+
+    Two separate dates, deliberately not one (Codex review, PR #410):
+
+    * ``routing_day`` — whose weekday decides which stations are reachable.
+      Defaults to ``payload.as_of_date``'s own day so the output is a pure
+      function of the inputs: a historical ``--as-of`` must render identically
+      whenever it is run, or `signal-regression.yml`'s fixed historical
+      invocations diff against the wall clock instead of against the code. The
+      CLI overrides it with the current Sydney date for live use, where "what
+      day is it" really is today's question and ``as_of`` may be several days
+      stale.
+    * ``now`` — the reference for how old the data is. Always the real current
+      date; a historical ``as_of`` does not make the DB fresher.
+
+    Collapsing these into one date is the bug that made a historical signal move
+    the Wed/Sun station on and off route depending on the hour it was run.
+
+    Station ordering is by PRICE, never by P(BUY). The label's cheapness test is
+    each station's OWN trailing percentile (labels.py condition 2), so P(BUY) is
+    station-relative and is not comparable across stations — sorting by it points
+    at whichever pump has fallen furthest against its own history, which is
+    routinely the dearest one on the list.
+    """
+    as_of_date = payload.as_of_date
+    state = payload.state
+    avg_current_price = payload.avg_current_price
+    drift = payload.drift
+    probs = payload.station_probs
+    rule_verdict = payload.rule_verdict
+    evaluations = payload.evaluations
+
+    now = now or _today_in_sydney()
+    today = routing_day or datetime.date.fromisoformat(as_of_date)
+
     views = [
         StationView(
             code=code,
             label=label,
-            price=_station_price_on(conn, code, as_of_date),
+            price=payload.station_prices.get(code),
             prob=probs.get(code),
             route_days=STATION_ROUTE_DAYS.get(code),
         )
-        for code, label in stations.items()
+        for code, label in payload.preferred_stations.items()
     ]
 
     on_route = sorted(
@@ -763,7 +858,7 @@ def build_signals(
         drift_str = "flat"
 
     lines = [
-        f"E10 - {as_of_date}{_freshness_note(as_of_date, _last_real_price_date(conn), now)}",
+        f"E10 - {as_of_date}{_freshness_note(as_of_date, payload.last_real_price_date, now)}",
         f"Network {avg_current_price:.1f}c, {drift_str}"
         f"  |  cycle day {day_str}/{cycle_len}"
         f"  |  last cycle {state.last_cycle_min:.1f}-{state.last_cycle_max:.1f}c",
@@ -771,16 +866,6 @@ def build_signals(
     ]
 
     # --- the call ---------------------------------------------------------
-    # Always computed: it is the fallback verdict when no model artifact exists
-    # (needing no model itself), and --explain reuses it below.
-    station_gradients: dict[str, float] = {}
-    for code, label in stations.items():
-        g = _station_latest_gradient(conn, code, as_of_date)
-        if g is not None:
-            station_gradients[label] = g
-    evaluations = evaluate_all_signals(state, avg_current_price, station_gradients)
-    rule_verdict = combine_signals(evaluations)
-
     if on_route:
         headline, reason = _fill_advice(
             on_route,
@@ -877,6 +962,30 @@ def build_signals(
             lines.append(f"    {ev.name}: {ev.recommendation.name} - {ev.description}")
 
     return "\n".join(lines)
+
+
+def build_signals(
+    conn: sqlite3.Connection,
+    as_of_date: str,
+    preferred_stations: dict[int, str] | None = None,
+    *,
+    model_path: pathlib.Path | None = None,
+    routing_day: datetime.date | None = None,
+    now: datetime.date | None = None,
+    explain: bool = False,
+) -> str:
+    """Compute and render the morning decision table in one call.
+
+    A thin compatibility wrapper: `render_text(compute_signal(...))` is the
+    real split (#415) — call those two directly for a consumer that wants to
+    reuse the expensive half (`compute_signal`) across multiple cheap reads
+    (`render_text`), e.g. a nightly cache job feeding a live API. This wrapper
+    exists for callers, like the CLI below, that just want the one-shot string.
+    """
+    payload = compute_signal(
+        conn, as_of_date, preferred_stations, model_path=model_path
+    )
+    return render_text(payload, routing_day=routing_day, now=now, explain=explain)
 
 
 # ---------------------------------------------------------------------------
