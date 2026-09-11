@@ -482,18 +482,25 @@ def _window_label_rows(
     implicit (`_LABEL_LOOKBACK_DAYS`/`_LABEL_HORIZON_DAYS`), because this function also
     needs their VALUES to size the query below.
 
-    One `assemble_training_rows` call over the EXPANDED ENVELOPE
+One `assemble_training_rows` call PER STATION, each over the EXPANDED ENVELOPE
     `min(window starts) - lookback_days` .. `max(window ends) + horizon_days`, not the
     station's full history and not the bare span: the calendar-gap mask needs real
     lookback/horizon days around every date whose label survives, which can fall OUTSIDE
     `spec.windows` (even outside `spec`'s span, at its very edges) — querying only the
     windows themselves would manufacture gaps at their boundaries that are an artifact of
-    the query, not the data. But a raw per-station-row load over a station's ENTIRE
-    history, times every station in a broad universe, is exactly the "~2.2M raw rows for
-    the decade" shape `AGENTS.md`'s memory section warns can OOM Viking — and describing a
-    410-station universe needs exactly that shape without the bound. The envelope is the
-    smallest range that cannot manufacture a boundary gap; windowing the result happens
-    afterward, by slicing the returned `price_date` column.
+    the query, not the data.
+
+    Per-station, not one call for all of `codes`: a single call across a 410-station
+    universe would concatenate every station's label rows into one DataFrame and hold
+    it resident alongside whatever the caller (e.g. `homogeneity.py`, already holding an
+    ~800k-row feature frame) is doing with the result — exactly the raw-row-materialization
+    shape `AGENTS.md`'s memory section warns can OOM Viking, merely moved to a shorter date
+    range rather than removed. Counting one station's label rows at a time and discarding
+    its frame immediately bounds the resident label data to one station's rows (at most a
+    few thousand), never all of `codes`'s at once. `windows` in a real run numbers in the
+    tens (outer folds), so N per-station queries costs a loop, not an architecture change —
+    unlike the AGENTS.md-documented streaming-bucket rewrite, which exists for a caller
+    scanning thousands of OVERLAPPING trailing windows and would be overkill here.
     """
     if not spec.windows or not codes:
         return {}
@@ -506,26 +513,25 @@ def _window_label_rows(
         max(date.fromisoformat(w_end) for _, w_end in spec.windows)
         + timedelta(days=_LABEL_HORIZON_DAYS)
     ).isoformat()
-    label_df = assemble_training_rows(
-        conn,
-        station_codes=codes,
-        lookback_days=_LABEL_LOOKBACK_DAYS,
-        horizon_days=_LABEL_HORIZON_DAYS,
-        start_date=envelope_start,
-        end_date=envelope_end,
-    )
-    out: dict[int, list[tuple[int, int]]] = {code: [] for code in codes}
-    for w_start, w_end in spec.windows:
-        w_days = (date.fromisoformat(w_end) - date.fromisoformat(w_start)).days + 1
-        if label_df.empty:
-            counts: dict[int, int] = {}
-        else:
-            in_window = label_df[
-                (label_df["price_date"] >= w_start) & (label_df["price_date"] <= w_end)
-            ]
-            counts = in_window.groupby("station_code")["label"].count().to_dict()
-        for code in codes:
-            out[code].append((int(counts.get(code, 0)), w_days))
+    window_days = [
+        (date.fromisoformat(w_end) - date.fromisoformat(w_start)).days + 1
+        for w_start, w_end in spec.windows
+    ]
+    out: dict[int, list[tuple[int, int]]] = {}
+    for code in codes:
+        station_labels = assemble_training_rows(
+            conn,
+            station_codes=[code],
+            lookback_days=_LABEL_LOOKBACK_DAYS,
+            horizon_days=_LABEL_HORIZON_DAYS,
+            start_date=envelope_start,
+            end_date=envelope_end,
+        )
+        dates = station_labels["price_date"]
+        out[code] = [
+            (int(((dates >= w_start) & (dates <= w_end)).sum()), w_d)
+            for (w_start, w_end), w_d in zip(spec.windows, window_days, strict=True)
+        ]
     return out
 
 
