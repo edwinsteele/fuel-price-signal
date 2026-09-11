@@ -263,6 +263,16 @@ def flask_client(conn):
         yield client
 
 
+def test_cycle_state_heading_shows_startup_date_not_request_time(flask_client):
+    """The cycle-state heading must show the frozen `today` (#419), not the
+    per-request render time, since it's the page's only staleness indicator
+    for the process-lifetime cycle_state/peak_data objects."""
+    resp = flask_client.get("/")
+    html = resp.data.decode()
+    assert "Cycle State — as of 2024-01-14" in html
+    assert "workbench startup" in html
+
+
 def test_route_start_end_override_persists_in_response(flask_client):
     """start= and end= params should appear in the rendered form inputs."""
     resp = flask_client.get(

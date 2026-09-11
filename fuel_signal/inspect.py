@@ -1112,6 +1112,16 @@ def main(db_path: str, host: str, port: int, debug: bool, no_browser: bool, shap
             "Run 'uv run python -m fuel_signal.fill' then 'uv run python -m fuel_signal.db' first."
         )
 
+    # cd/today/cycle_state/peak_data/summary/boundaries are built ONCE here and
+    # closed over by every route for the life of the process (#419) — they do
+    # NOT reflect data written after this point. `today` is the last date that
+    # was in daily_prices when this process started, and is rendered as-is
+    # ("Cycle State — as of {today}") so staleness is visible on the page
+    # rather than silently wrong. Freshness therefore depends entirely on the
+    # deployment restarting this service after each daily data load; per-request
+    # rebuild was deliberately rejected as a fix (see #419) in favour of that
+    # restart, so do not "fix" staleness here by querying these fresh per
+    # request without re-opening that decision.
     logger.info("Loading CycleDetector over %d daily points…", len(full_series))
     cd = CycleDetector(full_series)
 
