@@ -55,6 +55,17 @@ def test_write_meta_stamps_the_declared_baseline_by_default(tmp_path):
     assert meta["baseline"]["declared_by_caller"] is False
 
 
+def test_write_meta_filename_lets_two_scripts_share_a_directory(tmp_path):
+    """Two scripts in one experiment directory must not clobber each other's meta
+    artifact (fps-55e) — each passes its own filename= instead of relying on the
+    meta.json default."""
+    write_meta(tmp_path, {"who": "timing"}, filename="timing_meta.json")
+    write_meta(tmp_path, {"who": "homogeneity"}, filename="homogeneity_meta.json")
+    assert json.loads((tmp_path / "timing_meta.json").read_text())["who"] == "timing"
+    assert json.loads((tmp_path / "homogeneity_meta.json").read_text())["who"] == "homogeneity"
+    assert not (tmp_path / "meta.json").exists()
+
+
 def test_write_meta_records_a_caller_supplied_baseline_as_declared(tmp_path):
     cols = list(BASELINE_COLUMNS[:3])
     write_meta(tmp_path, {}, baseline_columns=cols)

@@ -52,10 +52,15 @@ PYTHONPATH=. uv run python experiments/2026-09-05_arbiter_universe_width/homogen
 `--n-stations` is required and has no default on purpose: the universe width is a costing
 decision, and `homogeneity.py` must not be where it gets made by accident.
 
-**`meta.json` is the homogeneity run's, not the timing run's.** Both scripts call
-`write_meta` on this directory, so the second to run clobbers the first. Nothing is lost —
-each script also writes its own `timing.json` / `homogeneity.json` carrying the identical
-payload — but read those, not `meta.json`, when you want the timing provenance.
+**The committed `meta.json` is the homogeneity run's, not the timing run's** — both scripts
+used to call `write_meta` on this directory with the default filename, so the second to run
+clobbered the first (fps-55e). Nothing was lost — each script also writes its own
+`timing.json` / `homogeneity.json` carrying the identical payload — but read those, not
+`meta.json`, when you want the timing provenance. `write_meta` now takes a `filename=`
+(the two scripts pass `timing_meta.json` / `homogeneity_meta.json`), so a re-run of either
+script no longer clobbers the other; the stale `meta.json` from before that fix is left
+as-is rather than regenerated, since regenerating it would mean re-running the timed
+experiment.
 
 ## Setup
 

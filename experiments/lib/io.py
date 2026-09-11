@@ -90,8 +90,14 @@ def write_meta(
     *,
     baseline_columns: Sequence[str] | None = None,
     tank: "TankParams | None" = None,
+    filename: str = "meta.json",
 ) -> dict:
-    """Serialise `meta` to out_dir/meta.json, stamping the baseline's identity into it.
+    """Serialise `meta` to out_dir/filename (default meta.json), stamping the baseline's
+    identity into it.
+
+    `filename` only needs setting when more than one script in the same experiment
+    directory calls write_meta — each caller must pass its own filename or they
+    clobber each other's meta.json in write order (fps-55e).
 
     **Returns the stamped payload exactly as written**, and a script that writes a
     SECOND artifact of its own beside meta.json must serialise that return value,
@@ -148,6 +154,6 @@ def write_meta(
 
         stamped["tank_params"] = require_tank_stamp(tank, what="write_meta")
     payload: dict = to_jsonable(stamped)  # type: ignore[assignment]
-    (out_dir / "meta.json").write_text(json.dumps(payload, indent=2, default=str))
-    print(f"\nMeta: {out_dir / 'meta.json'}", flush=True)
+    (out_dir / filename).write_text(json.dumps(payload, indent=2, default=str))
+    print(f"\nMeta: {out_dir / filename}", flush=True)
     return payload
