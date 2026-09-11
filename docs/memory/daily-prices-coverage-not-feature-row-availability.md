@@ -10,12 +10,17 @@ the REPLAY axis (`aggregate_backtest` / `run_backtest` walk this table). It is N
 for whether `fuel_signal.labels.assemble_training_rows` / `fuel_signal.features
 .assemble_feature_rows` actually produce a row for that station-date, and the two axes
 disagree badly on exactly the folds a coverage gate exists to protect. Cause: `fill.py`
-forward-fills a `daily_prices` gap of up to `MAX_GAP_FILL_DAYS = 28` days, but the labels
-calendar-gap mask strips `lookback_days` (90) days before, and `horizon_days` (7) days
-after, every gap in the RAW price history `daily_prices` was filled from — a much wider
-blast radius than the fill itself. Measured on batch1's frozen artifacts (2026-09-05):
-fold 1, both Blue Mountains stations sit at 0.96 `daily_prices` coverage with ZERO feature
-rows; station 414 is at 1.00 coverage in fold 8 with only 8 feature rows (#387).
+forward-fills a `daily_prices` gap of up to `MAX_GAP_FILL_DAYS = 28` days, so a filled
+gap that short is invisible to anything reading `daily_prices` — including the labels
+calendar-gap mask. What the mask DOES see is a gap that remains MISSING from
+`daily_prices` after filling (longer than `MAX_GAP_FILL_DAYS`, or past the trail-fill
+horizon); around one of those it strips `lookback_days` (90) days before, and
+`horizon_days` (7) days after — far wider than the hole itself. Measured on batch1's
+frozen artifacts (2026-09-05): fold 1, both Blue Mountains stations sit at 0.96
+`daily_prices` coverage (a station-window that DOES still carry an unfilled gap) with
+ZERO feature rows; station 414 is at 1.00 coverage in fold 8 with only 8 feature rows
+(#387). A coverage gate's 1-in-20 tolerance at the 0.90 default can, by itself, blank
+out a whole 90+7-day stretch of feature rows around the missing day.
 
 Fixed in #387/PR #413 by adding `describe_universe`'s `worst_window_label_fraction` — the
 `worst_window_coverage` analogue for this axis, using `assemble_training_rows` (not the
