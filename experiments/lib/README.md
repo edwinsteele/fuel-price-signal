@@ -46,7 +46,7 @@ Shared helpers for `paired_wfcv.py` scripts. All imports require `PYTHONPATH=.`.
 `aggregate_with_deltas(df_rows, cohort_ll_map, baseline_run="R0")` — groups by `(fold, regime, run)`, computes mean/median/`{col}_seedstd` per cohort column, and appends `delta_*_mean` / `delta_*_median` columns vs the baseline run. Ready to write directly to `fold_run.csv`.
 
 ## io.py
-`to_jsonable(o)` — recursively converts non-finite floats to `None`. `write_meta(out_dir, meta, *, baseline_columns=None, tank=None)` — serialises `meta` with `to_jsonable`, writes `meta.json`, and prints the path.
+`to_jsonable(o)` — recursively converts non-finite floats to `None`. `write_meta(out_dir, meta, *, baseline_columns=None, tank=None, filename="meta.json")` — serialises `meta` with `to_jsonable`, writes `filename`, and prints the path. When more than one script in a directory calls `write_meta`, each must pass its own `filename=` or they clobber each other's `meta.json` in write order (fps-55e).
 
 `write_meta` also stamps a `baseline` block (`n_columns`, `fingerprint`, `columns`, `declared_by_caller`) into every `meta.json`, so a result always says which R0 it was measured against. It defaults to `BASELINE_COLUMNS`; pass `baseline_columns=` — **in the order the model was fit in** — when the script's R0 is anything else.
 

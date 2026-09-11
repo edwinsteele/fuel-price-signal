@@ -248,8 +248,12 @@ def main() -> None:
     # From write_meta's RETURN, not `meta` — see fps-6rm / timing.py. This artifact
     # happened to satisfy the cadence-stamp scanner anyway, because `_run` copies
     # `tank_params` into each run row, but that is an accident of this script's shape
-    # and not something the next edit to it should have to rely on.
-    stamped = write_meta(HERE, meta, baseline_columns=baseline_columns, tank=tank)
+    # and not something the next edit to it should have to rely on. filename= keeps
+    # this script's meta artifact separate from timing.py's in this same directory
+    # (fps-55e) instead of clobbering it.
+    stamped = write_meta(
+        HERE, meta, baseline_columns=baseline_columns, tank=tank, filename="homogeneity_meta.json"
+    )
     (HERE / "homogeneity.json").write_text(json.dumps(stamped, indent=2, default=str))
 
     print("\n" + "=" * 72)
