@@ -13,6 +13,7 @@ import fuel_signal.db as db
 from fuel_signal.cycle import CycleState
 from fuel_signal.signal import (
     SignalEvaluation,
+    SignalPayload,
     SignalRecommendation,
     _gap_boundaries,
     _station_latest_gradient,
@@ -22,7 +23,9 @@ from fuel_signal.signal import (
     average_near_previous_min_max_signal,
     build_signals,
     combine_signals,
+    compute_signal,
     favourite_station_price_gradient_signal,
+    render_text,
 )
 from fuel_signal.signal import main as signal_cli
 
@@ -385,6 +388,75 @@ def test_day_number_exceeds_cycle_len_shows_plus_suffix(tmp_path):
         f"Expected 'cycle day N+/N' when cycle exceeds mean, got:\n{output}"
     )
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# compute_signal / render_text — the #415 split
+# ---------------------------------------------------------------------------
+
+def test_compute_signal_returns_a_structured_payload_with_no_formatting(signal_db):
+    conn, series, _ = signal_db
+    as_of = series[3 * _CYCLE_LENGTH + _CYCLE_LENGTH // 2][0]
+    payload = compute_signal(conn, as_of, preferred_stations=_PREFERRED)
+    assert isinstance(payload, SignalPayload)
+    assert payload.as_of_date == as_of
+    assert payload.preferred_stations == _PREFERRED
+    assert 9001 in payload.station_prices
+    assert payload.rule_verdict.long_label in ("BUY", "WAIT", "DON'T BUY")
+    assert isinstance(payload.evaluations, list) and payload.evaluations
+
+
+def test_render_text_of_compute_signal_matches_build_signals(two_station_db, monkeypatch):
+    """The split must be behaviour-preserving: same inputs, same string out."""
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    routing_day = datetime.date(2026, 9, 9)   # Wednesday
+
+    combined = build_signals(
+        conn, as_of, preferred_stations=_TWO, routing_day=routing_day, explain=True
+    )
+    split = render_text(
+        compute_signal(conn, as_of, preferred_stations=_TWO),
+        routing_day=routing_day,
+        explain=True,
+    )
+    assert split == combined
+
+
+def test_compute_signal_payload_is_reusable_across_routing_days(
+    two_station_db, monkeypatch
+):
+    """The whole point of the split: compute once, render per routing day.
+
+    A payload built without knowledge of the routing day must still route
+    correctly when rendered against two different ones — proving the expensive
+    half really is day-stable and the cheap half really does need only
+    routing_day/now supplied at render time, not baked in at compute time.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    payload = compute_signal(conn, as_of, preferred_stations=_TWO)
+
+    monday = datetime.date(2026, 9, 7)
+    wednesday = datetime.date(2026, 9, 9)
+    assert monday.weekday() == 0
+    assert wednesday.weekday() == 2
+
+    on_monday = render_text(payload, routing_day=monday)
+    on_wednesday = render_text(payload, routing_day=wednesday)
+
+    assert "OFF ROUTE" in on_monday
+    assert "OFF ROUTE" not in on_wednesday
+    # Day-stable facts (prices, drift, cycle state) must be identical either way.
+    assert "Weekly Servo" in on_monday and "Weekly Servo" in on_wednesday
+    price_line = re.compile(r"Weekly Servo\s+\d+\.\dc")
+    assert price_line.search(on_monday).group() == price_line.search(on_wednesday).group()
 
 
 # ---------------------------------------------------------------------------
