@@ -46,6 +46,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 
 ## Pipeline layout and plumbing
 
+- [wfcv-fold-streaming-not-bottleneck](wfcv-fold-streaming-not-bottleneck.md) — streaming all 14 WFCV folds is output-exact but saves only 0.84 s of non-fit work and does not reduce stable full-run peak RSS; LightGBM fitting dominates.
 - [batch-dir-vs-candidates-dir](batch-dir-vs-candidates-dir.md) — `experiments/batches/<b>/` vs `experiments/candidates/<b>/` are different dirs with near-identical names; the wrong one yields a plausible-but-false "never written" reason.
 - [experiments-pipeline-import-cycle](experiments-pipeline-import-cycle.md) — `dossier_tables → runner → batch_freeze` is load-bearing; import `noise_floor` inside function bodies, never at module level.
 - [status-rejected-means-graded-not-failed](status-rejected-means-graded-not-failed.md) — `STATUS_REJECTED` means "finished grading", win or lose. Not a verdict.
