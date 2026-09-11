@@ -170,3 +170,14 @@ fixup push, so it overstates Codex's own latency — **use the latest pushed com
 timestamp as the baseline, not PR-open, whenever a PR had a mid-review fixup.** One
 sample; re-measure before trusting either figure generally, and note whether
 "Exhaustive" vs. default review depth is configured when comparing across PRs.
+
+**Second confirmation, PR #414 (2026-09-11):** the silent-`+1`-reaction clean pass is not
+a one-off. Single-commit `polish` PR, no fixup push: commit `7a602c6` authored
+20:05:57Z → `chatgpt-codex-connector[bot]` `+1` reaction on the PR body at 20:08:36Z,
+~2m39s later — in the same ~2-3 min band as #412. Sourcery was simultaneously
+rate-limited on this same PR (`COMMENTED` review, budget exhausted) — the two bots'
+statuses are independent and must both be checked and both narrated; one being silent
+or unavailable says nothing about the other. Reported to the owner as: "Sourcery:
+rate-limited, skipped. Codex: reviewed, clean (silent `+1`)." — **that paired framing
+(what each of Sourcery and Codex did, even when one did nothing) is the expected
+standing format for narrating PR review status, not just for Codex in isolation.**
