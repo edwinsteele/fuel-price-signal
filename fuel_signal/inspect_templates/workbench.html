@@ -194,8 +194,11 @@
 <div class="banner banner-error">{{ err }}</div>
 {% endfor %}
 
-<!-- Cycle state — always against Sydney average, regardless of what's plotted -->
-<h2>Cycle State — as of {{ today or '—' }}</h2>
+<!-- Cycle state — always against Sydney average, regardless of what's plotted.
+     `today` is computed once at workbench startup (#419), not per request, so
+     this heading is the actual staleness indicator: compare it to today's
+     real date rather than trusting "as of {{ now }}" above. -->
+<h2>Cycle State — as of {{ today or '—' }} <span style="font-size:.75rem; font-weight:400; color:#888">(data as loaded at workbench startup)</span></h2>
 {% include "_cycle_state.html" %}
 
 <!-- Chart -->
