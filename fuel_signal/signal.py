@@ -842,10 +842,16 @@ def render_text(
         for code, label in payload.preferred_stations.items()
     ]
 
+    reachable = [v for v in views if v.reachable_on(today)]
     on_route = sorted(
-        (v for v in views if v.reachable_on(today) and v.price is not None),
+        (v for v in reachable if v.price is not None),
         key=lambda v: v.price,
     )
+    # Reachable today but no price yet — a data problem, not a routing one
+    # (#418). Partitioning on price first used to fold these into `unpriced`
+    # and empty `on_route`, which made a station that genuinely IS on the
+    # route report as "Nothing on your route today."
+    on_route_unpriced = [v for v in reachable if v.price is None]
     off_route = sorted(
         (v for v in views if not v.reachable_on(today) and v.price is not None),
         key=lambda v: v.price,
@@ -883,8 +889,16 @@ def render_text(
             rule_verdict=rule_verdict,
         )
         lines += [f"  {headline}", f"  {reason}", ""]
+    elif on_route_unpriced:
+        # Something IS reachable today; it simply has no price yet.
+        names = ", ".join(v.label for v in on_route_unpriced)
+        lines += [
+            f"  {names} on route today, but no price data yet.",
+            "",
+        ]
     elif off_route:
-        # Priced stations exist, just none reachable today — a routing answer.
+        # Nothing reachable today at all — priced stations exist, just off
+        # route. A routing answer, distinct from the case above.
         nearest = off_route[0]
         nxt = nearest.next_reachable(today)
         assert nxt is not None and nxt[1] >= 1   # off-route ⇒ not today

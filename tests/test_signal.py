@@ -589,7 +589,7 @@ def test_cli_output_structure(signal_db):
     assert f"E10 - {as_of}" in result.output
     assert ("FILL UP" in result.output) or ("WORTH A STOP" in result.output) or (
         "WAIT if you can" in result.output
-    ) or ("No price data" in result.output)
+    ) or ("No price data" in result.output) or ("no price data yet" in result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +661,39 @@ def test_off_route_station_joins_the_table_on_a_day_it_is_passed(two_station_db,
     assert "OFF ROUTE" not in output
     # 8c cheaper and reachable → it is the marked pick.
     assert re.search(r"->\s+Weekly Servo", output)
+
+
+def test_reachable_but_unpriced_station_is_not_reported_as_nothing_on_route(
+    two_station_db, monkeypatch
+):
+    """#418: the partition used to be on price first, route second.
+
+    Daily Servo is reachable every day (no route_days entry) but its price for
+    `as_of` is missing; Weekly Servo has a price but is off route today. The
+    old code emptied `on_route` (Daily Servo landed in `unpriced` instead) and
+    fell into the `elif off_route:` branch, printing "Nothing on your route
+    today" — false, since Daily Servo genuinely is on the route. The headline
+    must say the station is unpriced, not unreachable.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS", {9002: frozenset({2})}
+    )
+    as_of = series[180][0]
+    fid = db.fuel_type_id(conn, "E10")
+    conn.execute(
+        "DELETE FROM daily_prices WHERE station_code = 9001 AND fuel_type_id = ?"
+        " AND price_date = ?",
+        (fid, db._date_to_int(as_of)),
+    )
+    conn.commit()
+    monday = datetime.date(2026, 9, 7)
+    assert monday.weekday() == 0
+    output = build_signals(conn, as_of, preferred_stations=_TWO, routing_day=monday)
+    assert "Nothing on your route today" not in output
+    assert "Daily Servo on route today, but no price data yet." in output
+    assert "OFF ROUTE" in output
+    assert "Weekly Servo" in output
 
 
 def test_stations_are_ranked_by_price_not_by_probability(two_station_db, monkeypatch):
