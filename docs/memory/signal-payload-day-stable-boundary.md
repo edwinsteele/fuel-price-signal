@@ -40,6 +40,12 @@ in `tests/test_signal.py` is the mechanical check: it renders one payload at two
 byte-identical. Run it (or extend it) before adding a field to `SignalPayload` —
 a field that fails this test belongs in `render_text`'s arguments instead.
 
-This boundary is the precondition for #416 (the API server, in the sibling repo
-`fuel-price-signal-app`): a nightly job computes the payload once, and the HTTP
-handler projects it against the real current Sydney date per request.
+This boundary was the precondition for #416 (CLOSED via PR #425, 2026-09-12):
+`fuel_signal/generate_signal_cache.py` computes and JSON-encodes the payload
+once nightly (`fuel_signal/api_v1.py`'s `encode_cache_entry`), and the
+`/api/v1/stations`/`/api/v1/recommendation` blueprint in `inspect.py` decodes
+it and projects it against the real current Sydney date per request — the
+same `payload` vs `routing_day`/`now` split as `render_text`, just over HTTP
+instead of stdout. The iOS app consuming this lives in the sibling repo
+`fps-app`, not in this one. See [[signal-cache-format-versioning]] for the
+JSON encoding's own gotcha.

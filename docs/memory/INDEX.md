@@ -45,6 +45,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [noise-floor-force-vs-cadence-relock](noise-floor-force-vs-cadence-relock.md) — `--force` recovers a floor after a *column* re-lock, but is refused after a *cadence* re-lock. Freeze a new batch instead.
 - [check-freeze-cadence-lives-in-batch-freeze](check-freeze-cadence-lives-in-batch-freeze.md) — the guard moved from `noise_floor.py` to `batch_freeze.py` (#382) so `runner.py` could call it too, without a circular import.
 - [elif-chain-hides-independent-facts](elif-chain-hides-independent-facts.md) — `render_text`'s route headline chained two independent facts as `elif`; whichever was checked first (`on_route_unpriced`, true almost every live day) permanently shadowed the other (the off-route pointer). Check independent facts independently and compose the output.
+- [signal-cache-format-versioning](signal-cache-format-versioning.md) — `api_v1.py`'s cache blob hand-indexes every `SignalPayload` field; bump `_CACHE_FORMAT_VERSION` on a field change, or an old row 500s instead of the documented 503.
 
 ## Pipeline layout and plumbing
 
