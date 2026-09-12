@@ -2,9 +2,9 @@
 
 Status: **implemented server-side** (#416) — `fuel_signal/api_v1.py`,
 `fuel_signal/generate_signal_cache.py`, and the blueprint in `fuel_signal/inspect.py`.
-This copy is the server-side source of truth; the canonical copy previously lived
-only in the `fps-app` worktree. App-side implementation status is tracked in that
-repo, not here.
+This copy is the server-side source of truth: the canonical copy lives in the
+`fuel-price-signal` repo, and `fuel-price-signal-app` vendors it byte-for-byte.
+App-side implementation status is tracked in `fuel-price-signal-app`, not here.
 
 The app makes one batch of calls each morning on the home LAN and renders the
 result. Both endpoints are projections of a single nightly-precomputed blob, so
@@ -46,8 +46,9 @@ than computed, treat it as suspect and check it against `signal.py`.
 
 ## Transport
 
-- Base: `http://fuel.home.wordspeak.org:5000/api/v1` (viking's LAN address, the existing
-  `fuelsignal-workbench.service` waitress process, one extra Flask blueprint).
+- Base: `http://fuel.home.wordspeak.org:5000/api/v1` (a CNAME for viking's LAN
+  address, the existing `fuelsignal-workbench.service` waitress process, one
+  extra Flask blueprint).
 - No auth. LAN-only is enforced by bind address, as it already is for the
   workbench. A `before_request` hook on the blueprint is the seam if a token is
   ever wanted; nothing speculative is built now.
@@ -535,8 +536,12 @@ workbench restart. In the few-millisecond window where the nightly job's
 can therefore read different rows and disagree, contradicting the opening
 paragraph's guarantee. The window is narrow (one write, once nightly) and low
 severity, but real. A client that wants to rule it out entirely should compare
-`generated_at` across its `/stations` and `/recommendation` calls and re-fetch
-on a mismatch; v1 has no request parameter to pin a specific `generated_at`.
+**both** `generated_at` and `routing_day` across its `/stations` and
+`/recommendation` calls, re-fetching on either mismatch; `generated_at` alone
+is not enough, because `routing_day` is computed fresh per request (see
+above) and can differ between the two calls even when both read the same
+cached row — for example when the calls straddle midnight in Sydney. v1 has
+no request parameter to pin a specific `generated_at`.
 
 ## Split of work between cached and per-request
 
