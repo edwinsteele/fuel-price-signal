@@ -89,7 +89,11 @@ syntax, expanded from the checkout's git remote — write it literally.
   inline comments and its clean pass can be a bare reaction with no comment or review at all.**
   Use the `codex-pr-review` skill (or [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md)
   directly) to read Codex's status correctly; this bit a PR-status report on #422 (all four checks
-  above ran except the reactions one, missing a silent clean pass).
+  above ran except the reactions one, missing a silent clean pass). **A reaction on the PR persists
+  across later pushes** — before trusting a `+1` as "clean", check its `created_at` against the
+  timestamp of the commit currently at HEAD; a reaction older than the latest push reviewed a
+  previous commit, not this one, and tells you nothing about what's there now (caught by Sourcery
+  on PR #423, review round 1).
 - **Claim/release an issue** (replaces `gh issue edit --add-assignee`/`--remove-assignee`):
   ```bash
   LOGIN=$(gh api user --jq .login)
@@ -184,8 +188,10 @@ syntax, expanded from the checkout's git remote — write it literally.
    [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md). If
    there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available
    in `/loop` mode — do not attempt it here.) Act on any actionable comments found. If Sourcery is
-   rate-limited or Codex hasn't triggered, skip and move on — do not reschedule; `@codex review`
-   re-triggers it if a later pass needs to cover a skipped commit. Implement comments, run
+   rate-limited or absent, skip and move on — do not reschedule. **If Codex has produced no signal
+   at all (no review, comment, or reaction) after the wait, its auto-trigger is documented as
+   unreliable — post `@codex review` as a PR comment and check again after another ~270s, rather
+   than treating silence as clean or giving up on it.** Implement comments, run
    `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
 
 Note: this run does not wait for the merge — that is gated by the separate `auto-merge.yml`
@@ -250,11 +256,15 @@ Handle conflicts first, then review threads, in a single pass per PR.
   (or follow [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md)'s
   four checks directly: `pulls/<N>/comments` for inline findings, `issues/<N>/comments` for a
   clean-pass comment, `issues/<N>/reactions` for a silent clean-pass, and `Reviewed commit` vs HEAD)
-  to get Codex's actual status, and `pulls/<N>/reviews` for Sourcery. Act on any actionable comments
-  present. If Sourcery is rate-limited or Codex hasn't triggered, **skip and move on — do not
-  reschedule to wait for it**; `@codex review` re-triggers it if needed. Implement appropriate
-  comments, push, repeat until no actionable comments remain. **Report each reviewer's status to
-  the user explicitly, including a clean pass** — silence reads as "didn't check," not "was clean."
+  to get Codex's actual status (checking a reaction's `created_at` against the commit at HEAD — a
+  reaction predating the latest push reviewed a previous commit, not this one), and
+  `pulls/<N>/reviews` for Sourcery. Act on any actionable comments present. If Sourcery is
+  rate-limited or absent, **skip and move on — do not reschedule to wait for it**. If Codex has
+  produced no signal at all (no review, comment, or reaction) after the wait, its auto-trigger is
+  documented as unreliable — post `@codex review` as a PR comment and check again rather than
+  treating silence as clean or giving up on it. Implement appropriate comments, push, repeat until
+  no actionable comments remain. **Report each reviewer's status to the user explicitly, including
+  a clean pass** — silence reads as "didn't check," not "was clean."
 - **`experiments/**` and `docs/memory/**` are exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs), `experiments/INDEX.md`, and technical memory files may be committed **and pushed** directly to `main` without a PR. Those are the only paths that bypass review; everything else still requires one, and a commit touching an exempt path *and* code is not exempt — split it. **Direct-to-`main` includes the push** — a commit left on the local `main` is not landed, and unattended routines are exactly where that goes unnoticed (see [docs/CONVENTIONS.md](docs/CONVENTIONS.md) § Git workflow for the 2026-08-26 incident). End any session that writes to `main` with `git status --short` empty and `git log --oneline origin/main..main` empty.
 
 ## spawn_task → `gh issue create` redirect

@@ -429,7 +429,21 @@ If while implementing a `polish` issue you discover it actually requires design 
 
 ## PR feedback loop
 
-Immediately after `gh pr create` returns a PR number, call `ScheduleWakeup(delaySeconds=270)` with a prompt that runs `gh pr view <N> --json comments,reviews,mergeable,statusCheckRollup`. This is a mandatory mechanical step, not a suggestion — do it before writing any response to the user. When the wakeup fires: act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Use judgement on style nits that conflict with project conventions. Run `uv run ruff check . && uv run pytest -q`, push, and repeat until no actionable comments remain. The goal is a ready-to-merge deliverable.
+Immediately after `gh pr create` returns a PR number, call `ScheduleWakeup(delaySeconds=270)` with
+a prompt that checks review status for **every** currently-configured reviewer (Sourcery and
+Codex) — invoke the `codex-pr-review` skill, or run its four checks directly (`pulls/<N>/comments`,
+`issues/<N>/comments`, `issues/<N>/reactions`, and `Reviewed commit` vs HEAD — see
+[docs/memory/codex-pr-review-integration.md](memory/codex-pr-review-integration.md)) alongside
+`pulls/<N>/reviews` for Sourcery. **`gh pr view <N> --json comments,reviews,mergeable,statusCheckRollup`
+alone is not this check** — it misses Codex's inline findings and its silent reaction-only clean
+pass entirely (caught live on PR #422). This is a mandatory mechanical step, not a suggestion — do
+it before writing any response to the user. When the wakeup fires: act on any actionable comments
+present. If Sourcery is rate-limited or absent, **skip it and move on — do not reschedule to wait
+for it**. If Codex hasn't produced any signal (no review, comment, or reaction) after the wait,
+post `@codex review` as a PR comment and check again rather than concluding it's clean or giving up
+on it — the auto-trigger is documented as unreliable. Use judgement on style nits that conflict
+with project conventions. Run `uv run ruff check . && uv run pytest -q`, push, and repeat until no
+actionable comments remain. The goal is a ready-to-merge deliverable.
 
 **A re-review after a fix commit can re-post identical comments against stale line numbers.** Observed on PR #311 (fps-3jj.9): CodeRabbit's second review, triggered by the fix-commit push, posted the same 4 comments verbatim — including inline diff suggestions quoting the pre-fix code — even though the fix commit had already addressed every one of them. Don't assume a repeated comment is a new/unaddressed finding; `grep`/`sed` the current file at the cited path and check whether the flagged code still looks like what the comment describes before touching anything again.
 
