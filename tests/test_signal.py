@@ -877,6 +877,32 @@ def test_wait_does_not_claim_nothing_clears_when_something_does(
     assert "Daily Servo does" in output
 
 
+def test_wait_distinguishes_unscored_from_below_threshold(
+    two_station_db, monkeypatch
+):
+    """The cheapest station may simply be unscored, not scored-and-failing.
+
+    `model_probabilities` only inserts stations it could score, so a dict with
+    holes is normal. Reporting a hole as "doesn't clear its own buy bar" claims
+    a probability was computed and failed the bar when none was computed at
+    all — a different, false statement.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr("fuel_signal.signal.STATION_ROUTE_DAYS", {})
+    # Cheapest (Weekly Servo) is missing entirely — never scored.
+    monkeypatch.setattr(
+        "fuel_signal.signal.model_probabilities",
+        lambda *a, **k: {9001: 0.90},
+    )
+    output = build_signals(
+        conn, series[180][0], preferred_stations=_TWO, routing_day=datetime.date(2026, 9, 7)
+    )
+    assert "doesn't clear its own buy bar" not in output
+    assert "hasn't been scored" in output
+    assert "Weekly Servo" in output and "Daily Servo does" not in output
+    assert "Daily Servo clears the buy bar instead" in output
+
+
 def test_wait_may_say_nothing_clears_when_truly_nothing_does(
     two_station_db, monkeypatch
 ):
