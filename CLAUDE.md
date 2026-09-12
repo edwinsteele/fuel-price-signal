@@ -78,11 +78,18 @@ syntax, expanded from the checkout's git remote — write it literally.
 - **PR review/CI snapshot for PR `<N>`** (replaces `gh pr view N --json comments,reviews,mergeable,statusCheckRollup`):
   ```bash
   gh api repos/{owner}/{repo}/pulls/<N> --jq '{mergeable, mergeable_state, sha: .head.sha}'
-  gh api repos/{owner}/{repo}/pulls/<N>/reviews --paginate                    # → reviews[]
-  gh api repos/{owner}/{repo}/issues/<N>/comments --paginate                  # → comments[] (PR conversation, not inline)
+  gh api repos/{owner}/{repo}/pulls/<N>/reviews --paginate                    # → reviews[] (review bodies — boilerplate for Codex, findings for Sourcery)
+  gh api repos/{owner}/{repo}/pulls/<N>/comments --paginate                   # → inline findings (Codex's ARE HERE, not in reviews[].body)
+  gh api repos/{owner}/{repo}/issues/<N>/comments --paginate                  # → comments[] (PR conversation; Codex's clean-pass text lands here)
+  gh api repos/{owner}/{repo}/issues/<N>/reactions --paginate                 # → a silent Codex clean pass can be JUST a chatgpt-codex-connector[bot] 👍 here, nothing else
   gh api "repos/{owner}/{repo}/commits/<sha>/check-runs" --paginate --jq '.check_runs'  # → CI rollup
   ```
-  `mergeable_state == "dirty"` is REST's equivalent of GraphQL's `mergeable: CONFLICTING`.
+  `mergeable_state == "dirty"` is REST's equivalent of GraphQL's `mergeable: CONFLICTING`. **Never
+  treat `pulls/<N>/reviews` + `issues/<N>/comments` alone as "checked Codex" — its findings are
+  inline comments and its clean pass can be a bare reaction with no comment or review at all.**
+  Use the `codex-pr-review` skill (or [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md)
+  directly) to read Codex's status correctly; this bit a PR-status report on #422 (all four checks
+  above ran except the reactions one, missing a silent clean pass).
 - **Claim/release an issue** (replaces `gh issue edit --add-assignee`/`--remove-assignee`):
   ```bash
   LOGIN=$(gh api user --jq .login)
@@ -172,12 +179,14 @@ syntax, expanded from the checkout's git remote — write it literally.
    issue when the PR merges.
 4. After opening the PR, do other useful sequenced work (write a memory to `docs/memory/`, file
    any follow-up issues with `gh issue create`). Once ≈270s of real elapsed time has passed, run
-   the **PR review/CI snapshot** helper to check for reviews. If there is no other useful work,
-   run `sleep 270` then check. (`ScheduleWakeup` is only
-   available in `/loop` mode — do not attempt it here.) Act on any actionable comments found in
-   `reviews[].body`. If CodeRabbit is rate-limited or absent, skip and move on — do not
-   reschedule. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat
-   until no actionable comments remain.
+   the **PR review/CI snapshot** helper to check for reviews — its inline-comments and reactions
+   calls, not just `reviews[].body`, are what actually surface Codex's findings or clean pass; see
+   [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md). If
+   there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available
+   in `/loop` mode — do not attempt it here.) Act on any actionable comments found. If Sourcery is
+   rate-limited or Codex hasn't triggered, skip and move on — do not reschedule; `@codex review`
+   re-triggers it if a later pass needs to cover a skipped commit. Implement comments, run
+   `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
 
 Note: this run does not wait for the merge — that is gated by the separate `auto-merge.yml`
 workflow (≥900s age + green checks). Nothing is left over for a later run to finish: the
@@ -234,7 +243,18 @@ Handle conflicts first, then review threads, in a single pass per PR.
   this is a general license for `branch -D`/force operations beyond your own finished branch.
 - Do not open PRs with `claude-authored` label — that label is exclusively for the worker.
 - After each commit + push, open a PR immediately without asking.
-- After submitting a PR, wait 270s (4.5 min), then check for review comments (`gh pr view N --json comments,reviews,mergeable,statusCheckRollup`). Act on any actionable comments present. If CodeRabbit is rate-limited or absent, **skip it and move on — do not reschedule to wait for it**. Implement appropriate comments, push, repeat until no actionable comments remain.
+- After submitting a PR, wait 270s (4.5 min), then check review status. **`gh pr view --json
+  comments,reviews,mergeable,statusCheckRollup` is not sufficient on its own** — it misses inline
+  review comments entirely, which is where Codex's findings live, and a clean Codex pass can be a
+  bare 👍 reaction with no comment, review, or check-run at all. Invoke the `codex-pr-review` skill
+  (or follow [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md)'s
+  four checks directly: `pulls/<N>/comments` for inline findings, `issues/<N>/comments` for a
+  clean-pass comment, `issues/<N>/reactions` for a silent clean-pass, and `Reviewed commit` vs HEAD)
+  to get Codex's actual status, and `pulls/<N>/reviews` for Sourcery. Act on any actionable comments
+  present. If Sourcery is rate-limited or Codex hasn't triggered, **skip and move on — do not
+  reschedule to wait for it**; `@codex review` re-triggers it if needed. Implement appropriate
+  comments, push, repeat until no actionable comments remain. **Report each reviewer's status to
+  the user explicitly, including a clean pass** — silence reads as "didn't check," not "was clean."
 - **`experiments/**` and `docs/memory/**` are exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs), `experiments/INDEX.md`, and technical memory files may be committed **and pushed** directly to `main` without a PR. Those are the only paths that bypass review; everything else still requires one, and a commit touching an exempt path *and* code is not exempt — split it. **Direct-to-`main` includes the push** — a commit left on the local `main` is not landed, and unattended routines are exactly where that goes unnoticed (see [docs/CONVENTIONS.md](docs/CONVENTIONS.md) § Git workflow for the 2026-08-26 incident). End any session that writes to `main` with `git status --short` empty and `git log --oneline origin/main..main` empty.
 
 ## spawn_task → `gh issue create` redirect
