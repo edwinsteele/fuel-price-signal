@@ -35,7 +35,9 @@ fuel_signal/
 ├── cycle.py           # Cycle detection + current phase calculation
 ├── signal.py          # Combine phase + live price → one-line output
 ├── compare.py         # Compare two price series (station vs station, station vs LGA mean, etc.)
-├── inspect.py         # Flask workbench: interactive chart + cycle state (dev server)
+├── inspect.py         # Flask workbench: interactive chart + cycle state (dev server); also /api/v1
+├── api_v1.py          # /api/v1 wire-format serializers — see docs/api-contract.md
+├── generate_signal_cache.py  # Precompute compute_signal() into db.signal_cache for /api/v1
 ├── stations.py        # Station lookup CLI
 ├── labels.py          # ML label generation + training-row assembly
 ├── label_viz.py       # Diagnostic plots for label distributions
@@ -72,6 +74,7 @@ uv run python -m fuel_signal.compare SERIES_A SERIES_B [--fuel E10] [--within 0.
 uv run python -m fuel_signal.stations [QUERY]
 uv run python -m fuel_signal.labels [--output PATH] [--horizon DAYS] [--threshold CENTS] [--db PATH]
 uv run python -m fuel_signal.shap_report --model MODEL --features CSV --split val --output DIR
+uv run python -m fuel_signal.generate_signal_cache [--as-of DATE] [--db PATH]
 ```
 
 **Do not** add new commands to a shared CLI group or create new `[project.scripts]` entries — each module is its own entry point invoked via `python -m`.

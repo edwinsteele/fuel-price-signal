@@ -28,10 +28,12 @@ import pandas as pd
 import shap
 from flask import Flask, jsonify, render_template, request, send_file
 
+from fuel_signal import api_v1 as _api_v1
 from fuel_signal import db as _db
 from fuel_signal import series as _series
 from fuel_signal.config import PREFERRED_STATIONS
 from fuel_signal.cycle import CycleDetector
+from fuel_signal.signal import _sydney_now
 
 logger = logging.getLogger(__name__)
 
@@ -1047,6 +1049,60 @@ def _create_app(
         plt.close(fig)
 
         return send_file(str(cache_png.resolve()), mimetype="image/png")
+
+    def _load_signal_cache():
+        """Decoded (payload, gap_start, gap_end, generated_at), or None if never generated.
+
+        Unlike `cd`/`cycle_state`/`today` above — frozen at process startup, so the
+        workbench needs a restart to see new data (#419) — this queries `conn` fresh
+        on every call. `fuel_signal.generate_signal_cache` runs as a separate process;
+        WAL mode is what lets its commits become visible here without a restart.
+        """
+        row = _db.read_signal_cache(conn)
+        if row is None:
+            return None
+        blob = json.loads(row["payload_json"])
+        try:
+            payload, gap_start, gap_end = _api_v1.decode_cache_entry(blob)
+        except (KeyError, TypeError, ValueError):
+            # A row left over from before a SignalPayload field was added/removed/
+            # renamed — the code reading it has moved on, but the row on disk
+            # hasn't (yet; the next `generate_signal_cache` run overwrites it).
+            # That is "not generated" from this reader's point of view, not a 500.
+            logger.warning("signal_cache row failed to decode; treating as not generated", exc_info=True)
+            return None
+        return payload, gap_start, gap_end, row["generated_at"]
+
+    def _not_generated_response():
+        return jsonify({
+            "error": "not_generated",
+            "detail": "No precomputed signal. Runs nightly after the price load.",
+            "last_generated_at": None,
+        }), 503
+
+    @app.route("/api/v1/stations")
+    def api_v1_stations():
+        cached = _load_signal_cache()
+        if cached is None:
+            return _not_generated_response()
+        payload, gap_start, gap_end, generated_at = cached
+        now_dt = _sydney_now()
+        return jsonify(_api_v1.build_stations_response(
+            payload, gap_start, gap_end, generated_at,
+            routing_day=now_dt.date(), served_at=now_dt.isoformat(timespec="seconds"), now=now_dt.date(),
+        ))
+
+    @app.route("/api/v1/recommendation")
+    def api_v1_recommendation():
+        cached = _load_signal_cache()
+        if cached is None:
+            return _not_generated_response()
+        payload, gap_start, gap_end, generated_at = cached
+        now_dt = _sydney_now()
+        return jsonify(_api_v1.build_recommendation_response(
+            payload, gap_start, gap_end, generated_at,
+            routing_day=now_dt.date(), served_at=now_dt.isoformat(timespec="seconds"), now=now_dt.date(),
+        ))
 
     @app.route("/healthz")
     def healthz():
