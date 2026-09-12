@@ -68,6 +68,11 @@ def main(as_of: str | None, db_path: str, model_path: pathlib.Path) -> None:
         )
     conn = db.open_db(path)
     try:
+        # An existing DB from before this table was added won't have it yet;
+        # create_schema is idempotent (CREATE TABLE IF NOT EXISTS), so this is
+        # cheap and safe to run every time rather than requiring an operator
+        # to separately re-run `python -m fuel_signal.db` first.
+        db.create_schema(conn)
         as_of_date = as_of or _latest_daily_date(conn)
         payload = compute_signal(conn, as_of_date, model_path=model_path)
         gap_start, gap_end = _gap_boundaries(conn)

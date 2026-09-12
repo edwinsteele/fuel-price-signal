@@ -1185,10 +1185,22 @@ def write_signal_cache(
 
 
 def read_signal_cache(conn: sqlite3.Connection) -> dict | None:
-    """Return {as_of_date, generated_at, payload_json}, or None if never generated."""
-    row = conn.execute(
-        "SELECT as_of_date, generated_at, payload_json FROM signal_cache WHERE id = 1"
-    ).fetchone()
+    """Return {as_of_date, generated_at, payload_json}, or None if never generated.
+
+    Also None if `signal_cache` itself doesn't exist yet: an existing DB that
+    predates this table (built before this schema change, and not yet rebuilt
+    via `python -m fuel_signal.db` or `generate_signal_cache`, which both call
+    `create_schema`) must read as "not generated" — the documented 503 — not a
+    bare 500 from the workbench.
+    """
+    try:
+        row = conn.execute(
+            "SELECT as_of_date, generated_at, payload_json FROM signal_cache WHERE id = 1"
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return None
     if row is None:
         return None
     return {"as_of_date": row[0], "generated_at": row[1], "payload_json": row[2]}

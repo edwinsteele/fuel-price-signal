@@ -25,11 +25,13 @@ from fuel_signal.db import (
     mark_file_loaded,
     normalize_address,
     open_db,
+    read_signal_cache,
     station_price_series,
     station_search,
     tgp_series,
     upsert_daily_prices,
     upsert_stations,
+    write_signal_cache,
 )
 
 # ---------------------------------------------------------------------------
@@ -960,3 +962,40 @@ def test_latest_tgp_date(conn, tmp_path):
     _write_tgp_csv(csv_path, [("2024-01-01", "100.0"), ("2024-03-15", "110.0")])
     load_tgp_csv(conn, csv_path)
     assert latest_tgp_date(conn) == "2024-03-15"
+
+
+# ---------------------------------------------------------------------------
+# signal_cache — the #416 precomputed-signal store
+# ---------------------------------------------------------------------------
+
+def test_read_signal_cache_returns_none_when_never_written(conn):
+    assert read_signal_cache(conn) is None
+
+
+def test_write_then_read_signal_cache_round_trips(conn):
+    write_signal_cache(conn, "2026-09-11", "2026-09-11T22:00:00+10:00", '{"a": 1}')
+    row = read_signal_cache(conn)
+    assert row == {
+        "as_of_date": "2026-09-11",
+        "generated_at": "2026-09-11T22:00:00+10:00",
+        "payload_json": '{"a": 1}',
+    }
+
+
+def test_write_signal_cache_replaces_the_single_row(conn):
+    write_signal_cache(conn, "2026-09-11", "2026-09-11T22:00:00+10:00", '{"a": 1}')
+    write_signal_cache(conn, "2026-09-12", "2026-09-12T22:00:00+10:00", '{"a": 2}')
+    row = read_signal_cache(conn)
+    assert row["as_of_date"] == "2026-09-12"
+    assert conn.execute("SELECT COUNT(*) FROM signal_cache").fetchone()[0] == 1
+
+
+def test_read_signal_cache_returns_none_when_table_missing(tmp_path):
+    """A DB from before this table was added must read as 'not generated' (503),
+    not raise — sourcery-ai review on #425."""
+    conn = open_db(tmp_path / "predates_signal_cache.db")
+    conn.executescript("""
+        CREATE TABLE fuel_types (id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE);
+    """)
+    assert read_signal_cache(conn) is None
+    conn.close()
