@@ -2,9 +2,9 @@
 
 Status: **implemented server-side** (#416) — `fuel_signal/api_v1.py`,
 `fuel_signal/generate_signal_cache.py`, and the blueprint in `fuel_signal/inspect.py`.
-This copy is the server-side source of truth: the canonical copy lives in the
-`fuel-price-signal` repo, and `fuel-price-signal-app` vendors it byte-for-byte.
-App-side implementation status is tracked in `fuel-price-signal-app`, not here.
+The canonical copy lives in `fuel-price-signal`; `fuel-price-signal-app` vendors
+it byte-for-byte. App-side implementation status is tracked in
+`fuel-price-signal-app`, not in this document.
 
 The app makes one batch of calls each morning on the home LAN and renders the
 result. Both endpoints are projections of a single nightly-precomputed blob, so
