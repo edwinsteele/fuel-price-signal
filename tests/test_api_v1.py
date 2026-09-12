@@ -379,3 +379,86 @@ def test_fill_decision_matches_contract_branch_table(on_route, drift, scored, ru
         on_route, drift, 0.25, scored=scored, rule_verdict=rule_verdict
     )
     assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# Cache format versioning — Claude review on #425
+# ---------------------------------------------------------------------------
+
+
+def test_encode_cache_entry_stamps_the_format_version():
+    payload = _contract_payload()
+    blob = api_v1.encode_cache_entry(payload, gap_start=None, gap_end=None)
+    assert blob["version"] == api_v1._CACHE_FORMAT_VERSION
+
+
+def test_decode_cache_entry_rejects_a_missing_version():
+    """A row written before versioning existed — must fail loudly (the /api/v1
+    blueprint catches this and degrades to 503, not a bare 500)."""
+    payload = _contract_payload()
+    blob = api_v1.encode_cache_entry(payload, gap_start=None, gap_end=None)
+    del blob["version"]
+    with pytest.raises(ValueError, match="unsupported signal_cache format version"):
+        api_v1.decode_cache_entry(blob)
+
+
+def test_decode_cache_entry_rejects_a_future_version():
+    payload = _contract_payload()
+    blob = api_v1.encode_cache_entry(payload, gap_start=None, gap_end=None)
+    blob["version"] = api_v1._CACHE_FORMAT_VERSION + 1
+    with pytest.raises(ValueError, match="unsupported signal_cache format version"):
+        api_v1.decode_cache_entry(blob)
+
+
+def test_decode_cache_entry_raises_keyerror_on_a_missing_field():
+    """A field renamed/removed since the row was written — same failure shape,
+    different exception type; the blueprint catches both."""
+    payload = _contract_payload()
+    blob = api_v1.encode_cache_entry(payload, gap_start=None, gap_end=None)
+    del blob["payload"]["last_real_price_date"]
+    with pytest.raises(KeyError):
+        api_v1.decode_cache_entry(blob)
+
+
+# ---------------------------------------------------------------------------
+# A station with an empty (not None) route_days — Claude review on #425
+# ---------------------------------------------------------------------------
+
+
+def test_route_block_handles_a_station_with_no_reachable_day():
+    """`route_days=frozenset()` is a real (if unusual) config state — genuinely
+    never reachable — distinct from `route_days=None` (always reachable).
+    `StationView.next_reachable` returns None for it, same as the unrestricted
+    case; the two must not be conflated."""
+    v = StationView(code=1, label="Never", price=150.0, prob=None, route_days=frozenset())
+    block = api_v1._route_block(v, _ROUTING_DAY)
+    assert block == {
+        "restricted": True,
+        "days": [],
+        "reachable_on_routing_day": False,
+        "next_reachable_date": None,
+        "days_until_reachable": None,
+    }
+
+
+def test_recommendation_handles_an_off_route_station_with_no_reachable_day():
+    payload = _make_payload(
+        preferred_stations={999: "Never Reachable"},
+        station_prices={999: 150.0},
+        station_probs={},
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(api_v1, "STATION_ROUTE_DAYS", {999: frozenset()})
+        body = api_v1.build_recommendation_response(
+            payload, gap_start=None, gap_end=None, generated_at=_GENERATED_AT,
+            routing_day=_ROUTING_DAY, served_at=_SERVED_AT, now=_ROUTING_DAY,
+        )
+    assert body["status"] == "no_priced_station_on_route"
+    assert body["nearest_off_route"] == {
+        "code": 999,
+        "label": "Never Reachable",
+        "price": 150.0,
+        "next_reachable_date": None,
+        "days_until_reachable": None,
+    }
+    assert "no reachable day configured" in body["reason"]

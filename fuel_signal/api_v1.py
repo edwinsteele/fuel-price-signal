@@ -19,6 +19,10 @@ import math
 from fuel_signal import signal
 from fuel_signal.config import STATION_ROUTE_DAYS
 
+# Bump when `_encode_signal_payload`/`_decode_signal_payload`'s field set changes
+# in a way an older/newer reader can't tolerate. See `decode_cache_entry`.
+_CACHE_FORMAT_VERSION = 1
+
 # ---------------------------------------------------------------------------
 # SignalPayload <-> JSON
 # ---------------------------------------------------------------------------
@@ -108,6 +112,7 @@ def encode_cache_entry(
 ) -> dict:
     """The full JSON-safe blob stored in `db.signal_cache.payload_json`."""
     return {
+        "version": _CACHE_FORMAT_VERSION,
         "payload": _encode_signal_payload(payload),
         "gap_start": gap_start,
         "gap_end": gap_end,
@@ -115,6 +120,17 @@ def encode_cache_entry(
 
 
 def decode_cache_entry(data: dict) -> tuple[signal.SignalPayload, str | None, str | None]:
+    """Raises (KeyError, TypeError, ValueError) on a blob this code can't read.
+
+    `SignalPayload` is explicitly designed to grow new fields over time (see its
+    docstring), and a cache row persists across a `git pull` + waitress restart
+    until the next nightly `generate_signal_cache` run overwrites it — so a
+    field rename/addition can leave a row on disk that predates the code
+    reading it. Callers (the /api/v1 blueprint) must catch these and degrade to
+    the documented 503 "not_generated", not let them surface as a bare 500.
+    """
+    if data.get("version") != _CACHE_FORMAT_VERSION:
+        raise ValueError(f"unsupported signal_cache format version: {data.get('version')!r}")
     return (
         _decode_signal_payload(data["payload"]),
         data.get("gap_start"),
@@ -190,7 +206,18 @@ def _route_block(v: signal.StationView, routing_day: datetime.date) -> dict:
             "days_until_reachable": 0,
         }
     nxt = v.next_reachable(routing_day)
-    assert nxt is not None   # restricted stations always have a next reachable day
+    if nxt is None:
+        # `route_days` is a non-None but EMPTY set — a station configured as
+        # never reachable, not the same as unrestricted. `next_reachable`
+        # returns None here too (its `range(0, 8)` search matches nothing), so
+        # this is not covered by the None-means-unrestricted branch above.
+        return {
+            "restricted": True,
+            "days": sorted(v.route_days),
+            "reachable_on_routing_day": False,
+            "next_reachable_date": None,
+            "days_until_reachable": None,
+        }
     return {
         "restricted": True,
         "days": sorted(v.route_days),
@@ -372,18 +399,30 @@ def build_recommendation_response(
         headline = "no priced station is reachable today"
         nearest = off_route[0]
         nxt = nearest.next_reachable(routing_day)
-        assert nxt is not None
-        reason = (
-            f"Cheapest preferred station is {nearest.label} @ {nearest.price:.1f}c, "
-            f"next passed in {nxt[1]}d."
-        )
+        # `nxt` is None for a station configured with an empty (not None)
+        # `route_days` — genuinely never reachable, not the common case this
+        # branch is named for, but real input, not a code invariant to assert.
+        if nxt is None:
+            next_reachable_date = None
+            days_until_reachable = None
+            reason = (
+                f"Cheapest preferred station is {nearest.label} @ {nearest.price:.1f}c, "
+                "but it has no reachable day configured."
+            )
+        else:
+            next_reachable_date = nxt[0].isoformat()
+            days_until_reachable = nxt[1]
+            reason = (
+                f"Cheapest preferred station is {nearest.label} @ {nearest.price:.1f}c, "
+                f"next passed in {nxt[1]}d."
+            )
         target_station = None
         nearest_off_route = {
             "code": nearest.code,
             "label": nearest.label,
             "price": _round1(nearest.price),
-            "next_reachable_date": nxt[0].isoformat(),
-            "days_until_reachable": nxt[1],
+            "next_reachable_date": next_reachable_date,
+            "days_until_reachable": days_until_reachable,
         }
     else:
         status = "no_price_data"

@@ -291,9 +291,13 @@ the workbench can serve it:
 # Precompute today's signal (latest date in daily_prices) and cache it
 uv run python -m fuel_signal.generate_signal_cache
 
-# As of a specific date, or a custom DB / model path
-uv run python -m fuel_signal.generate_signal_cache --as-of 2026-09-11
+# Custom DB / model path
 uv run python -m fuel_signal.generate_signal_cache --db /path/to/fuel_signal.db
+
+# Preview a past date — refused unless it's the latest available date, since
+# the freshness banner is computed independently of --as-of and wouldn't
+# reflect a stale cache
+uv run python -m fuel_signal.generate_signal_cache --as-of 2026-06-01 --force
 ```
 
 Run this once nightly, after the price load, before starting or restarting

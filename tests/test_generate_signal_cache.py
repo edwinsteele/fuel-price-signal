@@ -88,7 +88,7 @@ def test_cli_creates_signal_cache_table_on_a_pre_migration_db(tmp_path):
 def test_cli_stores_a_decodable_payload(tmp_path):
     db_path = tmp_path / "fresh.db"
     series = _build_db(db_path)
-    as_of = series[180][0]
+    as_of = series[-1][0]   # the latest date — no --force needed
 
     runner = CliRunner()
     result = runner.invoke(
@@ -106,4 +106,54 @@ def test_cli_stores_a_decodable_payload(tmp_path):
     # so every price comes back None, but the keys must still be present.
     assert set(payload.station_prices) == set(PREFERRED_STATIONS)
     assert all(price is None for price in payload.station_prices.values())
+    conn.close()
+
+
+def test_generated_at_has_second_precision_not_microseconds():
+    """Claude review on #425: the contract's every worked example is
+    second-precision; `datetime.isoformat()` defaults to microseconds, which
+    an iOS `ISO8601DateFormatter` without `.withFractionalSeconds` rejects."""
+    import re
+
+    from fuel_signal.signal import _sydney_now
+    generated_at = _sydney_now().isoformat(timespec="seconds")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}", generated_at)
+
+
+# ---------------------------------------------------------------------------
+# --as-of / --force — Claude review on #425
+# ---------------------------------------------------------------------------
+
+def test_cli_refuses_a_non_latest_as_of_without_force(tmp_path):
+    db_path = tmp_path / "fresh.db"
+    series = _build_db(db_path)
+    stale_as_of = series[180][0]
+
+    runner = CliRunner()
+    result = runner.invoke(
+        generate_signal_cache_cli, ["--db", str(db_path), "--as-of", stale_as_of]
+    )
+    assert result.exit_code != 0
+    assert "not the latest available date" in result.output
+
+    conn = db.open_db(db_path)
+    assert db.read_signal_cache(conn) is None
+    conn.close()
+
+
+def test_cli_force_allows_a_non_latest_as_of(tmp_path):
+    db_path = tmp_path / "fresh.db"
+    series = _build_db(db_path)
+    stale_as_of = series[180][0]
+
+    runner = CliRunner()
+    result = runner.invoke(
+        generate_signal_cache_cli,
+        ["--db", str(db_path), "--as-of", stale_as_of, "--force"],
+    )
+    assert result.exit_code == 0, result.output
+
+    conn = db.open_db(db_path)
+    row = db.read_signal_cache(conn)
+    assert row["as_of_date"] == stale_as_of
     conn.close()

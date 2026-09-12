@@ -9,8 +9,11 @@ AGENTS.md/README.md for where this fits in the daily pipeline.
 
 Usage:
     uv run python -m fuel_signal.generate_signal_cache
-    uv run python -m fuel_signal.generate_signal_cache --as-of 2026-09-11
     uv run python -m fuel_signal.generate_signal_cache --db /path/to/fuel_signal.db
+
+    # --as-of is for previewing a past date; it refuses anything but the
+    # latest available date unless --force is also given (see main() below).
+    uv run python -m fuel_signal.generate_signal_cache --as-of 2026-06-01 --force
 """
 
 from __future__ import annotations
@@ -40,7 +43,13 @@ logger = logging.getLogger(__name__)
     "as_of",
     default=None,
     metavar="DATE",
-    help="Date to evaluate (YYYY-MM-DD). Defaults to latest date in daily_prices.",
+    help="Date to evaluate (YYYY-MM-DD). Defaults to, and normally must equal, the "
+         "latest date in daily_prices — see --force.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Allow --as-of to be earlier than the latest available date.",
 )
 @click.option(
     "--db",
@@ -57,7 +66,7 @@ logger = logging.getLogger(__name__)
     show_default=True,
     help="Calibrated model artifact. Falls back to rules-only if absent.",
 )
-def main(as_of: str | None, db_path: str, model_path: pathlib.Path) -> None:
+def main(as_of: str | None, force: bool, db_path: str, model_path: pathlib.Path) -> None:
     """Compute today's signal and store it for the HTTP API to serve."""
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 
@@ -73,11 +82,25 @@ def main(as_of: str | None, db_path: str, model_path: pathlib.Path) -> None:
         # cheap and safe to run every time rather than requiring an operator
         # to separately re-run `python -m fuel_signal.db` first.
         db.create_schema(conn)
-        as_of_date = as_of or _latest_daily_date(conn)
+        latest = _latest_daily_date(conn)
+        as_of_date = as_of or latest
+        if as_of_date != latest and not force:
+            # docs/api-contract.md deliberately has no `historical_view` field:
+            # v1 has no as_of *request* parameter, so a live request can never
+            # observe a stale cache — but that reasoning only holds if the
+            # cached payload's as_of is always the latest date. `days_stale` is
+            # measured from `last_real_price_date` (the DB's real current max,
+            # independent of `as_of`), so a payload cached from an old --as-of
+            # reads as fresh even though every priced/cycle field in it is old.
+            raise click.ClickException(
+                f"--as-of {as_of_date} is not the latest available date ({latest}). "
+                "The API's freshness banner would not reflect this — pass --force "
+                "if you really want to cache a historical date."
+            )
         payload = compute_signal(conn, as_of_date, model_path=model_path)
         gap_start, gap_end = _gap_boundaries(conn)
         blob = api_v1.encode_cache_entry(payload, gap_start, gap_end)
-        generated_at = _sydney_now().isoformat()
+        generated_at = _sydney_now().isoformat(timespec="seconds")
         db.write_signal_cache(conn, as_of_date, generated_at, json.dumps(blob))
         click.echo(f"Cached signal for {as_of_date} (generated_at={generated_at}).")
     finally:

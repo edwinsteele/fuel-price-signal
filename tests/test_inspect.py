@@ -932,6 +932,26 @@ def test_api_v1_stations_returns_cached_payload(conn, api_v1_client):
     assert body["stations"][0]["group"] == "on_route"
 
 
+def test_api_v1_stations_served_at_has_second_precision(api_v1_client, conn):
+    """Claude review on #425: the contract's worked examples are all
+    second-precision; the frozen `_sydney_now` here carries no microseconds,
+    so a regression to bare `.isoformat()` wouldn't fail this — see
+    test_generate_signal_cache.py for the microseconds-stripping assertion."""
+    _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.823}))
+    resp = api_v1_client.get("/api/v1/stations")
+    body = resp.get_json()
+    assert body["served_at"] == "2026-09-12T07:01:55+10:00"
+
+
+def test_api_v1_stations_returns_503_not_500_on_an_undecodable_cache_row(conn, api_v1_client):
+    """A row from a since-changed SignalPayload schema — sourcery/Claude
+    reviews on #425: this must degrade to the documented 503, not a 500."""
+    write_signal_cache(conn, "2026-09-11", "2026-09-11T22:00:00+10:00", json.dumps({"version": 999}))
+    resp = api_v1_client.get("/api/v1/stations")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "not_generated"
+
+
 def test_api_v1_recommendation_status_ok_source_model(conn, api_v1_client):
     """status=ok, source=model — at least one station scored above threshold."""
     _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.9}))

@@ -1062,7 +1062,15 @@ def _create_app(
         if row is None:
             return None
         blob = json.loads(row["payload_json"])
-        payload, gap_start, gap_end = _api_v1.decode_cache_entry(blob)
+        try:
+            payload, gap_start, gap_end = _api_v1.decode_cache_entry(blob)
+        except (KeyError, TypeError, ValueError):
+            # A row left over from before a SignalPayload field was added/removed/
+            # renamed — the code reading it has moved on, but the row on disk
+            # hasn't (yet; the next `generate_signal_cache` run overwrites it).
+            # That is "not generated" from this reader's point of view, not a 500.
+            logger.warning("signal_cache row failed to decode; treating as not generated", exc_info=True)
+            return None
         return payload, gap_start, gap_end, row["generated_at"]
 
     def _not_generated_response():
@@ -1081,7 +1089,7 @@ def _create_app(
         now_dt = _sydney_now()
         return jsonify(_api_v1.build_stations_response(
             payload, gap_start, gap_end, generated_at,
-            routing_day=now_dt.date(), served_at=now_dt.isoformat(), now=now_dt.date(),
+            routing_day=now_dt.date(), served_at=now_dt.isoformat(timespec="seconds"), now=now_dt.date(),
         ))
 
     @app.route("/api/v1/recommendation")
@@ -1093,7 +1101,7 @@ def _create_app(
         now_dt = _sydney_now()
         return jsonify(_api_v1.build_recommendation_response(
             payload, gap_start, gap_end, generated_at,
-            routing_day=now_dt.date(), served_at=now_dt.isoformat(), now=now_dt.date(),
+            routing_day=now_dt.date(), served_at=now_dt.isoformat(timespec="seconds"), now=now_dt.date(),
         ))
 
     @app.route("/healthz")

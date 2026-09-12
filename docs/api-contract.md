@@ -527,6 +527,17 @@ process. Not a file in the repo checkout — the daily script's first action is
 `git pull --ff-only`. `db.py` owns all persistence by convention; WAL mode lets
 the timer write while waitress reads.
 
+**Implementation note (server-side, added post-#416 review):** each endpoint
+reads the cache row independently and fresh per request — necessarily so,
+since WAL is exactly what lets a new nightly row become visible without a
+workbench restart. In the few-millisecond window where the nightly job's
+`write_signal_cache` commit lands between two client calls, the two endpoints
+can therefore read different rows and disagree, contradicting the opening
+paragraph's guarantee. The window is narrow (one write, once nightly) and low
+severity, but real. A client that wants to rule it out entirely should compare
+`generated_at` across its `/stations` and `/recommendation` calls and re-fetch
+on a mismatch; v1 has no request parameter to pin a specific `generated_at`.
+
 ## Split of work between cached and per-request
 
 Cached nightly (expensive, day-stable, a function of `as_of` and the DB): station
