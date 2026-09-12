@@ -46,7 +46,7 @@ than computed, treat it as suspect and check it against `signal.py`.
 
 ## Transport
 
-- Base: `http://192.168.20.200:5000/api/v1` (viking's LAN address, the existing
+- Base: `http://fuel.home.wordspeak.org:5000/api/v1` (viking's LAN address, the existing
   `fuelsignal-workbench.service` waitress process, one extra Flask blueprint).
 - No auth. LAN-only is enforced by bind address, as it already is for the
   workbench. A `before_request` hook on the blueprint is the seam if a token is
@@ -139,7 +139,7 @@ adds historical queries, adding the field back is purely additive.
 
 ## `GET /api/v1/stations`
 
-```json
+```json stations-response
 {
   "as_of": "2026-09-11",
   "generated_at": "2026-09-11T22:04:13+10:00",
@@ -274,7 +274,7 @@ prose fields exist.
 
 ## `GET /api/v1/recommendation`
 
-```json
+```json recommendation-response
 {
   "as_of": "2026-09-11",
   "generated_at": "2026-09-11T22:04:13+10:00",
