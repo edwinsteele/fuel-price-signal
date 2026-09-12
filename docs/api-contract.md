@@ -8,7 +8,9 @@ it byte-for-byte. App-side implementation status is tracked in
 
 The app makes one batch of calls each morning on the home LAN and renders the
 result. Both endpoints are projections of a single nightly-precomputed blob, so
-a pair of calls made seconds apart cannot disagree.
+a pair of calls made seconds apart cannot disagree — except across the narrow
+nightly cache-replacement window described in the implementation note under
+**Storage of the precomputed blob** below.
 
 ## A note on the examples
 
@@ -535,13 +537,17 @@ workbench restart. In the few-millisecond window where the nightly job's
 `write_signal_cache` commit lands between two client calls, the two endpoints
 can therefore read different rows and disagree, contradicting the opening
 paragraph's guarantee. The window is narrow (one write, once nightly) and low
-severity, but real. A client that wants to rule it out entirely should compare
-**both** `generated_at` and `routing_day` across its `/stations` and
-`/recommendation` calls, re-fetching on either mismatch; `generated_at` alone
-is not enough, because `routing_day` is computed fresh per request (see
-above) and can differ between the two calls even when both read the same
-cached row — for example when the calls straddle midnight in Sydney. v1 has
-no request parameter to pin a specific `generated_at`.
+severity, but real. A client that wants to catch the common case — a nightly
+write landing between its two calls — should compare **both** `generated_at`
+and `routing_day` across its `/stations` and `/recommendation` calls,
+re-fetching on either mismatch; `generated_at` alone is not enough, because
+`routing_day` is computed fresh per request (see above) and can differ
+between the two calls even when both read the same cached row — for example
+when the calls straddle midnight in Sydney. This is a strong mitigation, not
+a guarantee: two writes within the same second (a retry, or overlapping
+nightly runs) could share an identical `generated_at` while still replacing
+the row, and v1 exposes no cache revision or request parameter that would
+close that gap.
 
 ## Split of work between cached and per-request
 
