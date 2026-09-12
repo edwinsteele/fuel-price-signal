@@ -427,19 +427,24 @@ _WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _SYDNEY = "Australia/Sydney"
 
 
-def _today_in_sydney() -> datetime.date:
-    """Today's date in Sydney, whatever the host clock is set to."""
+def _sydney_now() -> datetime.datetime:
+    """Current wall-clock time in Sydney, whatever the host clock is set to."""
     try:
         tz = zoneinfo.ZoneInfo(_SYDNEY)
     except zoneinfo.ZoneInfoNotFoundError as exc:   # pragma: no cover - bare container
-        # Deliberately fatal rather than falling back to date.today(): a silent
+        # Deliberately fatal rather than falling back to datetime.now(): a silent
         # fallback reintroduces exactly the off-by-one-day routing bug this
         # exists to prevent, and it would do so invisibly.
         raise click.ClickException(
             f"No timezone database for {_SYDNEY} ({exc}). Install system tzdata "
             "(or `uv pip install tzdata`) — routing needs the Sydney date."
         ) from exc
-    return datetime.datetime.now(tz).date()
+    return datetime.datetime.now(tz)
+
+
+def _today_in_sydney() -> datetime.date:
+    """Today's date in Sydney, whatever the host clock is set to."""
+    return _sydney_now().date()
 
 
 @dataclass

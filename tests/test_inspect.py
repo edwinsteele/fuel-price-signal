@@ -1,12 +1,16 @@
 """Tests for fuel_signal.inspect — gradient heatmap builder and Flask routes."""
 
 import datetime
+import json
 import re
+import zoneinfo
 
 import pytest
 from bs4 import BeautifulSoup
 
+from fuel_signal import api_v1
 from fuel_signal import series as _series
+from fuel_signal.cycle import CycleState
 from fuel_signal.db import (
     create_schema,
     db_summary,
@@ -14,6 +18,7 @@ from fuel_signal.db import (
     open_db,
     upsert_daily_prices,
     upsert_stations,
+    write_signal_cache,
 )
 from fuel_signal.inspect import (
     _apply_hybrid_cutoff,
@@ -27,6 +32,7 @@ from fuel_signal.inspect import (
     _slice_points,
     _sort_shap_rows,
 )
+from fuel_signal.signal import CombinedVerdict, SignalEvaluation, SignalPayload, SignalRecommendation
 
 
 @pytest.fixture
@@ -833,3 +839,143 @@ def test_features_plot_interaction_missing_arrays_returns_503(conn, tmp_path):
     with app.test_client() as client:
         resp = client.get("/features/plot/feat_a?interaction=feat_b")
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/stations and /api/v1/recommendation (#416)
+# ---------------------------------------------------------------------------
+
+def _api_v1_payload(
+    preferred_stations: dict[int, str],
+    station_prices: dict[int, float | None],
+    station_probs: dict[int, float] | None = None,
+    rule_verdict: CombinedVerdict | None = None,
+) -> SignalPayload:
+    state = CycleState(
+        as_of_date="2026-09-11",
+        days_since_last_peak=40,
+        mean_cycle_length=46.33,
+        pct_through_cycle=40 / 46.33,
+        last_cycle_min=155.3,
+        last_cycle_max=201.7,
+        last_3_gradients=[-0.9, -0.8, -0.7],
+        peak_count=5,
+    )
+    evaluations = [
+        SignalEvaluation("AverageCycleTimeSignal", SignalRecommendation.BUY, "d1"),
+        SignalEvaluation("AverageGradientAfterPeakSignal", SignalRecommendation.NEUTRAL, "d2"),
+        SignalEvaluation("AverageNearPreviousMinMaxSignal", SignalRecommendation.WAIT, "d3"),
+        SignalEvaluation("FavouriteServiceStationPriceGradientSignal", SignalRecommendation.NEUTRAL, "d4"),
+    ]
+    return SignalPayload(
+        as_of_date="2026-09-11",
+        preferred_stations=preferred_stations,
+        state=state,
+        avg_current_price=178.4,
+        drift=-0.8,
+        station_prices=station_prices,
+        station_probs=station_probs or {},
+        rule_verdict=rule_verdict or CombinedVerdict("BUY ", "BUY", 0.5),
+        evaluations=evaluations,
+        last_real_price_date="2026-09-11",
+    )
+
+
+def _seed_signal_cache(conn, payload: SignalPayload) -> None:
+    blob = api_v1.encode_cache_entry(payload, gap_start=None, gap_end=None)
+    write_signal_cache(conn, payload.as_of_date, "2026-09-11T22:04:13+10:00", json.dumps(blob))
+
+
+@pytest.fixture
+def api_v1_client(conn, monkeypatch):
+    """Flask test client with `_sydney_now` frozen to Sat 2026-09-12 07:01:55.
+
+    2026-09-12 is a Saturday — real `STATION_ROUTE_DAYS` restricts station 261
+    to Wed/Sun, so tests can hit `no_priced_station_on_route` without
+    monkeypatching config.
+    """
+    fixed = datetime.datetime(2026, 9, 12, 7, 1, 55, tzinfo=zoneinfo.ZoneInfo("Australia/Sydney"))
+    assert fixed.weekday() == 5
+    monkeypatch.setattr("fuel_signal.inspect._sydney_now", lambda: fixed)
+    app = _create_app(
+        conn, cd=None, today="2026-09-11", cycle_state=None,
+        peak_data={}, summary=db_summary(conn), boundaries={},
+    )
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        yield client
+
+
+def test_api_v1_stations_returns_503_when_cache_missing(api_v1_client):
+    resp = api_v1_client.get("/api/v1/stations")
+    assert resp.status_code == 503
+    body = resp.get_json()
+    assert body == {
+        "error": "not_generated",
+        "detail": "No precomputed signal. Runs nightly after the price load.",
+        "last_generated_at": None,
+    }
+
+
+def test_api_v1_recommendation_returns_503_when_cache_missing(api_v1_client):
+    resp = api_v1_client.get("/api/v1/recommendation")
+    assert resp.status_code == 503
+
+
+def test_api_v1_stations_returns_cached_payload(conn, api_v1_client):
+    _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.823}))
+    resp = api_v1_client.get("/api/v1/stations")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["routing_day"] == "2026-09-12"
+    assert body["stations"][0]["code"] == 414
+    assert body["stations"][0]["group"] == "on_route"
+
+
+def test_api_v1_recommendation_status_ok_source_model(conn, api_v1_client):
+    """status=ok, source=model — at least one station scored above threshold."""
+    _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.9}))
+    resp = api_v1_client.get("/api/v1/recommendation")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "ok"
+    assert body["source"] == "model"
+    assert body["verdict"] == "BUY"
+
+
+def test_api_v1_recommendation_status_ok_source_rules(conn, api_v1_client):
+    """status=ok, source=rules — no model artifact, falls back to the legacy rules."""
+    _seed_signal_cache(
+        conn,
+        _api_v1_payload(
+            {414: "BP Springwood"}, {414: 161.9}, {},
+            rule_verdict=CombinedVerdict("BUY ", "BUY", 1.0),
+        ),
+    )
+    resp = api_v1_client.get("/api/v1/recommendation")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "ok"
+    assert body["source"] == "rules"
+    assert body["verdict"] == "BUY"
+
+
+def test_api_v1_recommendation_status_no_priced_station_on_route(conn, api_v1_client):
+    """261 is priced but restricted to Wed/Sun; the frozen 'now' is a Saturday."""
+    _seed_signal_cache(conn, _api_v1_payload({261: "7-Eleven Penrith South"}, {261: 157.7}, {}))
+    resp = api_v1_client.get("/api/v1/recommendation")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "no_priced_station_on_route"
+    assert body["verdict"] is None
+    assert body["nearest_off_route"]["code"] == 261
+
+
+def test_api_v1_recommendation_status_no_price_data(conn, api_v1_client):
+    _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: None}, {}))
+    resp = api_v1_client.get("/api/v1/recommendation")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "no_price_data"
+    assert body["verdict"] is None
+    assert body["target_station"] is None

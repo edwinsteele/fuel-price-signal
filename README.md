@@ -271,6 +271,36 @@ the median of the drift distribution, splitting days ~49/51. Treat "brim it" vs
 call are both backed by measurement, this is not. See
 [docs/memory/brim-bridge-threshold-unvalidated.md](docs/memory/brim-bridge-threshold-unvalidated.md).
 
+## Serving the signal over HTTP
+
+An iPhone app on the home LAN fetches the same decision once each morning, over
+two read-only endpoints served by the `inspect.py` workbench:
+
+- `GET /api/v1/stations`
+- `GET /api/v1/recommendation`
+
+Both are projections of one nightly-precomputed blob, so a pair of calls made
+seconds apart cannot disagree. The full wire format — every field, its
+rounding, and the worked examples — is [docs/api-contract.md](docs/api-contract.md).
+
+Scoring is too slow to run inside a request (~29s of `load_history`), so the
+signal must be precomputed by a separate command and stored in the DB before
+the workbench can serve it:
+
+```bash
+# Precompute today's signal (latest date in daily_prices) and cache it
+uv run python -m fuel_signal.generate_signal_cache
+
+# As of a specific date, or a custom DB / model path
+uv run python -m fuel_signal.generate_signal_cache --as-of 2026-09-11
+uv run python -m fuel_signal.generate_signal_cache --db /path/to/fuel_signal.db
+```
+
+Run this once nightly, after the price load, before starting or restarting
+`fuel_signal.inspect`. Until the first run, both endpoints return `HTTP 503`
+rather than a stale or empty payload. There is no auth — LAN-only by bind
+address, per the contract.
+
 ## Makefile shortcuts
 
 A `Makefile` wraps the local daily routine so you don't have to remember the step order:

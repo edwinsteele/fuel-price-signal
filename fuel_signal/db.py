@@ -177,6 +177,13 @@ CREATE TABLE IF NOT EXISTS tgp (
                                      -- series carries sub-cent precision that decicent
                                      -- rounding would lose and corrupt tgp_delta_7d
 );
+
+CREATE TABLE IF NOT EXISTS signal_cache (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),  -- single row: always the latest
+    as_of_date   TEXT    NOT NULL,   -- YYYY-MM-DD; compute_signal's as_of_date
+    generated_at TEXT    NOT NULL,   -- ISO 8601 with Sydney offset; when this run computed it
+    payload_json TEXT    NOT NULL    -- fuel_signal.api_v1-encoded SignalPayload + gap bounds
+);
 """
 
 
@@ -1159,6 +1166,32 @@ def latest_tgp_date(conn: sqlite3.Connection) -> str | None:
     """Return the most recent tgp_date (YYYY-MM-DD) in the tgp table, or None."""
     row = conn.execute("SELECT MAX(tgp_date) FROM tgp").fetchone()
     return _date_from_int(row[0]) if row and row[0] else None
+
+
+def write_signal_cache(
+    conn: sqlite3.Connection, as_of_date: str, generated_at: str, payload_json: str
+) -> None:
+    """Replace the single precomputed-signal row consumed by the /api/v1 blueprint."""
+    conn.execute(
+        """INSERT INTO signal_cache (id, as_of_date, generated_at, payload_json)
+           VALUES (1, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+               as_of_date = excluded.as_of_date,
+               generated_at = excluded.generated_at,
+               payload_json = excluded.payload_json""",
+        (as_of_date, generated_at, payload_json),
+    )
+    conn.commit()
+
+
+def read_signal_cache(conn: sqlite3.Connection) -> dict | None:
+    """Return {as_of_date, generated_at, payload_json}, or None if never generated."""
+    row = conn.execute(
+        "SELECT as_of_date, generated_at, payload_json FROM signal_cache WHERE id = 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return {"as_of_date": row[0], "generated_at": row[1], "payload_json": row[2]}
 
 
 # ---------------------------------------------------------------------------
