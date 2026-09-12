@@ -28,6 +28,13 @@ means "hasn't reached this PR yet", not "never triggered"** — do not nudge it 
 `@codex review` comment. The paragraph immediately below is kept as the historical record of
 the setup-period failure mode, not current guidance.
 
+**Codex itself disputed this change** (PR #423, reviewing the commit that made it): it
+argued two successful firings don't erase the recorded #409/#411/#410 incidents, and
+suggested keeping the manual-trigger fallback. The reply on record: this is an explicit
+repo-owner decision, not an oversight, and stands regardless of a bot's disagreement — a
+recurrence should be logged fresh here for the owner to weigh, not used as grounds to
+silently reinstate the old remedy on the session's own judgement.
+
 **[Historical, setup period only] The PR-open auto-trigger was NOT reliable — never assume it
 already ran.** Confirmed firing automatically on #410 (review posted 4m44s after PR open, no
 comment asked for it). Confirmed NOT firing on #409 and #411 — both sat completely silent (no
@@ -96,6 +103,15 @@ gh api repos/{owner}/{repo}/issues/<N>/comments --paginate \
 Missing this on PR #410 meant reporting "no substantive review yet" while six P1
 findings sat on the diff. Also check `.[].line` — some findings come back with
 `line: null` (outdated/file-level) and are easy to skip when eyeballing.
+
+**`pulls/<N>/comments`'s `commit_id` field tracks current HEAD for a still-live
+comment, not the commit it was originally posted against.** Filtering that endpoint
+by `commit_id == <latest sha>` to isolate "new findings from this push" doesn't
+work — a comment from an earlier review whose diff context is unchanged keeps
+getting its `commit_id` updated forward and will match. Use `created_at` against
+your last-checked timestamp instead; `original_commit_id` is the one that stays
+fixed at the comment's origin. Confirmed on PR #423 (2026-09-12): three comments
+from a review of an earlier commit all showed `commit_id` equal to a later HEAD.
 
 **[Historical, setup period] Codex re-reviews pushes, but on PR #410 (2026-09-09-10, the same
 setup period as the trigger issue above) it ran six automatic passes then stopped, leaving the
