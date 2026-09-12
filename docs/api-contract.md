@@ -9,8 +9,9 @@ it byte-for-byte. App-side implementation status is tracked in
 The app makes one batch of calls each morning on the home LAN and renders the
 result. Both endpoints are projections of a single nightly-precomputed blob, so
 a pair of calls made seconds apart cannot disagree — except across the narrow
-nightly cache-replacement window described in the implementation note under
-**Storage of the precomputed blob** below.
+nightly cache-replacement window, or when the calls straddle midnight in
+Sydney, both described in the implementation note under **Storage of the
+precomputed blob** below.
 
 ## A note on the examples
 
