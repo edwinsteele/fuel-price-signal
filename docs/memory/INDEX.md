@@ -74,6 +74,11 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [prose-justifications-fail-silently](prose-justifications-fail-silently.md) — "X is this way BECAUSE Y" is the claim nothing tests. Ask what would fail if Y were false; if nothing, delete the sentence or attach the measurement.
 - [test-discrimination-claims-need-mutation](test-discrimination-claims-need-mutation.md) — "this test catches X" needs the mutation *run*, and needs you to read the line that answers the question. `tail -n` truncates exactly the count you were asking for.
 
+## api-contract.md / iOS client wire format
+
+- [api-contract-generated-at-not-an-identity](api-contract-generated-at-not-an-identity.md) — the iOS client's `JSONDecoder` (`.iso8601` = `.withInternetDateTime`) rejects fractional seconds; don't add sub-second precision to `generated_at` to close the same-second cache-write race.
+- [api-contract-byte-identical-copy-wording-trap](api-contract-byte-identical-copy-wording-trap.md) — `fuel-price-signal-app` vendors this doc byte-for-byte; "this repo"/"here"/"this copy" phrasing is true in at most one of the two homes.
+
 ## Environment and tooling traps
 
 - [venv-corruption-concurrent-uv](venv-corruption-concurrent-uv.md) — `ModuleNotFoundError` for `six`/`py` means two concurrent `uv run`s half-synced `.venv`. Only fix: `rm -rf .venv && uv sync`. Run pipeline stages sequentially.
