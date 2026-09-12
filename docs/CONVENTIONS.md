@@ -439,9 +439,9 @@ alone is not this check** — it misses Codex's inline findings and its silent r
 pass entirely (caught live on PR #422). This is a mandatory mechanical step, not a suggestion — do
 it before writing any response to the user. When the wakeup fires: act on any actionable comments
 present. If Sourcery is rate-limited or absent, **skip it and move on — do not reschedule to wait
-for it**. If Codex hasn't produced any signal (no review, comment, or reaction) after the wait,
-post `@codex review` as a PR comment and check again rather than concluding it's clean or giving up
-on it — the auto-trigger is documented as unreliable. Use judgement on style nits that conflict
+for it**. Codex's PR-open and re-review triggers are reliable as of 2026-09-12 — **do not manually
+post `@codex review`**; if it hasn't produced a signal yet, that means it hasn't reached this PR
+yet, not that it needs nudging. Use judgement on style nits that conflict
 with project conventions. Run `uv run ruff check . && uv run pytest -q`, push, and repeat until no
 actionable comments remain. The goal is a ready-to-merge deliverable.
 

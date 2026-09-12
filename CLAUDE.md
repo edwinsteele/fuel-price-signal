@@ -188,11 +188,11 @@ syntax, expanded from the checkout's git remote — write it literally.
    [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md). If
    there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available
    in `/loop` mode — do not attempt it here.) Act on any actionable comments found. If Sourcery is
-   rate-limited or absent, skip and move on — do not reschedule. **If Codex has produced no signal
-   at all (no review, comment, or reaction) after the wait, its auto-trigger is documented as
-   unreliable — post `@codex review` as a PR comment and check again after another ~270s, rather
-   than treating silence as clean or giving up on it.** Implement comments, run
-   `uv run ruff check . && uv run pytest -q`, push. Repeat until no actionable comments remain.
+   rate-limited or absent, skip and move on — do not reschedule. Codex's PR-open and re-review
+   triggers are reliable as of 2026-09-12 — **do not manually post `@codex review`**; if it has
+   produced no signal after the wait, that means it hasn't reached this PR yet, not that it needs
+   nudging. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until
+   no actionable comments remain.
 
 Note: this run does not wait for the merge — that is gated by the separate `auto-merge.yml`
 workflow (≥900s age + green checks). Nothing is left over for a later run to finish: the
@@ -208,7 +208,9 @@ When pickup rule 2 triggers, for each qualifying PR:
 4. `git push --force-with-lease`.
 
 *Unresolved review threads:*
-1. Run the **PR review/CI snapshot** helper and inspect each review body for actionable inline comments not yet addressed (i.e. no `[worker]` reply in `comments`).
+1. Run the **PR review/CI snapshot** helper and inspect the `pulls/<N>/comments` entries (inline
+   findings — Codex's are here, not in `reviews[].body`, which is boilerplate) for actionable
+   comments not yet addressed (i.e. no `[worker]` reply among the replies on that comment).
 2. Read all such threads together to understand the full set of requested changes.
 3. For any thread that is ambiguous or requires a design decision: reply `[worker] Needs owner input — <question>` and skip it. Do not make changes for that thread.
 4. Make the minimal changes to address the remaining threads.
@@ -259,12 +261,11 @@ Handle conflicts first, then review threads, in a single pass per PR.
   to get Codex's actual status (checking a reaction's `created_at` against the commit at HEAD — a
   reaction predating the latest push reviewed a previous commit, not this one), and
   `pulls/<N>/reviews` for Sourcery. Act on any actionable comments present. If Sourcery is
-  rate-limited or absent, **skip and move on — do not reschedule to wait for it**. If Codex has
-  produced no signal at all (no review, comment, or reaction) after the wait, its auto-trigger is
-  documented as unreliable — post `@codex review` as a PR comment and check again rather than
-  treating silence as clean or giving up on it. Implement appropriate comments, push, repeat until
-  no actionable comments remain. **Report each reviewer's status to the user explicitly, including
-  a clean pass** — silence reads as "didn't check," not "was clean."
+  rate-limited or absent, **skip and move on — do not reschedule to wait for it**. Codex's
+  PR-open/re-review triggers are reliable as of 2026-09-12 — **do not manually post `@codex
+  review`**; if it has produced no signal yet, wait rather than nudging it. Implement appropriate
+  comments, push, repeat until no actionable comments remain. **Report each reviewer's status to
+  the user explicitly, including a clean pass** — silence reads as "didn't check," not "was clean."
 - **`experiments/**` and `docs/memory/**` are exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs), `experiments/INDEX.md`, and technical memory files may be committed **and pushed** directly to `main` without a PR. Those are the only paths that bypass review; everything else still requires one, and a commit touching an exempt path *and* code is not exempt — split it. **Direct-to-`main` includes the push** — a commit left on the local `main` is not landed, and unattended routines are exactly where that goes unnoticed (see [docs/CONVENTIONS.md](docs/CONVENTIONS.md) § Git workflow for the 2026-08-26 incident). End any session that writes to `main` with `git status --short` empty and `git log --oneline origin/main..main` empty.
 
 ## spawn_task → `gh issue create` redirect
