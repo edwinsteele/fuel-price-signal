@@ -629,6 +629,14 @@ def _fill_advice(
     ]
     if others:
         alt = others[0]
+        if best.prob is None:
+            return (
+                "WAIT if you can.",
+                f"{best.label} @ {best.price:.1f}c is the cheapest on route but hasn't "
+                f"been scored. {alt.label} clears the buy bar instead, at "
+                f"+{alt.price - best.price:.1f}c — P(BUY) is measured per station, so "
+                "it is not a reason to drive there.",
+            )
         return (
             "WAIT if you can.",
             f"{best.label} @ {best.price:.1f}c is the cheapest on route but doesn't "
