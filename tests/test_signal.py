@@ -587,9 +587,12 @@ def test_cli_output_structure(signal_db):
     result = runner.invoke(signal_cli, ["--as-of", as_of, "--db", str(db_path)])
     assert result.exit_code == 0
     assert f"E10 - {as_of}" in result.output
-    assert ("FILL UP" in result.output) or ("WORTH A STOP" in result.output) or (
-        "WAIT if you can" in result.output
-    ) or ("No price data" in result.output) or ("no price data yet" in result.output)
+    # This fixture's DB has no seeded prices for any of the real PREFERRED_STATIONS,
+    # and 4 of its 5 default stations are on the daily commute (only 261 is
+    # restricted — see config.STATION_ROUTE_DAYS), so this pins the specific
+    # on_route_unpriced branch rather than accepting any headline (review on
+    # #418: an assertion widened across all branches stops pinning any of them).
+    assert "on route today, but no price data for this date." in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -691,9 +694,48 @@ def test_reachable_but_unpriced_station_is_not_reported_as_nothing_on_route(
     assert monday.weekday() == 0
     output = build_signals(conn, as_of, preferred_stations=_TWO, routing_day=monday)
     assert "Nothing on your route today" not in output
-    assert "Daily Servo on route today, but no price data yet." in output
+    assert "Daily Servo on route today, but no price data for this date." in output
     assert "OFF ROUTE" in output
     assert "Weekly Servo" in output
+    # The off-route pointer must survive alongside the unpriced headline —
+    # #418 review: an earlier `elif` chain let whichever alternative lost the
+    # race disappear entirely, dropping this exact "go here instead" line.
+    assert re.search(r"Cheapest preferred station is Weekly Servo @ \d+\.\dc, next passed in 2d\.", output)
+    # Daily Servo is already named in the headline above — the footer must
+    # not repeat it (#418 review: it used to print every unpriced station
+    # unconditionally, duplicating anything just named).
+    assert "Daily Servo: no price data" not in output
+
+
+def test_nothing_reachable_and_nothing_priced_reports_total_outage(
+    two_station_db, monkeypatch
+):
+    """Neither `on_route_unpriced` nor `off_route` — the genuine data-outage case.
+
+    Restricting every preferred station off today's route AND stripping every
+    price for `as_of` empties both `on_route_unpriced` (nothing reachable) and
+    `off_route` (nothing priced) — the combination `test_cli_output_structure`
+    stopped pinning once its assertion widened to accept any headline (#418
+    review). This is what the final `else` branch exists for.
+    """
+    conn, series = two_station_db
+    monkeypatch.setattr(
+        "fuel_signal.signal.STATION_ROUTE_DAYS",
+        {9001: frozenset({2}), 9002: frozenset({2})},
+    )
+    as_of = series[180][0]
+    fid = db.fuel_type_id(conn, "E10")
+    conn.execute(
+        "DELETE FROM daily_prices WHERE fuel_type_id = ? AND price_date = ?",
+        (fid, db._date_to_int(as_of)),
+    )
+    conn.commit()
+    monday = datetime.date(2026, 9, 7)
+    assert monday.weekday() == 0
+    output = build_signals(conn, as_of, preferred_stations=_TWO, routing_day=monday)
+    assert "No price data for any preferred station on this date." in output
+    assert "Nothing on your route today" not in output
+    assert "on route today, but no price data" not in output
 
 
 def test_stations_are_ranked_by_price_not_by_probability(two_station_db, monkeypatch):
