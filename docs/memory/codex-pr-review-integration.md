@@ -16,16 +16,26 @@ for this repo". That comment is not a review and does not mean the integration i
 `@codex` alone also worked. It answers questions and can push fixes with
 `@codex address that feedback` when it has push permission.
 
-**The PR-open auto-trigger is NOT reliable — never assume it already ran.** Confirmed
-firing automatically on #410 (review posted 4m44s after PR open, no comment asked for
-it). Confirmed NOT firing on #409 and #411 — both sat completely silent (no comment, no
-review, no reaction, no check-run) until a manual `@codex review`, and in both cases the
-repo's Codex environment was already configured (no "create an environment" nag either,
-which is the tell for that separate failure mode). So: after opening a PR, check for
-Codex activity same as you'd check for Sourcery's — do not wait indefinitely on the
-assumption it auto-fired, and do not read an early SILENCE as "still running" versus
-"never triggered". If nothing shows up within a few minutes, post `@codex review`
-yourself rather than waiting longer.
+**UPDATE 2026-09-12: the auto-trigger unreliability below was a setup-period problem, now
+resolved — do not manually post `@codex review` any more.** The #409/#411 silence dated to
+right after the connector was enabled (2026-09-09); by PR #423 (2026-09-12) the auto-trigger
+fired automatically and reliably twice in one PR — once on PR open (review posted 5m27s
+later, unprompted) and once on a fixup push (review posted ~4m after the push, unprompted,
+correctly reviewing the new commit). No manual `@codex review` was needed either time. Still
+check for Codex activity the way you'd check for Sourcery's (see the channels below — findings
+land as inline comments, a clean pass can be a bare reaction), but **absence after the wait
+means "hasn't reached this PR yet", not "never triggered"** — do not nudge it with a manual
+`@codex review` comment. The paragraph immediately below is kept as the historical record of
+the setup-period failure mode, not current guidance.
+
+**[Historical, setup period only] The PR-open auto-trigger was NOT reliable — never assume it
+already ran.** Confirmed firing automatically on #410 (review posted 4m44s after PR open, no
+comment asked for it). Confirmed NOT firing on #409 and #411 — both sat completely silent (no
+comment, no review, no reaction, no check-run) until a manual `@codex review`, and in both
+cases the repo's Codex environment was already configured (no "create an environment" nag
+either, which is the tell for that separate failure mode). This was the state of the
+integration in its first three days (2026-09-09 to 2026-09-11); see the 2026-09-12 update
+above for the current, resolved behaviour.
 
 **Standard practice: announce Codex's status the same way you already announce
 Sourcery's.** When you see Codex has posted (a review with findings, or the "Codex
@@ -87,12 +97,14 @@ Missing this on PR #410 meant reporting "no substantive review yet" while six P1
 findings sat on the diff. Also check `.[].line` — some findings come back with
 `line: null` (outdated/file-level) and are easy to skip when eyeballing.
 
-**Codex re-reviews pushes, but NOT indefinitely — do not assume it will catch up.**
-On PR #410 it ran six automatic passes (~4-6 min behind each push) and then stopped,
-leaving the last three commits unreviewed with no notice. Whether that is a
-re-review cap like Sourcery's five, or a rate limit, is not established; what is
-established is that "it will get to it" is not safe. `@codex review` re-triggers it
-and is the documented way to cover commits it skipped.
+**[Historical, setup period] Codex re-reviews pushes, but on PR #410 (2026-09-09-10, the same
+setup period as the trigger issue above) it ran six automatic passes then stopped, leaving the
+last three commits unreviewed with no notice.** Whether that was a re-review cap or a rate
+limit tied to the setup-period problems above is not established, and it has not recurred since
+(PR #423, 2026-09-12, re-reviewed a fixup push normally). Per the 2026-09-12 update at the top
+of this file, **do not manually post `@codex review`** to work around a suspected stall —
+if a later PR with many pushes does show this again, note it fresh rather than reaching for the
+old remedy.
 
 A pass whose "Reviewed commit" is not HEAD has not seen your latest fix — absence of
 new findings there means "hasn't looked", not "clean". **Check the reviewed sha
