@@ -44,6 +44,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [signal-payload-day-stable-boundary](signal-payload-day-stable-boundary.md) — `SignalPayload` (post-#415 split) fields must be a function of `(as_of_date, database)` only; a field derived from `now`, even transitively, is unsafe to cache overnight.
 - [noise-floor-force-vs-cadence-relock](noise-floor-force-vs-cadence-relock.md) — `--force` recovers a floor after a *column* re-lock, but is refused after a *cadence* re-lock. Freeze a new batch instead.
 - [check-freeze-cadence-lives-in-batch-freeze](check-freeze-cadence-lives-in-batch-freeze.md) — the guard moved from `noise_floor.py` to `batch_freeze.py` (#382) so `runner.py` could call it too, without a circular import.
+- [elif-chain-hides-independent-facts](elif-chain-hides-independent-facts.md) — `render_text`'s route headline chained two independent facts as `elif`; whichever was checked first (`on_route_unpriced`, true almost every live day) permanently shadowed the other (the off-route pointer). Check independent facts independently and compose the output.
 
 ## Pipeline layout and plumbing
 
