@@ -18,6 +18,34 @@ For project architecture, CLI patterns, data strategy, signal logic, and automat
   run it.
 - [docs/memory/INDEX.md](docs/memory/INDEX.md) — this repo's atomic technical gotchas (pipeline layout, numerical traps, environment traps). Short, load-bearing, and cheap to read; several are rules you will otherwise break before noticing. Git/worktree/GitHub discipline moved to [docs/CONVENTIONS.md](docs/CONVENTIONS.md) instead.
 
+## API contract: this repo is canonical
+
+[docs/api-contract.md](docs/api-contract.md) has a sibling copy in
+`edwinsteele/fuel-price-signal-app` (the private iOS client), which vendors it.
+**This repo holds the canonical copy.** The contract describes bytes this
+server emits, and only this server can make a statement in it true — so when
+the two copies disagree, this one wins.
+
+The contract is a **shared agreement**, not a description of the server: if
+something in it can't be served as written, raise it rather than editing the
+contract unilaterally to match whatever the server currently does. Either side
+may propose a change, but only the canonical copy decides who wins a diff.
+
+The two worked JSON examples (`stations` and `recommendation` responses) open
+with `` ```json stations-response `` and `` ```json recommendation-response ``
+rather than plain `` ```json ``. Those markers are inert here — GitHub's
+fenced-code highlighting reads only the first word of the info string — but
+the app's `ContractFixtures.swift` extracts each payload by marker at test
+time, and the app's sync tooling refuses to vendor a copy that's missing them
+rather than silently breaking its test build. **Never drop or rename these
+markers when editing the examples.**
+
+Changes land here first and are pulled downstream second. There's no
+automated push: this repo would need a token to read the private app repo,
+which isn't worth it for this. So flag any contract change here to the app
+side directly — its own weekly sync-check job is the backstop, but it only
+notices on its own schedule and may take up to a week to catch a drift.
+
 ## Model/effort guidance
 
 - Sonnet for implementation (downloader, transformer, DB layer, tests)
