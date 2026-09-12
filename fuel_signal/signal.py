@@ -842,10 +842,16 @@ def render_text(
         for code, label in payload.preferred_stations.items()
     ]
 
+    reachable = [v for v in views if v.reachable_on(today)]
     on_route = sorted(
-        (v for v in views if v.reachable_on(today) and v.price is not None),
+        (v for v in reachable if v.price is not None),
         key=lambda v: v.price,
     )
+    # Reachable today but no price yet — a data problem, not a routing one
+    # (#418). Partitioning on price first used to fold these into `unpriced`
+    # and empty `on_route`, which made a station that genuinely IS on the
+    # route report as "Nothing on your route today."
+    on_route_unpriced = [v for v in reachable if v.price is None]
     off_route = sorted(
         (v for v in views if not v.reachable_on(today) and v.price is not None),
         key=lambda v: v.price,
@@ -874,6 +880,7 @@ def render_text(
     ]
 
     # --- the call ---------------------------------------------------------
+    headline_named_unpriced: set[int] = set()
     if on_route:
         headline, reason = _fill_advice(
             on_route,
@@ -883,24 +890,33 @@ def render_text(
             rule_verdict=rule_verdict,
         )
         lines += [f"  {headline}", f"  {reason}", ""]
-    elif off_route:
-        # Priced stations exist, just none reachable today — a routing answer.
-        nearest = off_route[0]
-        nxt = nearest.next_reachable(today)
-        assert nxt is not None and nxt[1] >= 1   # off-route ⇒ not today
-        when = f"in {nxt[1]}d"
-        lines += [
-            "  Nothing on your route today.",
-            f"  Cheapest preferred station is {nearest.label} @ "
-            f"{nearest.price:.1f}c, next passed {when}.",
-            "",
-        ]
     else:
-        # No station has a price at all — a data answer, not a routing one.
-        lines += [
-            "  No price data for any preferred station on this date.",
-            "",
-        ]
+        # Nothing priced is reachable today. "On route but unpriced" (a data
+        # problem) and "priced but off route" (a routing pointer) are
+        # independent facts that can both hold at once — an earlier version
+        # of this branch picked one via `elif`, which silently dropped
+        # whichever alternative lost the race (review on #418: with 4 of 5
+        # PREFERRED_STATIONS on the daily commute, `on_route_unpriced` is
+        # almost always non-empty live, which made the off-route pointer
+        # below dead code in production).
+        if on_route_unpriced:
+            names = ", ".join(v.label for v in on_route_unpriced)
+            lines.append(f"  {names} on route today, but no price data for this date.")
+            headline_named_unpriced = {v.code for v in on_route_unpriced}
+        elif off_route:
+            lines.append("  Nothing on your route today.")
+        else:
+            lines.append("  No price data for any preferred station on this date.")
+        if off_route:
+            nearest = off_route[0]
+            nxt = nearest.next_reachable(today)
+            assert nxt is not None and nxt[1] >= 1   # off-route ⇒ not today
+            when = f"in {nxt[1]}d"
+            lines.append(
+                f"  Cheapest preferred station is {nearest.label} @ "
+                f"{nearest.price:.1f}c, next passed {when}."
+            )
+        lines.append("")
 
     # --- tables -----------------------------------------------------------
     scored = bool(probs)
@@ -947,6 +963,8 @@ def render_text(
                     )
 
     for v in unpriced:
+        if v.code in headline_named_unpriced:
+            continue   # already named in the headline above — don't repeat it
         lines.append(f"  {v.label}: no price data")
 
     if not scored:
