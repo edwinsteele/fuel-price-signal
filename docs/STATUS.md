@@ -215,7 +215,7 @@ on sign, r = 0.704, intervals overlap). Full write-up and the numbers behind eve
    `.get(key) or DEFAULT` — the latter would silently promote an explicit `null` too), so every
    floor committed before this axis existed keeps grading exactly as it does today. **The
    noise floor itself is still five-station** — this stamps and guards the axis, it does not
-   move it. Next: `fps-ajs` (recompute at 410, 40 draws, ~11h), blocking dep set.
+   move it. (`fps-ajs`, the 410 recompute, has since landed — closed 2026-09-05, run 2026-09-06: `experiments/2026-09-06_noise_floor_n410/`; see below.)
 2. **Run those BEFORE any new pass/fail grading** — notably `fps-490` (locked-block ablation).
    Block *rankings* survive a ruler change; pass/fail calls do not.
 
