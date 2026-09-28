@@ -12,28 +12,30 @@ PR #408.
 still comments on every new PR, but only to say "To use Codex here, create an environment
 for this repo". That comment is not a review and does not mean the integration is broken.
 
-**Triggers:** PR opened for review, draft marked ready, or a `@codex review` comment.
+**Triggers:** a `@codex review` comment (the only one that fires now — see CURRENT below); with auto-review on it was also PR opened for review and draft marked ready.
 `@codex` alone also worked. It answers questions and can push fixes with
 `@codex address that feedback` when it has push permission.
 
-**UPDATE 2026-09-12: the auto-trigger unreliability below was a setup-period problem, now
-resolved — do not manually post `@codex review` any more.** The #409/#411 silence dated to
-right after the connector was enabled (2026-09-09); by PR #423 (2026-09-12) the auto-trigger
-fired automatically and reliably twice in one PR — once on PR open (review posted 5m27s
-later, unprompted) and once on a fixup push (review posted ~4m after the push, unprompted,
-correctly reviewing the new commit). No manual `@codex review` was needed either time. Still
-check for Codex activity the way you'd check for Sourcery's (see the channels below — findings
-land as inline comments, a clean pass can be a bare reaction), but **absence after the wait
-means "hasn't reached this PR yet", not "never triggered"** — do not nudge it with a manual
-`@codex review` comment. The paragraph immediately below is kept as the historical record of
-the setup-period failure mode, not current guidance.
+**CURRENT (owner, 2026-09-29): Codex auto-review is OFF. It reviews only when asked — post one
+`@codex review` comment after opening the PR and after each push, once per head.** Never post a
+second request for a head that already has one; silence after a request means Codex hasn't reached
+it yet (typical latency 4–6 min, see below), not that it needs another nudge. A head nobody has
+asked about will never get a review, so "no signal" on an unrequested head is not "pending" — it is
+`UNREQUESTED`. The `codex-pr-review` skill's `codex-status.sh <owner/repo> <N>` (in
+`~/.claude/skills/`, not this repo) reports `UNREQUESTED` / `PENDING` / `IN_FLIGHT` / `CLEAN` /
+`FINDINGS n` / `ERRORED n` for the current head; where it isn't available, run the four channel
+checks below. Findings still land as inline comments and a clean pass can still be a bare 👍.
 
-**Codex itself disputed this change** (PR #423, reviewing the commit that made it): it
-argued two successful firings don't erase the recorded #409/#411/#410 incidents, and
-suggested keeping the manual-trigger fallback. The reply on record: this is an explicit
-repo-owner decision, not an oversight, and stands regardless of a bot's disagreement — a
-recurrence should be logged fresh here for the owner to weigh, not used as grounds to
-silently reinstate the old remedy on the session's own judgement.
+**History of this rule (do not treat as current guidance):**
+- 2026-09-09 to 09-11 (setup period): the PR-open auto-trigger was unreliable — see the next
+  paragraph — and the practice was to post `@codex review` manually.
+- 2026-09-12 (PR #423): auto-trigger fired unprompted twice in one PR (review 5m27s after PR open,
+  ~4m after a fixup push), so the owner ruled "do not manually post `@codex review`". Codex itself
+  disputed that on the PR (two firings don't erase #409/#411/#410) and suggested keeping the manual
+  fallback; the owner's answer then was that the decision stood.
+- By 2026-09-24 auto-review had been turned off (the `ticket-to-pr` skill's commit of that date
+  records it: "Auto-review is being turned off"), reversing the 09-12 ruling; the owner confirmed
+  it is off on 2026-09-29. Repo docs and `CLAUDE.md` still said "do not manually post" in the interim.
 
 **[Historical, setup period only] The PR-open auto-trigger was NOT reliable — never assume it
 already ran.** Confirmed firing automatically on #410 (review posted 4m44s after PR open, no
@@ -117,10 +119,8 @@ from a review of an earlier commit all showed `commit_id` equal to a later HEAD.
 setup period as the trigger issue above) it ran six automatic passes then stopped, leaving the
 last three commits unreviewed with no notice.** Whether that was a re-review cap or a rate
 limit tied to the setup-period problems above is not established, and it has not recurred since
-(PR #423, 2026-09-12, re-reviewed a fixup push normally). Per the 2026-09-12 update at the top
-of this file, **do not manually post `@codex review`** to work around a suspected stall —
-if a later PR with many pushes does show this again, note it fresh rather than reaching for the
-old remedy.
+(PR #423, 2026-09-12, re-reviewed a fixup push normally). That was under auto-review; with it now off (see CURRENT at the top of this file), a re-review
+after each push needs its own `@codex review`, so a stall like this would just read as `UNREQUESTED`.
 
 A pass whose "Reviewed commit" is not HEAD has not seen your latest fix — absence of
 new findings there means "hasn't looked", not "clean". **Check the reviewed sha

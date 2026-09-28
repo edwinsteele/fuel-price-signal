@@ -216,10 +216,11 @@ syntax, expanded from the checkout's git remote — write it literally.
    [docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md). If
    there is no other useful work, run `sleep 270` then check. (`ScheduleWakeup` is only available
    in `/loop` mode — do not attempt it here.) Act on any actionable comments found. If Sourcery is
-   rate-limited or absent, skip and move on — do not reschedule. Codex's PR-open and re-review
-   triggers are reliable as of 2026-09-12 — **do not manually post `@codex review`**; if it has
-   produced no signal after the wait, that means it hasn't reached this PR yet, not that it needs
-   nudging. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until
+   rate-limited or absent, skip and move on — do not reschedule. **Codex auto-review is OFF** (owner,
+   2026-09-29): it reviews only when asked, so right after opening the PR — and after each later push —
+   post one `@codex review` (`gh api repos/{owner}/{repo}/issues/<N>/comments -f 'body=@codex review'`),
+   once per head, never re-posted for a head it has already been asked about. If it has produced no
+   signal after the wait, it hasn't reached the request yet — wait, don't repost. Implement comments, run `uv run ruff check . && uv run pytest -q`, push. Repeat until
    no actionable comments remain.
 
 Note: this run does not wait for the merge — that is gated by the separate `auto-merge.yml`
@@ -289,9 +290,11 @@ Handle conflicts first, then review threads, in a single pass per PR.
   to get Codex's actual status (checking a reaction's `created_at` against the commit at HEAD — a
   reaction predating the latest push reviewed a previous commit, not this one), and
   `pulls/<N>/reviews` for Sourcery. Act on any actionable comments present. If Sourcery is
-  rate-limited or absent, **skip and move on — do not reschedule to wait for it**. Codex's
-  PR-open/re-review triggers are reliable as of 2026-09-12 — **do not manually post `@codex
-  review`**; if it has produced no signal yet, wait rather than nudging it. Implement appropriate
+  rate-limited or absent, **skip and move on — do not reschedule to wait for it**. **Codex
+  auto-review is OFF** (owner, 2026-09-29): request it with one `@codex review` comment after the PR is
+  opened and after each push, once per head (`codex-pr-review` skill's `codex-status.sh` reports
+  `UNREQUESTED` when a head hasn't been asked); if it has produced no signal after a request, wait rather
+  than reposting. Implement appropriate
   comments, push, repeat until no actionable comments remain. **Report each reviewer's status to
   the user explicitly, including a clean pass** — silence reads as "didn't check," not "was clean."
 - **`experiments/**` and `docs/memory/**` are exempt from the PR rule.** Lab book entries (per-experiment `README.md`, scripts, CSV outputs), `experiments/INDEX.md`, and technical memory files may be committed **and pushed** directly to `main` without a PR. Those are the only paths that bypass review; everything else still requires one, and a commit touching an exempt path *and* code is not exempt — split it. **Direct-to-`main` includes the push** — a commit left on the local `main` is not landed, and unattended routines are exactly where that goes unnoticed (see [docs/CONVENTIONS.md](docs/CONVENTIONS.md) § Git workflow for the 2026-08-26 incident). End any session that writes to `main` with `git status --short` empty and `git log --oneline origin/main..main` empty.
