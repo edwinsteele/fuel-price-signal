@@ -16,10 +16,10 @@ separator is a command lookup for `==`, which fails:
 It is an expansion error, so zsh **abandons the whole command list** — every
 command after it on a `;`-joined line is skipped, and the tool reports exit 1.
 Hit three times in one session (2026-10-01); one of those silently skipped a
-second `codex-wait.sh` call, so the second PR's review status was never
-checked and the failure read as "the wait failed".
+second `codex-wait.sh` call, so the second PR's review status went unchecked
+until a re-run, and the failure first read as "the wait failed".
 
-**How to apply:** use `echo '==='`, `echo ---`, or `printf '%s\n' ===` for
+**How to apply:** use `echo '==='` or `echo ---` for
 separators, and quote any other argument that starts with `=`. For a script that
 must be bash, run it as `bash -c '…'` or a file with a bash shebang — a
 `#!/usr/bin/env bash` script is unaffected; only the interactive command line is
