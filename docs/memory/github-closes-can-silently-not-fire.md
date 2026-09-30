@@ -18,7 +18,7 @@ than systemic. Don't build a theory on one occurrence; build the check.
 
 **The rule: `closingIssuesReferences` being present is NOT evidence the issue closed.** They
 are two different pieces of state and this is the case that proves they can disagree. The
-post-merge checklist in CLAUDE.md already says to confirm closure — do it by reading the
+post-merge checklist in `docs/CONVENTIONS.md` § Interactive sessions already says to confirm closure — do it by reading the
 issue's own state, which is the only thing that settles it:
 
 ```bash

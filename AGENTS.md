@@ -15,11 +15,17 @@ See [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for code style, test patterns, de
 See [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) for the ML model training/evaluation CLI reference (README.md covers setup and day-to-day signal usage only).
 See [docs/feature-pipeline.md](docs/feature-pipeline.md) for the AI-sourced candidate-feature pipeline's machinery.
 See [docs/data-semantics.md](docs/data-semantics.md) for station classification, price-data shape, and the traps in filtering on class.
+`PLAN_ml_signal.md` is the active ML-signal plan. It lives at the **repo root and is gitignored** — some docs say `docs/PLAN_ml_signal.md`, which is wrong.
 
-**This file has a byte budget.** Codex loads `AGENTS.md` eagerly up to 32 KiB and silently
-drops the remainder, so it stays architecture, module layout and review rules only — everything
-else goes in the docs above and is reached by link. `tests/test_agents_md_budget.py` enforces
-the limit; when it fails, move content out rather than deleting it.
+This file is read by every agent working in this repo — currently Claude Code and Codex.
+`CLAUDE.md` is a thin pointer to it plus Claude-Code-specific tooling; Codex reads this file
+directly and never sees `CLAUDE.md`, so a repo fact that lives only there is invisible to it.
+
+**This file has a hard size limit, and it is not a style rule.** Codex loads `AGENTS.md`
+eagerly up to 32 KiB and silently drops the remainder, so it stays architecture, module layout
+and review rules only — everything else goes in the docs above and is reached by link.
+`tests/test_agents_md_budget.py` enforces the limit; when it fails, move content out rather
+than deleting it.
 
 ## Module structure
 
@@ -110,6 +116,7 @@ Backfills also commit per snapshot; batch commits in range mode only, where the 
 
 - Package manager: **uv** (`uv init`, `uv add`, `uv run`)
 - Standard `pyproject.toml` (not Poetry's custom format)
+- Ported from `~/Code/ff-aws-backend` (primary: `recommendations.py`, `purchasing_strategy.py`, FuelCheck OAuth, Click `cli.py`) and `~/Code/petrol_prices` (transformer/downloader/gap-fill, postcode→LGA map); the port is done, so read them only to trace original logic. Never carry over their AWS/Django infrastructure (DynamoDB, S3, SQS, SNS, Serverless, Django ORM) or `jsonpickle`/`msrest`.
 
 ## Data strategy
 
@@ -247,6 +254,8 @@ Known unrecoverable gaps (source data never published):
 
 `inspect.py` is a local Flask dev server — `uv run python -m fuel_signal.inspect` starts it (default port 5000). State lives in the URL query string. Series types: `sydney`, `lga:Name`, `brand:Name`, `station:CODE`. Chart types: line, scatter, gradient heatmap, coverage heatmap. See README for full usage.
 
+**`/api/v1` has a contract, and this repo holds the canonical copy.** [docs/api-contract.md](docs/api-contract.md) is vendored byte-for-byte by the private iOS client (`edwinsteele/fuel-price-signal-app`). It is a shared agreement, not a description of the server: raise a mismatch rather than editing the contract to match the code. **Never drop or rename the `` ```json stations-response `` / `` ```json recommendation-response `` fence markers** — both repos' tests extract the examples by them. Workflow: [docs/CONVENTIONS.md § API contract](docs/CONVENTIONS.md#api-contract-this-repo-is-canonical).
+
 Leading indicators (deferred — not yet built):
 - Hypothesis: some LGAs and/or macro signals (TGP, crude) precede BM price rises
 - Architecture supports this: new series → new `CycleDetector` → new signal class → register in `RecommendationManager`
@@ -275,6 +284,21 @@ See [docs/CONVENTIONS.md § Multi-seed test-logloss policy](docs/CONVENTIONS.md#
 ## Testing
 
 Tests are required alongside all implementation. Required coverage areas and the DB fixture / `CliRunner` patterns: [docs/CONVENTIONS.md § Tests](docs/CONVENTIONS.md#tests).
+
+## Agent workflow conventions
+
+These bind whichever agent is acting in this repo, not just Claude. The full set is
+[docs/CONVENTIONS.md](docs/CONVENTIONS.md); these are the ones most often got wrong.
+
+- **Wait for the review proactively.** After opening a PR, request and wait for the review
+  yourself and report each reviewer's status, clean passes included — see § Code review below
+  and [docs/CONVENTIONS.md § PR feedback loop](docs/CONVENTIONS.md#pr-feedback-loop).
+- **Merging is the owner's call** in interactive work. Only the worker's `chore` PRs merge
+  unattended (`auto-merge-ok` + green CI, via `auto-merge.yml`).
+- **Docs go straight to `main` — no PR.** Markdown-only changes (`AGENTS.md`, `CLAUDE.md`,
+  anything under `docs/`), `docs/memory/**` and `experiments/**` commit **and push** straight to
+  `main`. `.github/workflows/**` is **not** covered: CI changes go through a PR. If a change
+  mixes doc and code, the code half decides and the whole thing goes through a PR.
 
 ## Technical memories
 
@@ -333,9 +357,17 @@ Command reference, the decision-pointer convention, the `--label` vs `--search` 
 
 See [docs/automation.md](docs/automation.md) for the full state machine and operational details, and [docs/CONVENTIONS.md § Issue label taxonomy](docs/CONVENTIONS.md#issue-label-taxonomy) for the routing/topic/priority labels that decide who picks an issue up.
 
-## Code Review Rules
+## Code review
 
-For `@codex review`. General correctness review needs no instruction here — these are the
+PRs here are reviewed by ChatGPT Codex (on request — one `@codex review` comment per pushed
+head; auto-review is off) and Sourcery. **For the agent checking a PR's status:** Codex's
+findings are *inline* review comments (`gh api repos/{owner}/{repo}/pulls/<N>/comments`) that
+`gh pr view` does not show, and a clean pass can be nothing but a 👍 on
+`issues/<N>/reactions` — check its `created_at` against HEAD's push time. Claude Code sessions
+use the `codex-pr-review` skill; the raw checks are in
+[docs/memory/codex-pr-review-integration.md](docs/memory/codex-pr-review-integration.md).
+
+**Review rules, for `@codex review`.** General correctness review needs no instruction here — these are the
 repository-specific rules.
 
 **Do not report:**

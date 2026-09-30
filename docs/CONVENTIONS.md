@@ -25,8 +25,8 @@ docs](#decisions-land-in-repo-docs-not-just-memory) · [One source of
 truth](#one-source-of-truth-for-current-model-state) · [Docs and memory: signal
 over sediment](#docs-and-memory-signal-over-sediment) · [Git
 workflow](#git-workflow) · [Worktrees](#worktrees) · [Filing and finding
-issues](#filing-and-finding-issues) · [PR feedback loop](#pr-feedback-loop) · [Code review
-caution](#code-review-caution) · [Experiment scripts](#experiment-scripts) ·
+issues](#filing-and-finding-issues) · [Interactive sessions](#interactive-sessions) · [PR feedback loop](#pr-feedback-loop) · [Code review
+caution](#code-review-caution) · [API contract](#api-contract-this-repo-is-canonical) · [Experiment scripts](#experiment-scripts) ·
 [Shell tooling](#shell-tooling)
 
 ## Code
@@ -293,7 +293,8 @@ or [STATUS.md](STATUS.md) and leave a pointer — a linked doc costs nothing.
 - **Fresh branch per PR.** Branch off `main` for each PR; do not continue committing to a previously merged branch even though GitHub diffs against `main` would still work.
 - **Open the PR immediately** after the first commit+push — no need to ask first.
 - Branch naming, PR title format, and PR body shape: see [§ Branch and PR conventions](#branch-and-pr-conventions).
-- **Experiments lab book is exempt.** Changes confined to `experiments/**` may be committed **and pushed** directly to `main` without a PR. Each experiment dir is a self-contained lab book entry; iterate freely. `experiments/results.csv` (the formal graduated-experiment log) and `experiments/INDEX.md` (the lab book index) are also direct-to-`main`. Anything touching `fuel_signal/`, `tests/`, `docs/`, or top-level config still goes through a PR even if an experiment motivated it.
+- **Experiments lab book is exempt.** Changes confined to `experiments/**` may be committed **and pushed** directly to `main` without a PR. Each experiment dir is a self-contained lab book entry; iterate freely. `experiments/results.csv` (the formal graduated-experiment log) and `experiments/INDEX.md` (the lab book index) are also direct-to-`main`. Anything touching `fuel_signal/`, `tests/`, or top-level config still goes through a PR even if an experiment motivated it.
+- **Doc-only changes are exempt too** — markdown with no code or test change (`AGENTS.md`, `CLAUDE.md`, `docs/**`) commits and pushes straight to `main`; see [AGENTS.md § Agent workflow conventions](../AGENTS.md#agent-workflow-conventions). A doc change bundled with code goes through the code's PR. `.github/**` is CI, not docs, and always needs a PR.
 - **`docs/memory/**` is exempt too.** Technical memories are filed straight to `main`, no PR — they are notes, not code, and a review round-trip is enough friction to stop them being written at all. Same postcondition as the lab book: committed **and pushed**. The write protocol (classify, check for a duplicate, index it) is in [AGENTS.md § Technical memories](../AGENTS.md#technical-memories). A commit that touches a memory **and code** is not exempt — split it. (Memories alongside other *docs* are fine; that is the doc-only path, not the code path.)
 - **"Direct to `main`" means committed AND pushed — a commit sitting on a local `main` is not landed.** The PR path can't get this wrong (you cannot open a PR without pushing), so every place the word "commit" appears alone is on an exempt path, and the exempt paths are the ones unattended routines use. That asymmetry bit us for real: on 2026-08-26 eight commits — two candidate dossiers, a post-hoc script, ledger/INDEX rows, and two interaction-log entries — were found sitting unpushed on the primary worktree's local `main`, the oldest two days old. One of them was itself the fix for the *commit* half of this same gap, written and then never pushed, so the fix reproduced the bug it fixed. **Postcondition for any routine or session that writes to `main`: `git status --short` is empty AND `git log --oneline origin/main..main` is empty before you report the work done.** Check it, don't remember it.
 - **Branch before the first commit — `git checkout -b <branch>` is the first git action in any implementation session**, before any edit. **Why:** committing to `main` directly has happened twice, each needing a destructive `git reset --hard` + force-push to undo. If you realise mid-session you're on `main`: stop, branch, continue — don't commit-then-fix.
@@ -314,7 +315,7 @@ This repo's worktrees live *inside* the primary checkout at `.claude/worktrees/*
 - **A worktree's git state is not exclusively yours.** Worktree exclusivity is per-branch-checkout, not per-directory-access, so the owner's terminal or another Claude session can commit into the directory you're working in. Observed 2026-09-02 on PR #359: a commit appeared in the branch's reflog as a plain `commit:` action mid-session with no fetch/pull/merge on this session's part. Nothing broke (git commit/push are atomic), but if a push's old-tip SHA isn't what you last saw, check `git reflog show <branch>` before assuming something is wrong.
 - **A subagent can strand the primary worktree off `main`.** A code-review agent that checks out a PR branch inside the primary to inspect a diff can leave a local-only temp branch there (`pr-308-review-tmp`), plus stray untracked pipeline artifacts. `git status` doesn't surface it; only `git -C <primary> branch --show-current` does. Check that before any post-merge step that commits in the primary, and `git checkout main` there first if needed — a plain branch switch doesn't touch untracked files. Leave the stray artifacts and abandoned temp branch alone and *report* them; they may be someone else's in-progress work.
 - **A squash-merged identity branch can never `git pull --ff-only` back to caught-up — that's the terminal state, not staleness.** Squash-merge writes a new commit on `main` with different parents and hash, so `git merge-base --is-ancestor <branch> origin/main` returns false even when every byte of the diff landed. Verify with *content*, not ancestry: `git diff HEAD origin/main -- <files the branch touched>`; empty output (or only unrelated concurrent changes) means the work is fully landed. Confirmed 2026-08-27 on PR #339. Don't "fix" it by checking out `main` in the worktree — a finished per-issue worktree is disposable and gets left for a later cleanup session.
-  - **This is why the post-merge worktree sweep was retired outright, not just made stricter.** An earlier version of CLAUDE.md's checklist had an interactive session sweep other idle worktrees, confirming "landed" by content diff rather than by ancestry (ancestry alone gives a false negative: a squash-merged worktree reads as "3 commits ahead, unmerged work" indefinitely — hit live 2026-09-08 on `handover-beads-github-cutover-42114a`, whose three commits were PR #394, merged; `git rev-list --count origin/main..HEAD` said 3 while `git diff HEAD origin/main -- <the five files it touched>` was empty). That content check is real and correct, but it answers "has this branch's *work* landed", not "is this worktree *live*" — a live session leaves no git trace of being live at all. Hit twice: the scheduled weekly-cleanup task removed a worktree mid-review on 2026-09-08, and an interactive session following the (then-stricter, still-wrong) checklist removed a live worktree out from under another running session on 2026-09-11. **No interactive session sweeps worktrees now, regardless of what checks it passes** — see CLAUDE.md's post-merge checklist. Cleanup is the weekly scheduled task's job only.
+  - **This is why the post-merge worktree sweep was retired outright, not just made stricter.** An earlier version of CLAUDE.md's checklist had an interactive session sweep other idle worktrees, confirming "landed" by content diff rather than by ancestry (ancestry alone gives a false negative: a squash-merged worktree reads as "3 commits ahead, unmerged work" indefinitely — hit live 2026-09-08 on `handover-beads-github-cutover-42114a`, whose three commits were PR #394, merged; `git rev-list --count origin/main..HEAD` said 3 while `git diff HEAD origin/main -- <the five files it touched>` was empty). That content check is real and correct, but it answers "has this branch's *work* landed", not "is this worktree *live*" — a live session leaves no git trace of being live at all. Hit twice: the scheduled weekly-cleanup task removed a worktree mid-review on 2026-09-08, and an interactive session following the (then-stricter, still-wrong) checklist removed a live worktree out from under another running session on 2026-09-11. **No interactive session sweeps worktrees now, regardless of what checks it passes** — see [§ Interactive sessions](#interactive-sessions)' post-merge checklist. Cleanup is the weekly scheduled task's job only.
 - **A worktree that cut a *temp* PR branch mid-session is a different case, and that one can fast-forward.** When a session in a per-issue worktree branches off its own identity branch, then cuts a fresh PR branch from `origin/main` mid-session (per the rule above, because `origin/main` moved), merging and deleting the temp branch leaves the worktree either on nothing or on its own identity branch several commits behind. The post-merge checklist is phrased for *other* worktrees and misses this one. After any PR merge from a per-issue worktree, run `git branch --show-current`; if it's the temp branch or behind `origin/main`, check out the identity branch and `git pull --ff-only origin main` — safe when `git merge-base --is-ancestor <identity-branch> origin/main` is true. The user had to ask for this explicitly after PR #330.
 - **The harness can recycle a worktree mid-session, and the replacement is stale.** A session can be moved to a brand-new worktree directory (a new random slug) checked out to the *same* branch at the *same commit it had when the session started* — so if you merged a PR earlier in that session, the new worktree comes back pointing at your pre-squash commit, behind `origin/main` and "1 ahead" of it. Nothing warns you, `git status` is clean, and the stale checkout looks exactly like a healthy one. Anything uncommitted in the old directory is gone, and absolute paths into the old worktree no longer resolve. Hit live 2026-09-10 after PR #407: the replacement worktree sat at the pre-merge commit, 2 behind `origin/main`. **After any mid-session worktree swap, re-run `git fetch origin` and `git rev-list --left-right --count origin/main...HEAD` before doing anything else.** If the branch's work has landed (content check, per the bullet above) `git reset --hard origin/main` is the safe resync — the branch is squash-merged and its remote copy is already auto-deleted, so there is nothing to lose.
 
@@ -335,8 +336,8 @@ Work items live in **GitHub Issues**, driven from the `gh` CLI. The live backlog
 - **Closing:** put `Closes #<N>` in the PR body and the squash merge closes it. Only an
   issue with no PR needs `gh issue close <N>` by hand.
 - **Filing work:** `gh issue create --title "..." --body "..." --label chore|polish|design` —
-  see [§ Issue label taxonomy](#issue-label-taxonomy) below for which label. The `spawn_task`
-  redirect in [CLAUDE.md](../CLAUDE.md) uses this.
+  see [§ Issue label taxonomy](#issue-label-taxonomy) below for which label. Ask the owner
+  first — see [§ Filing and finding issues](#filing-and-finding-issues).
 - **`--label` and `--search` do not have the same consistency**, and automation that mutates
   an issue then re-reads a list must use the plain `--label` listing and filter client-side.
   See [docs/memory/gh-issue-list-consistency.md](memory/gh-issue-list-consistency.md).
@@ -353,7 +354,7 @@ Work items live in **GitHub Issues**, driven from the `gh` CLI. The live backlog
   Backfill lazily as decisions come up in conversation, not as a batch project.
 - **Which layer a fact belongs in.** Work items are issues; atomic technical gotchas are
   [docs/memory/](memory/INDEX.md); process rules are
-  this document and [CLAUDE.md](../CLAUDE.md); decision narratives
+  this document and [AGENTS.md](../AGENTS.md); decision narratives
   are the docs above. An agent's own private memory holds only what is about the *owner*
   (preferences, teaching style), never a repo fact — see [§ Technical memories](../AGENTS.md#technical-memories).
 - **`fps-*` IDs in older prose are Beads issue IDs and resolve by archive lookup, not by any
@@ -411,7 +412,7 @@ If while implementing a `polish` issue you discover it actually requires design 
 ### Branch and PR conventions
 
 - Branch naming: `worker/<issue-number>-<short-slug>` (e.g. `worker/381-add-type-hints`)
-- PR title: `fix: <issue title> (#<N>)` for chore; `feat: <issue title> (#<N>)` for polish — plus a `Closes #<N>` line in the PR body, which is what actually closes the issue on merge (see [CLAUDE.md](../CLAUDE.md#automated-worker-vs-interactive-session))
+- PR title: `fix: <issue title> (#<N>)` for chore; `feat: <issue title> (#<N>)` for polish — plus a `Closes #<N>` line in the PR body, which is what actually closes the issue on merge (see [docs/routines/worker.md § Rules](routines/worker.md#rules))
 - PR body: 3–5 bullet plan (what changed, what didn't, what test was added)
 - Target branch: always `main` (`--base main`)
 - Run `uv run ruff check . && uv run pytest -q` before pushing; fix any failures
@@ -425,7 +426,42 @@ If while implementing a `polish` issue you discover it actually requires design 
 
 - **GitHub Issue state is authoritative again, and code depends on it.** Since the Beads cutover (2026-09-07, issues #365–#388), `gh issue` open/closed state *and* assignees are the live record: `experiments/pipeline/launch.py` reads both to decide what is claimable. Do not treat a closed issue as ambiguous, and do not leave a finished issue open. **Why this is called out:** the reverse rule held for a month — the 2026-08-06 bulk-close made GitHub state meaningless, and a memory said so explicitly — so anything written between those dates asserts the opposite. Issue numbers below #365 that show a `closedAt` inside the 22-second window at `2026-08-06T07:37` were closed by that bulk operation, not by resolution; check [docs/bd-id-map.md](bd-id-map.md) and the frozen corpus at [docs/bd-archive/](bd-archive/) for their real outcome.
 - **Search the artifact noun before filing, and put that noun in the title.** **Why:** four separate sessions filed four issues for one `dossier_tables.py` bug over three days because each described the incident with a different verb — "wipes", "clobbers", "regressing", "wiped". Verbs never collide across filers; the artifact does. The rule has two halves and the *write* half is what makes the read half work. Corollary for reviewers: when several issues do turn out to be one incident, merge into the best-written root-cause issue and carry the others' acceptance criteria across verbatim rather than closing them as pure dupes — one of those four carried a genuinely second defect in the same file, and both halves belong in one PR.
+- **Ask the owner before filing.** The backlog needs active triage, so a new issue is a decision, not a side effect — propose it and let them say yes. This includes an out-of-scope problem noticed mid-task: propose an issue rather than scope-creeping the current change or spinning up a separate session.
+- **Body shape:** `## What` / `## Why I noticed this` (file paths + context) / `## Files likely affected` / `## Acceptance criteria` (checkboxes). One routing label (`chore`/`polish`/`design`) plus one topic label — see [§ Issue label taxonomy](#issue-label-taxonomy).
 - **Handoff pointers go at the top of the issue body, above What/Why.** Reference prototypes, experiment dirs, prior profiling, "read X before coding" — a reader who thinks they've finished the acceptance criteria has already stopped reading. Comments are for post-hoc discussion, not handoff.
+
+## Interactive sessions
+
+An interactive session (owner-directed, as opposed to the scheduled worker, whose rules are [docs/routines/worker.md § Rules](routines/worker.md#rules)):
+
+- **Do not pick up `chore` or `polish` issues yourself** — those are the worker's queue. File one instead. If the owner explicitly directs you to work one anyway, it's yours to finish, including closing it — don't leave it for the worker.
+- **`design` issues are fair game.** `gh issue edit <N> --add-assignee "@me"` when you start; `Closes #<N>` in the PR body closes it on merge.
+- **Never label a PR `claude-authored`** — that label is exclusively the worker's, and the worker's one-PR-at-a-time cap reads it.
+- **Report each reviewer's status to the owner explicitly, including a clean pass** — silence reads as "didn't check", not "was clean". The mechanics are [§ PR feedback loop](#pr-feedback-loop).
+
+**Post-merge checklist — the instant you have direct merge confirmation, run all of this in the same turn, unprompted.** "Direct confirmation" means you merged it yourself, or the owner just told you it merged. Don't wait to be asked for any of these, and don't split them across turns:
+
+1. **Confirm the issue actually closed** (`gh issue view <N> --json state`). A `Closes #<N>`
+   line in the PR body closes it automatically on merge, so this is a check, not a step —
+   but only that exact syntax works, and a PR body that referenced the issue any other way
+   leaves it open. Close it by hand if so: `gh issue close <N>`.
+2. `git branch -D <branch>` for the now-local-only branch. Squash-merge means git won't recognize it as an ordinary merge (`branch -d` refuses), but the content is already in the squash commit on `main`, so force-deleting the local pointer loses nothing. The remote copy is usually already gone — this repo auto-deletes head branches on merge, so don't treat a failed manual delete ("remote ref does not exist") as an error.
+   - **If the branch is checked out in the worktree this session is running from** (rather than a different, already-idle worktree), `branch -D` fails — git refuses to delete a branch checked out anywhere, including from another worktree's shell. This isn't rare: it's the normal case for a per-issue worktree session finishing its own PR. Don't force past it, and **don't ask the user how to proceed** — the owner's standing answer is always "leave it for a later cleanup session" (asked and answered 2026-08-23; removing your own worktree mid-session is disruptive and was never actually wanted). Just note in your final summary that the branch/worktree is stale and merged, and move on — no question needed.
+3. `git pull --ff-only` in any other worktree (including the primary one) that's now behind `main` and has a clean `git status --short` — a bare fast-forward on a clean tree can't lose anything.
+4. **Do not sweep other worktrees. Ever.** An interactive session must never remove, or offer
+   to remove, any worktree other than the one it's running in — not even one that passes every
+   git-level check (clean `git status`, content landed by diff not just ancestry, no open PR).
+   Passing those checks is not proof of idleness: a live session working in that worktree leaves
+   no git trace of being live at all, and this has cost real, disruptive damage twice — once to
+   the *scheduled* weekly cleanup task (2026-09-08, mid-review worktree removed) and once to an
+   *interactive* session following this exact step (2026-09-11, a live worktree removed out from
+   under another running session). Worktree cleanup is exclusively the job of the owner's weekly
+   scheduled task now. If you notice a worktree that looks idle or stale, say so in your summary
+   and stop there — do not act on it.
+
+This checklist item is otherwise scoped to your own branch/worktree only: never force-remove
+*any* worktree that still has staged/unstaged changes without flagging it first, and none of
+this is a general license for `branch -D`/force operations beyond your own finished branch.
 
 ## PR feedback loop
 
@@ -466,6 +502,37 @@ When a review's findings come back reported as fixed, re-verify against the diff
 
 - **Re-read the diff, don't accept the summary.** In the fps-hvi review of PR #299, the fixer reported one finding as "already fixed before your review ran, stale" and cited a commit that had only touched `pit_test.py`/`validate.py` — the finding was live when raised and was fixed by a later commit. Cheap to check with `git show --stat`; the conclusion happened to be right, but the reasoning would have discredited a valid finding.
 - **Re-review the fix itself for regressions.** The same round's fix for "write artifacts before grading" made `_grade_run` return `effect_delta = None` on failure, which `_summarise_for_comment` then fed to a `:+.4f` format spec — a `TypeError` on exactly the path the fix existed to survive. A full green suite (1038 passed, ruff clean) did not catch it, because the new test didn't exercise the one argument that triggers it. A fix lands in code that the original review already mapped; re-run that map over it.
+
+## API contract: this repo is canonical
+
+[docs/api-contract.md](api-contract.md) has a sibling copy in
+`edwinsteele/fuel-price-signal-app` (the private iOS client), which vendors it.
+**This repo holds the canonical copy.** The contract describes bytes this
+server emits, and only this server can make a statement in it true — so when
+the two copies disagree, this one wins.
+
+The contract is a **shared agreement**, not a description of the server: if
+something in it can't be served as written, raise it rather than editing the
+contract unilaterally to match whatever the server currently does. Either side
+may propose a change, but only the canonical copy decides who wins a diff.
+
+The two worked JSON examples (`stations` and `recommendation` responses) open
+with `` ```json stations-response `` and `` ```json recommendation-response ``
+rather than plain `` ```json ``. GitHub's fenced-code highlighting reads only
+the first word of the info string, so the markers don't render, but both
+sides' tests extract each payload by marker at test time:
+`tests/test_api_v1.py` (via `tests/contract_examples.py`) asserts the
+serializer emits each example exactly, and the app's `ContractFixtures.swift`
+asserts its types decode it. The app's sync tooling also refuses to vendor a
+copy that's missing a marker rather than silently breaking its test build.
+**Never drop or rename these markers when editing the examples** — and an
+example edit that the server can't emit now fails `test_api_v1.py` here.
+
+Changes land here first and are pulled downstream second. There's no
+automated push: this repo would need a token to read the private app repo,
+which isn't worth it for this. So flag any contract change here to the app
+side directly — its own weekly sync-check job is the backstop, but it only
+notices on its own schedule and may take up to a week to catch a drift.
 
 ## Experiment scripts
 

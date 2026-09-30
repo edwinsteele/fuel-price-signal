@@ -5,7 +5,7 @@ metadata:
   type: feedback
 ---
 
-CLAUDE.md's post-merge checklist has four items: confirm the issue closed, delete
+The post-merge checklist (`docs/CONVENTIONS.md` § Interactive sessions) has four items: confirm the issue closed, delete
 the now-merged local branch (expected to fail from inside its own worktree —
 don't force it), fast-forward *other* worktrees that are clean and now behind
 `main`, and never sweep (remove) another worktree. After merging #421 (#415),

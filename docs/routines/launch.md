@@ -153,7 +153,7 @@ what actually keeps it out of the claim query.
 
 ## Stale-claim recovery
 
-Mirrors CLAUDE.md's chore/polish worker pickup rule 4, adapted to the experiment queue. For every
+Mirrors the chore/polish worker's pickup rule 4 ([worker.md § Rules](worker.md#rules)), adapted to the experiment queue. For every
 open, un-`blocked` `experiment` issue **assigned to this routine's own login** (see the warning
 above for what that does and doesn't protect): resolve its `(batch_dir, candidate_path)`, look at
 `default_out_dir(candidate_path)`. It's stale iff `results.json` is absent, `run.log` exists and its tail

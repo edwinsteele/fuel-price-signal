@@ -27,8 +27,8 @@ is [[github-closes-can-silently-not-fire]]. Together they are why the post-merge
 check is mandatory rather than defensive.
 
 This is a general GitHub behavior, not specific to this repo's automation, but it interacts badly
-with this repo's own `Closes #<N>` convention (CLAUDE.md's "For each PR" section, and the
-worker-routine pickup rules): `Closes #<N>` is the *entire* mechanism that closes an issue on
+with this repo's own `Closes #<N>` convention (`docs/routines/worker.md` § Rules — the
+worker's "For each PR" and pickup rules): `Closes #<N>` is the *entire* mechanism that closes an issue on
 merge post-Beads, checked mechanically by GitHub's parser, not by intent — so a body that merely
 *discusses* an issue number defensively needs to avoid the keyword entirely, not just phrase it
 carefully.

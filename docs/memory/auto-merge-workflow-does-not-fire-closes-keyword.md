@@ -42,6 +42,6 @@ never looks orphaned).
 
 Note this is the mirror image of [[github-closes-keyword-substring-match]]: that one is the
 parser firing when you did not want it to, this one is the merge path not firing it when you did.
-Both mean **the post-merge issue-state check is not optional** — CLAUDE.md's interactive
-post-merge checklist step 1 (`gh issue view <N> --json state`, close by hand if still open) is the
+Both mean **the post-merge issue-state check is not optional** — the interactive
+post-merge checklist's step 1 (`docs/CONVENTIONS.md` § Interactive sessions) (`gh issue view <N> --json state`, close by hand if still open) is the
 only thing standing between this and a silently-drifting tracker.
