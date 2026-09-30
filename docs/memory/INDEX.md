@@ -34,6 +34,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [graduating-a-column-is-two-edits](graduating-a-column-is-two-edits.md) — append to `LOCKED_FEATURE_COLUMNS` **and** delete from `NON_MODEL_COLUMNS`. Order is part of the contract; the contract test skips in CI.
 - [five-all-nan-lga-trough-columns](five-all-nan-lga-trough-columns.md) — five locked columns are permanently 100% NaN, so a complete-case mask over the locked set selects **zero rows**, silently.
 - [decide-feature-parity-gap](decide-feature-parity-gap.md) — `backtest.py`'s `decide()` recomputes features independently of `features.py`. A new feature family needs wiring in both or the realised backtest aborts.
+- [model-artifact-paths-overwritten-per-lock](model-artifact-paths-overwritten-per-lock.md) — the joblib paths are overwritten by every lock; identify what's on disk by `feature_columns`, never by filename.
 
 ## Cadence, tau and the tank
 
@@ -85,6 +86,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [zsh-equals-word-aborts-command-list](zsh-equals-word-aborts-command-list.md) — the agent shell is zsh; `echo ===` fails with `== not found` and silently skips every later command on the line. Quote separators; `${pipestatus[1]}` not `${PIPESTATUS[0]}`.
 - [venv-corruption-concurrent-uv](venv-corruption-concurrent-uv.md) — `ModuleNotFoundError` for `six`/`py` means two concurrent `uv run`s half-synced `.venv`. Only fix: `rm -rf .venv && uv sync`. Run pipeline stages sequentially.
 - [worktree-missing-gitignored-batch-data](worktree-missing-gitignored-batch-data.md) — gitignored batch/candidate artifacts don't exist in a fresh worktree; copy them in first or the run dies with `FileNotFoundError`.
+- [run-outputs-live-where-the-run-ran](run-outputs-live-where-the-run-ran.md) — read the primary's run outputs by absolute path, edit only in the worktree; a gitignored `*.log` can be a different session's copy.
 - [webfetch-403-data-nsw-gov-au](webfetch-403-data-nsw-gov-au.md) — WebFetch gets 403 on `data.nsw.gov.au`; `requests` gets a clean 200. Use `history.py`'s discovery or the Browser tool.
 - [1password-ssh-push](1password-ssh-push.md) — `Permission denied (publickey)` means the 1Password SSH agent is down. **Never** `ssh-add`; the owner has ruled that out.
 - [https-push-when-1password-agent-down](https-push-when-1password-agent-down.md) — the HTTPS fallback works, but silently leaves `origin/main` stale, which is how a worktree branched off an old commit.
