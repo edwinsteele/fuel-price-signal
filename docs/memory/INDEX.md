@@ -78,9 +78,11 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 
 - [api-contract-generated-at-not-an-identity](api-contract-generated-at-not-an-identity.md) — the iOS client's `JSONDecoder` (`.iso8601` = `.withInternetDateTime`) rejects fractional seconds; don't add sub-second precision to `generated_at` to close the same-second cache-write race.
 - [api-contract-byte-identical-copy-wording-trap](api-contract-byte-identical-copy-wording-trap.md) — `fuel-price-signal-app` vendors this doc byte-for-byte; "this repo"/"here"/"this copy" phrasing is true in at most one of the two homes.
+- [api-contract-golden-tests-prove-serialization-not-evaluation](api-contract-golden-tests-prove-serialization-not-evaluation.md) — `test_api_v1` asserts the serializer emits the contract's examples exactly, but from hand-set inputs; the rule-signal description strings are not checked against `signal.py`.
 
 ## Environment and tooling traps
 
+- [zsh-equals-word-aborts-command-list](zsh-equals-word-aborts-command-list.md) — the agent shell is zsh; `echo ===` fails with `== not found` and silently skips every later command on the line. Quote separators; `${pipestatus[1]}` not `${PIPESTATUS[0]}`.
 - [venv-corruption-concurrent-uv](venv-corruption-concurrent-uv.md) — `ModuleNotFoundError` for `six`/`py` means two concurrent `uv run`s half-synced `.venv`. Only fix: `rm -rf .venv && uv sync`. Run pipeline stages sequentially.
 - [worktree-missing-gitignored-batch-data](worktree-missing-gitignored-batch-data.md) — gitignored batch/candidate artifacts don't exist in a fresh worktree; copy them in first or the run dies with `FileNotFoundError`.
 - [webfetch-403-data-nsw-gov-au](webfetch-403-data-nsw-gov-au.md) — WebFetch gets 403 on `data.nsw.gov.au`; `requests` gets a clean 200. Use `history.py`'s discovery or the Browser tool.
