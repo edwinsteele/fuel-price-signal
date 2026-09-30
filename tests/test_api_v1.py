@@ -1,8 +1,10 @@
 """Tests for fuel_signal.api_v1 — the /api/v1 wire-format serializers.
 
-Several tests reproduce the worked examples from docs/api-contract.md verbatim
-(rev 3, agreed with the iOS-app session) and assert an exact match against the
-literal JSON in that document, rather than just spot-checking fields.
+The two worked-example tests build each response through the real serializer
+and assert it equals the example extracted from docs/api-contract.md at test
+time (tests/contract_examples.py), so an edit to an example that the server
+can't emit fails here. fuel-price-signal-app decodes the same fences, so both
+sides test against one document rather than each holding a copy.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from fuel_signal.signal import (
     SignalRecommendation,
     StationView,
 )
+from tests.contract_examples import contract_example
 
 _CONTRACT_EVALUATIONS = [
     SignalEvaluation(
@@ -146,79 +149,7 @@ def test_build_stations_response_matches_contract_worked_example():
         payload, gap_start=None, gap_end=None, generated_at=_GENERATED_AT,
         routing_day=_ROUTING_DAY, served_at=_SERVED_AT, now=_ROUTING_DAY,
     )
-
-    assert body["as_of"] == "2026-09-11"
-    assert body["generated_at"] == _GENERATED_AT
-    assert body["routing_day"] == "2026-09-12"
-    assert body["served_at"] == _SERVED_AT
-    assert body["freshness"] == {
-        "latest_observation_date": "2026-09-11",
-        "days_stale": 1,
-        "expected_lag_days": 1,
-        "fill_gap": None,
-    }
-    assert body["network"] == {
-        "average_price": 178.4,
-        "drift_cents_per_day": -0.8,
-        "drift_label": "falling",
-    }
-
-    on_route, off_route, unpriced = body["stations"]
-    assert on_route == {
-        "code": 414,
-        "label": "BP Springwood",
-        "group": "on_route",
-        "price": 161.9,
-        "delta_vs_network": -16.5,
-        "probability_buy": 0.823,
-        "route": {
-            "restricted": False,
-            "days": None,
-            "reachable_on_routing_day": True,
-            "next_reachable_date": "2026-09-12",
-            "days_until_reachable": 0,
-        },
-        "diversion": None,
-        "cheapest_on_route": True,
-    }
-    assert off_route == {
-        "code": 261,
-        "label": "7-Eleven Penrith South",
-        "group": "off_route",
-        "price": 157.7,
-        "delta_vs_network": -20.7,
-        "probability_buy": None,
-        "route": {
-            "restricted": True,
-            "days": [2, 6],
-            "reachable_on_routing_day": False,
-            "next_reachable_date": "2026-09-13",
-            "days_until_reachable": 1,
-        },
-        "diversion": {
-            "delta_vs_cheapest_on_route": -4.2,
-            "worth_diverting": True,
-            "threshold_cents": 3.0,
-        },
-        "cheapest_on_route": False,
-    }
-    assert unpriced == {
-        "code": 585,
-        "label": "EG Ampol Emu Heights",
-        "group": "unpriced",
-        "price": None,
-        "delta_vs_network": None,
-        "probability_buy": None,
-        "route": {
-            "restricted": False,
-            "days": None,
-            "reachable_on_routing_day": True,
-            "next_reachable_date": "2026-09-12",
-            "days_until_reachable": 0,
-        },
-        "diversion": None,
-        "cheapest_on_route": False,
-    }
+    assert body == contract_example("stations-response")
 
 
 # ---------------------------------------------------------------------------
@@ -232,41 +163,9 @@ def test_build_recommendation_response_matches_contract_worked_example():
         payload, gap_start=None, gap_end=None, generated_at=_GENERATED_AT,
         routing_day=_ROUTING_DAY, served_at=_SERVED_AT, now=_ROUTING_DAY,
     )
-
-    assert body["status"] == "ok"
-    assert body["verdict"] == "BUY"
-    assert body["fill_size"] == "bridge"
-    assert body["source"] == "model"
-    assert body["headline"] == "WORTH A STOP — BP Springwood @ 161.9c, but bridge, don't brim."
-    assert body["reason"] == (
-        "Good local price, but the network is falling 0.8c/day — buy enough to "
-        "get by and keep some tank for later."
-    )
-    assert body["target_station"] == {"code": 414, "label": "BP Springwood", "price": 161.9}
-    assert body["nearest_off_route"] is None
-    assert body["cycle"] == {
-        "day": 41,
-        "length": 46.33,
-        "beyond_expected_length": False,
-        "pct_through": pytest.approx(0.8633714655730629),
-        "last_cycle_min": 155.3,
-        "last_cycle_max": 201.7,
-    }
-    assert body["rules"] == {
-        "verdict": "BUY",
-        "mean_value": 0.5,
-        "signals": [
-            {"name": "AverageCycleTimeSignal", "recommendation": "BUY",
-             "description": "cycle ending soon (86% through cycle; day 40 / 46.3)"},
-            {"name": "AverageGradientAfterPeakSignal", "recommendation": "NEUTRAL",
-             "description": "price has not flatlined (last 3 gradients: [-0.9, -0.8, -0.7])"},
-            {"name": "AverageNearPreviousMinMaxSignal", "recommendation": "WAIT",
-             "description": "price in middle of last cycle (current 178.4c; last cycle min 155.3c, max 201.7c)"},
-            {"name": "FavouriteServiceStationPriceGradientSignal", "recommendation": "NEUTRAL",
-             "description": "no preferred stations raising sharply (big raisers: none; non-raisers: "
-             "BP Springwood @ -0.8, 7-Eleven Penrith South @ -0.6)"},
-        ],
-    }
+    # Exact, including cycle.pct_through: the contract states it is unrounded,
+    # so the example must carry the full float the server emits.
+    assert body == contract_example("recommendation-response")
 
 
 def test_recommendation_dont_buy_is_remapped_from_rules_verdict():

@@ -33,12 +33,15 @@ may propose a change, but only the canonical copy decides who wins a diff.
 
 The two worked JSON examples (`stations` and `recommendation` responses) open
 with `` ```json stations-response `` and `` ```json recommendation-response ``
-rather than plain `` ```json ``. Those markers are inert here — GitHub's
-fenced-code highlighting reads only the first word of the info string — but
-the app's `ContractFixtures.swift` extracts each payload by marker at test
-time, and the app's sync tooling refuses to vendor a copy that's missing them
-rather than silently breaking its test build. **Never drop or rename these
-markers when editing the examples.**
+rather than plain `` ```json ``. GitHub's fenced-code highlighting reads only
+the first word of the info string, so the markers don't render, but both
+sides' tests extract each payload by marker at test time:
+`tests/test_api_v1.py` (via `tests/contract_examples.py`) asserts the
+serializer emits each example exactly, and the app's `ContractFixtures.swift`
+asserts its types decode it. The app's sync tooling also refuses to vendor a
+copy that's missing a marker rather than silently breaking its test build.
+**Never drop or rename these markers when editing the examples** — and an
+example edit that the server can't emit now fails `test_api_v1.py` here.
 
 Changes land here first and are pulled downstream second. There's no
 automated push: this repo would need a token to read the private app repo,
