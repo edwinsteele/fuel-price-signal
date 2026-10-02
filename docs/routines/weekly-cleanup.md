@@ -60,9 +60,16 @@ been removed from this repo — don't run it or recommend it.
 ## Private memory
 
 Claude's private memory here is mid-migration: most notes are repo facts that
-belong in `docs/memory/` (claude-codex-setup § 5). Consolidate it, report how
-many notes still look like repo facts, and don't migrate any unattended — the
-migration is being done in reviewed batches.
+belong in `docs/memory/` (claude-codex-setup § 5). The migration is done in
+reviewed batches, so a cleanup run never *creates* a `docs/memory/` note from a
+private one. Everything else in the skill's Part 2 still applies to every
+private note, repo fact or not:
+- retire notes for finished work and notes contradicted by the repo;
+- merge duplicates;
+- delete a private note whose fact a `docs/memory/` note, `AGENTS.md` or
+  `docs/CONVENTIONS.md` already carries (the owner's own `MEMORY.md` policy).
+
+Report how many private notes still look like repo facts.
 
 ## Extra checks
 
