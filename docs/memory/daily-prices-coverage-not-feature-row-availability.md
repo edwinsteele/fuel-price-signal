@@ -14,8 +14,8 @@ forward-fills a `daily_prices` gap of up to `MAX_GAP_FILL_DAYS = 28` days, so a 
 gap that short is invisible to anything reading `daily_prices` — including the labels
 calendar-gap mask. What the mask DOES see is a gap that remains MISSING from
 `daily_prices` after filling (longer than `MAX_GAP_FILL_DAYS`, or past the trail-fill
-horizon); around one of those it strips `lookback_days` (90) days before, and
-`horizon_days` (7) days after — far wider than the hole itself. Measured on batch1's
+horizon); around one of those it strips `horizon_days` (7) days before (their
+forward window crosses the hole) and `lookback_days` (90) days after (their lookback does) — far wider than the hole itself. Measured on batch1's
 frozen artifacts (2026-09-05): fold 1, both Blue Mountains stations sit at 0.96
 `daily_prices` coverage (a station-window that DOES still carry an unfilled gap) with
 ZERO feature rows; station 414 is at 1.00 coverage in fold 8 with only 8 feature rows

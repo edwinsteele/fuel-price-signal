@@ -541,7 +541,7 @@ notices on its own schedule and may take up to a week to catch a drift.
 
 ## Experiment scripts
 
-Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. This includes `paired_wfcv.py` harnesses, step-level ablation scripts (`step*.py`), and oracle/diagnostic scripts that call `fit_score`. Import with `PYTHONPATH=.`.
+Any experiment script that runs LightGBM fits **must** use `experiments/lib/` helpers — do not copy scaffolding from prior scripts. This includes `paired_wfcv.py` harnesses, step-level ablation scripts (`step*.py`), and oracle/diagnostic scripts that call `fit_score`. Run them as `PYTHONPATH=. uv run python experiments/<dir>/<script>.py 2>&1 | tee experiments/<dir>/<step>.log` — a script-path run, unlike the `python -m fuel_signal.<module>` CLI pattern, does not put the repo root on `sys.path`, so `from fuel_signal import …` fails without the prefix.
 
 These rules govern **new** scripts. `experiments/lib/` landed 2026-06-11 and `load_features()` postdates many existing experiment dirs; older scripts are frozen lab-book entries — some gitignored, untracked exploration — that are not retrofitted, not the template, and not the standard. Read them for their results, not as a pattern to copy.
 
@@ -587,7 +587,7 @@ The inside of every `compute_features()` / `add_candidate_columns()` uses helper
 
 Signal C in `a_c_ablation` (row-wise std across LGA columns) is column-wise, not row-filtered — `cohort_std_by_date` does not apply; that computation stays inline.
 
-Cross-reference: `feedback_experiment_scripts_pythonpath` (`PYTHONPATH=.` prefix); `feedback_instrument_walltime` (time + log per step); `feedback_throwaway_validation_scripts` (minimal one-off validators).
+**Time every non-trivial step.** Wrap each data load, fit and SHAP pass in `experiments.lib.timing.time_block` and keep the per-step seconds beside the results, so the next run's wall-clock estimate comes from a log rather than a guess.
 
 ## Shell tooling
 

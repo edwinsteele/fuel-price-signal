@@ -133,8 +133,10 @@ Read all of the following before proposing anything:
    forward-looking value stamped *on* the row survives date-truncation unchanged — so
    don't treat "the leak test would have caught it" as a reason to be casual here.
 6. **The fold/regime taxonomy.** Two distinct axes, don't conflate them:
-   - **Fold-level**: 14-fold paired walk-forward CV; `SHOCK_FOLDS = {1, 4, 9, 13}`
-     (`experiments/lib/constants.py`), everything else `normal`.
+   - **Fold-level**: 14-fold paired walk-forward CV; the per-batch empirical shock set
+     (`<batch_dir>/shock_folds.json`, from `experiments/lib/folds.py::compute_shock_folds`;
+     batch1 = {1, 3, 4, 14}), everything else `normal`. The fixed
+     `SHOCK_FOLDS = {1, 4, 9, 13}` in `experiments/lib/constants.py` is superseded (#350).
    - **Row-level cycle regime**: `experiments/lib/zones.py` `assign_regime()` over
      `cycle_pct_through` — `normal` (0.0–0.6), `late_descent` (0.6–1.0), `overdue`
      (≥1.0).
@@ -193,8 +195,8 @@ Read all of the following before proposing anything:
    > fails for any feature class whose value is orthogonal to the proxy.
 
    `cycle_mean_length` is the standing example of a feature that looked more accurate
-   and produced worse/flat realised CPL (`project_cycle_length_accuracy_not_objective`
-   — the denominator turned out to be economically inert because the model already
+   and produced worse/flat realised CPL (#254,
+   `experiments/2026-06-16_regime_cycle_length/` — the denominator turned out to be economically inert because the model already
    uses the drift-clock). A candidate whose `PREDICTED_SIGNATURE` is phrased in
    accuracy terms ("more precisely estimates X") without a decision-timing story is
    weaker than one phrased in terms of *when the model should act differently*.
