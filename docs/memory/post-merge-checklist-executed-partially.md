@@ -1,6 +1,6 @@
 ---
 name: post-merge-checklist-executed-partially
-description: The interactive-session post-merge checklist (CLAUDE.md) was run for the merger's own branch/issue but silently skipped the "sync other clean, behind worktrees" step — the owner had to point it out.
+description: The interactive-session post-merge checklist (docs/CONVENTIONS.md § Interactive sessions) was run for the merger's own branch/issue but silently skipped the "sync other clean, behind worktrees" step — the owner had to point it out.
 metadata:
   type: feedback
 ---

@@ -7,7 +7,7 @@ metadata:
 
 Before comparing the numbers from two experiment runs, compare their BASELINE FINGERPRINTS. Different fingerprint = not commensurable, whatever the deltas say.
 
-The fingerprint is '<n>:<sha12>', a sha256 over the ORDERED baseline column list (fuel_signal.features.baseline_fingerprint). The current lock is 54:1a6ec2d84a69. It is recorded in:
+The fingerprint is '<n>:<sha12>', a sha256 over the ORDERED baseline column list (fuel_signal.features.baseline_fingerprint). The current lock's value is `fuel_signal.features.LOCKED_FEATURE_FINGERPRINT` (quoted in docs/STATUS.md); it changes on any re-lock. It is recorded in:
   - experiment meta.json      -> meta["baseline"]  (stamped automatically by experiments.lib.io.write_meta)
   - batch freeze.json         -> "baseline_fingerprint"
   - run results.json / facts.json -> meta["baseline_fingerprint"] + "n_baseline_columns"

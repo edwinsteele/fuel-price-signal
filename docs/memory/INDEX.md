@@ -23,7 +23,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 
 ## Before you compare two runs
 
-- [baseline-fingerprint-before-comparing-runs](baseline-fingerprint-before-comparing-runs.md) — different fingerprint = not commensurable, whatever the deltas say. Current lock `54:1a6ec2d84a69`; a missing fingerprint is itself the signal.
+- [baseline-fingerprint-before-comparing-runs](baseline-fingerprint-before-comparing-runs.md) — different fingerprint = not commensurable, whatever the deltas say. Current value: `LOCKED_FEATURE_FINGERPRINT`; a missing fingerprint is itself the signal.
 - [screen-and-arbiter-share-no-population](screen-and-arbiter-share-no-population.md) — the WFCV screen and the realised arbiter share **0.71%** of their rows. Per-fold sign disagreement is expected, not a signal.
 - [aggregate-py-unpaired-seed-median](aggregate-py-unpaired-seed-median.md) — published per-fold deltas are a difference of medians over *paired* seeds. Deliberately unfixed; compute the paired version yourself if you read signs.
 - [tau-is-calibrated-not-raw](tau-is-calibrated-not-raw.md) — τ=0.25 is calibrated, `rowpreds.proba` is raw. Equivalent raw threshold ≈0.11–0.16; comparing them is a category error worth ~0.10 of probability.
@@ -39,7 +39,6 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 ## Cadence, tau and the tank
 
 - [brim-bridge-threshold-unvalidated](brim-bridge-threshold-unvalidated.md) — `FALLING_CENTS_PER_DAY = -0.5` was reasoned, not measured, and lands on the **median** of the drift distribution (p50 = -0.47), splitting days 49/51. Least stable cut available.
-- [cadence-not-a-free-knob](cadence-not-a-free-knob.md) — oracle-vs-model headroom is only meaningful at **1, 2 and 7 days**; 3–6 and 8–14 are invalid (run-dry paths diverge between the two engines).
 - [tau-selector-is-cadence-blind](tau-selector-is-cadence-blind.md) — the selector never sees the tank, so an unmoved τ after a cadence re-lock proves nothing. Harmless by measurement, not by construction.
 - [pbuy-is-station-relative](pbuy-is-station-relative.md) — `P(BUY)` is measured against each station's **own** trailing percentile, so it cannot rank stations. Sorting by it points at the dearest pump.
 - [signal-payload-day-stable-boundary](signal-payload-day-stable-boundary.md) — `SignalPayload` (post-#415 split) fields must be a function of `(as_of_date, database)` only; a field derived from `now`, even transitively, is unsafe to cache overnight.
@@ -53,9 +52,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [wfcv-fold-streaming-not-bottleneck](wfcv-fold-streaming-not-bottleneck.md) — streaming all 14 WFCV folds is output-exact but saves only 0.84 s of non-fit work and does not reduce stable full-run peak RSS; LightGBM fitting dominates.
 - [batch-dir-vs-candidates-dir](batch-dir-vs-candidates-dir.md) — `experiments/batches/<b>/` vs `experiments/candidates/<b>/` are different dirs with near-identical names; the wrong one yields a plausible-but-false "never written" reason.
 - [experiments-pipeline-import-cycle](experiments-pipeline-import-cycle.md) — `dossier_tables → runner → batch_freeze` is load-bearing; import `noise_floor` inside function bodies, never at module level.
-- [status-rejected-means-graded-not-failed](status-rejected-means-graded-not-failed.md) — `STATUS_REJECTED` means "finished grading", win or lose. Not a verdict.
 - [candidate-output-align-by-index-label](candidate-output-align-by-index-label.md) — align by index label; a positional `.to_numpy()` pairs rows with the wrong station and the run still passes validation.
-- [batch-freeze-stale-features](batch-freeze-stale-features.md) — the old "run features before freezing" workaround is obsolete; `refresh_db()` hard-gates both now.
 - [handover-before-results-csv-write](handover-before-results-csv-write.md) — hand over to the user *before* any step that writes `experiments/results.csv`. Running it is the violation.
 - [daily-prices-coverage-not-feature-row-availability](daily-prices-coverage-not-feature-row-availability.md) — high `daily_prices` coverage in a window does not imply the ML feature pipeline emits any row there. Check `describe_universe`'s `worst_window_label_fraction` too.
 - [date-bound-not-enough-for-broad-universe-oom](date-bound-not-enough-for-broad-universe-oom.md) — bounding a per-station query by date range doesn't stop a broad (100s-station) universe from concatenating every station's rows into one resident frame. Check both axes.
@@ -91,7 +88,6 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [1password-ssh-push](1password-ssh-push.md) — `Permission denied (publickey)` means the 1Password SSH agent is down. **Never** `ssh-add`; the owner has ruled that out.
 - [https-push-when-1password-agent-down](https-push-when-1password-agent-down.md) — the HTTPS fallback works, but silently leaves `origin/main` stale, which is how a worktree branched off an old commit.
 - [codex-pr-review-integration](codex-pr-review-integration.md) — findings are INLINE comments (`pulls/N/comments`), not review bodies; `gh pr view` shows an empty-looking review. A Sourcery FAILURE may be blocking security findings, not the rate limit. Codex auto-review is OFF (2026-09-29): request with one `@codex review` per pushed head.
-- [gh-pr-merge-delete-branch-fails-in-worktree](gh-pr-merge-delete-branch-fails-in-worktree.md) — "fatal: 'main' is already used by worktree" comes AFTER a successful merge. Verify, never retry.
 - [post-merge-checklist-executed-partially](post-merge-checklist-executed-partially.md) — the "sync other clean, behind worktrees" step gets silently dropped because it's the one step not about the branch you were just working on. Run `git worktree list` and check each one explicitly.
 - [gh-issue-list-consistency](gh-issue-list-consistency.md) — `gh issue list --search`/`--assignee` are search-index backed and lag a mutation 2–4s; plain `--label` does not. Every form lags *creation* ~7s.
 - [gh-auth-status-false-negative-restricted-token](gh-auth-status-false-negative-restricted-token.md) — `gh auth status` reports the worker Routine's restricted token as invalid (it isn't — that check is GraphQL too). Verify with `gh api user` instead.

@@ -6,7 +6,7 @@ metadata:
 ---
 
 `Closes #<N>` in a PR body is the *entire* mechanism that closes an issue on merge in this repo
-post-Beads (CLAUDE.md "For each PR"). **It does not fire when `auto-merge.yml` does the merging.**
+post-Beads (docs/routines/worker.md § Rules, "For each PR"; it was in CLAUDE.md until 2026-10-01). **It does not fire when `auto-merge.yml` does the merging.**
 
 `.github/workflows/auto-merge.yml` runs `gh pr merge` with
 `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`. GitHub deliberately suppresses downstream event

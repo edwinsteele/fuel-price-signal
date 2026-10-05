@@ -15,6 +15,8 @@ twenty minutes after the merge. It only closed later, when an unrelated direct c
 all the usual explanations were checked and ruled out. A sweep of every other recent merged
 PR (#400–#407) found all their closing references had fired normally, so this is rare rather
 than systemic. Don't build a theory on one occurrence; build the check.
+Later evidence: #406 was merged by `github-actions` via `auto-merge.yml`, and a second bot
+merge (#409) didn't fire it either — see [[auto-merge-workflow-does-not-fire-closes-keyword]].
 
 **The rule: `closingIssuesReferences` being present is NOT evidence the issue closed.** They
 are two different pieces of state and this is the case that proves they can disagree. The

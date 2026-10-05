@@ -17,4 +17,4 @@ Two traps at re-lock time:
   - ORDER is part of the contract. LightGBM breaks equal-gain split ties by feature index, so a permutation fits a different model (measured: 0.038 c/L on the pooled realised delta). Append leaves existing indices untouched; inserting or sorting does not.
   - tests/test_feature_contract.py asserts LOCKED_FEATURE_COLUMNS == the artifact's feature_columns (ORDERED ==), but SKIPS when data/models/ is absent — and it always is in CI, since the dir is gitignored and ci.yml runs a bare `pytest -q`. Verify the re-lock LOCALLY; green CI does not mean the contract was checked.
 
-Live case: tgp_delta_7d at the #271 chip-4 re-lock — bd fps-1785999729707-1-0301bf82, component 5 carries the full revised sequence.
+Planned case, never executed: tgp_delta_7d at the #271 chip-4 re-lock — #271 closed as superseded (docs/STATUS.md `tgp.py` row), so tgp_delta_7d is still in NON_MODEL_COLUMNS. The revised re-lock sequence is in bd fps-1785999729707-1-0301bf82, component 5.

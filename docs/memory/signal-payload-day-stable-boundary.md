@@ -47,5 +47,5 @@ once nightly (`fuel_signal/api_v1.py`'s `encode_cache_entry`), and the
 it and projects it against the real current Sydney date per request — the
 same `payload` vs `routing_day`/`now` split as `render_text`, just over HTTP
 instead of stdout. The iOS app consuming this lives in the sibling repo
-`fps-app`, not in this one. See [[signal-cache-format-versioning]] for the
+`fps-app` (GitHub `edwinsteele/fuel-price-signal-app`), not in this one. See [[signal-cache-format-versioning]] for the
 JSON encoding's own gotcha.

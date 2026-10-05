@@ -1,6 +1,6 @@
 ---
 name: https-push-when-1password-agent-down
-description: HTTPS push works while the 1Password agent is down, but silently staleness origin/main.
+description: HTTPS push works while the 1Password agent is down, but silently leaves origin/main stale.
 metadata:
   type: reference
 ---

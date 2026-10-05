@@ -34,6 +34,6 @@ brim-vs-bridge policies against realised CPL with the tank engine in
 
 **Do not quietly re-tune it by eye.** That swaps one unmeasured number for another
 and makes the next reader think it was validated. Related:
-[[cadence-not-a-free-knob]], [[tau-selector-is-cadence-blind]] — both are cases in
+[[tau-selector-is-cadence-blind]] is a case in
 this repo where a parameter that looked like a knob turned out to need a declared
 measurement.

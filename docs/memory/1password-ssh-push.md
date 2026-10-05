@@ -1,6 +1,6 @@
 ---
 name: 1password-ssh-push
-description: 'Permission denied (publickey)' on push means the 1Password SSH agent is down — never ssh-add.
+description: "'Permission denied (publickey)' on push means the 1Password SSH agent is down — never ssh-add."
 metadata:
   type: reference
 ---

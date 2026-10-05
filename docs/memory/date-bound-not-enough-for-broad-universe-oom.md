@@ -8,7 +8,7 @@ metadata:
 `experiments/lib/universe.py::_window_label_rows` (#387, PR #413) originally called
 `fuel_signal.labels.assemble_training_rows(conn, station_codes=codes)` with NO date
 bound — a raw per-station-row load over EVERY station's FULL history, exactly the
-"~2.2M raw rows for the decade" shape [docs/AGENTS.md § Backfill paths](../../AGENTS.md)
+"~2.2M raw rows for the decade" shape [AGENTS.md § Backfill (`--start-date`) paths](../../AGENTS.md)
 warns can OOM Viking. The first fix (bounding the query to the smallest date envelope
 that still gives every window's calendar-gap mask its full lookback/horizon context)
 was necessary but NOT sufficient: for a 410-station universe it still concatenated
