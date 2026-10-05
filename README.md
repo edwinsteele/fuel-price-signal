@@ -68,7 +68,7 @@ This writes one snapshot CSV to `data/snapshots/YYYY/MM/YYYY-MM-DD.csv` and is a
 
 ### 2b. (Optional) Refresh the AIP TGP series
 
-Pulls the AIP Sydney ULP Terminal Gate Price (wholesale floor, c/L) and refreshes `data/tgp/tgp_sydney.csv` — the upstream series for the pending `tgp_delta_7d` feature (#271).
+Pulls the AIP Sydney ULP Terminal Gate Price (wholesale floor, c/L) and refreshes `data/tgp/tgp_sydney.csv` — the upstream series for the `tgp_delta_7d` column, which is computed into `features.csv` but held out of the model (#271 closed as superseded; current state in [docs/STATUS.md](docs/STATUS.md)).
 
 ```bash
 uv run python -m fuel_signal.tgp                       # scrape + download the latest AIP xlsx

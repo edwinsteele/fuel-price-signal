@@ -555,7 +555,7 @@ per night. To run immediately instead of waiting for the schedule:
 PYTHONPATH=. uv run python -m experiments.pipeline.launch
 ```
 
-**Dossier — not yet a scheduled task.** Once a night's run finishes, a Claude session following
+**Dossier.** Once a night's run finishes, a Claude session following
 `docs/routines/dossier.md` turns it into a write-up: first the deterministic pass —
 
 ```bash
@@ -565,5 +565,6 @@ PYTHONPATH=. uv run python -m experiments.pipeline.dossier_tables --scan experim
 — which writes `facts.json` + plots for every completed, undossiered run (no judgement calls), then
 the session reads `facts.json`, grades the run against its own `PREDICTED_SIGNATURE`, and writes
 `experiments/<batch>/<NAME>/README.md`, an `experiments/INDEX.md` row, and an `experiments/ledger.yaml`
-entry by hand, per the routine doc. Only `fuel-price-signal-launch` is registered as a scheduled
-task so far — this step needs to be invoked manually (or the scheduled task set up) until then.
+entry by hand, per the routine doc. It is registered as the `fuel-price-signal-dossier` local
+scheduled task alongside `fuel-price-signal-launch`; both were disabled as of 2026-10-06, so while
+they stay off this step is invoked manually.

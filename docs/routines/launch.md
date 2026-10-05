@@ -46,7 +46,7 @@ instructions nobody remembers to update.
 2. Read its output:
    - `[launch] no experiment work ready` — the queue is empty. Nothing to do; exit quietly.
    - `[launch] #<N>: launched detached pid=<pid> log=<path>` — success. The run continues for
-     hours with no Claude involvement; the dossier routine (fps-3jj.6, not yet built) picks up
+     hours with no Claude involvement; the dossier routine ([dossier.md](dossier.md), fps-3jj.6) picks up
      the finished artifacts later.
    - `[launch] #<N>: aborted before launch (release|block) — <reason>` — the candidate failed
      validation (PIT leak, missing columns, bad `INPUTS`/`COLUMNS` declaration, etc.). The
@@ -101,7 +101,7 @@ instructions nobody remembers to update.
 ## Candidate-issue convention
 
 `experiments/pipeline/launch.py` is the consumer of `experiment`-labelled GitHub issues; the
-generator session (fps-3jj.7, not yet written) is the producer and must file issues this way. An
+generator session ([generator.md](generator.md), fps-3jj.7) is the producer and must file issues this way. An
 issue's **body** must contain two lines, parsed by `parse_candidate_ref()`:
 
 ```text
@@ -124,7 +124,7 @@ stale-claim recovery looks for them.
 
 Experiment issues carry a fourth label, `experiment`, alongside whatever type label they'd
 otherwise get. This needs no code on the worker side: the chore/polish worker's pickup rule only
-ever queries the `chore` and `polish` labels (CLAUDE.md) — an issue carrying only `experiment` is
+ever queries the `chore` and `polish` labels ([worker.md § Rules](worker.md#rules)) — an issue carrying only `experiment` is
 structurally invisible to it. `launch.py` lists open `experiment`-labelled issues, keeps the
 unassigned and un-`blocked` ones, takes the oldest by creation date, and claims it with
 `gh issue edit <N> --add-assignee "@me"`.

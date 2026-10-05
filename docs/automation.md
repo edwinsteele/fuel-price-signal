@@ -96,7 +96,7 @@ The worker is a scheduled remote Claude Code routine. To pause it:
 1. Go to the Claude Code scheduled tasks and disable the routine, **or**
 2. Open a PR manually with the `claude-authored` label — the WIP cap will stop the worker from picking up anything.
 
-(Currently disabled via option 1 — see the status note at the top of this doc.)
+(It was disabled via option 1 until its re-enable on 2026-09-08 — see the status note at the top of this doc.)
 
 ## Spend monitoring
 

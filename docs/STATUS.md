@@ -235,7 +235,7 @@ manufactures savings. This is a correctness constraint, not a precision preferen
 **Three things must line up, and two of them currently default the wrong way:**
 
 1. **`launch.py::build_runner_cmd` does not pass `--n-stations`** (`experiments/pipeline/
-   launch.py:416`). It was `fps-hc7`, P4, deliberately deferred while wide runs were
+   launch.py`). It was `fps-hc7` (now #381), P4, deliberately deferred while wide runs were
    hand-invoked. **That deferral no longer holds: it is now a blocker for batch2**, because
    a candidate launched the normal way silently runs at the five-station default.
 2. **Batch2's noise floor must be built with BOTH `--n-stations 410` and an `--arity` at

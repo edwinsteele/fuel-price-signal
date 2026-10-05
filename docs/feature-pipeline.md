@@ -56,8 +56,8 @@ closes it out.
 
 **Two things are nightly scheduled tasks (Claude Code Routines); the rest are event-triggered
 interactive sessions.** Launch and dossier are the nightly pair — see
-`docs/automation.md` for the mechanics of running Claude as a Routine, including why the worker
-routine is currently disabled (unrelated to this pipeline's own routines, but the same platform). The generator and retrospective are invoked
+`docs/automation.md` for the mechanics of running Claude as a Routine, including the worker
+routine (unrelated to this pipeline's own routines, but the same platform). The generator and retrospective are invoked
 by a human (or an interactive Claude session) at batch boundaries, not on a timer —
 `docs/routines/generator.md` and `docs/routines/retrospective.md` both say so explicitly.
 
@@ -309,7 +309,7 @@ Five things that bite, in the order people hit them:
 - **A floor must also be at least as wide in ARITY as the candidate.** An arity-1 floor
   refuses every arity-2/3 candidate. batch1's candidates are arity 2–3, so a grading floor
   there needs `--arity 3`. Arity costs essentially no extra wall clock — the fit loop is
-  per draw, not per column (`noise_floor.py:409`), and the two batch1 410-station banks
+  per draw, not per column (the draw loop in `noise_floor.py`'s `compute_noise_floor`), and the two batch1 410-station banks
   measured 42,572s at arity 1 against 44,316s at arity 3 for the same 40 draws x 14 folds
   (+4%). It costs a little resolution through source-column reuse, which
   `placebo.effective_n_draws` prices into the bar: 40 draws at arity 3 draw 120 column
@@ -322,7 +322,7 @@ Five things that bite, in the order people hit them:
 - **A wide re-run will DESTROY the narrow run's `results.json` unless you give it its own
   candidate path.** `runner`'s output directory is `default_out_dir(candidate_path)` — the
   candidate path with `.py` stripped — and `run_candidate` unlinks any existing
-  `results.json` there before it starts (`runner.py:393`). So re-running an
+  `results.json` there before it starts (`runner.py`'s `run_candidate`). So re-running an
   already-dossiered candidate at a new width in place deletes the old result and leaves it
   desynchronised from the `facts.json`, `README.md` and PNGs beside it, which together are
   the batch's dossier record. **A separate batch dir does NOT fix this** — `out_dir` is

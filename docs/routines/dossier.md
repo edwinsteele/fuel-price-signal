@@ -566,7 +566,7 @@ worth a follow-up issue (`gh issue create`), not something to compute in-session
 
 6. **Commit `README.md` + the run's updated `facts.json` (`grading` filled in) + the PNGs +
    `experiments/ledger.yaml` + `experiments/INDEX.md` together, straight to `main`, and
-   `git push`** — `experiments/**` is PR-exempt (`CLAUDE.md`), and `ledger.yaml`/`INDEX.md` are
+   `git push`** — `experiments/**` is PR-exempt (`AGENTS.md` § Agent workflow conventions), and `ledger.yaml`/`INDEX.md` are
    prose/data files under the same exemption since they only ever get written by this routine or
    hand-backfills of experiment content. One commit per run if several are queued in one session
    (keeps `git blame` readable per candidate). **The push is not optional and not deferrable to
