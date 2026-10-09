@@ -30,5 +30,5 @@ The mitigation (added in review on PR #425, same day as the endpoints themselves
 `fuel_signal/api_v1.py`. The version bump doesn't make the old row *readable* — it just
 guarantees the failure is a clean, immediate `ValueError` (version mismatch) instead of a
 `KeyError` deep in field-by-field decoding, which is easier to diagnose but behaves identically
-from the blueprint's point of view (both degrade to 503). Either way, the fix on the ground is
+from the `/api/v1` routes' point of view (both degrade to 503). Either way, the fix on the ground is
 the same: run `generate_signal_cache` again.
