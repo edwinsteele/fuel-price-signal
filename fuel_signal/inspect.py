@@ -1133,7 +1133,9 @@ def _create_app(
         token = _api_v1.parse_devices_request(request.get_json(silent=True))
         if token is None:
             return _devices_bad_request()
-        seen_at = _sydney_now().isoformat(timespec="seconds")
+        # Milliseconds, not seconds: the 410 cleanup compares last_seen with an
+        # APNs timestamp in milliseconds (db.delete_device_if_older_than).
+        seen_at = _sydney_now().isoformat(timespec="milliseconds")
         # Never the shared `conn`: it is used from every waitress thread, and a
         # write's transaction on it would interleave with other requests' work
         # (docs/memory/inspect-workbench-shared-sqlite-connection-serializes-routes.md).

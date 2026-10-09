@@ -1269,11 +1269,21 @@ def upsert_device(conn: sqlite3.Connection, token: str, seen_at: str) -> None:
 
     `token` must already be normalized (lowercase hex); `seen_at` is ISO 8601
     with an offset.
+
+    Two requests for one token stamp `seen_at` before they take the write lock,
+    so they can commit in the reverse of time order. last_seen therefore only
+    ever moves later and first_seen only earlier, compared as instants: an
+    out-of-order commit must not make a just-registered token look stale to
+    eviction or to the 410 cleanup.
     """
     _require_timestamp(conn, seen_at)
     conn.execute(
         """INSERT INTO devices (token, first_seen, last_seen) VALUES (?, ?, ?)
-           ON CONFLICT(token) DO UPDATE SET last_seen = excluded.last_seen""",
+           ON CONFLICT(token) DO UPDATE SET
+               first_seen = CASE WHEN julianday(excluded.first_seen) < julianday(devices.first_seen)
+                                 THEN excluded.first_seen ELSE devices.first_seen END,
+               last_seen  = CASE WHEN julianday(excluded.last_seen) > julianday(devices.last_seen)
+                                 THEN excluded.last_seen ELSE devices.last_seen END""",
         (token, seen_at, seen_at),
     )
 
@@ -1332,7 +1342,10 @@ def delete_device_if_older_than(conn: sqlite3.Connection, token: str, before: st
 
     For APNs `410 Unregistered` (docs/api-contract.md § Nightly push): `before`
     is the time APNs says the token stopped being valid, so a re-registration
-    that raced the push is kept.
+    that raced the push is kept. APNs reports that time in milliseconds, which
+    is why POST /api/v1/devices stores last_seen to the millisecond (and is
+    also julianday()'s resolution): stored to the second, a re-registration
+    later in the same second would compare as older and be deleted.
     """
     _require_timestamp(conn, before)
     cur = conn.execute(

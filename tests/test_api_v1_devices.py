@@ -72,6 +72,22 @@ def test_register_known_token_bumps_last_seen_keeps_first_seen(conn):
     assert list_devices(conn) == [{"token": _TOKEN, "first_seen": _ts(0), "last_seen": _ts(5)}]
 
 
+def test_register_out_of_order_never_moves_last_seen_back(conn):
+    # Two requests for one token stamp seen_at before taking the write lock, so
+    # they can commit in reverse time order. The later instant must win.
+    register_device(conn, _TOKEN, _ts(10))
+    register_device(conn, _TOKEN, _ts(5))
+    assert list_devices(conn) == [{"token": _TOKEN, "first_seen": _ts(5), "last_seen": _ts(10)}]
+
+
+def test_register_out_of_order_compares_instants_across_dst_fall_back(conn):
+    # 02:15+10:00 (16:15Z) is the later instant though it sorts first as a string.
+    earlier, later = "2026-04-05T02:30:00+11:00", "2026-04-05T02:15:00+10:00"
+    register_device(conn, _TOKEN, later)
+    register_device(conn, _TOKEN, earlier)
+    assert list_devices(conn) == [{"token": _TOKEN, "first_seen": earlier, "last_seen": later}]
+
+
 def test_eleventh_token_evicts_oldest_last_seen(conn):
     for i in range(MAX_DEVICES):
         register_device(conn, _token(i), _ts(i))
@@ -223,7 +239,7 @@ def test_post_new_token_returns_204_and_stores_it(client, conn):
     assert resp.status_code == 204
     assert resp.data == b""
     assert list_devices(conn) == [
-        {"token": _TOKEN, "first_seen": "2026-10-10T07:01:55+11:00", "last_seen": "2026-10-10T07:01:55+11:00"}
+        {"token": _TOKEN, "first_seen": "2026-10-10T07:01:55.000+11:00", "last_seen": "2026-10-10T07:01:55.000+11:00"}
     ]
 
 
@@ -234,8 +250,27 @@ def test_post_repeat_token_returns_204_and_bumps_last_seen(client, conn, clock):
     assert resp.status_code == 204
     assert resp.data == b""
     assert list_devices(conn) == [
-        {"token": _TOKEN, "first_seen": "2026-10-10T07:01:55+11:00", "last_seen": "2026-10-10T10:01:55+11:00"}
+        {"token": _TOKEN, "first_seen": "2026-10-10T07:01:55.000+11:00", "last_seen": "2026-10-10T10:01:55.000+11:00"}
     ]
+
+
+def test_post_reregistration_within_the_second_after_a_410_is_kept(client, conn, clock):
+    # APNs reports a 410's invalidation time in milliseconds. A re-registration
+    # 300 ms later, inside the same second, must not look older than it.
+    invalidated_at = (_T0 + datetime.timedelta(milliseconds=400)).isoformat(timespec="milliseconds")
+    clock["now"] = _T0 + datetime.timedelta(milliseconds=700)
+    assert _post(client, {"token": _TOKEN}).status_code == 204
+    assert delete_device_if_older_than(conn, _TOKEN, invalidated_at) is False
+    assert [d["token"] for d in list_devices(conn)] == [_TOKEN]
+
+
+def test_post_reregistration_in_the_same_millisecond_as_a_410_is_kept(client, conn, clock):
+    # Sub-millisecond request time is truncated to the 410's own resolution,
+    # where "strictly before" keeps the tie.
+    invalidated_at = (_T0 + datetime.timedelta(milliseconds=400)).isoformat(timespec="milliseconds")
+    clock["now"] = _T0 + datetime.timedelta(microseconds=400_900)
+    assert _post(client, {"token": _TOKEN}).status_code == 204
+    assert delete_device_if_older_than(conn, _TOKEN, invalidated_at) is False
 
 
 def test_post_mixed_case_is_stored_lowercased_as_one_row(client, conn):
