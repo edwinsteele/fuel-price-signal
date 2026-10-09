@@ -57,6 +57,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [daily-prices-coverage-not-feature-row-availability](daily-prices-coverage-not-feature-row-availability.md) — high `daily_prices` coverage in a window does not imply the ML feature pipeline emits any row there. Check `describe_universe`'s `worst_window_label_fraction` too.
 - [date-bound-not-enough-for-broad-universe-oom](date-bound-not-enough-for-broad-universe-oom.md) — bounding a per-station query by date range doesn't stop a broad (100s-station) universe from concatenating every station's rows into one resident frame. Check both axes.
 - [inspect-workbench-cycle-state-frozen-at-startup](inspect-workbench-cycle-state-frozen-at-startup.md) — `inspect.py`'s `cd`/`cycle_state`/`peak_data`/`summary`/`boundaries` are built once in `main()`, never per request; freshness depends on a deployment-side restart, not on any query in this repo.
+- [inspect-workbench-shared-sqlite-connection-serializes-routes](inspect-workbench-shared-sqlite-connection-serializes-routes.md) — all `inspect.py` routes share one serialized sqlite3 connection, so a slow page query blocks a concurrent `/api/v1` read; writes must open their own connection (#435, #439).
 
 ## Numerical and test traps
 
