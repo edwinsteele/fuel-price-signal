@@ -67,6 +67,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [default-flip-breaks-contrast-tests](default-flip-breaks-contrast-tests.md) — flipping a default silently disarms every test that used the new value as its contrast arm. Five of six kept passing while comparing a value to itself.
 - [noise-floor-fixture-needs-n-placebo-columns](noise-floor-fixture-needs-n-placebo-columns.md) — a 2+ column fixture without `n_placebo_columns` trips the arity refusal branch instead of what the test meant to exercise.
 - [backfill-perf-work-needs-synthetic-benchmark](backfill-perf-work-needs-synthetic-benchmark.md) — the 492MB profiling DB is gitignored and usually absent; write a synthetic parity + direction check and cite the experiment for the production-scale number.
+- [sydney-offset-timestamps-dont-sort-as-strings](sydney-offset-timestamps-dont-sort-as-strings.md) — `…+10:00`/`…+11:00` ISO strings mis-order across the April fall-back hour (and against `Z` times always); compare in SQL with `julianday()`, which applies the offset.
 
 ## Writing claims that nothing executes
 
