@@ -254,7 +254,7 @@ Known unrecoverable gaps (source data never published):
 
 `inspect.py` is a local Flask dev server — `uv run python -m fuel_signal.inspect` starts it (default port 5000). State lives in the URL query string. Series types: `sydney`, `lga:Name`, `brand:Name`, `station:CODE`. Chart types: line, scatter, gradient heatmap, coverage heatmap. See README for full usage.
 
-**`/api/v1` has a contract, and this repo holds the canonical copy.** [docs/api-contract.md](docs/api-contract.md) is vendored byte-for-byte by the private iOS client (`edwinsteele/fuel-price-signal-app`). It is a shared agreement, not a description of the server: raise a mismatch rather than editing the contract to match the code. **Never drop or rename the `` ```json stations-response `` / `` ```json recommendation-response `` fence markers** — both repos' tests extract the examples by them. Workflow: [docs/CONVENTIONS.md § API contract](docs/CONVENTIONS.md#api-contract-this-repo-is-canonical).
+**`/api/v1` has a contract, and this repo holds the canonical copy.** [docs/api-contract.md](docs/api-contract.md) is vendored byte-for-byte by the private iOS client (`edwinsteele/fuel-price-signal-app`). It is a shared agreement, not a description of the server: raise a mismatch rather than editing the contract to match the code. **Never drop or rename an example's `` ```json <marker> `` fence marker** (`stations-response`, `devices-request`, …) — both repos' tests extract examples by marker. Workflow: [docs/CONVENTIONS.md § API contract](docs/CONVENTIONS.md#api-contract-this-repo-is-canonical).
 
 Leading indicators (deferred — not yet built):
 - Hypothesis: some LGAs and/or macro signals (TGP, crude) precede BM price rises

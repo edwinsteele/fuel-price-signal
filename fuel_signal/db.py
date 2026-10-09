@@ -186,6 +186,19 @@ CREATE TABLE IF NOT EXISTS signal_cache (
 );
 """
 
+# APNs device tokens registered by POST /api/v1/devices (docs/api-contract.md).
+# Kept separate so register_device can ensure the table on a DB built before it
+# existed, without running the whole of _SCHEMA on a request thread.
+_DEVICES_SCHEMA = """\
+CREATE TABLE IF NOT EXISTS devices (
+    token      TEXT NOT NULL PRIMARY KEY,  -- APNs device token, lowercase hex
+    first_seen TEXT NOT NULL,             -- ISO 8601 with Sydney offset; first registration
+    last_seen  TEXT NOT NULL              -- ISO 8601 with Sydney offset; latest registration
+);
+"""
+
+_SCHEMA += _DEVICES_SCHEMA
+
 
 # ---------------------------------------------------------------------------
 # Storage format helpers
@@ -1204,6 +1217,130 @@ def read_signal_cache(conn: sqlite3.Connection) -> dict | None:
     if row is None:
         return None
     return {"as_of_date": row[0], "generated_at": row[1], "payload_json": row[2]}
+
+
+# ---------------------------------------------------------------------------
+# APNs device tokens (POST /api/v1/devices, read by the nightly push)
+# ---------------------------------------------------------------------------
+
+# docs/api-contract.md § POST /api/v1/devices: registering an 11th token evicts
+# the one with the oldest last_seen.
+MAX_DEVICES = 10
+
+
+def database_file(conn: sqlite3.Connection) -> str:
+    """Return the file behind `conn`'s main database.
+
+    Raises ValueError for an in-memory or temporary database, which has no file
+    for a second connection to open.
+    """
+    for _seq, name, file in conn.execute("PRAGMA database_list"):
+        if name == "main":
+            if not file:
+                raise ValueError("connection has no database file (in-memory or temporary DB)")
+            return file
+    raise ValueError("connection has no main database")
+
+
+def open_request_connection(db_path: str | pathlib.Path, busy_timeout_s: float) -> sqlite3.Connection:
+    """Open a short-lived connection for one web request's write.
+
+    `timeout` is sqlite3's busy timeout: a write that finds the database locked
+    (the nightly load holds the write lock for long stretches) waits up to
+    `busy_timeout_s` before raising `sqlite3.OperationalError`. IMMEDIATE makes
+    each implicit transaction take the write lock when it begins, so the wait
+    happens there rather than as a mid-transaction lock upgrade. No
+    `journal_mode` pragma: WAL is persistent in the file, set by `open_db`.
+    """
+    return sqlite3.connect(db_path, timeout=busy_timeout_s, isolation_level="IMMEDIATE")
+
+
+def _require_timestamp(conn: sqlite3.Connection, value: str) -> None:
+    # Ordering and comparison go through julianday(), which reads the UTC
+    # offset — plain string order is wrong across the DST fall-back hour
+    # (02:15+10:00 is later than 02:30+11:00). julianday() of an unparseable
+    # string is NULL, which would compare false and silently match nothing.
+    if conn.execute("SELECT julianday(?)", (value,)).fetchone()[0] is None:
+        raise ValueError(f"not an ISO 8601 timestamp SQLite can read: {value!r}")
+
+
+def upsert_device(conn: sqlite3.Connection, token: str, seen_at: str) -> None:
+    """Add `token`, or bump a known token's last_seen (first_seen is kept). Does not commit.
+
+    `token` must already be normalized (lowercase hex); `seen_at` is ISO 8601
+    with an offset.
+    """
+    _require_timestamp(conn, seen_at)
+    conn.execute(
+        """INSERT INTO devices (token, first_seen, last_seen) VALUES (?, ?, ?)
+           ON CONFLICT(token) DO UPDATE SET last_seen = excluded.last_seen""",
+        (token, seen_at, seen_at),
+    )
+
+
+def cap_devices(
+    conn: sqlite3.Connection, max_devices: int = MAX_DEVICES, keep: str | None = None
+) -> int:
+    """Delete all but the `max_devices` most recently seen tokens. Does not commit.
+
+    `keep` is never evicted, so the token a request has just registered survives
+    even if it ties on last_seen with the tokens around the cut. Ties are
+    otherwise broken by first_seen, then token, so eviction is deterministic.
+    Returns the number of rows deleted.
+    """
+    cur = conn.execute(
+        """DELETE FROM devices WHERE token IN (
+               SELECT token FROM devices
+               ORDER BY token IS ? DESC,
+                        julianday(last_seen) DESC,
+                        julianday(first_seen) DESC,
+                        token
+               LIMIT -1 OFFSET ?
+           )""",
+        (keep, max_devices),
+    )
+    return cur.rowcount
+
+
+def register_device(
+    conn: sqlite3.Connection, token: str, seen_at: str, max_devices: int = MAX_DEVICES
+) -> None:
+    """The POST /api/v1/devices write: upsert `token`, then enforce the cap, in one transaction.
+
+    Also ensures the `devices` table, so a DB built before it existed accepts
+    registrations straight after a deploy instead of waiting for the next
+    `create_schema` run. CREATE TABLE IF NOT EXISTS on an existing table only
+    reads the schema.
+    """
+    conn.execute(_DEVICES_SCHEMA)
+    with conn:
+        upsert_device(conn, token, seen_at)
+        cap_devices(conn, max_devices, keep=token)
+
+
+def list_devices(conn: sqlite3.Connection) -> list[dict]:
+    """Return every registered token as {token, first_seen, last_seen}, most recently seen first."""
+    rows = conn.execute(
+        """SELECT token, first_seen, last_seen FROM devices
+           ORDER BY julianday(last_seen) DESC, julianday(first_seen) DESC, token"""
+    ).fetchall()
+    return [{"token": r[0], "first_seen": r[1], "last_seen": r[2]} for r in rows]
+
+
+def delete_device_if_older_than(conn: sqlite3.Connection, token: str, before: str) -> bool:
+    """Delete `token` only if its last_seen is strictly before `before`; commit. True if deleted.
+
+    For APNs `410 Unregistered` (docs/api-contract.md § Nightly push): `before`
+    is the time APNs says the token stopped being valid, so a re-registration
+    that raced the push is kept.
+    """
+    _require_timestamp(conn, before)
+    cur = conn.execute(
+        "DELETE FROM devices WHERE token = ? AND julianday(last_seen) < julianday(?)",
+        (token, before),
+    )
+    conn.commit()
+    return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------------------
