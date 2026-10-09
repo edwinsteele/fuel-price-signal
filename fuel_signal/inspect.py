@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 
 _LINE_CAP = 10  # max series on line chart before overflow banner
 
+# How long POST /api/v1/devices waits on a locked database before answering
+# 503. Kept short: the app retries any non-204 at its next registration point,
+# so failing early loses nothing, while a request thread parked on the lock is
+# one fewer waitress thread serving the GETs.
+_DEVICES_BUSY_TIMEOUT_S = 5.0
+
 _SYDNEY_COLOUR = "#9ca3af"  # mid-grey: visible on both light and dark backgrounds
 
 _COLOURS = [
@@ -698,6 +704,9 @@ def _create_app(
     _resolved_model_path = model_path or pathlib.Path("data/models/lgbm.joblib")
     _xv, _sv, _fc = _load_shap_arrays(_resolved_shap_dir)
     _model_meta = _load_model_metadata(_resolved_model_path)
+    # The file POST /api/v1/devices opens its own connection to: read off the
+    # shared `conn` once, here, so the write always lands in the DB the reads see.
+    db_file = _db.database_file(conn)
 
     app.jinja_env.filters["gradient_color"] = _gradient_color
     app.jinja_env.filters["coverage_color"] = _coverage_color
@@ -1103,6 +1112,45 @@ def _create_app(
             payload, gap_start, gap_end, generated_at,
             routing_day=now_dt.date(), served_at=now_dt.isoformat(timespec="seconds"), now=now_dt.date(),
         ))
+
+    def _devices_bad_request():
+        # The contract makes any 400 body diagnostic only; the app ignores it.
+        return jsonify({
+            "error": "invalid_request",
+            "detail": 'Send Content-Type: application/json and {"token": "<1-100 bytes as hex>"}.',
+        }), 400
+
+    @app.route("/api/v1/devices", methods=["POST"])
+    def api_v1_devices():
+        # Every malformed request is one status, 400 (contract). The explicit
+        # mimetype check is what holds that for content types: without it,
+        # get_json() answers a non-JSON type with Flask's 415, and with
+        # silent=True it parses application/*+json bodies, which the contract
+        # doesn't accept. silent=True also turns unparseable JSON into None
+        # rather than Flask's own 400 page.
+        if request.mimetype != "application/json":
+            return _devices_bad_request()
+        token = _api_v1.parse_devices_request(request.get_json(silent=True))
+        if token is None:
+            return _devices_bad_request()
+        # Milliseconds, not seconds: the 410 cleanup compares last_seen with an
+        # APNs timestamp in milliseconds (db.delete_device_if_older_than).
+        seen_at = _sydney_now().isoformat(timespec="milliseconds")
+        # Never the shared `conn`: it is used from every waitress thread, and a
+        # write's transaction on it would interleave with other requests' work
+        # (docs/memory/inspect-workbench-shared-sqlite-connection-serializes-routes.md).
+        write_conn = _db.open_request_connection(db_file, _DEVICES_BUSY_TIMEOUT_S)
+        try:
+            _db.register_device(write_conn, token, seen_at)
+        except sqlite3.OperationalError:
+            # Typically the nightly load still holding the write lock after the
+            # busy timeout. Transient by contract: the app retries at its next
+            # registration point.
+            logger.warning("device registration failed; reporting 503", exc_info=True)
+            return "", 503
+        finally:
+            write_conn.close()
+        return "", 204
 
     @app.route("/healthz")
     def healthz():

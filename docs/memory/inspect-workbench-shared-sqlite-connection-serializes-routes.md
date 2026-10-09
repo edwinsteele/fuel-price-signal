@@ -21,9 +21,11 @@ timeout.
 Consequences already designed around (2026-10-10, contract rev 4 / fps-app#142):
 - the nightly push is sent **after** the daily script's warm-up loop
   (setup-scripts#17), never before it;
-- `POST /api/v1/devices` (#435) must open its own per-request connection. A
-  write through the shared connection from a request thread would also race
-  other threads' transactions, which today's read-only routes never trigger.
+- `POST /api/v1/devices` (#435) opens its own per-request connection
+  (`db.open_request_connection`, with a busy timeout) and never touches the
+  shared one. A write through the shared connection from a request thread
+  would race other threads' transactions, which the read-only routes never
+  trigger. Any future write route follows the same pattern.
 
 Open fix: #439 moves the `/api/v1` GETs onto per-request connections. WAL allows
 concurrent readers on separate connections. Until it lands, don't assume an

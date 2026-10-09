@@ -532,6 +532,9 @@ asserts its types decode it. The app's sync tooling also refuses to vendor a
 copy that's missing a marker rather than silently breaking its test build.
 **Never drop or rename these markers when editing the examples** — and an
 example edit that the server can't emit now fails `test_api_v1.py` here.
+The same holds for the `` ```json devices-request `` example:
+`tests/test_api_v1_devices.py` posts it to `POST /api/v1/devices` and expects
+`204`, so an example token the server would reject fails there.
 
 Changes land here first and are pulled downstream second. There's no
 automated push: this repo would need a token to read the private app repo,

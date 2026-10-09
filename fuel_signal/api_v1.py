@@ -1,6 +1,6 @@
-"""JSON encoding for the /api/v1 blueprint — see docs/api-contract.md (rev 3).
+"""JSON encoding for the /api/v1 blueprint — see docs/api-contract.md (rev 4).
 
-Two halves, matching the cached/live split in `signal.SignalPayload`:
+The two GETs split along the cached/live line in `signal.SignalPayload`:
 
 - `encode_cache_entry` / `decode_cache_entry` round-trip a `SignalPayload` (plus
   the gap boundaries, themselves a pure function of the DB) through the JSON
@@ -9,12 +9,16 @@ Two halves, matching the cached/live split in `signal.SignalPayload`:
 - `build_stations_response` / `build_recommendation_response` take a decoded
   payload plus `routing_day`/`now` — fresh at request time, never cached — and
   produce the exact wire shapes the contract defines.
+
+The one write, `POST /api/v1/devices`, only needs its request body checked:
+`parse_devices_request`.
 """
 
 from __future__ import annotations
 
 import datetime
 import math
+import re
 
 from fuel_signal import signal
 from fuel_signal.config import STATION_ROUTE_DAYS
@@ -447,3 +451,28 @@ def build_recommendation_response(
         "network": _network_block(payload),
         "rules": _rules_block(payload),
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/devices
+# ---------------------------------------------------------------------------
+
+# The contract's valid token: 1–100 bytes as hex digits of either case. APNs
+# token length is not assumed — today's are 32 bytes, but that is APNs's call.
+_DEVICE_TOKEN_RE = re.compile(r"(?:[0-9a-fA-F]{2}){1,100}")
+
+
+def parse_devices_request(body: object) -> str | None:
+    """Return the request's device token lowercased, or None if the body is malformed.
+
+    `body` is the parsed JSON (None when it didn't parse). Keys other than
+    `token` are ignored.
+    """
+    if not isinstance(body, dict):
+        return None
+    token = body.get("token")
+    # isinstance first: a non-string token (number, list, null) is malformed,
+    # and re.fullmatch would raise TypeError on it rather than reject it.
+    if not isinstance(token, str) or _DEVICE_TOKEN_RE.fullmatch(token) is None:
+        return None
+    return token.lower()

@@ -3,10 +3,11 @@
 Status: the two `GET` endpoints are **implemented server-side**
 (fuel-price-signal#416) — `fuel_signal/api_v1.py`,
 `fuel_signal/generate_signal_cache.py`, and the `/api/v1` routes in
-`fuel_signal/inspect.py`. Rev 4 adds `POST /api/v1/devices` and the nightly
-push; both are **agreed, not yet implemented** — fuel-price-signal#435
-(devices) and fuel-price-signal#436 (push sender), with the nightly wiring in
-setup-scripts#17. The canonical copy lives in `fuel-price-signal`;
+`fuel_signal/inspect.py`. Rev 4 adds `POST /api/v1/devices`, also
+**implemented server-side** (fuel-price-signal#435) — the route in
+`fuel_signal/inspect.py`, the `devices` table in `fuel_signal/db.py` — and the
+nightly push, **agreed, not yet implemented** — fuel-price-signal#436 (push
+sender), with the nightly wiring in setup-scripts#17. The canonical copy lives in `fuel-price-signal`;
 `fuel-price-signal-app` vendors it byte-for-byte. App-side implementation status
 is tracked in `fuel-price-signal-app`, not in this document.
 

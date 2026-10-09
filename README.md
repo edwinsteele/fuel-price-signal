@@ -283,6 +283,10 @@ Both are projections of one nightly-precomputed blob, so a pair of calls made
 seconds apart cannot disagree. The full wire format — every field, its
 rounding, and the worked examples — is [docs/api-contract.md](docs/api-contract.md).
 
+The app also registers its push token with `POST /api/v1/devices`, the one
+write. The workbench stores it in the DB's `devices` table (at most 10 tokens;
+never readable over the API) for the nightly push to read.
+
 Scoring is too slow to run inside a request (~29s of `load_history`), so the
 signal must be precomputed by a separate command and stored in the DB before
 the workbench can serve it:
