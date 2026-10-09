@@ -542,8 +542,11 @@ It is the API's only write, and the only client-supplied state viking keeps.
 - **`204 No Content`** — registered. An idempotent upsert: a new token is
   added, a known one has its last-seen time bumped. The response is identical
   either way, and has no body.
-- **`400`** — malformed: a body that isn't JSON, a missing or non-string
-  `token`, or a token failing the rule above. Any body is diagnostic only.
+- **`400`** — malformed: a request not sent as `application/json`, a body
+  that isn't JSON, a missing or non-string `token`, or a token failing the
+  rule above. A wrong or missing content type is a `400` too, not a `415`, so
+  every malformed request is one status, distinct from the transient ones
+  below. Any body is diagnostic only.
 - **Anything else** (including a `5xx`, or no answer at all) is transient. The
   nightly price load holds the database's write lock for long stretches, so a
   registration landing mid-run can fail; so can any registration made away
@@ -580,7 +583,9 @@ the LAN, exactly as it does each morning (including the `generated_at` /
 | `apns-priority` | `5` |
 | `apns-topic` | `com.edwinsteele.FuelPriceSignal` |
 
-with exactly this body:
+and no other `apns-*` header — in particular `apns-expiration` is not set,
+and whatever APNs does by default with an undelivered push is acceptable: a
+late delivery only means one more fetch. The body is exactly:
 
 ```json push-payload
 {
