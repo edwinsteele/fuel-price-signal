@@ -1,13 +1,19 @@
-# fuel-price-signal HTTP API — v1 contract (rev 3)
+# fuel-price-signal HTTP API — v1 contract (rev 4)
 
-Status: **implemented server-side** (#416) — `fuel_signal/api_v1.py`,
-`fuel_signal/generate_signal_cache.py`, and the blueprint in `fuel_signal/inspect.py`.
-The canonical copy lives in `fuel-price-signal`; `fuel-price-signal-app` vendors
-it byte-for-byte. App-side implementation status is tracked in
-`fuel-price-signal-app`, not in this document.
+Status: the two `GET` endpoints are **implemented server-side**
+(fuel-price-signal#416) — `fuel_signal/api_v1.py`,
+`fuel_signal/generate_signal_cache.py`, and the `/api/v1` routes in
+`fuel_signal/inspect.py`. Rev 4 adds `POST /api/v1/devices` and the nightly
+push; both are **agreed, not yet implemented** — fuel-price-signal#435
+(devices) and fuel-price-signal#436 (push sender), with the nightly wiring in
+setup-scripts#17. The canonical copy lives in `fuel-price-signal`;
+`fuel-price-signal-app` vendors it byte-for-byte. App-side implementation status
+is tracked in `fuel-price-signal-app`, not in this document.
 
-The app makes one batch of calls each morning on the home LAN and renders the
-result. Both endpoints are projections of a single nightly-precomputed blob, so
+The app makes one batch of reads each morning on the home LAN — or overnight,
+when the nightly push wakes it — and renders the result; separately, it
+registers its push token (`POST /api/v1/devices`). Both `GET` endpoints are
+projections of a single nightly-precomputed blob, so
 a pair of calls made seconds apart cannot disagree — except across the narrow
 nightly cache-replacement window, or when the calls straddle midnight in
 Sydney, both described in the implementation note under **Storage of the
@@ -50,11 +56,21 @@ than computed, treat it as suspect and check it against `signal.py`.
 ## Transport
 
 - Base: `http://fuel.home.wordspeak.org:5000/api/v1` (a CNAME for viking's LAN
-  address, the existing `fuelsignal-workbench.service` waitress process, one
-  extra Flask blueprint).
-- No auth. LAN-only is enforced by bind address, as it already is for the
-  workbench. A `before_request` hook on the blueprint is the seam if a token is
-  ever wanted; nothing speculative is built now.
+  address, the existing `fuelsignal-workbench.service` waitress process). The
+  `/api/v1` routes are registered directly on the workbench's Flask `app` in
+  `fuel_signal/inspect.py`; there is no blueprint.
+- No auth, including on the one write (`POST /api/v1/devices`). LAN-only is
+  enforced by bind address, as it already is for the workbench. The write's
+  exposure is bounded by its own rules — strict token validation, a row cap,
+  no way to read tokens back — and a junk token costs one rejected APNs
+  request and a log line a night. One residual risk is accepted under this
+  LAN-only threat model: a device on the LAN registering junk tokens can fill
+  the 10-row cap and evict a real phone until that phone re-registers on its
+  next foreground. Rejected tokens are kept on purpose (see viking's handling
+  of APNs responses under **Nightly push**), so the push does not prune them
+  either. If a token is ever wanted, a `before_request` check scoped to
+  `/api/v1` (or moving the routes to a blueprint) is the seam; nothing
+  speculative is built now.
 - No TLS. Household LAN, public fuel prices.
 
 ## Fuel type
@@ -67,7 +83,7 @@ accepted tradeoff, recorded here so the assumption is written down.
 ## Dates and times — four distinct values
 
 Conflating any two of these has already caused one real bug (#410). All four
-appear in both endpoints.
+appear in both `GET` endpoints.
 
 | Field | Meaning |
 |---|---|
@@ -266,7 +282,8 @@ deterministic and stops it silently reordering if someone edits `config.py`.
   and `worth_diverting` is true at `<= -3.0`. `threshold_cents` echoes
   `DIVERSION_WORTH_CENTS`, a module constant rather than a tuned parameter.
 - The station list is **read-only**. `PREFERRED_STATIONS` keys are hashed into an
-  experiment grading identity, so the API must never accept mutations.
+  experiment grading identity, so the API must never accept mutations to it.
+  `POST /api/v1/devices` writes push tokens only and never touches stations.
 
 ### Do not sort by `probability_buy`
 
@@ -510,6 +527,126 @@ wording in the same PR as the refactor, so there is one source of prose and the
 API ships the corrected string. That is a visible, deliberate diff in
 `signal-regression.yml`.
 
+## `POST /api/v1/devices`
+
+Registers the phone's APNs device token so viking can send the nightly push.
+It is the API's only write, and the only client-supplied state viking keeps.
+
+```json devices-request
+{
+  "token": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+}
+```
+
+- `Content-Type: application/json`. `token` is the device token as hex — the
+  app sends whatever length APNs gives it; nothing here assumes 32 bytes.
+  The example's value is illustrative, not a real token.
+- **Valid token:** a non-empty, even-length string of hex digits
+  (`[0-9a-fA-F]`), at most 200 characters (100 bytes). viking stores it
+  lowercased, so the same token in either case is one registration.
+- **`204 No Content`** — registered. An idempotent upsert: a new token is
+  added, a known one has its last-seen time bumped. The response is identical
+  either way, and has no body.
+- **`400`** — malformed: a request not sent as `application/json`, a body
+  that isn't JSON, a missing or non-string `token`, or a token failing the
+  rule above. A wrong or missing content type is a `400` too, not a `415`, so
+  every malformed request is one status, distinct from the transient ones
+  below. Any body is diagnostic only.
+- **Anything else** (including a `5xx`, or no answer at all) is transient. The
+  nightly price load holds the database's write lock for long stretches, so a
+  registration landing mid-run can fail; so can any registration made away
+  from home.
+
+**What the app does with the response:** nothing visible. It registers on
+every process launch (once APNs hands it a token) **and** every time a scene
+becomes active, and treats every outcome other than `204` as "try again at the
+next one", silently. It ignores the response body in every case.
+
+**What viking keeps:** one row per token, with first-seen and last-seen times,
+in a table in the SQLite DB. **At most 10 tokens** — registering an 11th
+evicts the one with the oldest last-seen time. Tokens are never readable over
+the API; there is no `GET`. A from-scratch DB rebuild on viking drops the
+table (as it drops the signal cache, see **Errors**); because the app
+re-registers on every foreground, that heals the next time the app is opened.
+
+Token lifecycle on viking's side is driven by APNs's answers to the nightly
+push, described next.
+
+## Nightly push
+
+Once a night, viking sends one APNs background push to every registered
+token. It is a wake-up call, not a data channel: on receiving it the app makes
+its usual `GET /api/v1/stations` and `GET /api/v1/recommendation` reads over
+the LAN, exactly as it does each morning (including the `generated_at` /
+`routing_day` comparison under **Storage of the precomputed blob**).
+
+**What viking sends**, to `/3/device/<token>` on the APNs HTTP/2 API:
+
+| Header | Value |
+|---|---|
+| `apns-push-type` | `background` |
+| `apns-priority` | `5` |
+| `apns-topic` | `com.edwinsteele.FuelPriceSignal` |
+
+and no other `apns-*` header — in particular `apns-expiration` is not set,
+and whatever APNs does by default with an undelivered push is acceptable: a
+late delivery only means one more fetch. The body is exactly:
+
+```json push-payload
+{
+  "aps": {
+    "content-available": 1
+  }
+}
+```
+
+No custom keys — the push carries no data the app needs. If a later revision
+adds one it is additive, so **the app must ignore any key it doesn't know.**
+
+**Which APNs environment** is a viking setting, not something the app reports:
+sandbox (`api.sandbox.push.apple.com`) while the app is installed by
+development-signed builds (`make deploy` in `fuel-price-signal-app`, Release
+configuration included), production only after a move to TestFlight or the App
+Store. A token from the other environment is rejected by APNs; that is a
+viking misconfiguration, logged loudly there, and on the phone its only
+symptom is no overnight fetch.
+
+**When it is sent:**
+
+- After the nightly run has regenerated the signal cache, restarted the
+  workbench and finished warming it, and only once
+  `GET /api/v1/recommendation` has answered `200` from the restarted workbench
+  — so the phone is never woken to find the server mid-restart, or its reads
+  queued behind warm-up queries.
+- **Never after a failed run.** If any step of the nightly run fails, it
+  stops before the push; the app picks up whatever the cache holds when it is
+  next opened.
+- A night on which the day's price snapshot never arrived still regenerates
+  the cache, from the data viking has, and **still pushes**; `freshness`
+  reports the staleness as usual.
+- **No time-of-day guarantee.** The run waits for the upstream daily price
+  snapshot, whose arrival time is outside either repo's control and has
+  varied by hours. The push follows the cache, whenever that is; the app's
+  ordinary morning fetch covers a late night.
+
+**Delivery is best-effort.** APNs treats background pushes as low priority:
+the system may delay, coalesce or drop them, and does not deliver them to an
+app the user has force-quit. The app must behave correctly with no push at
+all — it does, by fetching when opened — and a missed wake is not, on its own,
+evidence of a server fault.
+
+**viking's handling of APNs responses** (it affects whether a token stays
+registered):
+
+- `410 Unregistered` — the token is deleted, but only if it was last
+  registered before the time APNs reports, so a re-registration racing the
+  push is kept.
+- `400 BadDeviceToken` / `DeviceTokenNotForTopic` — logged as an error, and
+  the token is **kept**: these mean viking's environment or topic setting is
+  wrong, and pruning would wipe every token over a configuration mistake.
+- A transport error, `429` or `5xx` — retried once, then left for the next
+  night.
+
 ## Errors
 
 The cache is missing until the first nightly run, and a from-scratch DB rebuild
@@ -524,6 +661,9 @@ HTTP 503
 
 The app treats 503 as "try again tomorrow", not as an error worth alarming about.
 
+These are the `GET` endpoints' errors; `POST /api/v1/devices` lists its own
+statuses in its section.
+
 ## Storage of the precomputed blob
 
 A table in the SQLite DB, written by the nightly job and read by the workbench
@@ -531,7 +671,7 @@ process. Not a file in the repo checkout — the daily script's first action is
 `git pull --ff-only`. `db.py` owns all persistence by convention; WAL mode lets
 the timer write while waitress reads.
 
-**Implementation note (server-side, added post-#416 review):** each endpoint
+**Implementation note (server-side, added post-#416 review):** each `GET` endpoint
 reads the cache row independently and fresh per request — necessarily so,
 since WAL is exactly what lets a new nightly row become visible without a
 workbench restart. In the few-millisecond window where the nightly job's
