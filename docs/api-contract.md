@@ -63,9 +63,14 @@ than computed, treat it as suspect and check it against `signal.py`.
   enforced by bind address, as it already is for the workbench. The write's
   exposure is bounded by its own rules — strict token validation, a row cap,
   no way to read tokens back — and a junk token costs one rejected APNs
-  request and a log line. If a token is ever wanted, a `before_request` check
-  scoped to `/api/v1` (or moving the routes to a blueprint) is the seam;
-  nothing speculative is built now.
+  request and a log line a night. One residual risk is accepted under this
+  LAN-only threat model: a device on the LAN registering junk tokens can fill
+  the 10-row cap and evict a real phone until that phone re-registers on its
+  next foreground. Rejected tokens are kept on purpose (see viking's handling
+  of APNs responses under **Nightly push**), so the push does not prune them
+  either. If a token is ever wanted, a `before_request` check scoped to
+  `/api/v1` (or moving the routes to a blueprint) is the seam; nothing
+  speculative is built now.
 - No TLS. Household LAN, public fuel prices.
 
 ## Fuel type
