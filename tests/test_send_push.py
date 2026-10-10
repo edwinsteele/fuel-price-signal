@@ -259,6 +259,26 @@ def test_short_token_never_appears_in_logs(configured, monkeypatch, caplog, toke
     assert token not in result.output
 
 
+def test_overlapping_tokens_never_appear_in_logs(configured, monkeypatch, caplog):
+    short, long = "abcdef12", "abcdef1234"
+    path = _database(configured, (short, long))
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(400 if request.url.path.endswith(short) else 200)
+
+    _mock_client(monkeypatch, handler)
+    with caplog.at_level("INFO"):
+        result = _run(path)
+
+    assert {request.url.path for request in requests} == {f"/3/device/{short}", f"/3/device/{long}"}
+    assert result.exit_code != 0
+    for token in (short, long):
+        assert token not in caplog.text
+        assert token not in result.output
+
+
 @pytest.mark.parametrize("first_token", [TOKEN, "ab"])
 def test_cleanup_failure_counts_token_and_sends_remaining_device(configured, monkeypatch, caplog, first_token):
     path = _database(configured, (first_token, OTHER_TOKEN))

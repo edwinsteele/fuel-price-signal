@@ -23,11 +23,7 @@ _HOSTS = {
 }
 _PAYLOAD = b'{"aps":{"content-available":1}}'
 _BACKOFF_SECONDS = 0.5
-
-
-def _token_label(token: str) -> str:
-    # API registration accepts tokens as short as two hex characters.
-    return f"{token[:8]}…" if len(token) > 8 else "[redacted]"
+_TOKEN_LABEL = "[redacted]"
 
 
 def _configuration() -> tuple[str, str, str, str, str]:
@@ -71,7 +67,8 @@ def _unregistered_at(response: httpx.Response) -> str | None:
 
 
 def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, str], conn) -> bool:
-    label = _token_label(token)
+    # A prefix of one token can be the entirety of another registered token.
+    label = _TOKEN_LABEL
     for attempt in range(2):
         try:
             response = client.post(f"{host}/3/device/{token}", headers=headers, content=_PAYLOAD)
