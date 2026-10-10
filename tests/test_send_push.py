@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime
 
 import httpx
@@ -227,3 +228,64 @@ def test_no_devices_exits_zero_with_info_log(configured, monkeypatch, caplog):
     assert result.exit_code == 0, result.output
     assert any(record.levelname == "INFO" and "No registered devices" in record.message for record in caplog.records)
     assert not requests
+
+
+@pytest.mark.parametrize("token", ["ab", "abcdef12"])
+@pytest.mark.parametrize("outcome", ["accepted", "rejected", "transport", "unregistered"])
+def test_short_token_never_appears_in_logs(configured, monkeypatch, caplog, token, outcome):
+    path = _database(configured, (token,))
+    requests = []
+    monkeypatch.setattr(send_push.time, "sleep", lambda seconds: None)
+
+    def handler(request):
+        requests.append(request)
+        if outcome == "transport":
+            raise httpx.ConnectError("connection lost", request=request)
+        if outcome == "rejected":
+            return httpx.Response(400, json={"reason": "BadDeviceToken"})
+        if outcome == "unregistered":
+            timestamp = int(datetime.fromisoformat("2026-10-11T10:00:01+11:00").timestamp() * 1000)
+            return httpx.Response(410, json={"reason": "Unregistered", "timestamp": timestamp})
+        return httpx.Response(200)
+
+    _mock_client(monkeypatch, handler)
+    with caplog.at_level("INFO", logger="fuel_signal.send_push"):
+        result = _run(path)
+
+    assert all(request.url.path == f"/3/device/{token}" for request in requests)
+    assert len(requests) == (2 if outcome == "transport" else 1)
+    assert result.exit_code == (0 if outcome in ("accepted", "unregistered") else 1)
+    assert token not in caplog.text
+    assert token not in result.output
+
+
+@pytest.mark.parametrize("first_token", [TOKEN, "ab"])
+def test_cleanup_failure_counts_token_and_sends_remaining_device(configured, monkeypatch, caplog, first_token):
+    path = _database(configured, (first_token, OTHER_TOKEN))
+    requests = []
+    timestamp = int(datetime.fromisoformat("2026-10-11T10:00:01+11:00").timestamp() * 1000)
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path.endswith(first_token):
+            return httpx.Response(410, json={"reason": "Unregistered", "timestamp": timestamp})
+        return httpx.Response(200)
+
+    _mock_client(monkeypatch, handler)
+
+    def fail_cleanup(*args):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(send_push.db, "delete_device_if_older_than", fail_cleanup)
+    with caplog.at_level("INFO", logger="fuel_signal.send_push"):
+        result = _run(path)
+
+    assert result.exit_code != 0
+    assert [request.url.path for request in requests] == [f"/3/device/{first_token}", f"/3/device/{OTHER_TOKEN}"]
+    assert "1 of 2 devices" in result.output
+    assert "cleanup" in caplog.text.lower()
+    assert first_token not in caplog.text
+    assert OTHER_TOKEN not in caplog.text
+    conn = db.open_db(path)
+    assert {item["token"] for item in db.list_devices(conn)} == {first_token, OTHER_TOKEN}
+    conn.close()

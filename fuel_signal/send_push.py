@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -22,6 +23,11 @@ _HOSTS = {
 }
 _PAYLOAD = b'{"aps":{"content-available":1}}'
 _BACKOFF_SECONDS = 0.5
+
+
+def _token_label(token: str) -> str:
+    # API registration accepts tokens as short as two hex characters.
+    return f"{token[:8]}…" if len(token) > 8 else "[redacted]"
 
 
 def _configuration() -> tuple[str, str, str, str, str]:
@@ -65,7 +71,7 @@ def _unregistered_at(response: httpx.Response) -> str | None:
 
 
 def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, str], conn) -> bool:
-    prefix = token[:8]
+    label = _token_label(token)
     for attempt in range(2):
         try:
             response = client.post(f"{host}/3/device/{token}", headers=headers, content=_PAYLOAD)
@@ -73,24 +79,34 @@ def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, st
             if attempt == 0:
                 time.sleep(_BACKOFF_SECONDS)
                 continue
-            logger.error("APNs transport failure for token %s…", prefix)
+            logger.error("APNs transport failure for token %s", label)
             return False
 
         if response.status_code == 200:
-            logger.info("APNs accepted token %s…", prefix)
+            logger.info("APNs accepted token %s", label)
             return True
         if response.status_code == 410:
             before = _unregistered_at(response)
             if before is not None:
-                removed = db.delete_device_if_older_than(conn, token, before)
-                logger.info("APNs unregistered token %s… (removed=%s)", prefix, removed)
+                try:
+                    removed = db.delete_device_if_older_than(conn, token, before)
+                except sqlite3.Error:
+                    # A failed commit may leave a pending delete; do not let a
+                    # later successful cleanup accidentally commit it.
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
+                    logger.error("APNs token cleanup failed for token %s", label)
+                    return False
+                logger.info("APNs unregistered token %s (removed=%s)", label, removed)
                 return True
         if response.status_code == 429 or response.status_code >= 500:
             if attempt == 0:
                 time.sleep(_BACKOFF_SECONDS)
                 continue
         # Do not print the request, response body, or headers: they may contain tokens.
-        logger.error("APNs rejected token %s… (HTTP %s)", prefix, response.status_code)
+        logger.error("APNs rejected token %s (HTTP %s)", label, response.status_code)
         return False
     return False
 
