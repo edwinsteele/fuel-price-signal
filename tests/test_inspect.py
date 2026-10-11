@@ -3,6 +3,8 @@
 import datetime
 import json
 import re
+import sqlite3
+import threading
 import zoneinfo
 
 import pytest
@@ -999,3 +1001,59 @@ def test_api_v1_recommendation_status_no_price_data(conn, api_v1_client):
     assert body["status"] == "no_price_data"
     assert body["verdict"] is None
     assert body["target_station"] is None
+
+
+@pytest.mark.parametrize("route", ["/api/v1/stations", "/api/v1/recommendation"])
+def test_api_v1_get_uses_own_connection_while_workbench_connection_is_busy(conn, route):
+    _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.9}))
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    shared = sqlite3.connect(db_file, check_same_thread=False)
+    app = _create_app(
+        shared, cd=None, today="2026-09-11", cycle_state=None,
+        peak_data={}, summary=db_summary(shared), boundaries={},
+    )
+    app.config["TESTING"] = True
+    entered = threading.Event()
+    release = threading.Event()
+    read_done = threading.Event()
+    results = []
+    errors = []
+
+    def hold_shared_connection():
+        entered.set()
+        release.wait(10)
+        return 1
+
+    def run_aggregate():
+        try:
+            shared.execute("SELECT hold_shared_connection()").fetchone()
+        except Exception as exc:
+            errors.append(exc)
+
+    def read_api():
+        try:
+            with app.test_client() as client:
+                results.append(client.get(route).status_code)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            read_done.set()
+
+    shared.create_function("hold_shared_connection", 0, hold_shared_connection)
+    holder = threading.Thread(target=run_aggregate, daemon=True)
+    reader = threading.Thread(target=read_api, daemon=True)
+    try:
+        holder.start()
+        assert entered.wait(2), "shared connection never entered the blocking query"
+        reader.start()
+        completed_before_release = read_done.wait(2)
+    finally:
+        release.set()
+        holder.join(timeout=2)
+        if reader.ident is not None:
+            reader.join(timeout=2)
+        shared.close()
+
+    assert completed_before_release, "API GET waited for the workbench connection"
+    assert not errors
+    assert results == [200]
