@@ -42,7 +42,7 @@ _LINE_CAP = 10  # max series on line chart before overflow banner
 # How long POST /api/v1/devices waits on a locked database before answering
 # 503. Kept short: the app retries any non-204 at its next registration point,
 # so failing early loses nothing, while a request thread parked on the lock is
-# one fewer waitress thread serving the GETs.
+# one fewer waitress thread serving the GETs. GETs use the same bounded wait.
 _DEVICES_BUSY_TIMEOUT_S = 5.0
 
 _SYDNEY_COLOUR = "#9ca3af"  # mid-grey: visible on both light and dark backgrounds
@@ -704,8 +704,8 @@ def _create_app(
     _resolved_model_path = model_path or pathlib.Path("data/models/lgbm.joblib")
     _xv, _sv, _fc = _load_shap_arrays(_resolved_shap_dir)
     _model_meta = _load_model_metadata(_resolved_model_path)
-    # The file POST /api/v1/devices opens its own connection to: read off the
-    # shared `conn` once, here, so the write always lands in the DB the reads see.
+    # Resolve the file once so every /api/v1 request opens its own connection
+    # to the same database while workbench pages keep using the shared `conn`.
     db_file = _db.database_file(conn)
 
     app.jinja_env.filters["gradient_color"] = _gradient_color
@@ -1063,11 +1063,15 @@ def _create_app(
         """Decoded (payload, gap_start, gap_end, generated_at), or None if never generated.
 
         Unlike `cd`/`cycle_state`/`today` above — frozen at process startup, so the
-        workbench needs a restart to see new data (#419) — this queries `conn` fresh
-        on every call. `fuel_signal.generate_signal_cache` runs as a separate process;
-        WAL mode is what lets its commits become visible here without a restart.
+        workbench needs a restart to see new data (#419) — this opens a new
+        connection for every call. `fuel_signal.generate_signal_cache` runs as a
+        separate process; WAL makes its commits visible without a restart.
         """
-        row = _db.read_signal_cache(conn)
+        read_conn = _db.open_request_connection(db_file, _DEVICES_BUSY_TIMEOUT_S)
+        try:
+            row = _db.read_signal_cache(read_conn)
+        finally:
+            read_conn.close()
         if row is None:
             return None
         blob = json.loads(row["payload_json"])

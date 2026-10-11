@@ -1243,7 +1243,7 @@ def database_file(conn: sqlite3.Connection) -> str:
 
 
 def open_request_connection(db_path: str | pathlib.Path, busy_timeout_s: float) -> sqlite3.Connection:
-    """Open a short-lived connection for one web request's write.
+    """Open a short-lived connection for one API request.
 
     `timeout` is sqlite3's busy timeout: a write that finds the database locked
     (the nightly load holds the write lock for long stretches) waits up to
