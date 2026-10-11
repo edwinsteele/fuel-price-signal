@@ -1,33 +1,23 @@
 ---
 name: inspect-workbench-shared-sqlite-connection-serializes-routes
-description: Every fuel_signal.inspect route shares one sqlite3 connection (check_same_thread=False) across waitress threads; SQLite serializes steps on it, so a slow page's aggregate query blocks a concurrent /api/v1 read. Writes must never use it.
+description: Workbench pages still share inspect.py's connection, so long SQLite steps serialize those routes; /api/v1 cache GETs and device writes use short-lived request connections instead.
 metadata:
   type: project
 ---
 
-`fuel_signal/inspect.py` `main()` opens **one** connection,
-`sqlite3.connect(..., check_same_thread=False)` (around line 1159). Every route
-closes over it: the heavy workbench pages (`/lead-lag` → `_compute_lead_lag(conn, …)`,
-`/classification-health` → `_classification_health_data(conn)`) and the cheap
-`/api/v1` reads (`_load_signal_cache` → one-row `SELECT` from `signal_cache`).
+`fuel_signal/inspect.py` `main()` opens one connection with
+`sqlite3.connect(..., check_same_thread=False)` for the workbench routes. Python's
+`sqlite3.threadsafety == 3` (serialized), so SQLite holds that connection's mutex
+for each `sqlite3_step`. Aggregate or sort queries do their work in the first
+step, so a cold-disk page query on viking (minutes, right after a fill) can hold
+the mutex for the whole computation and queue other workbench routes using that
+same connection.
 
-Python's `sqlite3.threadsafety == 3` (serialized), so SQLite holds that
-connection's mutex for each `sqlite3_step`. An aggregate or sort query does all
-its work in its first step, so a cold-disk page query on viking (minutes, right
-after a fill) holds the mutex the whole time. **A concurrent `/api/v1` read queues
-behind it.** That matters because the app's background fetch has a 10 s request
-timeout.
+The `/api/v1` cache reads no longer use this shared connection (#439). Each GET
+opens `db.open_request_connection` for its cache read and closes it afterward;
+`POST /api/v1/devices` follows the same per-request pattern. Separate WAL
+connections let these API requests proceed while a workbench query holds the
+workbench connection. Keep the shared connection for workbench pages, and use
+per-request connections for any future API route that writes or needs isolation.
 
-Consequences already designed around (2026-10-10, contract rev 4 / fps-app#142):
-- the nightly push is sent **after** the daily script's warm-up loop
-  (setup-scripts#17), never before it;
-- `POST /api/v1/devices` (#435) opens its own per-request connection
-  (`db.open_request_connection`, with a busy timeout) and never touches the
-  shared one. A write through the shared connection from a request thread
-  would race other threads' transactions, which the read-only routes never
-  trigger. Any future write route follows the same pattern.
-
-Open fix: #439 moves the `/api/v1` GETs onto per-request connections. WAL allows
-concurrent readers on separate connections. Until it lands, don't assume an
-`/api/v1` latency measurement is independent of whatever else the workbench is
-serving. Related: [[inspect-workbench-cycle-state-frozen-at-startup]].
+Related: [[inspect-workbench-cycle-state-frozen-at-startup]].
