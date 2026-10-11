@@ -6,10 +6,11 @@ Status: the two `GET` endpoints are **implemented server-side**
 `fuel_signal/inspect.py`. Rev 4 adds `POST /api/v1/devices`, also
 **implemented server-side** (fuel-price-signal#435) — the route in
 `fuel_signal/inspect.py`, the `devices` table in `fuel_signal/db.py` — and the
-nightly push, **agreed, not yet implemented** — fuel-price-signal#436 (push
-sender), with the nightly wiring in setup-scripts#17. The canonical copy lives in `fuel-price-signal`;
-`fuel-price-signal-app` vendors it byte-for-byte. App-side implementation status
-is tracked in `fuel-price-signal-app`, not in this document.
+nightly push, **implemented server-side** (fuel-price-signal#436) —
+`fuel_signal/send_push.py`, with the nightly wiring in setup-scripts#17.
+The canonical copy lives in `fuel-price-signal`; `fuel-price-signal-app`
+vendors it byte-for-byte. App-side implementation status is tracked in
+`fuel-price-signal-app`, not in this document.
 
 The app makes one batch of reads each morning on the home LAN — or overnight,
 when the nightly push wakes it — and renders the result; separately, it
@@ -639,9 +640,9 @@ evidence of a server fault.
 **viking's handling of APNs responses** (it affects whether a token stays
 registered):
 
-- `410 Unregistered` — the token is deleted, but only if it was last
-  registered before the time APNs reports, so a re-registration racing the
-  push is kept.
+- `410 Unregistered` / `ExpiredToken` — the token is deleted, but only if it
+  was last registered before the time APNs reports, so a re-registration
+  racing the push is kept.
 - `400 BadDeviceToken` / `DeviceTokenNotForTopic` — logged as an error, and
   the token is **kept**: these mean viking's environment or topic setting is
   wrong, and pruning would wipe every token over a configuration mistake.

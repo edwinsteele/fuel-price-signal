@@ -287,6 +287,20 @@ The app also registers its push token with `POST /api/v1/devices`, the one
 write. The workbench stores it in the DB's `devices` table (at most 10 tokens;
 never readable over the API) for the nightly push to read.
 
+To send one background wake to each registered device after the nightly cache
+refresh and workbench warm-up, run:
+
+```bash
+APNS_KEY_PATH=/path/to/AuthKey.p8 APNS_KEY_ID=key-id APNS_TEAM_ID=team-id \
+  APNS_TOPIC=com.edwinsteele.FuelPriceSignal APNS_ENV=sandbox \
+  uv run python -m fuel_signal.send_push
+# Or select another database: uv run python -m fuel_signal.send_push --db /path/to/fuel_signal.db
+```
+
+`APNS_ENV` must be `sandbox` or `production`, matching the app installation.
+The command exits nonzero if any token fails after its retry. The daily job's
+ordering and health gate live in setup-scripts#17.
+
 Scoring is too slow to run inside a request (~29s of `load_history`), so the
 signal must be precomputed by a separate command and stored in the DB before
 the workbench can serve it:
@@ -361,4 +375,3 @@ See [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md).
 ```bash
 uv run pytest
 ```
-
