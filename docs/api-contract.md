@@ -640,9 +640,9 @@ evidence of a server fault.
 **viking's handling of APNs responses** (it affects whether a token stays
 registered):
 
-- `410 Unregistered` — the token is deleted, but only if it was last
-  registered before the time APNs reports, so a re-registration racing the
-  push is kept.
+- `410 Unregistered` / `ExpiredToken` — the token is deleted, but only if it
+  was last registered before the time APNs reports, so a re-registration
+  racing the push is kept.
 - `400 BadDeviceToken` / `DeviceTokenNotForTopic` — logged as an error, and
   the token is **kept**: these mean viking's environment or topic setting is
   wrong, and pruning would wipe every token over a configuration mistake.

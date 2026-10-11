@@ -137,17 +137,18 @@ def test_unknown_environment_fails_before_send(configured, monkeypatch):
     assert not requests
 
 
+@pytest.mark.parametrize("reason", ["Unregistered", "ExpiredToken"])
 @pytest.mark.parametrize("timestamp,removed", [
     ("2026-10-11T10:00:00.001+11:00", True),
     ("2026-10-11T09:59:59+11:00", False),
     ("2026-10-11T10:00:00+11:00", False),
 ])
-def test_unregistered_deletes_only_older_registration(configured, monkeypatch, timestamp, removed):
+def test_retired_token_deletes_only_older_registration(configured, monkeypatch, reason, timestamp, removed):
     path = _database(configured)
     milliseconds = int(datetime.fromisoformat(timestamp).timestamp() * 1000)
     _mock_client(
         monkeypatch,
-        lambda request: httpx.Response(410, json={"reason": "Unregistered", "timestamp": milliseconds}),
+        lambda request: httpx.Response(410, json={"reason": reason, "timestamp": milliseconds}),
     )
 
     result = _run(path)

@@ -24,6 +24,8 @@ _HOSTS = {
 _PAYLOAD = b'{"aps":{"content-available":1}}'
 _BACKOFF_SECONDS = 0.5
 _TOKEN_LABEL = "[redacted]"
+# Apple documents both reasons for a 410; each means the token is dead for the topic.
+_RETIRED_REASONS = frozenset({"Unregistered", "ExpiredToken"})
 
 
 def _configuration() -> tuple[str, str, str, str, str]:
@@ -51,10 +53,10 @@ def _jwt(key_path: str, key_id: str, team_id: str) -> str:
         raise click.ClickException("Could not load or sign with APNs key") from None
 
 
-def _unregistered_at(response: httpx.Response) -> str | None:
+def _retired_at(response: httpx.Response) -> str | None:
     try:
         body = response.json()
-        if body.get("reason") != "Unregistered":
+        if body.get("reason") not in _RETIRED_REASONS:
             return None
         timestamp = body["timestamp"]
         if isinstance(timestamp, bool) or not isinstance(timestamp, int):
@@ -83,7 +85,7 @@ def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, st
             logger.info("APNs accepted token %s", label)
             return True
         if response.status_code == 410:
-            before = _unregistered_at(response)
+            before = _retired_at(response)
             if before is not None:
                 try:
                     removed = db.delete_device_if_older_than(conn, token, before)
@@ -96,7 +98,7 @@ def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, st
                         pass
                     logger.error("APNs token cleanup failed for token %s", label)
                     return False
-                logger.info("APNs unregistered token %s (removed=%s)", label, removed)
+                logger.info("APNs retired token %s (removed=%s)", label, removed)
                 return True
         if response.status_code == 429 or response.status_code >= 500:
             if attempt == 0:
