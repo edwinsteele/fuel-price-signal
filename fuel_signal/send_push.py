@@ -22,6 +22,9 @@ _HOSTS = {
     "production": "https://api.push.apple.com",
 }
 _PAYLOAD = b'{"aps":{"content-available":1}}'
+# Deliberately short for every retryable failure, 5xx included: the contract
+# retries once and leaves the rest to the next night. Apple's 15-minute 5xx
+# guidance would stall the daily script for a wake the app does not depend on.
 _BACKOFF_SECONDS = 0.5
 _TOKEN_LABEL = "[redacted]"
 # Apple documents both reasons for a 410; each means the token is dead for the topic.
