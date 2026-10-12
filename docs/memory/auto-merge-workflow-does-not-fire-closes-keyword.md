@@ -1,6 +1,6 @@
 ---
 name: auto-merge-workflow-does-not-fire-closes-keyword
-description: A PR merged by auto-merge.yml (GITHUB_TOKEN, github-actions[bot]) does NOT auto-close its Closes #N issue. Human/API merges do. This silently breaks worker rule 1 for exactly the chore PRs the worker creates.
+description: A PR merged by auto-merge.yml (GITHUB_TOKEN, github-actions[bot]) does NOT auto-close its Closes #N issue. Human/API merges do. This silently breaks worker rule 1 for exactly the chore PRs the worker creates. A registered closingIssuesReferences link is not closure — read the issue's state.
 metadata:
   type: reference
 ---
@@ -25,7 +25,18 @@ Observed 2026-09-10, four PRs merged within ~24h, clean contrast:
 #377's timeline shows only a `referenced` event from `github-actions[bot]` one second after the
 merge — never a `closed` event. It sat open until the owner closed it by hand ~31 minutes later.
 One observation of the bot path, but the mechanism is documented GitHub behaviour and the
-three-way contrast against human merges is clean.
+three-way contrast against human merges is clean. A second bot merge (#409) didn't fire either.
+
+**`closingIssuesReferences` is NOT evidence the issue closed.** On #406 GitHub *registered* the
+link — the PR's `closingIssuesReferences` listed #377 — while the issue stayed `open`,
+`state_reason: null`. The link and the issue's state are two different pieces of state; only the
+issue's own state settles it:
+
+```bash
+gh api repos/{owner}/{repo}/issues/<N> --jq '{state, state_reason}'
+```
+
+and `gh issue close <N>` if it's still open.
 
 **Why this is load-bearing, not trivia.** The two facts compose badly:
 

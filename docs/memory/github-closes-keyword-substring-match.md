@@ -23,7 +23,7 @@ negated clause. Say "issue #398" or "phase 7 (`#398`)" instead, and reserve the 
 line for the one issue the PR is genuinely meant to close.
 
 The opposite failure — a well-formed `Closes #N` that merges and does *not* close the issue —
-is [[github-closes-can-silently-not-fire]]. Together they are why the post-merge issue-state
+is [[auto-merge-workflow-does-not-fire-closes-keyword]]. Together they are why the post-merge issue-state
 check is mandatory rather than defensive.
 
 This is a general GitHub behavior, not specific to this repo's automation, but it interacts badly

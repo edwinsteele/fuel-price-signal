@@ -43,8 +43,8 @@ comment asked for it). Confirmed NOT firing on #409 and #411 — both sat comple
 comment, no review, no reaction, no check-run) until a manual `@codex review`, and in both
 cases the repo's Codex environment was already configured (no "create an environment" nag
 either, which is the tell for that separate failure mode). This was the state of the
-integration in its first three days (2026-09-09 to 2026-09-11); see the 2026-09-12 update
-above for the current, resolved behaviour.
+integration in its first three days (2026-09-09 to 2026-09-11); see CURRENT at the top of this
+file for the current behaviour.
 
 **Standard practice: announce Codex's status the same way you already announce
 Sourcery's.** When you see Codex has posted (a review with findings, or the "Codex

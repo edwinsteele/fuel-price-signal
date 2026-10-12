@@ -26,8 +26,8 @@ no information.
 
 **Two ways out, in increasing order of rigour.** Derive it from the reference
 distribution — p25 = -1.12 expresses "genuinely falling" (~30% of days) rather than
-"a shade below average" (~50%) — see [[feedback_derive_thresholds_from_reference_distribution]]
-in the private notes for why that beats an eyeballed constant. Better, score
+"a shade below average" (~50%) — an eyeballed constant has no number behind it, whereas a percentile of the
+metric's own reference distribution can be defended and re-derived. Better, score
 brim-vs-bridge policies against realised CPL with the tank engine in
 `backtest.py`, the bar every other lock parameter in this project had to clear;
 `TankParams` already models the partial-fill behaviour the choice is about.
