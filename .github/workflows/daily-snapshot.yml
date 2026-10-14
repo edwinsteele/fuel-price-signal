@@ -2,8 +2,9 @@ name: Daily E10 snapshot
 
 on:
   schedule:
-    # 10:00 UTC = 8pm AEST / 9pm AEDT — late evening, with buffer for Actions scheduling delays
-    - cron: "0 10 * * *"
+    # 09:17 UTC moves 43 minutes earlier and off GitHub's congested top of the hour.
+    # Jul–Oct median delays: 1.6/0.7/4.1/6.7 h; maxima: 3.6/11.0/7.8/8.9 h (see #438).
+    - cron: "17 9 * * *"
   workflow_dispatch:
 
 jobs:
