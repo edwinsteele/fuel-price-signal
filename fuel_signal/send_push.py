@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import re
 import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
@@ -29,6 +30,7 @@ _BACKOFF_SECONDS = 0.5
 _TOKEN_LABEL = "[redacted]"
 # Apple documents both reasons for a 410; each means the token is dead for the topic.
 _RETIRED_REASONS = frozenset({"Unregistered", "ExpiredToken"})
+_SAFE_REASON = re.compile(r"[A-Za-z]{1,64}")
 
 
 def _configuration() -> tuple[str, str, str, str, str]:
@@ -71,6 +73,15 @@ def _retired_at(response: httpx.Response) -> str | None:
         return None
 
 
+def _rejection_reason(response: httpx.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return "unknown"
+    reason = body.get("reason") if isinstance(body, dict) else None
+    return reason if isinstance(reason, str) and _SAFE_REASON.fullmatch(reason) else "unknown"
+
+
 def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, str], conn) -> bool:
     # A prefix of one token can be the entirety of another registered token.
     label = _TOKEN_LABEL
@@ -108,7 +119,10 @@ def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, st
                 time.sleep(_BACKOFF_SECONDS)
                 continue
         # Do not print the request, response body, or headers: they may contain tokens.
-        logger.error("APNs rejected token %s (HTTP %s)", label, response.status_code)
+        logger.error(
+            "APNs rejected token %s (HTTP %s, %s)",
+            label, response.status_code, _rejection_reason(response),
+        )
         return False
     return False
 
