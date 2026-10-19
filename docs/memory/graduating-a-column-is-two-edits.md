@@ -17,4 +17,6 @@ Two traps at re-lock time:
   - ORDER is part of the contract. LightGBM breaks equal-gain split ties by feature index, so a permutation fits a different model (measured: 0.038 c/L on the pooled realised delta). Append leaves existing indices untouched; inserting or sorting does not.
   - tests/test_feature_contract.py asserts LOCKED_FEATURE_COLUMNS == the artifact's feature_columns (ORDERED ==), but SKIPS when data/models/ is absent — and it always is in CI, since the dir is gitignored and ci.yml runs a bare `pytest -q`. Verify the re-lock LOCALLY; green CI does not mean the contract was checked.
 
+General rule both halves teach: for any invariant check ask (a) does it consult its own subject (a guard that consults what it guards is blind to that thing being wrong), and (b) does the test that "covers" it actually run in CI, or only locally? When a review dismisses a finding as "already covered by test Y", check Y runs where it matters.
+
 Never executed: the one planned graduation, tgp_delta_7d at the #271 chip-4 re-lock, was cancelled — #271 closed as superseded (docs/STATUS.md `tgp.py` row), so tgp_delta_7d stays in NON_MODEL_COLUMNS and no graduation is queued. The sequence that had been drafted is in fps-1785999729707-1-0301bf82, component 5 (docs/bd-archive/comments.json).
