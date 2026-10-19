@@ -208,6 +208,8 @@ def test_rejection_logs_safe_reason_only(configured, monkeypatch, caplog, status
     json.dumps({"reason": "Bad-DeviceToken", "secret": TOKEN}).encode(),
     json.dumps({"reason": "A" * 65, "secret": TOKEN}).encode(),
     json.dumps({"reason": "BádDeviceToken", "secret": TOKEN}).encode(),
+    json.dumps({"reason": TOKEN}).encode(),
+    json.dumps({"reason": OTHER_TOKEN}).encode(),
 ])
 def test_rejection_logs_unknown_for_invalid_reason(configured, monkeypatch, caplog, body):
     path = _database(configured)
@@ -220,7 +222,39 @@ def test_rejection_logs_unknown_for_invalid_reason(configured, monkeypatch, capl
         "APNs rejected token [redacted] (HTTP 403, unknown)",
     ]
     assert TOKEN not in caplog.text
+    assert OTHER_TOKEN not in caplog.text
     assert "signed.jwt" not in caplog.text
+
+
+@pytest.mark.parametrize("status", [403, 410])
+def test_reason_json_recursion_error_does_not_stop_later_devices(configured, monkeypatch, caplog, status):
+    path = _database(configured, (TOKEN, OTHER_TOKEN))
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path.endswith(TOKEN):
+            response = httpx.Response(status)
+
+            def too_deep():
+                raise RecursionError("JSON nesting exceeded")
+
+            monkeypatch.setattr(response, "json", too_deep)
+            return response
+        return httpx.Response(200)
+
+    _mock_client(monkeypatch, handler)
+    result = _run(path)
+
+    assert result.exit_code != 0
+    assert [request.url.path for request in requests] == [
+        f"/3/device/{TOKEN}", f"/3/device/{OTHER_TOKEN}",
+    ]
+    assert [record.message for record in caplog.records if record.levelname == "ERROR"] == [
+        f"APNs rejected token [redacted] (HTTP {status}, unknown)",
+    ]
+    assert TOKEN not in caplog.text
+    assert OTHER_TOKEN not in caplog.text
 
 
 @pytest.mark.parametrize("first", ["transport", 429, 500, 503])
