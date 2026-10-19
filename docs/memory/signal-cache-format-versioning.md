@@ -20,7 +20,7 @@ one day.
 
 The mitigation (added in review on PR #425, same day as the endpoints themselves):
 
-- `encode_cache_entry` stamps a `"version": _CACHE_FORMAT_VERSION` key (currently `1`).
+- `encode_cache_entry` stamps a `"version": _CACHE_FORMAT_VERSION` key (`1` as of 2026-10-20).
 - `decode_cache_entry` raises `ValueError` on a version mismatch, and lets `KeyError`/`TypeError`
   propagate on a missing/malformed field either way.
 - `inspect.py`'s `_load_signal_cache` catches `(KeyError, TypeError, ValueError)` around the

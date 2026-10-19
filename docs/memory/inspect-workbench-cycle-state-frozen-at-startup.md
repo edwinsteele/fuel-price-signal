@@ -24,7 +24,7 @@ same-day as a duplicate of already-shipped work). **Do not re-file this against 
 check `git log`/`grep restart` in a freshly-fetched `setup-scripts` checkout first; this repo has no
 way to detect drift in that one.
 
-The one on-page staleness indicator is the "Cycle State — as of {{ today }}" heading in
+The one on-page staleness indicator is the "Cycle State — as of {{ today or '—' }} (data as loaded at workbench startup)" heading in
 `workbench.html` — `today` is the last date that was in `daily_prices` when the process started, so
 comparing it to the real current date reveals staleness. Don't confuse it with the page's other "as
 of {{ now }}" line near the top, which is the per-request render time and is always current — that

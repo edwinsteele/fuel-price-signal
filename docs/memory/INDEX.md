@@ -63,7 +63,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 - [float-reformulation-not-strictly-more-accurate](float-reformulation-not-strictly-more-accurate.md) — a "more exact" path trades rounding failure modes rather than removing them. Check against exact rational arithmetic before claiming equivalence.
 - [default-flip-breaks-contrast-tests](default-flip-breaks-contrast-tests.md) — flipping a default silently disarms every test that used the new value as its contrast arm. Five of six kept passing while comparing a value to itself.
 - [noise-floor-fixture-needs-n-placebo-columns](noise-floor-fixture-needs-n-placebo-columns.md) — a 2+ column fixture without `n_placebo_columns` trips the arity refusal branch instead of what the test meant to exercise.
-- [backfill-perf-work-needs-synthetic-benchmark](backfill-perf-work-needs-synthetic-benchmark.md) — the 492MB profiling DB is gitignored and usually absent; write a synthetic parity + direction check and cite the experiment for the production-scale number.
+- [backfill-perf-work-needs-synthetic-benchmark](backfill-perf-work-needs-synthetic-benchmark.md) — the ~500MB profiling DB is gitignored: in the primary checkout's root, absent from worktrees; write a synthetic parity + direction check and cite the experiment for the production-scale number.
 - [sydney-offset-timestamps-dont-sort-as-strings](sydney-offset-timestamps-dont-sort-as-strings.md) — `…+10:00`/`…+11:00` ISO strings mis-order across the April fall-back hour (and against `Z` times always); compare in SQL with `julianday()`, which applies the offset.
 
 ## Writing claims that nothing executes
@@ -73,7 +73,7 @@ Provenance: these were `bd remember` entries until 2026-09-08; see
 
 ## api-contract.md / iOS client wire format
 
-- [api-contract-generated-at-not-an-identity](api-contract-generated-at-not-an-identity.md) — the iOS client's `JSONDecoder` (`.iso8601` = `.withInternetDateTime`) rejects fractional seconds; don't add sub-second precision to `generated_at` to close the same-second cache-write race.
+- [api-contract-generated-at-not-an-identity](api-contract-generated-at-not-an-identity.md) — the iOS client's date decoding (pinned to `.iso8601` = `.withInternetDateTime`) rejects fractional seconds; don't add sub-second precision to `generated_at` to close the same-second cache-write race.
 - [api-contract-byte-identical-copy-wording-trap](api-contract-byte-identical-copy-wording-trap.md) — `fuel-price-signal-app` vendors this doc byte-for-byte; "this repo"/"here"/"this copy" phrasing is true in at most one of the two homes.
 - [api-contract-golden-tests-prove-serialization-not-evaluation](api-contract-golden-tests-prove-serialization-not-evaluation.md) — `test_api_v1` asserts the serializer emits the contract's examples exactly, but from hand-set inputs; the rule-signal description strings are not checked against `signal.py`.
 

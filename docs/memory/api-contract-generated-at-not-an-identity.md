@@ -14,9 +14,10 @@ note itself for the full reasoning.
 
 **The trap:** the obvious fix is to widen `generated_at` to millisecond
 precision and restore the guarantee. Don't. The iOS client
-(`fuel-price-signal-app`'s `SignalClient`) decodes with
-`JSONDecoder.dateDecodingStrategy = .iso8601`, which is Foundation's
-`.withInternetDateTime` — it rejects fractional seconds. A payload carrying
+(`fuel-price-signal-app`'s `SignalClient`) decodes dates with a custom
+strategy (`decodeISO8601`, `Date.ISO8601FormatStyle()`) that a test pins to
+accept and reject exactly what the built-in `.iso8601`
+(`.withInternetDateTime`) does — it rejects fractional seconds. A payload carrying
 `22:04:13.472+10:00` doesn't degrade gracefully; every decode on both
 endpoints fails at once, for every client. This was flagged independently by
 Codex reviewing the app-side vendoring of the same doc change (2026-09-12).

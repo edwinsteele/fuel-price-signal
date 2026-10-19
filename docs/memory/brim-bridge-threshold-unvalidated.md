@@ -6,7 +6,7 @@ metadata:
 ---
 
 `fuel_signal/signal.py`'s `FALLING_CENTS_PER_DAY = -0.5` decides brim vs bridge:
-below it the CLI says cheaper fuel is coming so buy the minimum, at or above it
+below it the CLI (and `api_v1`'s recommendation) says cheaper fuel is coming so buy the minimum, at or above it
 says today is as good as it gets so fill up. It is the only free parameter in the
 new decision layer (#410) and **it was reasoned, not measured** — ~3.5 c/L over a
 week "felt like" the point where waiting earns its inconvenience.

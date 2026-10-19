@@ -61,8 +61,8 @@ already-merged, already-deleted branch — the PR #201 failure the window exists
 At 254s there is 3.5x margin and **no change to `MIN_AGE_SECONDS` is needed**. Caveat: one
 sample, on a docs-only diff. Re-measure before trusting it for a large code diff.
 
-**Its rules live in [AGENTS.md](../../AGENTS.md) § Code Review Rules**, the section name the
-GitHub integration looks for. That file is capped at 32 KiB (see the budget note in its
+**Its rules live in [AGENTS.md](../../AGENTS.md) § Code review** (the **Review rules, for
+`@codex review`** paragraph). That file is capped at 32 KiB (see the budget note in its
 header and `tests/test_agents_md_budget.py`), so review rules compete for budget with
 architecture — keep the section a compressed pointer into
 [CONVENTIONS.md § Code review caution](../CONVENTIONS.md#code-review-caution) and
