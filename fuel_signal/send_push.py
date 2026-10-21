@@ -29,6 +29,43 @@ _BACKOFF_SECONDS = 0.5
 _TOKEN_LABEL = "[redacted]"
 # Apple documents both reasons for a 410; each means the token is dead for the topic.
 _RETIRED_REASONS = frozenset({"Unregistered", "ExpiredToken"})
+# Apple's documented reason codes for device pushes. A shape check alone can
+# accept an all-letter device token, so log only known codes.
+# https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns
+_APNS_REASONS = frozenset({
+    "BadCertificate",
+    "BadCertificateEnvironment",
+    "BadCollapseId",
+    "BadDeviceToken",
+    "BadEnvironmentKeyIdInToken",
+    "BadExpirationDate",
+    "BadMessageId",
+    "BadPath",
+    "BadPriority",
+    "BadTopic",
+    "DeviceTokenNotForTopic",
+    "DuplicateHeaders",
+    "ExpiredProviderToken",
+    "ExpiredToken",
+    "Forbidden",
+    "IdleTimeout",
+    "InternalServerError",
+    "InvalidProviderToken",
+    "InvalidPushType",
+    "MethodNotAllowed",
+    "MissingDeviceToken",
+    "MissingProviderToken",
+    "MissingTopic",
+    "PayloadEmpty",
+    "PayloadTooLarge",
+    "ServiceUnavailable",
+    "Shutdown",
+    "TooManyProviderTokenUpdates",
+    "TooManyRequests",
+    "TopicDisallowed",
+    "Unregistered",
+    "UnrelatedKeyIdInToken",
+})
 
 
 def _configuration() -> tuple[str, str, str, str, str]:
@@ -67,8 +104,17 @@ def _retired_at(response: httpx.Response) -> str | None:
         seconds, milliseconds = divmod(timestamp, 1000)
         at = datetime.fromtimestamp(seconds, tz=UTC) + timedelta(milliseconds=milliseconds)
         return at.isoformat(timespec="milliseconds")
-    except (ValueError, KeyError, OverflowError, OSError, TypeError, AttributeError):
+    except (ValueError, KeyError, OverflowError, OSError, TypeError, AttributeError, RecursionError):
         return None
+
+
+def _rejection_reason(response: httpx.Response) -> str:
+    try:
+        body = response.json()
+    except (ValueError, RecursionError):
+        return "unknown"
+    reason = body.get("reason") if isinstance(body, dict) else None
+    return reason if isinstance(reason, str) and reason in _APNS_REASONS else "unknown"
 
 
 def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, str], conn) -> bool:
@@ -108,7 +154,10 @@ def _send_one(client: httpx.Client, host: str, token: str, headers: dict[str, st
                 time.sleep(_BACKOFF_SECONDS)
                 continue
         # Do not print the request, response body, or headers: they may contain tokens.
-        logger.error("APNs rejected token %s (HTTP %s)", label, response.status_code)
+        logger.error(
+            "APNs rejected token %s (HTTP %s, %s)",
+            label, response.status_code, _rejection_reason(response),
+        )
         return False
     return False
 
