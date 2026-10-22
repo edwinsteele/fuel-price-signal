@@ -15,6 +15,7 @@ import logging
 import pathlib
 import re
 import sqlite3
+import sys
 import webbrowser
 
 import click
@@ -44,6 +45,57 @@ _LINE_CAP = 10  # max series on line chart before overflow banner
 # so failing early loses nothing, while a request thread parked on the lock is
 # one fewer waitress thread serving the GETs. GETs use the same bounded wait.
 _DEVICES_BUSY_TIMEOUT_S = 5.0
+
+_API_ACCESS_LOGGER_NAME = "fuel_signal.api_access"
+
+
+class _StderrHandler(logging.StreamHandler):
+    """A StreamHandler that writes to whatever `sys.stderr` is when a record is
+    emitted, not the object it was when the handler was built.
+
+    The handler is attached once per process, so a stream bound at construction
+    would outlive any later replacement of `sys.stderr` — pytest's per-test
+    capture is one — and write lines nobody reads.
+    """
+
+    def __init__(self) -> None:
+        logging.Handler.__init__(self)
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, _value) -> None:
+        # StreamHandler.setStream assigns here; the stream is always sys.stderr.
+        pass
+
+
+def _api_access_logger() -> logging.Logger:
+    """The /api/v1 access logger, configured by this module itself.
+
+    Under waitress on viking nothing runs `main()`'s `basicConfig`, so the root
+    logger sits at WARNING and a plain INFO record would be dropped: the logger
+    carries its own level and stderr handler (systemd sends stderr to the
+    service's journal). `propagate = False` stops a second copy reaching root
+    when `main()` has configured it. The handler is attached only once, so
+    building several apps in one process doesn't duplicate lines.
+    """
+    log = logging.getLogger(_API_ACCESS_LOGGER_NAME)
+    if not log.handlers:
+        handler = _StderrHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    return log
+
+
+def _loggable_path(path: str) -> str:
+    # request.path is percent-decoded, so /api/v1/%0A... would otherwise write
+    # a forged second journal line. Ordinary ASCII paths come through unchanged.
+    return path.encode("unicode_escape").decode("ascii")
+
 
 _SYDNEY_COLOUR = "#9ca3af"  # mid-grey: visible on both light and dark backgrounds
 
@@ -710,6 +762,22 @@ def _create_app(
 
     app.jinja_env.filters["gradient_color"] = _gradient_color
     app.jinja_env.filters["coverage_color"] = _coverage_color
+
+    api_access_log = _api_access_logger()
+
+    @app.after_request
+    def _log_api_v1_request(response):
+        # One line per /api/v1 request, so a phone's fetch is visible in the
+        # journal: the responses come from signal_cache and leave no trace on
+        # disk. Path only, never the query string, body or headers —
+        # POST /api/v1/devices carries the APNs token.
+        path = request.path
+        if path == "/api/v1" or path.startswith("/api/v1/"):
+            api_access_log.info(
+                "api_v1 %s %s %s %s",
+                request.remote_addr, request.method, _loggable_path(path), response.status_code,
+            )
+        return response
 
     @app.template_filter("week_label")
     def _week_label_filter(idx: int, weeks: list[str]) -> str:

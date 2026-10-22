@@ -287,6 +287,17 @@ The app also registers its push token with `POST /api/v1/devices`, the one
 write. The workbench stores it in the DB's `devices` table (at most 10 tokens;
 never readable over the API) for the nightly push to read.
 
+Every request under `/api/v1` writes one line to stderr, whatever the server
+does with logging, so a phone's fetch shows up in the service's journal:
+
+```
+2026-10-23 02:19:04,512 INFO api_v1 192.168.1.23 GET /api/v1/stations 200
+```
+
+The line carries the client address, method, path (never the query string)
+and status, and never a request body or header, so a device token can't reach
+it. Workbench pages are not logged.
+
 To send one background wake to each registered device after the nightly cache
 refresh and workbench warm-up, run:
 
