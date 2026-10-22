@@ -1200,3 +1200,89 @@ def test_api_v1_access_log_no_second_copy_when_root_is_configured(root_at_warnin
     finally:
         root_at_warning.removeHandler(root_handler)
     assert err.count("api_v1 127.0.0.1 GET /api/v1/stations 503") == 1
+
+
+def _one_stations_request(conn) -> None:
+    app = _create_app(conn, cd=None, today="2026-09-11", cycle_state=None,
+                      peak_data={}, summary={}, boundaries={})
+    with app.test_client() as client:
+        client.get("/api/v1/stations")
+
+
+def _detach_stderr_handlers(access: logging.Logger) -> list[logging.Handler]:
+    """Remove (and return) the access logger's stderr handlers, so a test starts
+    from a logger no earlier test has configured."""
+    from fuel_signal.inspect import _StderrHandler
+
+    found = [h for h in access.handlers if isinstance(h, _StderrHandler)]
+    for h in found:
+        access.removeHandler(h)
+    return found
+
+
+def _reattach(access: logging.Logger, saved: list[logging.Handler]) -> None:
+    _detach_stderr_handlers(access)
+    for h in saved:
+        access.addHandler(h)
+
+
+def test_api_v1_access_log_reaches_stderr_past_a_foreign_handler(root_at_warning, conn, capfd):
+    # Another handler already on the logger (here a NullHandler) is not the
+    # stderr one: with propagation off it would be the only output.
+    access = logging.getLogger("fuel_signal.api_access")
+    saved = _detach_stderr_handlers(access)
+    foreign = logging.NullHandler()
+    access.addHandler(foreign)
+    try:
+        capfd.readouterr()
+        _one_stations_request(conn)
+        lines = _access_lines(capfd)
+    finally:
+        access.removeHandler(foreign)
+        _reattach(access, saved)
+    assert lines == ["api_v1 127.0.0.1 GET /api/v1/stations 503"]
+
+
+def test_api_v1_access_log_reenables_a_disabled_logger(root_at_warning, conn, capfd):
+    # dictConfig/fileConfig disable loggers that already exist; building the
+    # app afterwards must turn the access logger back on.
+    access = logging.getLogger("fuel_signal.api_access")
+    access.disabled = True
+    try:
+        capfd.readouterr()
+        _one_stations_request(conn)
+        lines = _access_lines(capfd)
+    finally:
+        access.disabled = False
+    assert lines == ["api_v1 127.0.0.1 GET /api/v1/stations 503"]
+
+
+def test_api_v1_access_log_concurrent_setup_attaches_one_handler(monkeypatch):
+    from fuel_signal.inspect import _api_access_logger, _StderrHandler
+
+    access = logging.getLogger("fuel_signal.api_access")
+    saved = _detach_stderr_handlers(access)
+
+    # Widen the check-then-add window so an unguarded check is caught every run.
+    original_add = logging.Logger.addHandler
+    barrier_passed = threading.Event()
+
+    def slow_add(self, handler):
+        barrier_passed.wait(timeout=1)
+        threading.Event().wait(0.05)
+        original_add(self, handler)
+
+    monkeypatch.setattr(logging.Logger, "addHandler", slow_add)
+    n = 8
+    barrier = threading.Barrier(n, action=barrier_passed.set)
+    threads = [threading.Thread(target=lambda: (barrier.wait(), _api_access_logger())) for _ in range(n)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        attached = [h for h in access.handlers if isinstance(h, _StderrHandler)]
+    finally:
+        monkeypatch.undo()
+        _reattach(access, saved)
+    assert len(attached) == 1

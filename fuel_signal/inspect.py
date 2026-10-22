@@ -16,6 +16,7 @@ import pathlib
 import re
 import sqlite3
 import sys
+import threading
 import webbrowser
 
 import click
@@ -47,6 +48,9 @@ _LINE_CAP = 10  # max series on line chart before overflow banner
 _DEVICES_BUSY_TIMEOUT_S = 5.0
 
 _API_ACCESS_LOGGER_NAME = "fuel_signal.api_access"
+# Guards the access logger's check-then-add, so two apps built concurrently
+# can't both see no stderr handler and attach one each.
+_API_ACCESS_LOGGER_LOCK = threading.Lock()
 
 
 class _StderrHandler(logging.StreamHandler):
@@ -78,16 +82,26 @@ def _api_access_logger() -> logging.Logger:
     logger sits at WARNING and a plain INFO record would be dropped: the logger
     carries its own level and stderr handler (systemd sends stderr to the
     service's journal). `propagate = False` stops a second copy reaching root
-    when `main()` has configured it. The handler is attached only once, so
-    building several apps in one process doesn't duplicate lines.
+    when `main()` has configured it. The stderr handler is attached only once,
+    under a lock, so building several apps in one process — concurrently or
+    not — doesn't duplicate lines.
+
+    The check is for this module's own stderr handler, not for any handler:
+    with propagation off, a handler someone else attached (a NullHandler, a
+    file) would otherwise be the logger's only output and the line would never
+    reach the journal. `disabled` is cleared too, because a later
+    `logging.config.dictConfig`/`fileConfig` disables loggers that already
+    exist, and a disabled logger drops every record before its handlers.
     """
     log = logging.getLogger(_API_ACCESS_LOGGER_NAME)
-    if not log.handlers:
-        handler = _StderrHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        log.addHandler(handler)
-    log.setLevel(logging.INFO)
-    log.propagate = False
+    with _API_ACCESS_LOGGER_LOCK:
+        if not any(isinstance(h, _StderrHandler) for h in log.handlers):
+            handler = _StderrHandler()
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            log.addHandler(handler)
+        log.setLevel(logging.INFO)
+        log.disabled = False
+        log.propagate = False
     return log
 
 
