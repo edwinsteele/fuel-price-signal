@@ -2,8 +2,10 @@
 
 import datetime
 import json
+import logging
 import re
 import sqlite3
+import sys
 import threading
 import zoneinfo
 
@@ -1057,3 +1059,230 @@ def test_api_v1_get_uses_own_connection_while_workbench_connection_is_busy(conn,
     assert completed_before_release, "API GET waited for the workbench connection"
     assert not errors
     assert results == [200]
+
+
+# ---------------------------------------------------------------------------
+# /api/v1 access log (#449)
+# ---------------------------------------------------------------------------
+
+# An APNs token in the shape the app sends. Its prefix must never reach the log.
+_ACCESS_LOG_TOKEN = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+_ACCESS_LINE = re.compile(r"^\S+ \S+ INFO (api_v1 .*)$")
+
+
+@pytest.fixture
+def root_at_warning():
+    """The root logger as waitress leaves it on viking: WARNING, no basicConfig.
+
+    The access logger has to reach stderr on its own from here. A plain
+    `logger.info` would be dropped at this level while still passing a
+    `caplog.set_level` test, so the tests below read stderr with `capfd`.
+    """
+    root = logging.getLogger()
+    saved = root.level
+    root.setLevel(logging.WARNING)
+    yield root
+    root.setLevel(saved)
+
+
+def _read_access(capfd) -> tuple[list[str], str]:
+    """(access-log messages, all of stderr) written since the last read."""
+    err = capfd.readouterr().err
+    return [m.group(1) for line in err.splitlines() if (m := _ACCESS_LINE.match(line))], err
+
+
+def _access_lines(capfd) -> list[str]:
+    return _read_access(capfd)[0]
+
+
+def test_api_v1_access_log_get_logs_one_line_at_info(root_at_warning, api_v1_client, capfd):
+    capfd.readouterr()
+    assert api_v1_client.get("/api/v1/stations").status_code == 503
+    assert api_v1_client.get("/api/v1/recommendation").status_code == 503
+    assert _access_lines(capfd) == [
+        "api_v1 127.0.0.1 GET /api/v1/stations 503",
+        "api_v1 127.0.0.1 GET /api/v1/recommendation 503",
+    ]
+
+
+def test_api_v1_access_log_get_200_logs_path_without_query(root_at_warning, conn, api_v1_client, capfd):
+    _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.823}))
+    capfd.readouterr()
+    assert api_v1_client.get("/api/v1/stations?probe=secret-query").status_code == 200
+    lines, err = _read_access(capfd)
+    assert lines == ["api_v1 127.0.0.1 GET /api/v1/stations 200"]
+    assert "secret-query" not in err
+
+
+@pytest.mark.parametrize(
+    ("body", "content_type", "status"),
+    [
+        (json.dumps({"token": _ACCESS_LOG_TOKEN}), "application/json", 204),
+        (json.dumps({"token": _ACCESS_LOG_TOKEN + "zz"}), "application/json", 400),
+        (json.dumps({"token": _ACCESS_LOG_TOKEN}), "text/plain", 400),
+    ],
+)
+def test_api_v1_access_log_devices_post_never_logs_the_token(
+    root_at_warning, api_v1_client, capfd, body, content_type, status
+):
+    capfd.readouterr()
+    resp = api_v1_client.post("/api/v1/devices", data=body, content_type=content_type)
+    assert resp.status_code == status
+    lines, err = _read_access(capfd)
+    assert lines == [f"api_v1 127.0.0.1 POST /api/v1/devices {status}"]
+    assert "a1b2c3d4e5f6" not in err
+
+
+def test_api_v1_access_log_devices_503_never_logs_the_token(root_at_warning, api_v1_client, capfd, monkeypatch):
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("fuel_signal.inspect._db.register_device", locked)
+    capfd.readouterr()
+    resp = api_v1_client.post("/api/v1/devices", json={"token": _ACCESS_LOG_TOKEN})
+    assert resp.status_code == 503
+    lines, err = _read_access(capfd)
+    assert lines == ["api_v1 127.0.0.1 POST /api/v1/devices 503"]
+    assert "a1b2c3d4e5f6" not in err
+
+
+def test_api_v1_access_log_unknown_api_path_logs_404(root_at_warning, api_v1_client, capfd):
+    capfd.readouterr()
+    assert api_v1_client.get("/api/v1/nope").status_code == 404
+    assert api_v1_client.get("/api/v1").status_code == 404
+    assert _access_lines(capfd) == [
+        "api_v1 127.0.0.1 GET /api/v1/nope 404",
+        "api_v1 127.0.0.1 GET /api/v1 404",
+    ]
+
+
+def test_api_v1_access_log_escapes_a_decoded_newline_in_the_path(root_at_warning, api_v1_client, capfd):
+    # request.path is percent-decoded: logged raw, %0A would start a forged line.
+    capfd.readouterr()
+    assert api_v1_client.get("/api/v1/x%0Aforged").status_code == 404
+    lines, err = _read_access(capfd)
+    assert lines == [r"api_v1 127.0.0.1 GET /api/v1/x\nforged 404"]
+    assert not any(line.startswith("forged") for line in err.splitlines())
+
+
+def test_api_v1_access_log_skips_workbench_and_lookalike_paths(root_at_warning, flask_client, capfd):
+    capfd.readouterr()
+    assert flask_client.get("/").status_code == 200
+    flask_client.get("/healthz")
+    flask_client.get("/static/nope.css")
+    assert flask_client.get("/api/v1x").status_code == 404
+    assert "api_v1" not in capfd.readouterr().err
+
+
+def test_api_v1_access_log_two_apps_one_request_one_line(root_at_warning, conn, capfd):
+    apps = [
+        _create_app(conn, cd=None, today="2026-09-11", cycle_state=None,
+                    peak_data={}, summary={}, boundaries={})
+        for _ in range(2)
+    ]
+    assert len(logging.getLogger("fuel_signal.api_access").handlers) == 1
+    capfd.readouterr()
+    with apps[1].test_client() as client:
+        client.get("/api/v1/stations")
+    assert _access_lines(capfd) == ["api_v1 127.0.0.1 GET /api/v1/stations 503"]
+
+
+def test_api_v1_access_log_no_second_copy_when_root_is_configured(root_at_warning, api_v1_client, capfd):
+    # main()'s basicConfig gives root an INFO stderr handler; the access line
+    # must not reach it as well.
+    root_handler = logging.StreamHandler(sys.stderr)
+    root_at_warning.addHandler(root_handler)
+    root_at_warning.setLevel(logging.INFO)
+    try:
+        capfd.readouterr()
+        api_v1_client.get("/api/v1/stations")
+        err = capfd.readouterr().err
+    finally:
+        root_at_warning.removeHandler(root_handler)
+    assert err.count("api_v1 127.0.0.1 GET /api/v1/stations 503") == 1
+
+
+def _one_stations_request(conn) -> None:
+    app = _create_app(conn, cd=None, today="2026-09-11", cycle_state=None,
+                      peak_data={}, summary={}, boundaries={})
+    with app.test_client() as client:
+        client.get("/api/v1/stations")
+
+
+def _detach_stderr_handlers(access: logging.Logger) -> list[logging.Handler]:
+    """Remove (and return) the access logger's stderr handlers, so a test starts
+    from a logger no earlier test has configured."""
+    from fuel_signal.inspect import _StderrHandler
+
+    found = [h for h in access.handlers if isinstance(h, _StderrHandler)]
+    for h in found:
+        access.removeHandler(h)
+    return found
+
+
+def _reattach(access: logging.Logger, saved: list[logging.Handler]) -> None:
+    _detach_stderr_handlers(access)
+    for h in saved:
+        access.addHandler(h)
+
+
+def test_api_v1_access_log_reaches_stderr_past_a_foreign_handler(root_at_warning, conn, capfd):
+    # Another handler already on the logger (here a NullHandler) is not the
+    # stderr one: with propagation off it would be the only output.
+    access = logging.getLogger("fuel_signal.api_access")
+    saved = _detach_stderr_handlers(access)
+    foreign = logging.NullHandler()
+    access.addHandler(foreign)
+    try:
+        capfd.readouterr()
+        _one_stations_request(conn)
+        lines = _access_lines(capfd)
+    finally:
+        access.removeHandler(foreign)
+        _reattach(access, saved)
+    assert lines == ["api_v1 127.0.0.1 GET /api/v1/stations 503"]
+
+
+def test_api_v1_access_log_reenables_a_disabled_logger(root_at_warning, conn, capfd):
+    # dictConfig/fileConfig disable loggers that already exist; building the
+    # app afterwards must turn the access logger back on.
+    access = logging.getLogger("fuel_signal.api_access")
+    access.disabled = True
+    try:
+        capfd.readouterr()
+        _one_stations_request(conn)
+        lines = _access_lines(capfd)
+    finally:
+        access.disabled = False
+    assert lines == ["api_v1 127.0.0.1 GET /api/v1/stations 503"]
+
+
+def test_api_v1_access_log_concurrent_setup_attaches_one_handler(monkeypatch):
+    from fuel_signal.inspect import _api_access_logger, _StderrHandler
+
+    access = logging.getLogger("fuel_signal.api_access")
+    saved = _detach_stderr_handlers(access)
+
+    # Widen the check-then-add window so an unguarded check is caught every run.
+    original_add = logging.Logger.addHandler
+    barrier_passed = threading.Event()
+
+    def slow_add(self, handler):
+        barrier_passed.wait(timeout=1)
+        threading.Event().wait(0.05)
+        original_add(self, handler)
+
+    monkeypatch.setattr(logging.Logger, "addHandler", slow_add)
+    n = 8
+    barrier = threading.Barrier(n, action=barrier_passed.set)
+    threads = [threading.Thread(target=lambda: (barrier.wait(), _api_access_logger())) for _ in range(n)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        attached = [h for h in access.handlers if isinstance(h, _StderrHandler)]
+    finally:
+        monkeypatch.undo()
+        _reattach(access, saved)
+    assert len(attached) == 1
