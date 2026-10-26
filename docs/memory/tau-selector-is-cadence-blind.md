@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-score_phase2's tau selector is CADENCE-BLIND — it prints "Chosen tau = 0.25" at any cadence, so a tau that did not move after a cadence re-lock is NOT evidence the cadence change worked.
+score_phase2's tau selector is CADENCE-BLIND — it prints "Chosen τ = 0.25" at any cadence, so a tau that did not move after a cadence re-lock is NOT evidence the cadence change worked.
 
 threshold_sweep() (fuel_signal/score_phase2.py:117) maximises (tp*6.37 - fp*5.80 - fn*11.14)/n over OOF PREDICTION ROWS. It takes y_true/y_pred and three cost constants — no TankParams, no tank state, no fill schedule — and tau is picked at step 3, BEFORE the tank is constructed for the backtest (score_phase2.py:495). Changing evaluation_interval_days cannot move it.
 
