@@ -521,8 +521,8 @@ something in it can't be served as written, raise it rather than editing the
 contract unilaterally to match whatever the server currently does. Either side
 may propose a change, but only the canonical copy decides who wins a diff.
 
-The two worked JSON examples (`stations` and `recommendation` responses) open
-with `` ```json stations-response `` and `` ```json recommendation-response ``
+Every worked JSON example opens with a named marker — `` ```json stations-response ``,
+`` ```json recommendation-response ``, `` ```json devices-request ``, `` ```json push-payload `` —
 rather than plain `` ```json ``. GitHub's fenced-code highlighting reads only
 the first word of the info string, so the markers don't render, but both
 sides' tests extract each payload by marker at test time:

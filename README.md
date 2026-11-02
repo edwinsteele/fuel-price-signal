@@ -250,8 +250,8 @@ Three things worth knowing about how to read it:
   is station-relative and not comparable across stations — the sample above has
   the dearest two pumps carrying the highest probabilities. `P(BUY)` answers
   *should I buy at all*; price answers *where*.
-- **`P(BUY)` comes from the locked artifact** (54-feat isotonic-calibrated LGBM,
-  τ=0.25 — see [docs/STATUS.md](docs/STATUS.md)), scored live. With no model file
+- **`P(BUY)` comes from the locked artifact** ([docs/STATUS.md](docs/STATUS.md)
+  names the model and τ), scored live. With no model file
   present the command still prints prices, cycle state and the fill call, and says
   so. Scoring costs ~20s, nearly all of it loading history and importing LightGBM.
 - **Staleness is measured against real observations, not `daily_prices`.**
