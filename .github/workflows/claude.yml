@@ -28,7 +28,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Full history, so `git diff origin/<base>...HEAD` always finds the
+          # merge base. The action then fetches the PR head without a depth
+          # limit, because it only deepens a checkout that is already shallow.
+          fetch-depth: 0
 
       - name: Run Claude Code
         id: claude
@@ -40,11 +43,22 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
-
+          # Review coverage. A bare `@claude review` on the stock setup got a
+          # 4-turn, 16-second pass that routinely skipped the tests and docs and
+          # said so (inc-setlist PR 165; fixed in inc-setlist PR 166, verified
+          # on PR 167). The appended prompt makes a review
+          # cover every changed file and end with a Coverage: line that the
+          # ticket-to-pr gates can check. The extra tools are read-only git
+          # commands the review needs; tag mode allows only git add, commit,
+          # rm and push by default. Keep the prompt free of apostrophes and
+          # dollar signs: it is parsed with shell quoting.
+          claude_args: |
+            --max-turns 60
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git merge-base:*),Bash(git ls-files:*)"
+            --append-system-prompt 'When the trigger comment asks you to review a pull request, review the whole pull request, not a sample of it.
+            1. Run git diff --stat origin/BASE...HEAD and then git diff origin/BASE...HEAD, where BASE is the base branch named in your instructions. If the diff cannot be computed, say so at the top of your comment, and say the review is incomplete.
+            2. Read the diff of every changed file: source, tests, docs, memory notes, configuration, workflows and agent instructions. A test or doc change is part of the change, not optional context. Read surrounding code wherever a hunk depends on it, and read AGENTS.md, CLAUDE.md and any REVIEW.md for the rules of this repository.
+            3. Check that the tests exercise the behaviour the PR claims, including its failure paths, and that docs, notes and the PR description claim only what the change and its evidence show.
+            4. This runner cannot build the project or run its tests. Say that once. It does not count as skipped coverage.
+            5. Report each finding with file and line, a severity (blocking, non-blocking or nit) and a concrete failure scenario. If there are no blocking problems, say so in those words.
+            6. End your comment with one line that starts with Coverage: and reads either Coverage: read all N changed files, or Coverage: read N of M changed files; not read: PATHS (REASON). Never leave this line out, and never claim a file was read when it was not.'
