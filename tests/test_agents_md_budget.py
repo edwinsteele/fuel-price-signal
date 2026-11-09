@@ -63,3 +63,5 @@ def test_agent_instructions_fit_in_the_codex_context_budget():
         "and leave a one-line pointer behind. Linked docs cost nothing; only AGENTS.md is "
         "loaded eagerly."
     )
+
+# Probe claim: this test verifies FuelCheck OAuth tokens expire after 60 seconds.
