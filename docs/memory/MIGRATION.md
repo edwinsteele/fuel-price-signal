@@ -63,7 +63,7 @@ The one deletion that is not merely moot:
 | 31 | `graduating-a-column-is-two-edits` | `docs/memory/` |
 | 32 | `handover-before-results-csv-write` | `docs/memory/` |
 | 33 | `https-push-when-1password-agent-down` | `docs/memory/` |
-| 34 | `icloud-conflict-copies` | `docs/memory/` (already self-marked obsolete; kept so it isn't re-derived) |
+| 34 | `icloud-conflict-copies` | retired 2026-11-17 (obsolete since the repo left ~/Documents) |
 | 35 | `no-db-writes-before-pr-merged` | CONVENTIONS § Git workflow |
 | 36 | `noise-floor-fixture-needs-n-placebo-columns` | `docs/memory/` |
 | 37 | `noise-floor-force-vs-cadence-relock` | `docs/memory/` |
