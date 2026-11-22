@@ -1,4 +1,4 @@
-# fuel-price-signal HTTP API — v1 contract (rev 4)
+# fuel-price-signal HTTP API — v1 contract (rev 5)
 
 Status: the two `GET` endpoints are **implemented server-side**
 (fuel-price-signal#416) — `fuel_signal/api_v1.py`,
@@ -8,6 +8,7 @@ Status: the two `GET` endpoints are **implemented server-side**
 `fuel_signal/inspect.py`, the `devices` table in `fuel_signal/db.py` — and the
 nightly push, **implemented server-side** (fuel-price-signal#436) —
 `fuel_signal/send_push.py`, with the nightly wiring in setup-scripts#17.
+Rev 5 adds the optional Stations `buy_timing` context (fuel-price-signal#461).
 The canonical copy lives in `fuel-price-signal`; `fuel-price-signal-app`
 vendors it byte-for-byte. App-side implementation status is tracked in
 `fuel-price-signal-app`, not in this document.
@@ -117,6 +118,7 @@ are for **display, not recomputation or cross-checking**. The CLI has exactly th
 same property today.
 
 `probability_buy` is not a cents value: 3 decimals (the CLI displays 2).
+It is a display value, not a reliable input for comparing with the model cutoff.
 
 ## Freshness — staleness and fabrication are different things
 
@@ -186,6 +188,7 @@ adds historical queries, adding the field back is purely additive.
       "price": 161.9,
       "delta_vs_network": -16.5,
       "probability_buy": 0.823,
+      "buy_timing": {"probability": 0.823, "cutoff": 0.25},
       "route": {
         "restricted": false,
         "days": null,
@@ -203,6 +206,7 @@ adds historical queries, adding the field back is purely additive.
       "price": 157.7,
       "delta_vs_network": -20.7,
       "probability_buy": null,
+      "buy_timing": null,
       "route": {
         "restricted": true,
         "days": [2, 6],
@@ -224,6 +228,7 @@ adds historical queries, adding the field back is purely additive.
       "price": null,
       "delta_vs_network": null,
       "probability_buy": null,
+      "buy_timing": null,
       "route": {
         "restricted": false,
         "days": null,
@@ -243,6 +248,21 @@ classification, so this station is `group: "unpriced"` while still carrying a
 real routing answer (`reachable_on_routing_day: true`). It is absent from the
 `FavouriteServiceStationPriceGradientSignal` description because a station with
 no recent price data has no gradient and is omitted by the caller.
+
+### Buy timing context
+
+`buy_timing` is optional per station. A scored station with a cutoff saved in
+the same snapshot gets `{ "probability": 0.2496, "cutoff": 0.25 }`, even though
+its existing `probability_buy` field rounds to `0.250`. Both values are finite
+JSON numbers in `[0, 1]`; the score meets the cutoff when `probability >= cutoff`.
+The cutoff belongs to the cached model snapshot, so replaying a snapshot after
+a deployment or on a different routing day preserves the score and cutoff pair.
+This guarantee applies to the Stations snapshot.
+
+An unscored station in a current snapshot gets `buy_timing: null`, even if it
+has a price. A scored legacy cache entry without a saved cutoff omits
+`buy_timing` while preserving its existing `probability_buy`. Older servers may
+also omit the member. The server continues to own the model decision rule.
 
 ### The `group` discriminator is not a routing partition
 

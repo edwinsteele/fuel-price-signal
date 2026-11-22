@@ -63,6 +63,7 @@ def _make_payload(
     evaluations: list[SignalEvaluation] | None = None,
     days_since_last_peak: int = 40,
     mean_cycle_length: float = 46.33,
+    model_cutoff: float | None = None,
 ) -> SignalPayload:
     state = CycleState(
         as_of_date=as_of_date,
@@ -85,6 +86,7 @@ def _make_payload(
         rule_verdict=rule_verdict or CombinedVerdict("BUY ", "BUY", 0.5),
         evaluations=evaluations or _CONTRACT_EVALUATIONS,
         last_real_price_date=last_real_price_date,
+        model_cutoff=model_cutoff,
     )
 
 
@@ -101,6 +103,7 @@ def _contract_payload(**overrides) -> SignalPayload:
         preferred_stations=_CONTRACT_STATIONS,
         station_prices=_CONTRACT_PRICES,
         station_probs=_CONTRACT_PROBS,
+        model_cutoff=0.25,
     )
     kwargs.update(overrides)
     return _make_payload(**kwargs)
@@ -116,6 +119,7 @@ def test_encode_decode_round_trips_a_payload():
     blob = api_v1.encode_cache_entry(payload, gap_start=None, gap_end=None)
     decoded_payload, gap_start, gap_end = api_v1.decode_cache_entry(blob)
     assert decoded_payload == payload
+    assert blob["payload"]["model_cutoff"] == 0.25
     assert gap_start is None
     assert gap_end is None
 
@@ -150,6 +154,33 @@ def test_build_stations_response_matches_contract_worked_example():
         routing_day=_ROUTING_DAY, served_at=_SERVED_AT, now=_ROUTING_DAY,
     )
     assert body == contract_example("stations-response")
+
+
+def test_stations_buy_timing_preserves_score_below_rounded_cutoff():
+    payload = _contract_payload(station_probs={414: 0.2496})
+    body = api_v1.build_stations_response(
+        payload, None, None, _GENERATED_AT, _ROUTING_DAY, _SERVED_AT, _ROUTING_DAY,
+    )
+    by_code = {station["code"]: station for station in body["stations"]}
+    assert [station["code"] for station in body["stations"]] == [414, 261, 585]
+    assert by_code[414]["probability_buy"] == 0.250
+    assert by_code[414]["buy_timing"] == {"probability": 0.2496, "cutoff": 0.25}
+    assert by_code[261]["price"] == 157.7
+    assert by_code[261]["group"] == "off_route"
+    assert by_code[261]["buy_timing"] is None
+    assert by_code[585]["buy_timing"] is None
+
+
+def test_stations_legacy_score_omits_buy_timing():
+    payload = _contract_payload(model_cutoff=None)
+    blob = api_v1.encode_cache_entry(payload, None, None)
+    blob["version"] = 1
+    restored, _, _ = api_v1.decode_cache_entry(blob)
+    body = api_v1.build_stations_response(
+        restored, None, None, _GENERATED_AT, _ROUTING_DAY, _SERVED_AT, _ROUTING_DAY,
+    )
+    assert body["stations"][0]["probability_buy"] == 0.823
+    assert "buy_timing" not in body["stations"][0]
 
 
 # ---------------------------------------------------------------------------

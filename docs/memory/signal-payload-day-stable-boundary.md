@@ -1,6 +1,6 @@
 ---
 name: signal-payload-day-stable-boundary
-description: SignalPayload fields must be a function of (as_of_date, database) only — nothing derived from the wall clock, even transitively. A field that reads `now` is unsafe to cache overnight.
+description: SignalPayload fields are fixed by snapshot inputs, including the model artifact and cutoff; nothing may derive from the wall clock, even transitively.
 metadata:
   type: project
 ---
@@ -21,10 +21,12 @@ reachability, and 07:00 Wednesday would still report it off-route — on the one
 morning it's actually reachable. The fix isn't "recompute reachability" as a
 special case; it's a hard rule about what may live on `SignalPayload` at all:
 
-**Every field on `SignalPayload` must be a function of `(as_of_date, database)`
-and nothing else.** Not `now`, not `routing_day`, not anything derived from
-either — directly or transitively. `render_text` takes `routing_day`/`now` as
-its own arguments, evaluated fresh at render time, specifically so a cached
+**Every field on `SignalPayload` must be fixed by the snapshot inputs**
+(`as_of_date`, database, model artifact and model cutoff). Not `now`, not
+`routing_day`, not anything derived from either — directly or transitively.
+The saved cutoff must travel with its probabilities when the cache is replayed.
+`render_text` takes `routing_day`/`now` as its own arguments, evaluated fresh
+at render time, specifically so a cached
 payload read the next morning is still correct.
 
 The freshness banner is the field most likely to violate this by accident: the

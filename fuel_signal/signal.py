@@ -685,21 +685,21 @@ def _freshness_note(as_of: str, last_real: str | None, today: datetime.date) -> 
 class SignalPayload:
     """The expensive, day-stable half of the signal.
 
-    **The invariant, precisely:** every field on this class must be a function
-    of ``(as_of_date, database)`` and *nothing else* — in particular, nothing
-    derived from the wall clock ("now"), directly or transitively. That is the
-    specific, checkable property that makes it safe to precompute once (this is
-    the ~29s `load_history` cost — see `backtest.py:load_history`) and reuse
+    **The invariant, precisely:** every field on this class must be fixed by
+    the snapshot inputs (``as_of_date``, database, model artifact, and model
+    cutoff), with *nothing* derived from the wall clock ("now"), directly or
+    transitively. That property makes it safe to precompute once (this is the
+    ~29s `load_history` cost — see `backtest.py:load_history`) and reuse
     across reads, e.g. a nightly cache read the next morning. A field that
     reads the clock is unsafe to cache no matter how correct it looks at the
     moment it was computed. If you add a field, ask which side of that line it
     is on — if it reads the clock, it belongs in `render_text`'s arguments
     instead, not here.
 
-    Current fields obey it: per-station price and P(BUY), cycle state, network
-    average and drift, the freshness *fact* (last real observation date — not
-    its age, see below), and the rule-based verdict are all pure functions of
-    ``as_of_date`` and the DB.
+    Current fields obey it: per-station price and P(BUY), their saved model
+    cutoff, cycle state, network average and drift, the freshness *fact* (last
+    real observation date — not its age, see below), and the rule-based verdict
+    are all fixed when the snapshot is computed.
 
     Deliberately excluded: station reachability, diversion arithmetic, and
     freshness *age* — those are cheap, but depend on ``routing_day``/``now``,
@@ -724,6 +724,8 @@ class SignalPayload:
     rule_verdict: CombinedVerdict
     evaluations: list[SignalEvaluation]
     last_real_price_date: str | None
+    # Captured with the scores so a cached snapshot keeps its own decision bar.
+    model_cutoff: float | None = None
 
 
 def compute_signal(
@@ -784,6 +786,7 @@ def compute_signal(
         rule_verdict=rule_verdict,
         evaluations=evaluations,
         last_real_price_date=_last_real_price_date(conn),
+        model_cutoff=MODEL_THRESHOLD if probs else None,
     )
 
 

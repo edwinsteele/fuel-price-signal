@@ -406,6 +406,18 @@ def test_compute_signal_returns_a_structured_payload_with_no_formatting(signal_d
     assert isinstance(payload.evaluations, list) and payload.evaluations
 
 
+def test_compute_signal_captures_cutoff_with_scored_snapshot(signal_db, monkeypatch):
+    conn, series, _ = signal_db
+    as_of = series[-1][0]
+    monkeypatch.setattr(
+        "fuel_signal.signal.model_probabilities",
+        lambda *args: {9001: 0.2496},
+    )
+    payload = compute_signal(conn, as_of, preferred_stations=_PREFERRED)
+    assert payload.station_probs == {9001: 0.2496}
+    assert payload.model_cutoff == 0.25
+
+
 def test_render_text_of_compute_signal_matches_build_signals(two_station_db, monkeypatch):
     """The split must be behaviour-preserving: same inputs, same string out."""
     conn, series = two_station_db
@@ -464,8 +476,8 @@ def test_rendering_the_same_payload_at_different_now_moves_only_the_freshness_ba
 ):
     """Mechanical check of the SignalPayload docstring's caching invariant.
 
-    Every field on SignalPayload must be a function of (as_of_date, database)
-    alone — nothing derived from the wall clock. Render one payload at two
+    Every field on SignalPayload must be fixed by snapshot inputs alone —
+    nothing derived from the wall clock. Render one payload at two
     `now` values five days apart: only the freshness banner (the one line that
     is legitimately about "how old is this, right now") may differ.
     """
