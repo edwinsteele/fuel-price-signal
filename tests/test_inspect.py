@@ -854,6 +854,7 @@ def _api_v1_payload(
     station_prices: dict[int, float | None],
     station_probs: dict[int, float] | None = None,
     rule_verdict: CombinedVerdict | None = None,
+    model_cutoff: float | None = None,
 ) -> SignalPayload:
     state = CycleState(
         as_of_date="2026-09-11",
@@ -882,6 +883,7 @@ def _api_v1_payload(
         rule_verdict=rule_verdict or CombinedVerdict("BUY ", "BUY", 0.5),
         evaluations=evaluations,
         last_real_price_date="2026-09-11",
+        model_cutoff=model_cutoff,
     )
 
 
@@ -934,6 +936,56 @@ def test_api_v1_stations_returns_cached_payload(conn, api_v1_client):
     assert body["routing_day"] == "2026-09-12"
     assert body["stations"][0]["code"] == 414
     assert body["stations"][0]["group"] == "on_route"
+
+
+def test_api_v1_stations_keeps_cached_score_and_cutoff_on_next_routing_day(
+    conn, api_v1_client,
+):
+    payload = _api_v1_payload(
+        {414: "BP Springwood", 261: "7-Eleven Penrith South"},
+        {414: 161.9, 261: 157.7}, {414: 0.2496}, model_cutoff=0.4,
+    )
+    _seed_signal_cache(conn, payload)
+    response = api_v1_client.get("/api/v1/stations")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["as_of"] == "2026-09-11"
+    assert body["routing_day"] == "2026-09-12"
+    by_code = {station["code"]: station for station in body["stations"]}
+    assert by_code[414]["probability_buy"] == 0.25
+    assert by_code[414]["buy_timing"] == {"probability": 0.2496, "cutoff": 0.4}
+    assert by_code[261]["price"] == 157.7
+    assert by_code[261]["buy_timing"] is None
+
+
+def test_api_v1_stations_legacy_cache_serves_score_without_context(conn, api_v1_client):
+    payload = _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.2496})
+    blob = api_v1.encode_cache_entry(payload, None, None)
+    blob["version"] = 1
+    write_signal_cache(conn, payload.as_of_date, "2026-09-11T22:04:13+10:00", json.dumps(blob))
+    response = api_v1_client.get("/api/v1/stations")
+    assert response.status_code == 200
+    station = response.get_json()["stations"][0]
+    assert station["probability_buy"] == 0.25
+    assert "buy_timing" not in station
+
+
+def test_api_v1_stations_rules_only_cache_has_null_context(conn, api_v1_client):
+    _seed_signal_cache(conn, _api_v1_payload({414: "BP Springwood"}, {414: 161.9}))
+    station = api_v1_client.get("/api/v1/stations").get_json()["stations"][0]
+    assert station["price"] == 161.9
+    assert station["buy_timing"] is None
+
+
+@pytest.mark.parametrize("bad_cutoff", [None, "0.25", True, float("nan"), float("inf"), 1.5])
+def test_api_v1_stations_rejects_invalid_cached_cutoff(conn, api_v1_client, bad_cutoff):
+    payload = _api_v1_payload({414: "BP Springwood"}, {414: 161.9}, {414: 0.2496})
+    blob = api_v1.encode_cache_entry(payload, None, None)
+    blob["payload"]["model_cutoff"] = bad_cutoff
+    write_signal_cache(conn, payload.as_of_date, "2026-09-11T22:04:13+10:00", json.dumps(blob))
+    response = api_v1_client.get("/api/v1/stations")
+    assert response.status_code == 503
+    assert response.get_json()["error"] == "not_generated"
 
 
 def test_api_v1_stations_served_at_has_second_precision(api_v1_client, conn):

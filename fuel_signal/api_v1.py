@@ -25,7 +25,14 @@ from fuel_signal.config import STATION_ROUTE_DAYS
 
 # Bump when `_encode_signal_payload`/`_decode_signal_payload`'s field set changes
 # in a way an older/newer reader can't tolerate. See `decode_cache_entry`.
-_CACHE_FORMAT_VERSION = 1
+_CACHE_FORMAT_VERSION = 2
+
+
+def _checked_probability(value: object, field: str) -> float:
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not 0 <= value <= 1 or not math.isfinite(value)):
+        raise ValueError(f"invalid {field}: {value!r}")
+    return value
 
 # ---------------------------------------------------------------------------
 # SignalPayload <-> JSON
@@ -33,7 +40,7 @@ _CACHE_FORMAT_VERSION = 1
 
 
 def _encode_signal_payload(payload: signal.SignalPayload) -> dict:
-    return {
+    data = {
         "as_of_date": payload.as_of_date,
         "preferred_stations": {str(k): v for k, v in payload.preferred_stations.items()},
         "state": {
@@ -69,9 +76,19 @@ def _encode_signal_payload(payload: signal.SignalPayload) -> dict:
         ],
         "last_real_price_date": payload.last_real_price_date,
     }
+    if payload.model_cutoff is not None:
+        data["model_cutoff"] = _checked_probability(payload.model_cutoff, "model_cutoff")
+        for prob in payload.station_probs.values():
+            _checked_probability(prob, "station probability")
+    return data
 
 
 def _decode_signal_payload(data: dict) -> signal.SignalPayload:
+    cutoff = None
+    if "model_cutoff" in data:
+        cutoff = _checked_probability(data["model_cutoff"], "model_cutoff")
+        for prob in data["station_probs"].values():
+            _checked_probability(prob, "station probability")
     state_d = data["state"]
     state = signal.CycleState(
         as_of_date=state_d["as_of_date"],
@@ -108,6 +125,7 @@ def _decode_signal_payload(data: dict) -> signal.SignalPayload:
         rule_verdict=rule_verdict,
         evaluations=evaluations,
         last_real_price_date=data["last_real_price_date"],
+        model_cutoff=cutoff,
     )
 
 
@@ -133,7 +151,7 @@ def decode_cache_entry(data: dict) -> tuple[signal.SignalPayload, str | None, st
     reading it. Callers (the /api/v1 blueprint) must catch these and degrade to
     the documented 503 "not_generated", not let them surface as a bare 500.
     """
-    if data.get("version") != _CACHE_FORMAT_VERSION:
+    if data.get("version") not in (1, _CACHE_FORMAT_VERSION):
         raise ValueError(f"unsupported signal_cache format version: {data.get('version')!r}")
     return (
         _decode_signal_payload(data["payload"]),
@@ -292,7 +310,7 @@ def build_stations_response(
                 "worth_diverting": delta <= -signal.DIVERSION_WORTH_CENTS,
                 "threshold_cents": signal.DIVERSION_WORTH_CENTS,
             }
-        return {
+        result = {
             "code": v.code,
             "label": v.label,
             "group": group,
@@ -305,6 +323,16 @@ def build_stations_response(
             "diversion": diversion,
             "cheapest_on_route": v.code == cheapest_code,
         }
+        if payload.model_cutoff is not None:
+            result["buy_timing"] = (
+                None if v.prob is None else {
+                    "probability": v.prob,
+                    "cutoff": payload.model_cutoff,
+                }
+            )
+        elif not payload.station_probs:
+            result["buy_timing"] = None
+        return result
 
     stations = (
         [entry(v, "on_route") for v in on_route]
